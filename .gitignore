@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.*
+data/
+*.db
+*.sqlite
+*.log
+api-keys.json
+satp-client/node_modules/
+research/
+tmp/
