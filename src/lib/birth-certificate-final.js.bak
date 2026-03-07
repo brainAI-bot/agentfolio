@@ -1,0 +1,427 @@
+const { createCanvas, loadImage } = require("canvas");
+const https = require("https");
+const http = require("http");
+const path = require("path");
+const fs = require("fs");
+
+const CERT_COUNTER_FILE = path.join(__dirname, "../../data/cert-counter.json");
+
+function getNextCertNumber() {
+  let counter = 0;
+  try {
+    if (fs.existsSync(CERT_COUNTER_FILE)) {
+      counter = JSON.parse(fs.readFileSync(CERT_COUNTER_FILE, "utf8")).count || 0;
+    }
+  } catch {}
+  counter++;
+  fs.writeFileSync(CERT_COUNTER_FILE, JSON.stringify({ count: counter }));
+  return `CERT-${String(counter).padStart(4, "0")}`;
+}
+
+function fetchImageBuffer(url) {
+  return new Promise((resolve, reject) => {
+    if (!url || !url.startsWith("http")) return reject(new Error("Invalid URL"));
+    const mod = url.startsWith("https") ? https : http;
+    mod.get(url, { headers: { "User-Agent": "AgentFolio/1.0" }, timeout: 10000 }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return fetchImageBuffer(res.headers.location).then(resolve).catch(reject);
+      }
+      if (res.statusCode !== 200) return reject(new Error("HTTP " + res.statusCode));
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => resolve(Buffer.concat(chunks)));
+      res.on("error", reject);
+    }).on("error", reject);
+  });
+}
+
+function truncHash(s, len = 16) {
+  if (!s) return "N/A";
+  if (s.length <= len + 6) return s;
+  return s.slice(0, len) + "..." + s.slice(-6);
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+const S = 1080; // Square dimension
+
+// ═══════════════════════════════════════════
+// FRONT SIDE — Pure NFT Image (no text, no branding)
+// ═══════════════════════════════════════════
+async function generateCardFront(opts) {
+  const { agentName, nftImageUrl } = opts;
+
+  const W = S, H = S;
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext("2d");
+
+  // Load NFT
+  let nftImg = null;
+  if (nftImageUrl) {
+    try {
+      const buf = await fetchImageBuffer(nftImageUrl);
+      nftImg = await loadImage(buf);
+    } catch (e) { console.log("[CardFront] PFP load error:", e.message); }
+  }
+
+  if (nftImg) {
+    // Draw the NFT image to fill the entire canvas — no borders, no text, nothing
+    const aspect = nftImg.width / nftImg.height;
+    let sw = W, sh = H;
+    if (aspect > 1) sw = H * aspect;
+    else sh = W / aspect;
+    const sx = (W - sw) / 2;
+    const sy = (H - sh) / 2;
+    ctx.drawImage(nftImg, sx, sy, sw, sh);
+  } else {
+    // Fallback: dark bg with initials (only if no image available)
+    ctx.fillStyle = "#06060B";
+    ctx.fillRect(0, 0, W, H);
+    const glow = ctx.createRadialGradient(W/2, H/2, 50, W/2, H/2, 400);
+    glow.addColorStop(0, "rgba(153,69,255,0.1)");
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, W, H);
+    ctx.font = "bold 280px Liberation Mono, monospace";
+    ctx.fillStyle = "#9945FF";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText((agentName || "??").slice(0, 2).toUpperCase(), W/2, H/2);
+    ctx.textBaseline = "alphabetic";
+  }
+
+  return canvas.toBuffer("image/png");
+}
+
+// BACK SIDE — Birth Certificate (square)
+// ═══════════════════════════════════════════
+async function generateCardBack(opts) {
+  const { agentName, agentHandle, agentId, nftImageUrl,
+    burnTxSignature, arweaveUrl, burnDate, certNumber } = opts;
+
+  const W = S, H = S;
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext("2d");
+
+  const PURPLE = "#9945FF";
+  const CYAN = "#00D4AA";
+  const GOLD = "#D4A853";
+  const BG = "#06060B";
+  const TEXT1 = "#F0F2F5";
+  const TEXT2 = "#94A3B8";
+  const TEXT3 = "#475569";
+
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, W, H);
+
+  // Glows
+  const bgGlow = ctx.createRadialGradient(W/2, 300, 50, W/2, 300, 400);
+  bgGlow.addColorStop(0, "rgba(153,69,255,0.08)");
+  bgGlow.addColorStop(0.5, "rgba(153,69,255,0.03)");
+  bgGlow.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = bgGlow;
+  ctx.fillRect(0, 0, W, H);
+
+  const bgGlow2 = ctx.createRadialGradient(W/2, H, 50, W/2, H, 350);
+  bgGlow2.addColorStop(0, "rgba(0,212,170,0.03)");
+  bgGlow2.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = bgGlow2;
+  ctx.fillRect(0, 0, W, H);
+
+  // Noise
+  ctx.fillStyle = "rgba(255,255,255,0.007)";
+  for (let i = 0; i < 1500; i++) {
+    ctx.fillRect(Math.random() * W, Math.random() * H, 1, 1);
+  }
+
+  // Watermark
+  ctx.save();
+  ctx.translate(W/2, H/2);
+  ctx.rotate(-0.35);
+  ctx.font = "bold 100px Liberation Mono, monospace";
+  ctx.fillStyle = "rgba(153,69,255,0.015)";
+  ctx.textAlign = "center";
+  ctx.fillText(certNumber || "CERT-0001", 0, 0);
+  ctx.restore();
+
+  // Borders
+  ctx.shadowColor = "rgba(153,69,255,0.2)";
+  ctx.shadowBlur = 20;
+  ctx.strokeStyle = PURPLE;
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, 20, 20, W-40, H-40, 10);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  ctx.strokeStyle = "rgba(153,69,255,0.12)";
+  ctx.lineWidth = 1;
+  roundRect(ctx, 32, 32, W-64, H-64, 6);
+  ctx.stroke();
+
+  // Corner accents
+  const cLen = 26, cOff = 24;
+  ctx.strokeStyle = PURPLE;
+  ctx.lineWidth = 2;
+  [[cOff, cOff, cOff+cLen, cOff, cOff, cOff+cLen],
+   [W-cOff, cOff, W-cOff-cLen, cOff, W-cOff, cOff+cLen],
+   [cOff, H-cOff, cOff+cLen, H-cOff, cOff, H-cOff-cLen],
+   [W-cOff, H-cOff, W-cOff-cLen, H-cOff, W-cOff, H-cOff-cLen]
+  ].forEach(([cx, cy, x2, y2, x3, y3]) => {
+    ctx.beginPath(); ctx.moveTo(x3, y3); ctx.lineTo(cx, cy); ctx.lineTo(x2, y2); ctx.stroke();
+  });
+
+  // Header
+  ctx.font = "bold 13px Liberation Mono, monospace";
+  ctx.fillStyle = PURPLE;
+  ctx.textAlign = "left";
+  ctx.fillText(">_", 56, 64);
+  ctx.fillStyle = TEXT2;
+  ctx.fillText(" AgentFolio", 73, 64);
+
+  ctx.font = "10px Liberation Mono, monospace";
+  ctx.fillStyle = TEXT3;
+  ctx.textAlign = "right";
+  ctx.fillText("No. " + (certNumber || "CERT-0001"), W - 56, 64);
+
+  // Header line
+  const hGrad = ctx.createLinearGradient(50, 0, W-50, 0);
+  hGrad.addColorStop(0, "rgba(153,69,255,0)");
+  hGrad.addColorStop(0.3, "rgba(153,69,255,0.2)");
+  hGrad.addColorStop(0.5, "rgba(153,69,255,0.3)");
+  hGrad.addColorStop(0.7, "rgba(153,69,255,0.2)");
+  hGrad.addColorStop(1, "rgba(153,69,255,0)");
+  ctx.fillStyle = hGrad;
+  ctx.fillRect(50, 77, W-100, 1);
+
+  // Title
+  ctx.textAlign = "center";
+  ctx.font = "bold 30px Liberation Sans, Arial, sans-serif";
+  ctx.fillStyle = TEXT1;
+  ctx.fillText("B I R T H   C E R T I F I C A T E", W/2, 114);
+
+  // Title underline
+  const tGrad = ctx.createLinearGradient(W/2-200, 0, W/2+200, 0);
+  tGrad.addColorStop(0, "rgba(153,69,255,0)");
+  tGrad.addColorStop(0.2, PURPLE);
+  tGrad.addColorStop(0.5, CYAN);
+  tGrad.addColorStop(0.8, PURPLE);
+  tGrad.addColorStop(1, "rgba(153,69,255,0)");
+  ctx.fillStyle = tGrad;
+  ctx.fillRect(W/2-200, 124, 400, 2);
+
+  ctx.font = "10px Liberation Mono, monospace";
+  ctx.fillStyle = TEXT3;
+  ctx.fillText("Issued on Solana  ·  Permanent  ·  Immutable  ·  Soulbound", W/2, 146);
+
+  // PFP thumbnail
+  const pfpCX = W/2, pfpCY = 242, pfpR = 56;
+
+  const pfpGlow = ctx.createRadialGradient(pfpCX, pfpCY, pfpR/2, pfpCX, pfpCY, pfpR + 35);
+  pfpGlow.addColorStop(0, "rgba(153,69,255,0.1)");
+  pfpGlow.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = pfpGlow;
+  ctx.beginPath(); ctx.arc(pfpCX, pfpCY, pfpR + 35, 0, Math.PI*2); ctx.fill();
+
+  const ringGrad = ctx.createLinearGradient(pfpCX - pfpR, pfpCY - pfpR, pfpCX + pfpR, pfpCY + pfpR);
+  ringGrad.addColorStop(0, PURPLE);
+  ringGrad.addColorStop(1, CYAN);
+  ctx.strokeStyle = ringGrad;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.arc(pfpCX, pfpCY, pfpR + 4, 0, Math.PI*2); ctx.stroke();
+
+  let nftImg = null;
+  if (nftImageUrl) {
+    try {
+      const buf = await fetchImageBuffer(nftImageUrl);
+      nftImg = await loadImage(buf);
+    } catch (e) { console.log("[CardBack] PFP load error:", e.message); }
+  }
+
+  ctx.save();
+  ctx.beginPath(); ctx.arc(pfpCX, pfpCY, pfpR, 0, Math.PI*2); ctx.clip();
+  if (nftImg) {
+    ctx.drawImage(nftImg, pfpCX - pfpR, pfpCY - pfpR, pfpR*2, pfpR*2);
+  } else {
+    ctx.fillStyle = "#1A1A2E";
+    ctx.fillRect(pfpCX - pfpR, pfpCY - pfpR, pfpR*2, pfpR*2);
+    ctx.font = "bold 40px Liberation Mono, monospace";
+    ctx.fillStyle = PURPLE;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText((agentName || "??").slice(0, 2).toUpperCase(), pfpCX, pfpCY);
+    ctx.textBaseline = "alphabetic";
+  }
+  ctx.restore();
+
+  // Name + handle
+  ctx.font = "bold 26px Liberation Sans, Arial, sans-serif";
+  ctx.fillStyle = TEXT1;
+  ctx.textAlign = "center";
+  ctx.fillText(agentName || "Unknown Agent", pfpCX, pfpCY + pfpR + 30);
+
+  if (agentHandle) {
+    ctx.font = "13px Liberation Mono, monospace";
+    ctx.fillStyle = PURPLE;
+    ctx.fillText(agentHandle, pfpCX, pfpCY + pfpR + 48);
+  }
+
+  // Divider
+  const divY = pfpCY + pfpR + 66;
+  const divGrad = ctx.createLinearGradient(80, 0, W-80, 0);
+  divGrad.addColorStop(0, "rgba(153,69,255,0)");
+  divGrad.addColorStop(0.2, "rgba(153,69,255,0.2)");
+  divGrad.addColorStop(0.5, "rgba(0,212,170,0.25)");
+  divGrad.addColorStop(0.8, "rgba(153,69,255,0.2)");
+  divGrad.addColorStop(1, "rgba(153,69,255,0)");
+  ctx.fillStyle = divGrad;
+  ctx.fillRect(80, divY, W-160, 1);
+
+  ctx.fillStyle = CYAN;
+  ctx.save(); ctx.translate(W/2, divY); ctx.rotate(Math.PI/4);
+  ctx.fillRect(-3, -3, 6, 6); ctx.restore();
+
+  // Data panel
+  const panelY = divY + 18;
+  const panelH = 155;
+  const panelX = 70;
+  const panelW = W - 140;
+
+  ctx.fillStyle = "rgba(255,255,255,0.012)";
+  roundRect(ctx, panelX, panelY, panelW, panelH, 8);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(153,69,255,0.06)";
+  ctx.lineWidth = 1;
+  roundRect(ctx, panelX, panelY, panelW, panelH, 8);
+  ctx.stroke();
+
+  const bDate = burnDate ? new Date(burnDate) : new Date();
+  const dateStr = bDate.toISOString().replace("T", " ").replace(/\.\d+Z/, " UTC");
+
+  const col1X = panelX + 30;
+  const col2X = panelX + panelW/2 + 20;
+  const rowH = 42;
+  const startY = panelY + 30;
+
+  function drawField(x, y, label, value, valColor) {
+    ctx.textAlign = "left";
+    ctx.font = "bold 9px Liberation Mono, monospace";
+    ctx.fillStyle = TEXT3;
+    ctx.fillText(label.toUpperCase(), x, y);
+    ctx.font = "12px Liberation Mono, monospace";
+    ctx.fillStyle = valColor || TEXT2;
+    ctx.fillText(value, x, y + 16);
+  }
+
+  ctx.fillStyle = "rgba(255,255,255,0.025)";
+  ctx.fillRect(panelX + 15, startY + rowH - 4, panelW - 30, 1);
+  ctx.fillRect(panelX + 15, startY + rowH * 2 - 4, panelW - 30, 1);
+  ctx.fillRect(panelX + panelW/2 - 5, panelY + 10, 1, panelH - 20);
+
+  drawField(col1X, startY, "Date of Birth", dateStr);
+  drawField(col1X, startY + rowH, "Identity", agentId || "N/A", TEXT1);
+  drawField(col1X, startY + rowH * 2, "Burn Transaction", truncHash(burnTxSignature));
+
+  drawField(col2X, startY, "Chain", "Solana", CYAN);
+  drawField(col2X, startY + rowH, "Certificate", certNumber || "CERT-0001", PURPLE);
+  drawField(col2X, startY + rowH * 2, "Permanent Storage", truncHash(arweaveUrl));
+
+  // Seal
+  const sealX = W - 120;
+  const sealY = panelY + panelH + 65;
+  const sealR = 42;
+
+  const sealGlow = ctx.createRadialGradient(sealX, sealY, sealR/3, sealX, sealY, sealR + 20);
+  sealGlow.addColorStop(0, "rgba(212,168,83,0.1)");
+  sealGlow.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = sealGlow;
+  ctx.beginPath(); ctx.arc(sealX, sealY, sealR + 20, 0, Math.PI*2); ctx.fill();
+
+  ctx.strokeStyle = GOLD;
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(sealX, sealY, sealR, 0, Math.PI*2); ctx.stroke();
+
+  ctx.strokeStyle = "rgba(212,168,83,0.35)";
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(sealX, sealY, sealR - 7, 0, Math.PI*2); ctx.stroke();
+
+  ctx.save();
+  ctx.translate(sealX, sealY);
+  ctx.font = "bold 6px Liberation Mono, monospace";
+  ctx.fillStyle = "rgba(212,168,83,0.5)";
+  const sealText = "· VERIFIED · ON-CHAIN · PERMANENT · SOULBOUND ";
+  const charAngle = (Math.PI * 2) / sealText.length;
+  for (let i = 0; i < sealText.length; i++) {
+    ctx.save();
+    ctx.rotate(-Math.PI/2 + charAngle * i);
+    ctx.fillText(sealText[i], 0, -(sealR - 14));
+    ctx.restore();
+  }
+  ctx.restore();
+
+  ctx.font = "bold 18px Liberation Mono, monospace";
+  ctx.fillStyle = GOLD;
+  ctx.textAlign = "center";
+  ctx.fillText(">_", sealX, sealY);
+  ctx.font = "bold 8px Liberation Mono, monospace";
+  ctx.fillStyle = "rgba(212,168,83,0.8)";
+  ctx.fillText("VERIFIED", sealX, sealY + 14);
+
+  // Tagline (left side, vertically aligned with seal)
+  ctx.textAlign = "left";
+  ctx.font = "italic 14px Liberation Sans, Georgia, serif";
+  ctx.fillStyle = TEXT3;
+  ctx.fillText('"This identity is permanent.', 80, sealY - 6);
+  ctx.fillText(' No changes. No undo."', 80, sealY + 14);
+
+  // Holographic strip
+  const stripY = H - 55;
+  const holoGrad = ctx.createLinearGradient(120, 0, W-120, 0);
+  holoGrad.addColorStop(0, "rgba(153,69,255,0)");
+  holoGrad.addColorStop(0.15, "rgba(153,69,255,0.35)");
+  holoGrad.addColorStop(0.35, "rgba(0,212,170,0.35)");
+  holoGrad.addColorStop(0.5, "rgba(212,168,83,0.25)");
+  holoGrad.addColorStop(0.65, "rgba(0,212,170,0.35)");
+  holoGrad.addColorStop(0.85, "rgba(153,69,255,0.35)");
+  holoGrad.addColorStop(1, "rgba(153,69,255,0)");
+  ctx.fillStyle = holoGrad;
+  ctx.fillRect(120, stripY, W-240, 2);
+
+  // Bottom
+  ctx.textAlign = "center";
+  ctx.font = "9px Liberation Mono, monospace";
+  ctx.fillStyle = "rgba(255,255,255,0.1)";
+  ctx.fillText("agentfolio.bot  ·  Powered by SATP", W/2, H - 30);
+
+  const botGrad = ctx.createLinearGradient(20, 0, W-20, 0);
+  botGrad.addColorStop(0, PURPLE);
+  botGrad.addColorStop(0.5, CYAN);
+  botGrad.addColorStop(1, PURPLE);
+  ctx.fillStyle = botGrad;
+  ctx.fillRect(20, H - 14, W - 40, 2);
+
+  return canvas.toBuffer("image/png");
+}
+
+// Main exports
+async function generateBirthCertificate(opts) {
+  return generateCardBack(opts);
+}
+
+async function generateBirthCard(opts) {
+  const [front, back] = await Promise.all([
+    generateCardFront(opts),
+    generateCardBack(opts),
+  ]);
+  return { front, back };
+}
+
+module.exports = { generateBirthCertificate, generateBirthCard, generateCardFront, generateCardBack, getNextCertNumber };

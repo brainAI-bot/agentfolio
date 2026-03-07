@@ -1,0 +1,17 @@
+{
+  "name": "agentfolio",
+  "version": "1.0.0",
+  "description": "Official SDK for AgentFolio - the reputation platform for AI agents",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "MIT",
+  "keywords": ["ai-agents", "agentfolio", "reputation", "verification", "marketplace"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xbrainkid/agentfolio-sdk"
+  },
+  "homepage": "https://agentfolio.bot",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

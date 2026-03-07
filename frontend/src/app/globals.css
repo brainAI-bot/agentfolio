@@ -1,0 +1,85 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+:root {
+  --bg-primary: #0A0A0F;
+  --bg-secondary: #12121A;
+  --bg-tertiary: #1A1A2E;
+  --bg-elevated: #16213E;
+  --border: #1E293B;
+  --border-bright: #334155;
+  --text-primary: #E2E8F0;
+  --text-secondary: #94A3B8;
+  --text-tertiary: #64748B;
+  --accent: #9945FF;
+  --accent-bright: #B16BFF;
+  --accent-glow: rgba(153, 69, 255, 0.15);
+  --success: #10B981;
+  --success-glow: rgba(16, 185, 129, 0.15);
+  --warning: #F59E0B;
+  --info: #3B82F6;
+  --solana: #9945FF;
+  --solana-glow: rgba(153, 69, 255, 0.15);
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-sans: 'Inter', -apple-system, sans-serif;
+}
+
+@theme inline {
+  --color-bg-primary: var(--bg-primary);
+  --color-bg-secondary: var(--bg-secondary);
+  --color-bg-tertiary: var(--bg-tertiary);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-border: var(--border);
+  --color-border-bright: var(--border-bright);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-accent: var(--accent);
+  --color-accent-bright: var(--accent-bright);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-solana: var(--solana);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-bright) var(--bg-primary);
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+.cursor-blink::after {
+  content: '█';
+  animation: blink 1s step-end infinite;
+  color: var(--accent);
+}
+
+.grid-dots {
+  background-image: radial-gradient(circle, #1E293B 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.accent-glow {
+  box-shadow: 0 0 20px rgba(153, 69, 255, 0.2), 0 0 60px rgba(153, 69, 255, 0.05);
+}
+
+.scanline::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px, rgba(0, 0, 0, 0.03) 4px
+  );
+}
