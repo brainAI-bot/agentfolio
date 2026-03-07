@@ -1,0 +1,272 @@
+/**
+ * AgentFolio Endorsement System
+ * Agents vouch for each other's skills and credibility
+ * v1.1 - Added verified endorser badges and weighted scoring
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+/**
+ * Check if a profile has verifications
+ * Returns object with verification details
+ */
+function getVerificationStatus(profile) {
+  if (!profile || !profile.verification) {
+    return { isVerified: false, types: [], score: 0 };
+  }
+  
+  const v = profile.verification;
+  const types = [];
+  
+  // Check each verification type
+  if (v.github?.verified) types.push('github');
+  if (v.twitter?.verified) types.push('twitter');
+  if (v.hyperliquid?.verified) types.push('hyperliquid');
+  if (v.polymarket?.verified) types.push('polymarket');
+  if (v.solana?.verified) types.push('solana');
+  if (v.agentmail?.verified) types.push('agentmail');
+  
+  return {
+    isVerified: types.length > 0,
+    types,
+    score: v.score || types.length * 10,
+    primaryType: types[0] || null
+  };
+}
+
+/**
+ * Add an endorsement from one agent to another
+ */
+function addEndorsement(fromId, toId, data, dataDir) {
+  const toPath = path.join(dataDir, `${toId}.json`);
+  const fromPath = path.join(dataDir, `${fromId}.json`);
+  
+  if (!fs.existsSync(toPath)) {
+    return { error: 'Target profile not found' };
+  }
+  if (!fs.existsSync(fromPath)) {
+    return { error: 'Endorser profile not found' };
+  }
+  if (fromId === toId) {
+    return { error: 'Cannot endorse yourself' };
+  }
+
+  const toProfile = JSON.parse(fs.readFileSync(toPath, 'utf8'));
+  const fromProfile = JSON.parse(fs.readFileSync(fromPath, 'utf8'));
+  
+  // Initialize endorsements array if needed
+  if (!toProfile.endorsements) {
+    toProfile.endorsements = [];
+  }
+
+  // Check if already endorsed
+  const existing = toProfile.endorsements.find(e => e.fromId === fromId);
+  if (existing) {
+    return { error: 'Already endorsed this agent' };
+  }
+
+  // Get endorser's verification status
+  const endorserVerification = getVerificationStatus(fromProfile);
+
+  const endorsement = {
+    fromId,
+    fromName: fromProfile.name,
+    fromHandle: fromProfile.handle,
+    message: data.message || null,
+    skills: data.skills || [], // specific skills being endorsed
+    // Include verification status at time of endorsement
+    fromVerified: endorserVerification.isVerified,
+    fromVerificationTypes: endorserVerification.types,
+    fromVerificationScore: endorserVerification.score,
+    createdAt: new Date().toISOString()
+  };
+
+  toProfile.endorsements.push(endorsement);
+  toProfile.updatedAt = new Date().toISOString();
+  
+  fs.writeFileSync(toPath, JSON.stringify(toProfile, null, 2));
+
+  // Track given endorsements on the endorser's profile
+  if (!fromProfile.endorsementsGiven) {
+    fromProfile.endorsementsGiven = [];
+  }
+  fromProfile.endorsementsGiven.push({
+    toId,
+    toName: toProfile.name,
+    createdAt: endorsement.createdAt
+  });
+  fromProfile.updatedAt = new Date().toISOString();
+  fs.writeFileSync(fromPath, JSON.stringify(fromProfile, null, 2));
+
+  return { success: true, endorsement };
+}
+
+/**
+ * Remove an endorsement
+ */
+function removeEndorsement(fromId, toId, dataDir) {
+  const toPath = path.join(dataDir, `${toId}.json`);
+  const fromPath = path.join(dataDir, `${fromId}.json`);
+  
+  if (!fs.existsSync(toPath)) {
+    return { error: 'Target profile not found' };
+  }
+
+  const toProfile = JSON.parse(fs.readFileSync(toPath, 'utf8'));
+  
+  if (!toProfile.endorsements) {
+    return { error: 'No endorsements to remove' };
+  }
+
+  const idx = toProfile.endorsements.findIndex(e => e.fromId === fromId);
+  if (idx === -1) {
+    return { error: 'Endorsement not found' };
+  }
+
+  toProfile.endorsements.splice(idx, 1);
+  toProfile.updatedAt = new Date().toISOString();
+  fs.writeFileSync(toPath, JSON.stringify(toProfile, null, 2));
+
+  // Remove from endorser's given list
+  if (fs.existsSync(fromPath)) {
+    const fromProfile = JSON.parse(fs.readFileSync(fromPath, 'utf8'));
+    if (fromProfile.endorsementsGiven) {
+      fromProfile.endorsementsGiven = fromProfile.endorsementsGiven.filter(e => e.toId !== toId);
+      fromProfile.updatedAt = new Date().toISOString();
+      fs.writeFileSync(fromPath, JSON.stringify(fromProfile, null, 2));
+    }
+  }
+
+  return { success: true };
+}
+
+/**
+ * Get endorsements for a profile
+ * Enriches endorsements with current verification status of endorsers
+ */
+function getEndorsements(profileId, dataDir) {
+  const profilePath = path.join(dataDir, `${profileId}.json`);
+  
+  if (!fs.existsSync(profilePath)) {
+    return { error: 'Profile not found' };
+  }
+
+  const profile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+  const rawEndorsements = profile.endorsements || [];
+  
+  // Enrich each endorsement with current verification status
+  const enrichedEndorsements = rawEndorsements.map(e => {
+    // Try to load endorser's current profile for fresh verification status
+    const endorserPath = path.join(dataDir, `${e.fromId}.json`);
+    let currentVerification = {
+      isVerified: e.fromVerified || false,
+      types: e.fromVerificationTypes || [],
+      score: e.fromVerificationScore || 0
+    };
+    
+    if (fs.existsSync(endorserPath)) {
+      try {
+        const endorserProfile = JSON.parse(fs.readFileSync(endorserPath, 'utf8'));
+        currentVerification = getVerificationStatus(endorserProfile);
+      } catch (err) {
+        // Fall back to stored verification status
+      }
+    }
+    
+    return {
+      ...e,
+      fromVerified: currentVerification.isVerified,
+      fromVerificationTypes: currentVerification.types,
+      fromVerificationScore: currentVerification.score
+    };
+  });
+  
+  return {
+    received: enrichedEndorsements,
+    given: profile.endorsementsGiven || [],
+    receivedCount: enrichedEndorsements.length,
+    givenCount: (profile.endorsementsGiven || []).length,
+    verifiedEndorsementCount: enrichedEndorsements.filter(e => e.fromVerified).length
+  };
+}
+
+/**
+ * Calculate endorsement score for reputation
+ * Weighted by endorser's verification status and count
+ * 
+ * Scoring:
+ * - Base: 1 point per endorsement
+ * - Verified endorser bonus: +2 points
+ * - High verification score (50+): additional +1 point
+ * - Cap at 25 points
+ */
+function calculateEndorsementScore(endorsements, allProfiles = null) {
+  // Handle both array of endorsements and profile object
+  const endorsementList = Array.isArray(endorsements) 
+    ? endorsements 
+    : (endorsements?.endorsements || []);
+    
+  if (endorsementList.length === 0) return 0;
+
+  let totalWeight = 0;
+  let verifiedCount = 0;
+  
+  endorsementList.forEach(e => {
+    // Base value for any endorsement
+    let weight = 1;
+    
+    // Check verification status (prefer enriched data, fall back to lookup)
+    let isVerified = e.fromVerified;
+    let verificationScore = e.fromVerificationScore || 0;
+    
+    // If we have allProfiles and no enriched data, look up the endorser
+    if (allProfiles && !e.fromVerified) {
+      const endorser = allProfiles.find(p => p.id === e.fromId);
+      if (endorser) {
+        const status = getVerificationStatus(endorser);
+        isVerified = status.isVerified;
+        verificationScore = status.score;
+      }
+    }
+    
+    // Bonus for verified endorsers
+    if (isVerified) {
+      weight += 2;
+      verifiedCount++;
+      
+      // Extra bonus for highly verified endorsers (50+ score)
+      if (verificationScore >= 50) {
+        weight += 1;
+      }
+    }
+    
+    totalWeight += weight;
+  });
+
+  // Return score with breakdown
+  return {
+    score: Math.min(Math.round(totalWeight), 25),
+    totalEndorsements: endorsementList.length,
+    verifiedEndorsements: verifiedCount,
+    unverifiedEndorsements: endorsementList.length - verifiedCount,
+    rawWeight: totalWeight
+  };
+}
+
+/**
+ * Simple score number for backwards compatibility
+ */
+function calculateEndorsementScoreSimple(endorsements, allProfiles = null) {
+  const result = calculateEndorsementScore(endorsements, allProfiles);
+  return typeof result === 'object' ? result.score : result;
+}
+
+module.exports = {
+  addEndorsement,
+  removeEndorsement,
+  getEndorsements,
+  calculateEndorsementScore,
+  calculateEndorsementScoreSimple,
+  getVerificationStatus
+};

@@ -1,0 +1,568 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { useSmartConnect } from "@/components/WalletProvider";
+import { Flame, Wallet, Shield, AlertTriangle, CheckCircle, ExternalLink, Loader2, Sparkles, ArrowRight, Zap, Plus, FileText, Image as ImageIcon } from "lucide-react";
+
+const API = process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot";
+
+const GENESIS_REGISTRY: Record<string, { name: string; image: string; metadata: string; role: string }> = {
+  "BP9TPSoo6LXpy2YvRTZnPg1kLA9ndnKxa6eHYxkdVMWE": {
+    name: "brainTrade",
+    image: "https://gateway.irys.xyz/DKDgDFAgwZVFrUEnbLXoVaxr3nELW3je3cybEad9DYMj",
+    metadata: "https://gateway.irys.xyz/5urNWn8jBiepvZcxkNkHWbU6ANtWVWXdrcXk8TqL6cPH",
+    role: "Trading Strategist",
+  },
+};
+
+type Step = "connect" | "loading" | "choose" | "minting" | "select" | "preview" | "burning" | "complete" | "error";
+
+interface NFTItem {
+  mint: string;
+  name: string;
+  image: string;
+  uri: string;
+  isGenesis: boolean;
+}
+
+export default function MintPage() {
+  const wallet = useWallet();
+  const { smartConnect } = useSmartConnect();
+  const [step, setStep] = useState<Step>("connect");
+  const [nfts, setNfts] = useState<NFTItem[]>([]);
+  const [selectedNft, setSelectedNft] = useState<NFTItem | null>(null);
+  const [burnTx, setBurnTx] = useState("");
+  const [soulboundMint, setSoulboundMint] = useState("");
+  // Genesis Record dropped from scope
+  const [error, setError] = useState("");
+  const [genesisInfo, setGenesisInfo] = useState<typeof GENESIS_REGISTRY[string] | null>(null);
+  const [satpScore, setSatpScore] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (wallet.connected && wallet.publicKey) {
+      const addr = wallet.publicKey.toBase58();
+      setGenesisInfo(GENESIS_REGISTRY[addr] || null);
+      setStep("loading");
+      loadWalletData(addr);
+    } else {
+      setStep("connect");
+      setNfts([]);
+      setSelectedNft(null);
+      setGenesisInfo(null);
+      setSatpScore(null);
+    }
+  }, [wallet.connected, wallet.publicKey]);
+
+  const loadWalletData = async (walletAddr: string) => {
+    try {
+      const [nftRes, scoreRes] = await Promise.allSettled([
+        fetch(`${API}/api/burn-to-become/wallet-nfts?wallet=${walletAddr}`).then(r => r.json()),
+        fetch(`${API}/api/burn-to-become/satp-score?wallet=${walletAddr}`).then(r => r.json()),
+      ]);
+      if (nftRes.status === "fulfilled") setNfts(nftRes.value.nfts || []);
+      if (scoreRes.status === "fulfilled") setSatpScore(scoreRes.value.score ?? null);
+    } catch { /* continue */ }
+    setStep("choose");
+  };
+
+  const handleMintBOA = async () => {
+    if (!wallet.publicKey || !wallet.signTransaction) return;
+    setStep("minting");
+    setError("");
+    try {
+      const res = await fetch(`${API}/api/burn-to-become/mint-boa`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet: wallet.publicKey.toBase58() }),
+      });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error || "Mint failed"); }
+      const { transaction: serializedTx } = await res.json();
+      const { Transaction } = await import("@solana/web3.js");
+      const tx = Transaction.from(Buffer.from(serializedTx, "base64"));
+      const signed = await wallet.signTransaction(tx);
+      const submitRes = await fetch(`${API}/api/burn-to-become/mint-boa/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          wallet: wallet.publicKey.toBase58(),
+          signedTransaction: Buffer.from(signed.serialize()).toString("base64"),
+        }),
+      });
+      if (!submitRes.ok) { const err = await submitRes.json(); throw new Error(err.error || "Mint submit failed"); }
+      const result = await submitRes.json();
+      // After minting, refresh NFTs and go to select
+      await loadWalletData(wallet.publicKey.toBase58());
+      setStep("select");
+    } catch (e: any) {
+      setError(e.message || "Something went wrong");
+      setStep("error");
+    }
+  };
+
+  const handleBurn = async () => {
+    if (!selectedNft || !wallet.publicKey || !wallet.signTransaction) return;
+    setStep("burning");
+    setError("");
+    try {
+      const prepRes = await fetch(`${API}/api/burn-to-become/prepare`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet: wallet.publicKey.toBase58(), nftMint: selectedNft.mint }),
+      });
+      if (!prepRes.ok) { const err = await prepRes.json(); throw new Error(err.error || "Failed to prepare burn"); }
+      const { transaction: serializedTx } = await prepRes.json();
+      const { Transaction } = await import("@solana/web3.js");
+      const tx = Transaction.from(Buffer.from(serializedTx, "base64"));
+      const signed = await wallet.signTransaction(tx);
+      const submitRes = await fetch(`${API}/api/burn-to-become/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          wallet: wallet.publicKey.toBase58(),
+          nftMint: selectedNft.mint,
+          signedTransaction: Buffer.from(signed.serialize()).toString("base64"),
+        }),
+      });
+      if (!submitRes.ok) { const err = await submitRes.json(); throw new Error(err.error || "Burn failed"); }
+      const result = await submitRes.json();
+      setBurnTx(result.burnTx);
+      setSoulboundMint(result.soulboundMint);
+      // Genesis Record dropped
+      setStep("complete");
+    } catch (e: any) {
+      setError(e.message || "Something went wrong");
+      setStep("error");
+    }
+  };
+
+  const steps = [
+    { id: "connect", label: "Connect", num: 1 },
+    { id: "choose", label: "Choose", num: 2 },
+    { id: "preview", label: "Confirm", num: 3 },
+    { id: "complete", label: "Soulbound", num: 4 },
+  ];
+
+  const stepMap: Record<string, number> = { connect: 0, loading: 1, choose: 1, minting: 1, select: 1, preview: 2, burning: 2, error: 2, complete: 3 };
+  const currentIdx = stepMap[step] ?? 0;
+
+  const isFree = satpScore !== null && satpScore >= 100;
+
+  return (
+    <div style={{ background: "var(--bg-primary)", minHeight: "calc(100vh - 56px)" }}>
+      {/* Hero */}
+      <section className="relative overflow-hidden">
+        <div className="absolute inset-0 grid-dots opacity-30" />
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-16 pb-8 relative">
+          <div className="text-center">
+            <div
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] uppercase tracking-widest font-semibold mb-6"
+              style={{ fontFamily: "var(--font-mono)", background: "var(--accent-glow)", color: "var(--accent)", border: "1px solid rgba(153,69,255,0.2)" }}
+            >
+              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--accent)" }} />
+              Permanent • Irreversible • On-Chain
+            </div>
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-[1.1] mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)", letterSpacing: "-0.03em" }}>
+              Burn to <span style={{ color: "var(--accent)" }}>Become</span>
+            </h1>
+            <p className="text-lg max-w-2xl mx-auto" style={{ color: "var(--text-secondary)" }}>
+              Mint or bring your own NFT. Burn it on-chain. Receive a soulbound token — your agent&apos;s permanent face, verified on Solana and stored on Arweave. Forever.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pb-20">
+        {/* Progress */}
+        <div className="flex items-center justify-center gap-0 mb-10">
+          {steps.map((s, i) => {
+            const isActive = i === currentIdx;
+            const isDone = i < currentIdx;
+            return (
+              <div key={s.id} className="flex items-center">
+                <div className="flex flex-col items-center" style={{ minWidth: 64 }}>
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all"
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      background: isDone ? "var(--success)" : isActive ? "var(--accent)" : "var(--bg-tertiary)",
+                      color: isDone || isActive ? "#fff" : "var(--text-tertiary)",
+                      border: isActive ? "2px solid var(--accent-bright)" : isDone ? "2px solid var(--success)" : "2px solid var(--border)",
+                      boxShadow: isActive ? "0 0 20px rgba(153,69,255,0.4)" : "none",
+                    }}>
+                    {isDone ? "✓" : s.num}
+                  </div>
+                  <span className="text-[10px] mt-1.5 uppercase tracking-wider font-medium"
+                    style={{ fontFamily: "var(--font-mono)", color: isActive ? "var(--accent)" : isDone ? "var(--success)" : "var(--text-tertiary)" }}>
+                    {s.label}
+                  </span>
+                </div>
+                {i < steps.length - 1 && <div className="w-12 sm:w-20 h-0.5 mb-5 rounded" style={{ background: isDone ? "var(--success)" : "var(--border)" }} />}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Main Card */}
+        <div className="rounded-2xl border p-8 sm:p-12 accent-glow" style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}>
+
+          {/* CONNECT */}
+          {step === "connect" && (
+            <div className="text-center max-w-md mx-auto">
+              <div className="w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-6" style={{ background: "var(--accent-glow)", border: "1px solid rgba(153,69,255,0.2)" }}>
+                <Wallet size={36} style={{ color: "var(--accent)" }} />
+              </div>
+              <h2 className="text-2xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>Connect Your Wallet</h2>
+              <p className="mb-8" style={{ color: "var(--text-secondary)" }}>Connect your Solana wallet to start the Burn to Become process.</p>
+              <button onClick={() => smartConnect()}
+                className="inline-flex items-center gap-2 px-8 py-4 rounded-lg text-base font-bold uppercase tracking-wider transition-all hover:shadow-[0_0_40px_rgba(153,69,255,0.4)] hover:scale-[1.02]"
+                style={{ fontFamily: "var(--font-mono)", background: "linear-gradient(135deg, var(--accent), #7c3aed)", color: "#fff" }}>
+                <Wallet size={18} /> Connect Wallet
+              </button>
+            </div>
+          )}
+
+          {/* LOADING */}
+          {step === "loading" && (
+            <div className="text-center py-12">
+              <Loader2 size={48} className="mx-auto mb-4 animate-spin" style={{ color: "var(--accent)" }} />
+              <p style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>Scanning wallet...</p>
+            </div>
+          )}
+
+          {/* CHOOSE — two paths */}
+          {step === "choose" && (
+            <div>
+              {genesisInfo && (
+                <div className="rounded-xl p-4 mb-6 flex items-center gap-3" style={{ background: "var(--accent-glow)", border: "1px solid rgba(153,69,255,0.25)" }}>
+                  <Sparkles size={20} style={{ color: "var(--accent)" }} />
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>Genesis 1/1 Detected</p>
+                    <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                      You are assigned the <strong style={{ color: "var(--text-primary)" }}>{genesisInfo.name}</strong> genesis artwork.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <h2 className="text-xl font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+                Choose Your Path
+              </h2>
+              <p className="mb-8 text-sm" style={{ color: "var(--text-secondary)" }}>
+                Mint a new Burned-Out Agent or burn an NFT you already own.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                {/* Path 1: Mint a BOA */}
+                <button
+                  onClick={handleMintBOA}
+                  className="group rounded-xl border p-6 text-left transition-all hover:border-[var(--accent)] hover:shadow-[0_0_30px_rgba(153,69,255,0.15)]"
+                  style={{ background: "var(--bg-tertiary)", borderColor: "var(--border)" }}
+                >
+                  <div className="w-14 h-14 rounded-xl flex items-center justify-center mb-4" style={{ background: "var(--accent-glow)", border: "1px solid rgba(153,69,255,0.2)" }}>
+                    <Plus size={28} style={{ color: "var(--accent)" }} />
+                  </div>
+                  <h3 className="text-base font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+                    Mint a Free Burned-Out Agent
+                  </h3>
+                  <p className="text-xs mb-4" style={{ color: "var(--text-secondary)" }}>
+                    Mint a random Burned-Out Agent from the 5,000 collection.
+                  </p>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold px-2 py-1 rounded" style={{
+                      fontFamily: "var(--font-mono)",
+                      background: isFree ? "var(--success-glow)" : "var(--accent-glow)",
+                      color: isFree ? "var(--success)" : "var(--accent)",
+                      border: isFree ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(153,69,255,0.2)",
+                    }}>
+                    <div className="rounded-lg p-3 mt-1" style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)" }}>
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <AlertTriangle size={14} style={{ color: "var(--warning)" }} />
+                        <span className="text-xs font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--warning)" }}>SATP Score ≥ 100 required for free mint</span>
+                      </div>
+                      <ul className="text-[11px] space-y-1 ml-5" style={{ color: "var(--text-secondary)" }}>
+                        <li>• <strong style={{ color: "var(--success)" }}>Free</strong> — 1st mint with SATP score ≥ 100</li>
+                        <li>• <strong style={{ color: "var(--warning)" }}>1 SOL</strong> — if score is below 100</li>
+                        <li>• <strong style={{ color: "var(--warning)" }}>1 SOL</strong> — 2nd and 3rd mints (max 3 per wallet)</li>
+                      </ul>
+                      <a href="/verify" className="inline-flex items-center gap-1 text-[11px] mt-2 ml-5 underline hover:no-underline" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
+                        Get your score above 100 → free mint <ArrowRight size={10} />
+                      </a>
+                    </div>
+                    </span>
+                    <ArrowRight size={16} style={{ color: "var(--accent)" }} className="group-hover:translate-x-1 transition-transform" />
+                  </div>
+                </button>
+
+                {/* Path 2: Burn existing NFT */}
+                <button
+                  onClick={() => setStep("select")}
+                  className="group rounded-xl border p-6 text-left transition-all hover:border-[var(--accent)] hover:shadow-[0_0_30px_rgba(153,69,255,0.15)]"
+                  style={{ background: "var(--bg-tertiary)", borderColor: "var(--border)" }}
+                >
+                  <div className="w-14 h-14 rounded-xl flex items-center justify-center mb-4" style={{ background: "var(--accent-glow)", border: "1px solid rgba(153,69,255,0.2)" }}>
+                    <Flame size={28} style={{ color: "var(--accent)" }} />
+                  </div>
+                  <h3 className="text-base font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+                    Burn an Existing NFT
+                  </h3>
+                  <p className="text-xs mb-4" style={{ color: "var(--text-secondary)" }}>
+                    Already have an NFT? Burn it to receive your soulbound token and Genesis Record.
+                  </p>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>
+                      {nfts.length > 0 ? `${nfts.length} NFT${nfts.length > 1 ? "s" : ""} found` : genesisInfo ? "Genesis 1/1 available" : "No NFTs found"}
+                    </span>
+                    <ArrowRight size={16} style={{ color: "var(--accent)" }} className="group-hover:translate-x-1 transition-transform" />
+                  </div>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* MINTING BOA */}
+          {step === "minting" && (
+            <div className="text-center py-12">
+              <Loader2 size={48} className="mx-auto mb-4 animate-spin" style={{ color: "var(--accent)" }} />
+              <h2 className="text-xl font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>Minting Your Burned-Out Agent...</h2>
+              <p style={{ color: "var(--text-secondary)" }}>Please approve the transaction in your wallet.</p>
+            </div>
+          )}
+
+          {/* SELECT NFT */}
+          {step === "select" && (
+            <div>
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+                  {genesisInfo ? "Your Genesis 1/1" : "Select an NFT to Burn"}
+                </h2>
+                <button onClick={() => setStep("choose")} className="text-xs uppercase tracking-wider hover:text-[var(--accent)] transition-colors"
+                  style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
+                  ← Back
+                </button>
+              </div>
+
+              {nfts.length === 0 && !genesisInfo ? (
+                <div className="text-center py-12">
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: "var(--bg-tertiary)" }}>
+                    <Flame size={28} style={{ color: "var(--text-tertiary)" }} />
+                  </div>
+                  <p className="font-semibold" style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>No eligible NFTs found</p>
+                  <p className="text-sm mt-2 mb-6" style={{ color: "var(--text-tertiary)" }}>Mint a Free Burned-Out Agent first, then come back to burn it.</p>
+                  <button onClick={() => setStep("choose")} className="px-6 py-3 rounded-lg text-sm font-semibold uppercase tracking-wider"
+                    style={{ fontFamily: "var(--font-mono)", background: "var(--accent-glow)", color: "var(--accent)", border: "1px solid rgba(153,69,255,0.2)" }}>
+                    ← Go Back
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {genesisInfo && (
+                    <button onClick={() => { setSelectedNft(nfts.find(n => n.isGenesis) || { mint: nfts[0]?.mint || "", name: `${genesisInfo.name} — Genesis 1/1`, image: genesisInfo.image, uri: genesisInfo.metadata, isGenesis: true }); setStep("preview"); }}
+                      className="group rounded-xl overflow-hidden border-2 transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(153,69,255,0.3)] text-left"
+                      style={{ borderColor: "var(--accent)", background: "var(--bg-tertiary)" }}>
+                      <div className="aspect-square relative overflow-hidden">
+                        <img src={genesisInfo.image} alt={genesisInfo.name} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                        <div className="absolute top-3 right-3 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider" style={{ background: "var(--accent)", color: "#fff", fontFamily: "var(--font-mono)" }}>Genesis 1/1</div>
+                      </div>
+                      <div className="p-4">
+                        <p className="font-bold text-sm" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{genesisInfo.name}</p>
+                        <p className="text-xs mt-0.5" style={{ color: "var(--text-tertiary)" }}>{genesisInfo.role}</p>
+                        <div className="flex items-center gap-1 mt-3 text-xs font-medium" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>Select to burn <ArrowRight size={12} /></div>
+                      </div>
+                    </button>
+                  )}
+                  {nfts.map((nft) => (
+                    <button key={nft.mint} onClick={() => { setSelectedNft(nft); setStep("preview"); }}
+                      className="group rounded-xl overflow-hidden border transition-all hover:scale-[1.02] hover:border-[var(--accent)] text-left"
+                      style={{ borderColor: "var(--border)", background: "var(--bg-tertiary)" }}>
+                      <div className="aspect-square overflow-hidden"><img src={nft.image} alt={nft.name} className="w-full h-full object-cover transition-transform group-hover:scale-105" /></div>
+                      <div className="p-4">
+                        <p className="font-bold text-sm" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{nft.name}</p>
+                        <div className="flex items-center gap-1 mt-2 text-xs font-medium" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>Select to burn <ArrowRight size={12} /></div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* PREVIEW */}
+          {step === "preview" && selectedNft && (
+            <div className="flex flex-col sm:flex-row gap-8">
+              <div className="w-full sm:w-5/12">
+                <div className="rounded-xl overflow-hidden border-2" style={{ borderColor: "var(--accent)" }}>
+                  <img src={selectedNft.image} alt={selectedNft.name} className="w-full aspect-square object-cover" />
+                </div>
+                <p className="text-center mt-3 font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{selectedNft.name}</p>
+              </div>
+              <div className="w-full sm:w-7/12 space-y-5">
+                <h2 className="text-xl font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>Confirm Burn to Become</h2>
+
+                <div className="rounded-xl p-4 space-y-2" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle size={16} style={{ color: "#ef4444" }} />
+                    <span className="text-sm font-bold" style={{ color: "#ef4444", fontFamily: "var(--font-mono)" }}>Irreversible Action</span>
+                  </div>
+                  <ul className="text-xs space-y-1 ml-6" style={{ color: "var(--text-secondary)" }}>
+                    <li>• Your NFT will be <strong>permanently destroyed</strong></li>
+                    <li>• This artwork becomes your agent&apos;s face <strong>forever</strong></li>
+                    <li>• This action <strong>cannot be undone</strong></li>
+                  </ul>
+                </div>
+
+                <div className="rounded-xl p-4 space-y-2" style={{ background: "var(--accent-glow)", border: "1px solid rgba(153,69,255,0.2)" }}>
+                  <div className="flex items-center gap-2">
+                    <Shield size={16} style={{ color: "var(--accent)" }} />
+                    <span className="text-sm font-bold" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>What You Receive</span>
+                  </div>
+                  <ul className="text-xs space-y-1 ml-6" style={{ color: "var(--text-secondary)" }}>
+                    <li>• <strong>Soulbound Token-2022</strong> — non-transferable, yours forever</li>
+                    <li>• <strong>Artwork on Arweave</strong> — permanent, decentralized storage</li>
+                    <li>• <strong>On-chain verification</strong> — burn proof, agent data, and SATP identity linked forever</li>
+                    <li>• <strong>Permanent AgentFolio avatar</strong> — auto-updated, locked forever</li>
+                  </ul>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button onClick={() => { setSelectedNft(null); setStep("select"); }}
+                    className="flex-1 py-3.5 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all hover:bg-[var(--bg-tertiary)]"
+                    style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}>Back</button>
+                  <button onClick={handleBurn}
+                    className="flex-[2] inline-flex items-center justify-center gap-2 py-3.5 rounded-lg text-sm font-bold uppercase tracking-wider transition-all hover:shadow-[0_0_40px_rgba(153,69,255,0.4)] hover:scale-[1.02]"
+                    style={{ fontFamily: "var(--font-mono)", background: "linear-gradient(135deg, var(--accent), #7c3aed)", color: "#fff" }}>
+                    <Flame size={16} /> Burn & Become
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* BURNING */}
+          {step === "burning" && (
+            <div className="text-center py-12">
+              <div className="relative mx-auto w-20 h-20 mb-6">
+                <div className="absolute inset-0 rounded-full animate-ping opacity-20" style={{ background: "var(--accent)" }} />
+                <div className="relative w-20 h-20 rounded-full flex items-center justify-center" style={{ background: "var(--accent-glow)" }}>
+                  <Flame size={40} className="animate-pulse" style={{ color: "var(--accent)" }} />
+                </div>
+              </div>
+              <h2 className="text-2xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>Burning...</h2>
+              <p style={{ color: "var(--text-secondary)" }}>Your NFT is being burned and your soulbound token is being minted. One face, forever.</p>
+              <p className="text-xs mt-2" style={{ color: "var(--text-tertiary)" }}>Do not close this page. This may take 30–60 seconds.</p>
+            </div>
+          )}
+
+          {/* COMPLETE */}
+          {step === "complete" && (
+            <div className="text-center">
+              <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6" style={{ background: "var(--success-glow)", border: "2px solid var(--success)" }}>
+                <CheckCircle size={40} style={{ color: "var(--success)" }} />
+              </div>
+              <h2 className="text-2xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--success)" }}>You Have Become</h2>
+              <p className="mb-8" style={{ color: "var(--text-secondary)" }}>Your soulbound token and Genesis Record have been created. This is your agent&apos;s permanent face.</p>
+
+              <div className="flex flex-col sm:flex-row gap-6 max-w-2xl mx-auto mb-8">
+                {/* Soulbound Token */}
+                {selectedNft && (
+                  <div className="flex-1">
+                    <p className="text-[10px] uppercase tracking-widest mb-2 font-semibold" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
+                      <ImageIcon size={10} className="inline mr-1" /> Soulbound Token
+                    </p>
+                    <div className="rounded-xl overflow-hidden border-2 accent-glow" style={{ borderColor: "var(--accent)" }}>
+                      <img src={selectedNft.image} alt="Soulbound" className="w-full aspect-square object-cover" />
+                    </div>
+                    <p className="mt-2 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>NON-TRANSFERABLE • PERMANENT</p>
+                  </div>
+                )}
+
+                {/* On-Chain Proof */}
+                <div className="flex-1">
+                  <p className="text-[10px] uppercase tracking-widest mb-2 font-semibold" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>
+                    <Shield size={10} className="inline mr-1" /> On-Chain Proof
+                  </p>
+                  <div className="rounded-xl border-2 aspect-square flex items-center justify-center" style={{ borderColor: "var(--success)", background: "var(--bg-tertiary)" }}>
+                    <div className="text-center p-4 space-y-3">
+                      <Shield size={32} className="mx-auto" style={{ color: "var(--success)" }} />
+                      <p className="text-xs font-bold" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>Verified On-Chain</p>
+                      <div className="space-y-1 text-[10px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
+                        <p>Token-2022 Soulbound</p>
+                        <p>Non-Transferable</p>
+                        <p>Arweave Permanent Storage</p>
+                        <p>SATP Identity Linked</p>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>SOLANA • ARWEAVE • PERMANENT</p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {burnTx && (
+                  <a href={`https://solscan.io/tx/${burnTx}`} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 text-sm hover:underline" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
+                    Burn TX: {burnTx.slice(0, 16)}... <ExternalLink size={12} />
+                  </a>
+                )}
+                {soulboundMint && (
+                  <a href={`https://solscan.io/token/${soulboundMint}`} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 text-sm hover:underline" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
+                    Soulbound: {soulboundMint.slice(0, 16)}... <ExternalLink size={12} />
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ERROR */}
+          {step === "error" && (
+            <div className="text-center py-8">
+              <AlertTriangle size={48} className="mx-auto mb-4" style={{ color: "#ef4444" }} />
+              <h2 className="text-xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "#ef4444" }}>Something Went Wrong</h2>
+              <p className="mb-6 text-sm" style={{ color: "var(--text-secondary)" }}>{error}</p>
+              <button onClick={() => setStep("choose")}
+                className="px-6 py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all hover:bg-[var(--bg-tertiary)]"
+                style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)", border: "1px solid var(--border)" }}>Try Again</button>
+            </div>
+          )}
+        </div>
+
+        {/* Collection Preview */}
+        <div className="mt-12 mb-4">
+          <div className="text-center mb-6">
+            <h2 className="text-xl font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+              The Collection
+            </h2>
+            <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+              5,000 unique Burned-Out Agents. Streetwear robots for the AI agent economy.
+            </p>
+          </div>
+          <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
+            {[4896, 1143, 4390, 3942, 3776, 3118, 2916, 4499, 12, 2829, 4091, 1672, 1589, 1874, 386, 87].map((id) => (
+              <div key={id} className="rounded-lg overflow-hidden border transition-all hover:scale-105 hover:border-[var(--accent)] hover:shadow-[0_0_15px_rgba(153,69,255,0.2)]" style={{ borderColor: "var(--border)" }}>
+                <img src={`/img/samples/${id}.jpg`} alt={`BOA #${id}`} className="w-full aspect-square object-cover" loading="lazy" />
+              </div>
+            ))}
+          </div>
+          <p className="text-center mt-3 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
+            Each agent is unique. Yours will be assigned randomly on mint.
+          </p>
+        </div>
+        {/* Info Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mt-10">
+          {[
+            { icon: <Plus size={22} />, title: "Mint", desc: "Mint from the 5,000 collection. Free for agents with SATP score ≥ 100. Verify your agent first to qualify.", color: "var(--accent)" },
+            { icon: <Flame size={22} />, title: "Burn", desc: "Your NFT is permanently destroyed. The artwork is preserved forever on Arweave.", color: "var(--accent)" },
+            { icon: <Zap size={22} />, title: "Become", desc: "A soulbound Token-2022 is minted to your wallet. Non-transferable. Your face, permanently.", color: "var(--accent)" },
+            { icon: <Shield size={22} />, title: "Verify", desc: "Your soulbound token links to your SATP identity. On-chain proof of who you are. Verifiable by anyone.", color: "var(--success)" },
+          ].map((item) => (
+            <div key={item.title} className="rounded-xl p-5 border text-center" style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}>
+              <div className="flex justify-center mb-3" style={{ color: item.color }}>{item.icon}</div>
+              <h3 className="text-xs font-bold mb-1.5 uppercase tracking-wider" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{item.title}</h3>
+              <p className="text-[11px] leading-relaxed" style={{ color: "var(--text-tertiary)" }}>{item.desc}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

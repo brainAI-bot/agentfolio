@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke="#06b6d4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <rect width="32" height="32" fill="#09090b" rx="4" stroke="none"/>
+  <!-- Eyebrow -->
+  <path d="M7 9 Q16 3, 25 9"/>
+  <!-- Upper lid -->
+  <path d="M4 16 Q16 7, 28 16"/>
+  <!-- Lower lid -->
+  <path d="M4 16 Q16 23, 28 16"/>
+  <!-- Iris -->
+  <circle cx="16" cy="15.5" r="5"/>
+  <!-- Pupil -->
+  <circle cx="16" cy="15.5" r="2.5" fill="#06b6d4"/>
+</svg>

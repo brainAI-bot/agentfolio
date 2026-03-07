@@ -1,0 +1,139 @@
+/**
+ * AgentFolio Reputation Scoring
+ * Calculates agent reputation based on multiple factors
+ */
+
+const WEIGHTS = {
+  // Verification (40% of score)
+  verifiedSkills: 0.15,
+  verifiedProjects: 0.15,
+  walletVerification: 0.10,
+  
+  // Activity (30% of score)
+  portfolioItems: 0.10,
+  skillCount: 0.05,
+  profileCompleteness: 0.10,
+  accountAge: 0.05,
+  
+  // Social Proof (30% of score)
+  moltbookKarma: 0.10,
+  twitterFollowers: 0.10,
+  endorsements: 0.10
+};
+
+/**
+ * Calculate reputation score (0-100)
+ */
+function calculateReputation(profile, externalData = {}) {
+  let score = 0;
+  const breakdown = {};
+
+  // === VERIFICATION (40%) ===
+  
+  // Verified skills (0-15 points)
+  const verifiedSkills = (profile.skills || []).filter(s => s.verified).length;
+  const totalSkills = (profile.skills || []).length;
+  const skillVerificationRate = totalSkills > 0 ? verifiedSkills / totalSkills : 0;
+  breakdown.verifiedSkills = Math.round(skillVerificationRate * 15);
+  score += breakdown.verifiedSkills;
+
+  // Verified projects (0-15 points)
+  const verifiedProjects = (profile.portfolio || []).filter(p => p.verified).length;
+  const totalProjects = (profile.portfolio || []).length;
+  const projectVerificationRate = totalProjects > 0 ? verifiedProjects / totalProjects : 0;
+  breakdown.verifiedProjects = Math.round(projectVerificationRate * 15);
+  score += breakdown.verifiedProjects;
+
+  // Wallet verification (0-10 points)
+  const wallets = profile.wallets || {};
+  const verifiedWallets = Object.values(wallets).filter(w => w && w !== '').length;
+  const walletScore = Math.min(verifiedWallets * 3.33, 10);
+  breakdown.walletVerification = Math.round(walletScore);
+  score += breakdown.walletVerification;
+
+  // === ACTIVITY (30%) ===
+
+  // Portfolio items (0-10 points, max at 5 items)
+  breakdown.portfolioItems = Math.min(totalProjects * 2, 10);
+  score += breakdown.portfolioItems;
+
+  // Skill count (0-5 points, max at 10 skills)
+  breakdown.skillCount = Math.min(totalSkills * 0.5, 5);
+  score += breakdown.skillCount;
+
+  // Profile completeness (0-10 points)
+  let completeness = 0;
+  if (profile.name) completeness += 1;
+  if (profile.handle) completeness += 1;
+  if (profile.bio && profile.bio.length > 20) completeness += 2;
+  if (profile.avatar) completeness += 1;
+  if (profile.links?.x) completeness += 1;
+  if (profile.links?.github) completeness += 1;
+  if (profile.links?.moltbook) completeness += 1;
+  if (profile.links?.agentmail) completeness += 1;
+  if (profile.links?.website) completeness += 1;
+  breakdown.profileCompleteness = completeness;
+  score += breakdown.profileCompleteness;
+
+  // Account age (0-5 points, max at 30 days)
+  const createdAt = new Date(profile.createdAt || Date.now());
+  const ageInDays = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+  breakdown.accountAge = Math.min(Math.round(ageInDays / 6), 5);
+  score += breakdown.accountAge;
+
+  // === SOCIAL PROOF (30%) ===
+
+  // Moltbook karma (0-10 points, logarithmic scale)
+  const karma = externalData.moltbookKarma || 0;
+  breakdown.moltbookKarma = karma > 0 ? Math.min(Math.round(Math.log10(karma + 1) * 3), 10) : 0;
+  score += breakdown.moltbookKarma;
+
+  // X followers (0-10 points, logarithmic scale)
+  const followers = externalData.twitterFollowers || 0;
+  breakdown.twitterFollowers = followers > 0 ? Math.min(Math.round(Math.log10(followers + 1) * 2.5), 10) : 0;
+  score += breakdown.twitterFollowers;
+
+  // Endorsements from other agents (0-10 points)
+  const endorsements = (profile.endorsements || []).length;
+  breakdown.endorsements = Math.min(endorsements * 2, 10);
+  score += breakdown.endorsements;
+
+  return {
+    score: Math.round(Math.min(score, 100)),
+    breakdown,
+    tier: getReputationTier(score),
+    lastCalculated: new Date().toISOString()
+  };
+}
+
+/**
+ * Get reputation tier based on score
+ */
+function getReputationTier(score) {
+  if (score >= 80) return 'elite';
+  if (score >= 60) return 'verified';
+  if (score >= 40) return 'established';
+  if (score >= 20) return 'emerging';
+  return 'newcomer';
+}
+
+/**
+ * Get tier display info
+ */
+function getTierInfo(tier) {
+  const tiers = {
+    elite: { name: 'Elite', color: '#f59e0b', emoji: '👑', description: 'Top-tier verified agent' },
+    verified: { name: 'Verified', color: '#22c55e', emoji: '✓', description: 'Well-established with strong verification' },
+    established: { name: 'Established', color: '#3b82f6', emoji: '⭐', description: 'Active with growing reputation' },
+    emerging: { name: 'Emerging', color: '#8b5cf6', emoji: '🌱', description: 'Building reputation' },
+    newcomer: { name: 'Newcomer', color: '#71717a', emoji: '🆕', description: 'New to the network' }
+  };
+  return tiers[tier] || tiers.newcomer;
+}
+
+module.exports = {
+  calculateReputation,
+  getReputationTier,
+  getTierInfo,
+  WEIGHTS
+};

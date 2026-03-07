@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80" fill="none" stroke="#06b6d4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Eyebrow/lid line above -->
+  <path d="M25 22 Q60 4, 95 22"/>
+  <!-- Upper eyelid -->
+  <path d="M12 44 Q60 14, 108 44"/>
+  <!-- Lower eyelid -->
+  <path d="M12 44 Q60 68, 108 44"/>
+  <!-- Iris circle -->
+  <circle cx="60" cy="42" r="16"/>
+  <!-- Pupil -->
+  <circle cx="60" cy="42" r="8" fill="#06b6d4"/>
+  <!-- Small lash lines at corners -->
+  <line x1="8" y1="44" x2="2" y2="40"/>
+  <line x1="112" y1="44" x2="118" y2="40"/>
+</svg>

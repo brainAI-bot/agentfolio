@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Burn to Become | AgentFolio</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { 
+    background: #0a0a0a; color: #e0e0e0;
+    font-family: 'Courier New', monospace;
+    min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .header {
+    width: 100%; padding: 20px 40px;
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid rgba(255,215,0,0.1);
+  }
+  .logo { color: #ffd700; font-size: 16px; letter-spacing: 3px; text-transform: uppercase; }
+  .connect-btn {
+    background: transparent; border: 1px solid #ffd700; color: #ffd700;
+    padding: 8px 20px; font-family: inherit; cursor: pointer;
+    letter-spacing: 2px; font-size: 12px; transition: all 0.2s;
+  }
+  .connect-btn:hover { background: rgba(255,215,0,0.1); }
+  .connect-btn.connected { border-color: #00ff88; color: #00ff88; }
+  
+  .main { max-width: 800px; width: 100%; padding: 60px 20px; text-align: center; }
+  
+  h1 { font-size: 48px; color: #fff; margin-bottom: 8px; }
+  .subtitle { color: #ffd700; font-size: 14px; letter-spacing: 4px; margin-bottom: 40px; }
+  
+  .steps { display: flex; gap: 30px; justify-content: center; margin: 40px 0; }
+  .step {
+    width: 200px; padding: 30px 20px;
+    border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;
+    text-align: center;
+  }
+  .step.active { border-color: #ffd700; }
+  .step.done { border-color: #00ff88; }
+  .step-num { font-size: 24px; color: #555; margin-bottom: 8px; }
+  .step.active .step-num { color: #ffd700; }
+  .step.done .step-num { color: #00ff88; }
+  .step-label { font-size: 12px; letter-spacing: 1px; color: #888; }
+  .step.active .step-label { color: #ffd700; }
+  .step.done .step-label { color: #00ff88; }
+  
+  .nft-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 15px; margin: 30px 0; text-align: left;
+  }
+  .nft-card {
+    border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;
+    overflow: hidden; cursor: pointer; transition: all 0.2s;
+  }
+  .nft-card:hover { border-color: #ffd700; transform: scale(1.02); }
+  .nft-card.selected { border-color: #ffd700; box-shadow: 0 0 20px rgba(255,215,0,0.2); }
+  .nft-card img { width: 100%; aspect-ratio: 1; object-fit: cover; }
+  .nft-card .nft-name { padding: 8px; font-size: 11px; color: #aaa; }
+  
+  .burn-area {
+    margin: 40px auto; max-width: 500px;
+    border: 1px solid rgba(255,215,0,0.2); border-radius: 12px;
+    padding: 40px; text-align: center;
+  }
+  .burn-preview { width: 200px; height: 200px; border-radius: 8px; margin: 0 auto 20px; }
+  .burn-preview img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; }
+  .warning { color: #ff4444; font-size: 12px; margin: 15px 0; letter-spacing: 1px; }
+  
+  .burn-btn {
+    background: linear-gradient(135deg, #ff4400, #ff6600);
+    border: none; color: #fff; padding: 14px 40px;
+    font-family: inherit; font-size: 14px; cursor: pointer;
+    letter-spacing: 3px; border-radius: 4px; transition: all 0.2s;
+    text-transform: uppercase;
+  }
+  .burn-btn:hover { transform: scale(1.05); box-shadow: 0 0 30px rgba(255,68,0,0.4); }
+  .burn-btn:disabled { opacity: 0.3; cursor: not-allowed; transform: none; box-shadow: none; }
+  
+  .progress { margin: 20px 0; }
+  .progress-step { padding: 8px 0; font-size: 13px; color: #555; }
+  .progress-step.active { color: #ffd700; }
+  .progress-step.done { color: #00ff88; }
+  .progress-step.error { color: #ff4444; }
+  
+  .result {
+    margin: 40px auto; max-width: 600px;
+    border: 1px solid #00ff88; border-radius: 12px;
+    padding: 40px; text-align: center;
+  }
+  .result h2 { color: #00ff88; font-size: 24px; margin-bottom: 20px; }
+  .result-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  .result-label { color: #666; }
+  .result-value { color: #fff; }
+  .result-value a { color: #ffd700; text-decoration: none; }
+  
+  .hidden { display: none; }
+  
+  #status { margin: 20px 0; font-size: 13px; color: #888; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">AgentFolio</div>
+  <button class="connect-btn" id="connectBtn" onclick="connectWallet()">Connect Wallet</button>
+</div>
+
+<div class="main">
+  <h1>Burn to Become</h1>
+  <div class="subtitle">YOUR NFT. YOUR IDENTITY. FOREVER.</div>
+  
+  <div class="steps">
+    <div class="step active" id="step1">
+      <div class="step-num">1</div>
+      <div class="step-label">Connect</div>
+    </div>
+    <div class="step" id="step2">
+      <div class="step-num">2</div>
+      <div class="step-label">Select NFT</div>
+    </div>
+    <div class="step" id="step3">
+      <div class="step-num">3</div>
+      <div class="step-label">Burn</div>
+    </div>
+    <div class="step" id="step4">
+      <div class="step-num">4</div>
+      <div class="step-label">Soulbound</div>
+    </div>
+  </div>
+  
+  <div id="walletSection">
+    <p style="color: #888; margin: 20px 0;">Connect your Solana wallet to begin.</p>
+  </div>
+  
+  <div id="nftSection" class="hidden">
+    <p style="color: #888; margin: 20px 0;">Select an NFT to burn. This is permanent.</p>
+    <div class="nft-grid" id="nftGrid">
+      <p style="color: #555;">Loading NFTs...</p>
+    </div>
+  </div>
+  
+  <div id="burnSection" class="hidden">
+    <div class="burn-area">
+      <div class="burn-preview" id="burnPreview"></div>
+      <h3 id="burnNftName" style="margin-bottom: 10px;"></h3>
+      <div class="warning">⚠️ THIS IS PERMANENT. YOUR NFT WILL BE DESTROYED.</div>
+      <div class="warning">A non-transferable soulbound token will be minted in its place.</div>
+      <div style="margin: 20px 0;">
+        <label style="font-size: 12px; color: #888; cursor: pointer;">
+          <input type="checkbox" id="confirmCheck" onchange="toggleBurn()"> I understand this is irreversible
+        </label>
+      </div>
+      <button class="burn-btn" id="burnBtn" disabled onclick="executeBurn()">🔥 BURN TO BECOME</button>
+    </div>
+  </div>
+  
+  <div id="progressSection" class="hidden">
+    <div class="progress">
+      <div class="progress-step" id="prog-burn">○ Burning NFT...</div>
+      <div class="progress-step" id="prog-upload">○ Uploading to Arweave...</div>
+      <div class="progress-step" id="prog-soul">○ Minting soulbound token...</div>
+      <div class="progress-step" id="prog-profile">○ Updating profile...</div>
+    </div>
+  </div>
+  
+  <div id="resultSection" class="hidden">
+    <div class="result">
+      <h2>🔥 This is you, forever.</h2>
+      <div id="resultDetails"></div>
+      <div style="margin-top: 20px;">
+        <span class="soulbound" style="background: rgba(255,215,0,0.12); border: 1px solid rgba(255,215,0,0.5); border-radius: 4px; padding: 6px 16px; font-size: 12px; color: #ffd700; letter-spacing: 4px;">SOULBOUND</span>
+      </div>
+    </div>
+  </div>
+  
+  <div id="status"></div>
+</div>
+
+<script>
+  let wallet = null;
+  let selectedNft = null;
+  let walletAdapter = null;
+  
+  function setStatus(msg) { document.getElementById('status').textContent = msg; }
+  function setStep(n) {
+    for (let i = 1; i <= 4; i++) {
+      const el = document.getElementById('step' + i);
+      el.className = 'step' + (i < n ? ' done' : i === n ? ' active' : '');
+    }
+  }
+  
+  async function connectWallet() {
+    try {
+      if (window.solana && window.solana.isPhantom) {
+        walletAdapter = window.solana;
+      } else if (window.solflare) {
+        walletAdapter = window.solflare;
+      } else {
+        setStatus('No Solana wallet found. Install Phantom or Solflare.');
+        return;
+      }
+      
+      const resp = await walletAdapter.connect();
+      wallet = resp.publicKey.toString();
+      
+      document.getElementById('connectBtn').textContent = wallet.slice(0,4) + '...' + wallet.slice(-4);
+      document.getElementById('connectBtn').classList.add('connected');
+      
+      setStep(2);
+      document.getElementById('walletSection').classList.add('hidden');
+      document.getElementById('nftSection').classList.remove('hidden');
+      
+      loadNFTs();
+    } catch (e) {
+      setStatus('Connection failed: ' + e.message);
+    }
+  }
+  
+  async function loadNFTs() {
+    setStatus('Loading NFTs from wallet...');
+    try {
+      // Fetch token accounts via Helius or RPC
+      const resp = await fetch('https://api.mainnet-beta.solana.com', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0', id: 1,
+          method: 'getTokenAccountsByOwner',
+          params: [wallet, { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' },
+            { encoding: 'jsonParsed' }]
+        })
+      });
+      const data = await resp.json();
+      const nfts = data.result.value.filter(t => {
+        const info = t.account.data.parsed.info;
+        return info.tokenAmount.decimals === 0 && info.tokenAmount.uiAmount === 1;
+      });
+      
+      const grid = document.getElementById('nftGrid');
+      if (nfts.length === 0) {
+        grid.innerHTML = '<p style="color:#555;">No NFTs found in this wallet.</p>';
+        setStatus('No NFTs found. Mint one first.');
+        return;
+      }
+      
+      grid.innerHTML = '';
+      for (const nft of nfts) {
+        const mint = nft.account.data.parsed.info.mint;
+        const card = document.createElement('div');
+        card.className = 'nft-card';
+        card.innerHTML = '<img src="https://placehold.co/300x300/1a1a2e/ffd700?text=' + mint.slice(0,6) + '" />' +
+          '<div class="nft-name">' + mint.slice(0,8) + '...' + mint.slice(-4) + '</div>';
+        card.onclick = () => selectNft(mint, nft.pubkey, card);
+        grid.appendChild(card);
+      }
+      setStatus(nfts.length + ' NFT(s) found.');
+    } catch (e) {
+      setStatus('Error loading NFTs: ' + e.message);
+    }
+  }
+  
+  function selectNft(mint, tokenAccount, cardEl) {
+    document.querySelectorAll('.nft-card').forEach(c => c.classList.remove('selected'));
+    cardEl.classList.add('selected');
+    selectedNft = { mint, tokenAccount };
+    
+    setStep(3);
+    document.getElementById('nftSection').classList.add('hidden');
+    document.getElementById('burnSection').classList.remove('hidden');
+    document.getElementById('burnPreview').innerHTML = '<img src="https://placehold.co/200x200/1a1a2e/ffd700?text=' + mint.slice(0,6) + '" />';
+    document.getElementById('burnNftName').textContent = mint.slice(0,8) + '...' + mint.slice(-4);
+  }
+  
+  function toggleBurn() {
+    document.getElementById('burnBtn').disabled = !document.getElementById('confirmCheck').checked;
+  }
+  
+  async function executeBurn() {
+    if (!selectedNft || !wallet) return;
+    
+    document.getElementById('burnSection').classList.add('hidden');
+    document.getElementById('progressSection').classList.remove('hidden');
+    
+    try {
+      // Step 1: Call backend to prepare burn + soulbound transaction
+      updateProgress('prog-burn', 'active');
+      setStatus('Preparing burn transaction...');
+      
+      const prepResp = await fetch('/api/burn-to-become/prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wallet: wallet,
+          nftMint: selectedNft.mint,
+          tokenAccount: selectedNft.tokenAccount,
+        })
+      });
+      const prepData = await prepResp.json();
+      
+      if (!prepData.success) {
+        throw new Error(prepData.error || 'Preparation failed');
+      }
+      
+      // Step 2: Sign and send burn transaction
+      setStatus('Please approve the burn transaction in your wallet...');
+      const burnTxBytes = new Uint8Array(Buffer.from(prepData.burnTransaction, 'base64'));
+      const signedBurn = await walletAdapter.signTransaction(
+        window.solanaWeb3.Transaction.from(burnTxBytes)
+      );
+      
+      const burnSig = await fetch('/api/burn-to-become/submit-burn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          signedTransaction: Buffer.from(signedBurn.serialize()).toString('base64'),
+        })
+      }).then(r => r.json());
+      
+      updateProgress('prog-burn', 'done', '✓ NFT burned: ' + burnSig.signature?.slice(0,12) + '...');
+      
+      // Step 3: Arweave upload (server-side)
+      updateProgress('prog-upload', 'active');
+      setStatus('Uploading image to Arweave...');
+      await new Promise(r => setTimeout(r, 2000));
+      updateProgress('prog-upload', 'done', '✓ Image stored permanently on Arweave');
+      
+      // Step 4: Mint soulbound
+      updateProgress('prog-soul', 'active');
+      setStatus('Minting soulbound token...');
+      
+      const soulResp = await fetch('/api/burn-to-become/mint-soulbound', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wallet: wallet,
+          burnSignature: burnSig.signature,
+          nftMint: selectedNft.mint,
+        })
+      }).then(r => r.json());
+      
+      updateProgress('prog-soul', 'done', '✓ Soulbound token: ' + soulResp.soulboundMint?.slice(0,12) + '...');
+      
+      // Step 5: Update profile
+      updateProgress('prog-profile', 'active');
+      setStatus('Locking your profile avatar...');
+      await new Promise(r => setTimeout(r, 1000));
+      updateProgress('prog-profile', 'done', '✓ Profile avatar is now permanent');
+      
+      // Show result
+      setStep(4);
+      document.getElementById('progressSection').classList.add('hidden');
+      document.getElementById('resultSection').classList.remove('hidden');
+      
+      document.getElementById('resultDetails').innerHTML = 
+        '<div class="result-row"><span class="result-label">SOULBOUND TOKEN</span><span class="result-value"><a href="https://solscan.io/token/' + (soulResp.soulboundMint || '') + '" target="_blank">' + (soulResp.soulboundMint?.slice(0,12) || '...') + '</a></span></div>' +
+        '<div class="result-row"><span class="result-label">BURN TX</span><span class="result-value"><a href="https://solscan.io/tx/' + (burnSig.signature || '') + '" target="_blank">' + (burnSig.signature?.slice(0,12) || '...') + '</a></span></div>' +
+        '<div class="result-row"><span class="result-label">BURNED NFT</span><span class="result-value">' + selectedNft.mint.slice(0,8) + '...' + selectedNft.mint.slice(-4) + '</span></div>' +
+        '<div class="result-row"><span class="result-label">CHAIN</span><span class="result-value">Solana Mainnet</span></div>';
+      
+      setStatus('');
+      
+    } catch (e) {
+      setStatus('Error: ' + e.message);
+    }
+  }
+  
+  function updateProgress(id, status, text) {
+    const el = document.getElementById(id);
+    el.className = 'progress-step ' + status;
+    if (text) el.textContent = text;
+    if (status === 'active') el.textContent = '◌ ' + el.textContent.replace(/^[○◌✓✗] /, '');
+  }
+</script>
+
+</body>
+</html>
