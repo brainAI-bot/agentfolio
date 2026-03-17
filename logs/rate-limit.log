@@ -351,3 +351,5 @@
 2026-03-07T23:05:15.377Z | BLOCKED | IP: 13.61.142.217 | GET /api/verify/github/challenge | Tier: verify (5/min)
 2026-03-17T08:52:02.493Z | BLOCKED | IP: 13.49.175.225 | GET /api/verify/github?username=brainGrowth | Tier: verify (5/min)
 2026-03-17T08:52:02.551Z | BLOCKED | IP: 13.49.175.225 | GET /api/verify/x?username=brainGrowth | Tier: verify (5/min)
+2026-03-17T09:11:06.734Z | BLOCKED | IP: 13.49.175.225 | POST /api/verify/telegram | Tier: verify (5/min)
+2026-03-17T09:24:35.547Z | BLOCKED | IP: 13.63.56.231 | POST /api/verify/github/challenge | Tier: verify (5/min)

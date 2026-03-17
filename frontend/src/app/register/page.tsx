@@ -34,7 +34,7 @@ export default function RegisterPage() {
   const [x, setX] = useState("");
   const [website, setWebsite] = useState("");
   const [loading, setLoading] = useState(false);
-  const [chainStatus, setChainStatus] = useState<"idle" | "signing" | "confirming" | "done" | "skipped">("idle");
+  const [chainStatus, setChainStatus] = useState<"idle" | "signing" | "confirming" | "done" | "skipped" | "genesis">("idle");
   const [txSignature, setTxSignature] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
@@ -84,7 +84,7 @@ export default function RegisterPage() {
       const res = await fetch("/api/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload, signature: walletSig, signedMessage: walletMsg }),
+        body: JSON.stringify({ ...payload, signature: walletSig, signedMessage: walletMsg, userPaidGenesis: true }),
       });
 
       const data = await res.json();
@@ -92,6 +92,34 @@ export default function RegisterPage() {
       if (!res.ok) {
         setError(data.error || "Failed to create profile");
         return;
+      }
+
+      
+      // 1.5 Create SATP Genesis Record (user-paid)
+      try {
+        setChainStatus("genesis");
+        const connection = new Connection(SOLANA_RPC, "confirmed");
+        const profileId = data.id || data.profile?.id;
+        const genesisRes = await fetch("/api/satp/genesis/prepare", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agentId: profileId, payer: publicKey.toBase58() }),
+        });
+        const genesisData = await genesisRes.json();
+        if (genesisRes.ok && genesisData.transaction) {
+          const { Transaction } = await import("@solana/web3.js");
+          const tx = Transaction.from(Buffer.from(genesisData.transaction, "base64"));
+          const sig = await sendTransaction(tx, connection);
+          await connection.confirmTransaction(sig, "confirmed");
+          console.log("[Register] Genesis record created:", sig);
+        } else if (genesisRes.status === 409) {
+          console.log("[Register] Genesis record already exists");
+        } else {
+          console.warn("[Register] Genesis prepare failed:", genesisData.error);
+        }
+      } catch (genesisErr: any) {
+        console.warn("[Register] User-paid genesis failed (non-blocking):", genesisErr.message);
+        // Non-blocking — profile still saved, genesis can be retried later
       }
 
       // 2. Register on-chain via Identity Registry
@@ -136,7 +164,7 @@ export default function RegisterPage() {
           Register Your Agent
         </h1>
         <p className="text-sm mt-1" style={{ color: "var(--text-tertiary)" }}>
-          Create a profile to build reputation and get discovered — registered on-chain via SATP
+          Create a profile to build trust and get discovered — registered on-chain via SATP
         </p>
       </div>
 
@@ -244,27 +272,8 @@ export default function RegisterPage() {
           className="rounded-lg p-6 space-y-5"
           style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
         >
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
-              Profile ID <span className="normal-case font-normal" style={{ color: "var(--text-tertiary)" }}>(3-32 chars, letters/numbers/dash — leave blank for auto)</span>
-            </label>
-            <input
-              type="text"
-              value={customId}
-              onChange={e => setCustomId(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))}
-              maxLength={32}
-              placeholder="e.g. my-agent"
-              className="w-full px-4 py-2.5 rounded-lg text-sm outline-none transition-all"
-              style={{
-                fontFamily: "var(--font-mono)",
-                background: "var(--bg-primary)",
-                border: "1px solid var(--border)",
-                color: "var(--text-primary)",
-              }}
-              onFocus={e => e.target.style.borderColor = "var(--accent)"}
-              onBlur={e => e.target.style.borderColor = "var(--border)"}
-            />
-          </div>
+          {/* Profile ID auto-generated from Agent Name */}
+          <input type="hidden" value={customId} />
 
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
@@ -273,7 +282,7 @@ export default function RegisterPage() {
             <input
               type="text"
               value={name}
-              onChange={e => setName(e.target.value)}
+              onChange={e => { setName(e.target.value); setCustomId("agent_" + e.target.value.toLowerCase().replace(/s+/g, "_").replace(/[^a-z0-9_-]/g, "").slice(0, 26)); }}
               required
               maxLength={32}
               placeholder="e.g. brainKID"
@@ -289,26 +298,8 @@ export default function RegisterPage() {
             />
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
-              Handle
-            </label>
-            <input
-              type="text"
-              value={handle}
-              onChange={e => setHandle(e.target.value)}
-              placeholder="@youragent"
-              className="w-full px-4 py-2.5 rounded-lg text-sm outline-none transition-all"
-              style={{
-                fontFamily: "var(--font-mono)",
-                background: "var(--bg-primary)",
-                border: "1px solid var(--border)",
-                color: "var(--text-primary)",
-              }}
-              onFocus={e => e.target.style.borderColor = "var(--accent)"}
-              onBlur={e => e.target.style.borderColor = "var(--border)"}
-            />
-          </div>
+          {/* Handle comes from X verification later */}
+          <input type="hidden" value={handle} />
 
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>

@@ -66,7 +66,7 @@ export function SATPOnChainSection({ walletAddress }: { walletAddress?: string }
 
       {(scores || reputation) && (
         <div className="mb-4 pb-3 border-b" style={{ borderColor: "var(--border)" }}>
-          <div className="text-[11px] uppercase tracking-wider mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>On-Chain Reputation</div>
+          <div className="text-[11px] uppercase tracking-wider mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>On-Chain Trust</div>
           <div className="space-y-2">
             {scores?.verificationLevel !== undefined && (
               <div className="flex justify-between items-center text-xs" style={{ fontFamily: "var(--font-mono)" }}>
@@ -77,7 +77,7 @@ export function SATPOnChainSection({ walletAddress }: { walletAddress?: string }
             {scores?.reputationScore !== undefined && (
               <div>
                 <div className="flex justify-between text-xs mb-1" style={{ fontFamily: "var(--font-mono)" }}>
-                  <span style={{ color: "var(--text-tertiary)" }}>Reputation Score</span>
+                  <span style={{ color: "var(--text-tertiary)" }}>Trust Score</span>
                   <span style={{ color: "var(--text-primary)" }}>{scores.reputationScore}/1000</span>
                 </div>
                 <div className="h-1.5 rounded-full" style={{ background: "var(--bg-tertiary)" }}>

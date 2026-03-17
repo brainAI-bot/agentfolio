@@ -1,30 +1,44 @@
 /**
- * Moltbook Verification Module
- * Verifies agent identity by checking Moltbook profile bio for agentfolio:{profileId}
+ * Moltbook Verification Module (SECURED)
+ * Verifies agent identity by checking Moltbook profile bio.
+ * Uses unique per-challenge nonce to prevent impersonation.
  */
 const crypto = require('crypto');
 
 const challenges = new Map();
 const CHALLENGE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const MAX_CHALLENGES_PER_PROFILE = 10;
 
 /**
  * Initiate Moltbook verification.
- * User must add "agentfolio:{profileId}" to their Moltbook bio.
+ * User must add the UNIQUE challenge string (with nonce) to their Moltbook bio.
  */
 async function initiateMoltbookVerification(profileId, moltbookUrl) {
-  // Normalize URL
   const clean = moltbookUrl.trim().replace(/\/+$/, '');
   if (!clean.includes('moltbook') && !clean.includes('molt.')) {
     throw new Error('Invalid Moltbook URL — must be a Moltbook profile URL');
   }
 
+  // Rate limit
+  let profileChallengeCount = 0;
+  const oneHourAgo = Date.now() - 3600000;
+  for (const [, ch] of challenges) {
+    if (ch.profileId === profileId && ch.createdAt > oneHourAgo) profileChallengeCount++;
+  }
+  if (profileChallengeCount >= MAX_CHALLENGES_PER_PROFILE) {
+    throw new Error('Too many verification attempts. Try again in 1 hour.');
+  }
+
   const challengeId = crypto.randomUUID();
-  const expectedContent = `agentfolio:${profileId}`;
+  const nonce = crypto.randomBytes(6).toString('hex');
+  // SECURED: unique per-challenge string prevents impersonation
+  const expectedContent = `agentfolio:${profileId}:${nonce}`;
 
   challenges.set(challengeId, {
     profileId,
     moltbookUrl: clean,
     expectedContent,
+    nonce,
     createdAt: Date.now(),
     verified: false,
   });
@@ -39,13 +53,13 @@ async function initiateMoltbookVerification(profileId, moltbookUrl) {
     challengeId,
     moltbookUrl: clean,
     expectedContent,
-    instructions: `Add "${expectedContent}" to your Moltbook profile bio, then click "Verify".`,
+    instructions: `Add "${expectedContent}" to your Moltbook profile bio, then click "Verify". This code is unique to this verification attempt.`,
     expiresIn: '1 hour',
   };
 }
 
 /**
- * Verify Moltbook challenge by scraping/fetching the profile page.
+ * Verify Moltbook challenge by fetching the profile page.
  */
 async function verifyMoltbookChallenge(challengeId) {
   const ch = challenges.get(challengeId);
@@ -56,7 +70,6 @@ async function verifyMoltbookChallenge(challengeId) {
   }
 
   try {
-    // Fetch the Moltbook profile page
     const response = await fetch(ch.moltbookUrl, {
       headers: {
         'User-Agent': 'AgentFolio-Verification/1.0',
@@ -71,11 +84,11 @@ async function verifyMoltbookChallenge(challengeId) {
 
     const body = await response.text();
 
-    // Check if the expected content appears in the page
+    // Check for the UNIQUE challenge string (includes nonce)
     if (!body.includes(ch.expectedContent)) {
       return {
         verified: false,
-        error: `"${ch.expectedContent}" not found in Moltbook profile. Make sure it's in your bio.`,
+        error: `"${ch.expectedContent}" not found in Moltbook profile. Make sure the EXACT string (including the code) is in your bio.`,
       };
     }
   } catch (e) {
@@ -87,17 +100,15 @@ async function verifyMoltbookChallenge(challengeId) {
 
   ch.verified = true;
 
-  // Extract username from URL for identifier
   const urlParts = ch.moltbookUrl.split('/');
   const username = urlParts[urlParts.length - 1] || urlParts[urlParts.length - 2] || ch.moltbookUrl;
 
-  // Save verification
   try {
     const profileStore = require('./profile-store');
     profileStore.addVerification(ch.profileId, 'moltbook', username, {
       challengeId,
       moltbookUrl: ch.moltbookUrl,
-      method: 'bio-check',
+      method: 'bio-check-with-nonce',
       verifiedAt: new Date().toISOString(),
     });
   } catch (e) {

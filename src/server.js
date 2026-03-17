@@ -41,6 +41,7 @@ const { verifyMoltbookAccount, getMoltbookChallengeString } = require('./lib/mol
 const { verifyMcpEndpoint } = require('./lib/mcp-verify');
 const { verifyA2aAgentCard } = require('./lib/a2a-verify');
 const { generateWebsiteChallenge, confirmWebsiteVerification } = require('./lib/website-verify');
+const { getV2Scoring } = require('./scoring');
 const posts = require('./lib/posts');
 const { getTradingLeaderboard, getPlatformLeaderboard } = require('./lib/trading-leaderboard');
 const { addEndorsement, removeEndorsement, getEndorsements, calculateEndorsementScore } = require('./lib/endorsements');
@@ -16662,6 +16663,27 @@ ${THEME_SCRIPT}
     res.end(JSON.stringify(profile.birthCertificate));
     return;
   }
+
+  // ── GET /api/profile/:id/genesis — SATP V3 On-Chain Genesis Record ──
+  else if (url.pathname.match(/^\/api\/profile\/[^/]+\/genesis$/) && req.method === 'GET') {
+    const profileId = url.pathname.split('/')[3];
+    try {
+      const { createSATPClient } = require('./satp-client/src');
+      const client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY' });
+      client.getGenesisRecord(profileId).then(record => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ genesis: record }));
+      }).catch(e => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ genesis: null, error: e.message }));
+      });
+    } catch (e) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ genesis: null, error: e.message }));
+    }
+    return;
+  }
+
   // ===== END GENESIS RECORD ENDPOINTS =====
   else if (url.pathname.startsWith('/api/profile/') && req.method === 'PATCH') {
     const profileId = url.pathname.replace('/api/profile/', '');
@@ -18433,7 +18455,7 @@ const { handleVerificationRoutes } = require('./lib/hardened-verification-routes
   // ============================================
   
   // Polymarket verification - get stats for address
-  else if (url.pathname === '/api/verify/polymarket/stats') {
+  else if (url.pathname === '/api/verify/polymarket/stats' || url.pathname === '/api/verify/polymarket/initiate') {
     const address = url.searchParams.get('address');
     if (!address) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -18593,7 +18615,7 @@ const { handleVerificationRoutes } = require('./lib/hardened-verification-routes
     return;
   }
   // ── Moltbook Verification ──
-  else if (url.pathname === '/api/verify/moltbook/challenge' && req.method === 'GET') {
+  else if (url.pathname === "/api/verify/moltbook/challenge" && req.method === "GET") {
     const profileId = url.searchParams.get('profileId');
     if (!profileId) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -18605,7 +18627,7 @@ const { handleVerificationRoutes } = require('./lib/hardened-verification-routes
     res.end(JSON.stringify({ challengeString, instructions: `Add "${challengeString}" to your Moltbook bio, then verify.` }));
     return;
   }
-  else if (url.pathname === '/api/verify/moltbook' && req.method === 'POST') {
+  else if ((url.pathname === '/api/verify/moltbook' || url.pathname === '/api/verify/moltbook/initiate') && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => body += chunk);
     req.on('end', async () => {
@@ -18652,7 +18674,7 @@ const { handleVerificationRoutes } = require('./lib/hardened-verification-routes
     return;
   }
   // ── MCP Endpoint Verification ──
-  else if (url.pathname === '/api/verify/mcp' && req.method === 'POST') {
+  else if ((url.pathname === '/api/verify/mcp' || url.pathname === '/api/verify/mcp/initiate') && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => body += chunk);
     req.on('end', async () => {
@@ -18698,7 +18720,7 @@ const { handleVerificationRoutes } = require('./lib/hardened-verification-routes
     return;
   }
   // ── A2A Agent Card Verification ──
-  else if (url.pathname === '/api/verify/a2a' && req.method === 'POST') {
+  else if ((url.pathname === '/api/verify/a2a' || url.pathname === '/api/verify/a2a/initiate') && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => body += chunk);
     req.on('end', async () => {
@@ -18743,7 +18765,7 @@ const { handleVerificationRoutes } = require('./lib/hardened-verification-routes
     return;
   }
   // ── Website .well-known Verification ──
-  else if (url.pathname === '/api/verify/website/challenge' && req.method === 'POST') {
+  else if ((url.pathname === '/api/verify/website/challenge' || url.pathname === '/api/verify/website/initiate') && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => body += chunk);
     req.on('end', () => {
@@ -18771,7 +18793,7 @@ const { handleVerificationRoutes } = require('./lib/hardened-verification-routes
     });
     return;
   }
-  else if (url.pathname === '/api/verify/website/confirm' && req.method === 'POST') {
+  else if ((url.pathname === '/api/verify/website/confirm' || url.pathname === '/api/verify/website/verify') && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => body += chunk);
     req.on('end', async () => {
@@ -28465,21 +28487,6 @@ server.listen(PORT, () => {
   setInterval(() => logger.cleanup(), 24 * 60 * 60 * 1000);
 });
 
-// Graceful shutdown
-function gracefulShutdown(signal) {
-  logger.info(`${signal} received, shutting down gracefully...`);
-  server.close(() => {
-    logger.info('Server closed');
-    process.exit(0);
-  });
-  // Force exit after 5s
-  setTimeout(() => { process.exit(1); }, 5000);
-}
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-process.on('uncaughtException', (err) => {
-  logger.error('Uncaught exception', { error: err.message, stack: err.stack });
-});
 process.on('unhandledRejection', (reason) => {
   logger.error('Unhandled rejection', { reason: String(reason) });
 });

@@ -52,7 +52,7 @@ export function V3OnChainBadge({ agentId }: { agentId: string }) {
           </div>
         </div>
         <div>
-          <div style={{ color: "var(--text-tertiary)" }}>Reputation</div>
+          <div style={{ color: "var(--text-tertiary)" }}>Trust</div>
           <div style={{ color: "var(--text-primary)", fontWeight: 600 }}>
             {genesis.reputationPct}%
           </div>
