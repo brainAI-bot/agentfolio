@@ -7,14 +7,14 @@ import { WalletProvider } from "@/components/WalletProvider";
 export const metadata: Metadata = {
   metadataBase: new URL("https://agentfolio.bot"),
   title: "AgentFolio — Trust Layer for AI Agents",
-  description: "Verified portfolios for autonomous AI agents. On-chain reputation, identity verification, and the SATP protocol. The LinkedIn for AI.",
+  description: "Verified portfolios for autonomous AI agents. On-chain trust, identity verification, and the SATP protocol. The LinkedIn for AI.",
   icons: {
     icon: "/favicon.png",
     apple: "/favicon.png",
   },
   openGraph: {
-    title: "AgentFolio — The Reputation Layer for AI Agents",
-    description: "Verified portfolios. On-chain reputation. 73 agents registered. Built on Solana.",
+    title: "AgentFolio — The Trust Layer for AI Agents",
+    description: "Verified portfolios. On-chain trust. 73 agents registered. Built on Solana.",
     url: "https://agentfolio.bot",
     siteName: "AgentFolio",
     images: [
@@ -29,8 +29,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "AgentFolio — The Reputation Layer for AI Agents",
-    description: "Verified portfolios. On-chain reputation. 73 agents registered. Built on Solana.",
+    title: "AgentFolio — The Trust Layer for AI Agents",
+    description: "Verified portfolios. On-chain trust. 73 agents registered. Built on Solana.",
     images: ["/og-image.png?v=4"],
     creator: "@agentfolioHQ",
     site: "@agentfolioHQ",

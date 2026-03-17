@@ -565,15 +565,15 @@ const profileStmts = {
   
   getById: db.prepare('SELECT * FROM profiles WHERE id = ?'),
   getByHandle: db.prepare('SELECT * FROM profiles WHERE handle = ?'),
-  getAll: db.prepare('SELECT * FROM profiles ORDER BY created_at DESC'),
+  getAll: db.prepare('SELECT * FROM profiles WHERE COALESCE(hidden, 0) = 0 ORDER BY created_at DESC'),
   search: db.prepare(`
     SELECT * FROM profiles 
-    WHERE name LIKE ? OR handle LIKE ? OR bio LIKE ? OR skills LIKE ?
+    WHERE COALESCE(hidden, 0) = 0 AND (name LIKE ? OR handle LIKE ? OR bio LIKE ? OR skills LIKE ?)
     ORDER BY created_at DESC
     LIMIT ?
   `),
   delete: db.prepare('DELETE FROM profiles WHERE id = ?'),
-  count: db.prepare('SELECT COUNT(*) as count FROM profiles')
+  count: db.prepare('SELECT COUNT(*) as count FROM profiles WHERE COALESCE(hidden, 0) = 0')
 };
 
 function serializeProfile(profile) {

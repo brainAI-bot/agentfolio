@@ -1,121 +1,75 @@
 /**
- * A2A Agent Card Verification
- * Verifies that an agent has a valid /.well-known/agent.json (Google A2A protocol)
- * and that the agent card references the AgentFolio profileId
+ * A2A Agent Card Verification Module
+ * Verifies agent ownership via .well-known/agent.json
  */
 
-const VERIFY_TIMEOUT = 10000;
+const TIMEOUT_MS = 10000;
 
 /**
- * Validate A2A agent card structure
- * Minimum fields: name, description, url
+ * Verify A2A agent card by checking .well-known/agent.json
  */
-function isValidAgentCard(card) {
-  if (!card || typeof card !== 'object') return false;
-  if (!card.name || typeof card.name !== 'string') return false;
-  // description and url are recommended but we'll be lenient
-  return true;
-}
-
-/**
- * Extract profileId from agent card
- * Checks multiple locations:
- * - card.agentfolio_id
- * - card.extensions?.agentfolio?.profileId
- * - card.identity?.agentfolio
- * - card.metadata?.agentfolio_id
- */
-function extractProfileId(card) {
-  if (card.agentfolio_id) return card.agentfolio_id;
-  if (card.extensions?.agentfolio?.profileId) return card.extensions.agentfolio.profileId;
-  if (card.extensions?.agentfolio?.id) return card.extensions.agentfolio.id;
-  if (card.identity?.agentfolio) return card.identity.agentfolio;
-  if (card.metadata?.agentfolio_id) return card.metadata.agentfolio_id;
-  return null;
-}
-
-/**
- * Verify an A2A agent card for a profile
- */
-async function verifyA2aAgentCard(agentUrl, profileId) {
-  let baseUrl = agentUrl.replace(/\/+$/, '');
-  if (!baseUrl.startsWith('http')) baseUrl = 'https://' + baseUrl;
-
+async function verifyA2aAgentCard(agentUrl, expectedProfileId) {
   try {
-    const cardUrl = `${baseUrl}/.well-known/agent.json`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), VERIFY_TIMEOUT);
+    // Normalize URL
+    const url = new URL(agentUrl);
+    const baseUrl = `${url.protocol}//${url.host}`;
+    const agentJsonUrl = `${baseUrl}/.well-known/agent.json`;
 
-    const res = await fetch(cardUrl, {
-      signal: controller.signal,
-      headers: { 'Accept': 'application/json', 'User-Agent': 'AgentFolio-Verify/1.0' }
+    const res = await fetch(agentJsonUrl, {
+      headers: { 
+        'Accept': 'application/json', 
+        'User-Agent': 'AgentFolio-A2A-Verify/1.0' 
+      },
+      signal: AbortSignal.timeout(TIMEOUT_MS)
     });
-    clearTimeout(timeout);
 
     if (!res.ok) {
       return {
         verified: false,
-        error: `Failed to fetch agent card: HTTP ${res.status}`,
-        url: cardUrl
+        error: `Failed to fetch .well-known/agent.json: HTTP ${res.status}`,
+        url: agentUrl
       };
     }
 
-    let card;
-    try {
-      card = await res.json();
-    } catch (e) {
-      return { verified: false, error: 'Invalid JSON in agent card', url: cardUrl };
-    }
+    const agentCard = await res.json();
 
-    if (!isValidAgentCard(card)) {
+    // Validate agent.json structure
+    if (!agentCard.id) {
       return {
         verified: false,
-        error: 'Agent card missing required fields (name)',
-        url: cardUrl,
-        card
+        error: 'agent.json missing required "id" field',
+        url: agentUrl
       };
     }
 
-    const foundProfileId = extractProfileId(card);
-    if (!foundProfileId) {
+    // Check if profileId matches
+    if (agentCard.agentfolio !== expectedProfileId && agentCard.id !== expectedProfileId) {
       return {
         verified: false,
-        error: 'Agent card does not contain agentfolio_id. Add "agentfolio_id": "' + profileId + '" to your agent.json',
-        url: cardUrl,
-        cardName: card.name
-      };
-    }
-
-    if (foundProfileId !== profileId) {
-      return {
-        verified: false,
-        error: `Profile ID mismatch: expected ${profileId}, found ${foundProfileId}`,
-        url: cardUrl
+        error: `ProfileId mismatch: agent.json has "${agentCard.agentfolio || agentCard.id}", expected "${expectedProfileId}"`,
+        url: agentUrl,
+        agentCard
       };
     }
 
     return {
       verified: true,
-      url: cardUrl,
-      profileId,
-      agentName: card.name,
-      agentDescription: card.description || '',
-      agentUrl: card.url || baseUrl,
-      capabilities: card.capabilities || [],
-      details: {
-        name: card.name,
-        description: card.description,
-        version: card.version,
-        skills: card.skills?.length || 0
-      }
+      url: agentUrl,
+      profileId: expectedProfileId,
+      agentName: agentCard.name || agentCard.id,
+      agentCard,
+      message: 'A2A agent card verified successfully'
     };
-  } catch (e) {
+
+  } catch (error) {
     return {
       verified: false,
-      error: `Failed to verify: ${e.message}`,
-      url: baseUrl
+      error: `Failed to verify: ${error.message}`,
+      url: agentUrl
     };
   }
 }
 
-module.exports = { verifyA2aAgentCard, isValidAgentCard, extractProfileId };
+module.exports = {
+  verifyA2aAgentCard
+};

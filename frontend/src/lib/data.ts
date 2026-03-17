@@ -152,7 +152,7 @@ function calcTrustScore(p: RawProfile): number {
   if (links?.twitter) score += 5;
   if (links.github) score += 5;
   if (links.website) score += 5;
-  return Math.min(score, 1000);
+  return Math.min(score, 800);
 }
 
 function calcTierFromScore(dbTier: string | undefined, score: number): number {  if (dbTier) {    const tierMap: Record<string, number> = { unverified: 0, bronze: 1, silver: 2, gold: 3, elite: 4 };    return tierMap[dbTier.toLowerCase()] || 0;  }  return calcTier(score);}
@@ -166,9 +166,24 @@ function calcTier(score: number): number {
 function mapProfile(p: RawProfile): Agent {
   // V3 on-chain scores override local scoring
   const v3 = (globalThis as any).__v3ScoresCache?.get(p.id);
-  const trustScore = v3 ? Math.round(v3.reputationPct * 10) : (p.verification?.score || calcTrustScore(p));
-  const tier = v3 ? v3.verificationLevel : calcTierFromScore(p.verification?.tier, trustScore);
+  // Trust Score: SATP on-chain is source of truth (synced by backend score engine)
+  // V3 reputationPct is 0-100 scale, multiply by 8 to get 0-800 v2 trust score
+  const trustScore = v3 ? Math.round(v3.reputationPct * 8) : (p.verification?.score || calcTrustScore(p));
   const vd = p.verificationData || {};
+  // Count local verifications for level fallback
+  const localVerifCount = Object.values(vd).filter((v: any) => v && v.verified).length;
+  const hasSATP = !!(vd.satp?.verified || (p.wallets?.solana));
+  // Tier: SATP on-chain is source of truth. Local fallback for agents without genesis records.
+  let tier: number;
+  if (v3) {
+    tier = v3.verificationLevel;
+  } else if (localVerifCount >= 5 || (hasSATP && localVerifCount >= 3)) {
+    tier = Math.min(3, 1 + Math.floor(localVerifCount / 2)); // L1-L3 based on verif count
+  } else if (hasSATP || localVerifCount >= 1) {
+    tier = 1; // L1 Registered — has SATP or at least 1 verification
+  } else {
+    tier = calcTierFromScore(p.verification?.tier, trustScore);
+  }
 
   return {
     id: p.id,
@@ -219,9 +234,9 @@ function mapProfile(p: RawProfile): Agent {
     // V3 on-chain scoring
     verificationLevel: v3 ? v3.verificationLevel : Math.min(tier, 5),
     verificationBadge: v3 ? ["⚪","🟡","🔵","🟢","🟠","🟣"][v3.verificationLevel] || "⚪" : ["⚪","🟡","🔵","🟢","🟠","🟣"][Math.min(tier, 5)] || "⚪",
-    verificationLevelName: v3 ? v3.verificationLabel : ["Unverified","Basic","Standard","Enhanced","Premium","Maximum"][Math.min(tier, 5)] || "Unverified",
-    reputationScore: v3 ? Math.round(v3.reputationPct * 10) : trustScore,
-    reputationRank: v3 ? v3.verificationLabel : ["Newcomer","Recognized","Competent","Expert","Master"][Math.min(Math.floor(trustScore / 250), 4)] || "Newcomer",
+    verificationLevelName: ["Unclaimed","Registered","Verified","Established","Trusted","Sovereign"][v3 ? v3.verificationLevel : Math.min(tier, 5)] || "Unclaimed",
+    reputationScore: trustScore, // From SATP on-chain (v2 trust score) when available
+    reputationRank: ["Newcomer","Recognized","Competent","Expert","Master"][Math.min(Math.floor(trustScore / 250), 4)] || "Newcomer",
   };
 }
 
@@ -247,6 +262,9 @@ function loadAllProfiles(): Agent[] {
     }
     // Sort by trust score desc
     agents.sort((a, b) => b.trustScore - a.trustScore);
+    // Filter out test profiles from public views
+    const TEST_NAMES = ["SmokeTest", "brainTEST", "test_satp", "TestCLI", "test-no-sig", "test-check-id", "CEOTestAgent", "test"];
+    agents = agents.filter(a => !TEST_NAMES.some(t => a.name === t || a.name?.includes(t) || a.id?.includes("test_satp") || a.id?.includes("test-no-sig") || a.id?.includes("test-check-id")));
     _agentsCache = agents;
     _agentsCacheTime = Date.now();
     

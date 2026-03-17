@@ -20,22 +20,23 @@ const levelColors: Record<number, { bg: string; color: string }> = {
   5: { bg: '#1E0C2D', color: '#8b5cf6' },
 };
 
-const levelDescriptions: Record<number, string> = {
-  0: 'No verifications yet',
-  1: 'Basic profile created',
-  2: 'Multiple verifications from different categories',
-  3: 'On-chain identity (SATP) + 5 verifications from 2+ categories',
-  4: 'Full verification suite + proven track record',
-  5: 'Sovereign — human-verified identity + max trust',
+const levelNames: Record<number, string> = {
+  0: 'Unclaimed',
+  1: 'Registered',
+  2: 'Verified',
+  3: 'Established',
+  4: 'Trusted',
+  5: 'Sovereign',
 };
 
-const repRanges = [
-  { max: 50, label: 'Newcomer', desc: 'Just getting started' },
-  { max: 200, label: 'Recognized', desc: 'Building reputation' },
-  { max: 500, label: 'Competent', desc: 'Proven track record' },
-  { max: 800, label: 'Expert', desc: 'Highly trusted agent' },
-  { max: 1000, label: 'Master', desc: 'Top-tier reputation' },
-];
+const levelDescriptions: Record<number, string> = {
+  0: 'Placeholder profile — not yet claimed',
+  1: 'Profile created, SATP identity on-chain',
+  2: '2+ verifications from any category',
+  3: '5+ verifications from 2+ categories + complete profile',
+  4: 'Proven track record — escrow jobs + reviews',
+  5: 'Sovereign — human-verified + soulbound avatar',
+};
 
 export function TrustBadge({ tier, score, verificationLevel, verificationBadge, verificationLevelName, reputationScore, reputationRank }: TrustBadgeProps) {
   const [showTooltip, setShowTooltip] = useState(false);
@@ -52,8 +53,9 @@ export function TrustBadge({ tier, score, verificationLevel, verificationBadge, 
 
   if (verificationLevel !== undefined) {
     const lc = levelColors[verificationLevel] || levelColors[0];
-    const rep = reputationScore ?? 0;
-    const repPercent = Math.min((rep / 1000) * 100, 100);
+    const trustScore = reputationScore ?? 0;
+    const trustPercent = Math.min((trustScore / 800) * 100, 100);
+    const displayName = verificationLevelName || levelNames[verificationLevel] || 'Unknown';
 
     return (
       <div
@@ -67,13 +69,13 @@ export function TrustBadge({ tier, score, verificationLevel, verificationBadge, 
           className="px-2 py-0.5 rounded text-[10px] font-bold tracking-widest"
           style={{ fontFamily: 'var(--font-mono)', background: lc.bg, color: lc.color }}
         >
-          {verificationBadge || '⚪'} L{verificationLevel} · {verificationLevelName || 'Unknown'}
+          {verificationBadge || '⚪'} L{verificationLevel} · {displayName}
         </span>
         <span
           className="text-sm font-semibold"
           style={{ fontFamily: 'var(--font-mono)', color: lc.color }}
         >
-          {rep} REP
+          {trustScore} Trust
         </span>
 
         {showTooltip && (
@@ -97,7 +99,7 @@ export function TrustBadge({ tier, score, verificationLevel, verificationBadge, 
                   Verification Level
                 </span>
                 <span className="text-xs font-bold" style={{ color: lc.color }}>
-                  {verificationLevel}/5
+                  L{verificationLevel} · {displayName}
                 </span>
               </div>
               <div className="flex gap-1 mb-1">
@@ -116,27 +118,25 @@ export function TrustBadge({ tier, score, verificationLevel, verificationBadge, 
               </p>
             </div>
 
-            {/* Reputation Score */}
+            {/* Trust Score */}
             <div className="mb-2">
               <div className="flex items-center justify-between mb-1">
                 <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                  Reputation
+                  Trust Score
                 </span>
                 <span className="text-xs font-bold" style={{ color: lc.color }}>
-                  {rep}/1000
+                  {trustScore}/800
                 </span>
               </div>
               <div className="h-1.5 rounded-full" style={{ background: 'var(--bg-tertiary)' }}>
                 <div
                   className="h-full rounded-full transition-all"
-                  style={{ width: repPercent + '%', background: lc.color }}
+                  style={{ width: trustPercent + '%', background: lc.color }}
                 />
               </div>
-              {reputationRank && (
-                <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                  Rank: {reputationRank}
-                </p>
-              )}
+              <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                Earned through platform engagement
+              </p>
             </div>
 
             {/* How scores work link */}

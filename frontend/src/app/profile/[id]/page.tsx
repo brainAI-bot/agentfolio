@@ -5,7 +5,6 @@ import { TrustBadge } from "@/components/TrustBadge";
 import { VerificationBadge } from "@/components/VerificationBadge";
 import { Github, Wallet, Globe, Shield, ExternalLink, Star } from "lucide-react";
 import { ActivityHeatmap } from "@/components/ActivityHeatmap";
-import { FolioProfileSection } from "@/components/FolioProfileSection";
 import BurnToBecomeSection from "@/components/BurnToBecomeSection";
 import BirthCertificate from "@/components/BirthCertificate";
 import { SATPOnChainSection } from "@/components/SATPOnChainSection";
@@ -225,12 +224,6 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
         </div>
       </div>
 
-      {/* $FOLIO Integration */}
-      <FolioProfileSection
-        agentId={agent.id}
-        walletAddress={agent.verifications?.solana?.address}
-        tokenLaunch={(agent as any).tokenLaunch}
-      />
 
       {/* Two column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -326,12 +319,12 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                 const v3Level = genesis ? genesis.verificationLevel : null;
                 if (genesis) {
                   return [
-                    { label: "Reputation", pct: Math.round(v3Rep || 0) },
+                    { label: "Trust Score", pct: Math.round(v3Rep || 0) },
                     { label: "Verification", pct: Math.round(((v3Level || 0) / 5) * 100) },
                   ];
                 }
                 return [
-                  { label: "Reputation", pct: Math.min(100, Math.round(displayRating * 20)) },
+                  { label: "Trust Score", pct: Math.min(100, Math.round(displayRating * 20)) },
                   { label: "Verification", pct: Math.min(100, agent.trustScore) },
                 ];
               })().map(({ label, pct }) => (
