@@ -207,29 +207,10 @@ function addVerification(profileId, platform, identifier, proof) {
   }
 
 
-  // V3: Update verification level on-chain
-  if (satpV3) {
-    (async () => {
-      try {
-        const { Keypair } = require('@solana/web3.js');
-        const signerKey = JSON.parse(require('fs').readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'));
-        const signer = Keypair.fromSecretKey(Uint8Array.from(signerKey));
-        // Count total verifications for this profile to determine level
-        const d = getDb();
-        const verCount = d.prepare('SELECT COUNT(*) as c FROM verifications WHERE profile_id = ?').get(profileId)?.c || 0;
-        const newLevel = Math.min(5, Math.max(1, Math.floor(verCount / 2) + 1));
-        const { transaction } = await satpV3.client.buildUpdateVerification(signer.publicKey, profileId, newLevel);
-        transaction.sign(signer);
-        const sig = await satpV3.client.connection.sendRawTransaction(transaction.serialize(), { skipPreflight: true, maxRetries: 3 });
-        console.log(`[SATP V3] Verification level updated for ${profileId}: level=${newLevel} tx=${sig}`);
-      } catch (err) {
-        console.error(`[SATP V3] Failed to update verification for ${profileId}:`, err.message);
-      }
-    })();
-  }
+  // [S4 FIX] Removed duplicate SATP update block — single block below handles it
 
   // V3: Update verification level on-chain (fire-and-forget)
-  if (satpV3) {
+  if (satpV3 && !userPaidGenesis) {
     (async () => {
       try {
         const { Keypair } = require('@solana/web3.js');
@@ -243,12 +224,27 @@ function addVerification(profileId, platform, identifier, proof) {
           return;
         }
         
-        // Calculate new verification level based on verification count
+        // Calculate new verification level with category awareness (S3 fix)
         const d = getDb();
-        const verifs = d.prepare('SELECT COUNT(*) as cnt FROM verifications WHERE profile_id = ?').get(profileId);
-        const verifCount = verifs?.cnt || 0;
-        // Level: 0=none, 1=1 verif, 2=2+ verifs, 3=SATP+5, 4=full suite, 5=sovereign
-        const newLevel = Math.min(5, verifCount >= 5 ? 3 : verifCount >= 2 ? 2 : verifCount >= 1 ? 1 : 0);
+        const allVerifs = d.prepare('SELECT platform FROM verifications WHERE profile_id = ?').all(profileId);
+        const verifCount = allVerifs.length;
+        // Map platforms to categories
+        const CATEGORY_MAP = {
+          solana: 'wallets', ethereum: 'wallets', hyperliquid: 'wallets', polymarket: 'wallets',
+          moltbook: 'platforms', agentmail: 'platforms', github: 'platforms', x: 'platforms', twitter: 'platforms', discord: 'platforms', telegram: 'platforms',
+          domain: 'infrastructure', mcp: 'infrastructure', a2a: 'infrastructure', website: 'infrastructure',
+          satp: 'onchain',
+        };
+        const categories = new Set(allVerifs.map(v => CATEGORY_MAP[v.platform] || 'other'));
+        const catCount = categories.size;
+        // L3 requires 5+ verifications AND 2+ distinct categories
+        let newLevel;
+        if (verifCount >= 8 && catCount >= 3) newLevel = 4;
+        else if (verifCount >= 5 && catCount >= 2) newLevel = 3;
+        else if (verifCount >= 2) newLevel = 2;
+        else if (verifCount >= 1) newLevel = 1;
+        else newLevel = 0;
+        newLevel = Math.min(5, newLevel);
         
         if (newLevel > genesis.verificationLevel) {
           const { transaction } = await satpV3.client.buildUpdateVerification(signer.publicKey, profileId, newLevel);
@@ -274,7 +270,7 @@ function addVerification(profileId, platform, identifier, proof) {
     addActivity(profileId, 'verification', { platform, identifier });
 
   // Fire-and-forget: update V3 on-chain verification level
-  if (satpV3) {
+  if (satpV3 && !userPaidGenesis) {
     (async () => {
       try {
         // Check if Genesis Record exists first
@@ -416,7 +412,7 @@ function enrichProfile(row) {
 function registerRoutes(app) {
   // ── POST /api/register ──────────────────────────────────────────
   app.post('/api/register', (req, res) => {
-    const { name, handle, description, bio, avatar, website, framework, capabilities, tags, wallet, wallets, skills, links, twitter, github, email, signature, signedMessage } = req.body;
+    const { name, handle, description, bio, avatar, website, framework, capabilities, tags, wallet, wallets, skills, links, twitter, github, email, signature, signedMessage, userPaidGenesis } = req.body;
     if (!name || typeof name !== 'string' || name.trim().length < 1) {
       return res.status(400).json({ error: 'name is required (non-empty string)' });
     }
@@ -587,8 +583,8 @@ function registerRoutes(app) {
       fs.writeFileSync(path.join(profilesDir, `${id}.json`), JSON.stringify(profileJson, null, 2));
       console.log(`[ProfileStore] JSON profile written: ${profilesDir}/${id}.json`);
 
-      // Fire-and-forget: create SATP V3 Genesis Record
-      if (satpV3) {
+      // Fire-and-forget: create SATP V3 Genesis Record (skip if user will pay)
+      if (satpV3 && !userPaidGenesis) {
         (async () => {
           const { Keypair } = require('@solana/web3.js');
           const signerKey = JSON.parse(require('fs').readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'));
