@@ -1,0 +1,478 @@
+{
+  "address": "D8HsSpK3JtAN7tVcA1yfgxScju7KcG6skEfaShSKojki",
+  "metadata": {
+    "name": "reviews",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "SATP Reviews — on-chain review storage"
+  },
+  "instructions": [
+    {
+      "name": "create_review",
+      "docs": [
+        "Create a review for an agent"
+      ],
+      "discriminator": [
+        69,
+        237,
+        87,
+        43,
+        238,
+        125,
+        40,
+        1
+      ],
+      "accounts": [
+        {
+          "name": "review",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  118,
+                  105,
+                  101,
+                  119
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "agent_id"
+              },
+              {
+                "kind": "account",
+                "path": "reviewer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "review_counter",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  118,
+                  105,
+                  101,
+                  119,
+                  95,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "agent_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "reviewer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "agent_id",
+          "type": "pubkey"
+        },
+        {
+          "name": "rating",
+          "type": "u8"
+        },
+        {
+          "name": "review_text",
+          "type": "string"
+        },
+        {
+          "name": "metadata",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "delete_review",
+      "docs": [
+        "Soft-delete a review (reviewer only)"
+      ],
+      "discriminator": [
+        217,
+        101,
+        10,
+        71,
+        231,
+        220,
+        241,
+        202
+      ],
+      "accounts": [
+        {
+          "name": "review",
+          "writable": true
+        },
+        {
+          "name": "reviewer",
+          "signer": true,
+          "relations": [
+            "review"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "init_review_counter",
+      "docs": [
+        "Initialize a review counter for an agent (idempotent via init_if_needed)"
+      ],
+      "discriminator": [
+        22,
+        101,
+        236,
+        30,
+        237,
+        207,
+        181,
+        36
+      ],
+      "accounts": [
+        {
+          "name": "review_counter",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  118,
+                  105,
+                  101,
+                  119,
+                  95,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "agent_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "agent_id",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "update_review",
+      "docs": [
+        "Update an existing review (reviewer only)"
+      ],
+      "discriminator": [
+        254,
+        84,
+        60,
+        221,
+        68,
+        163,
+        94,
+        29
+      ],
+      "accounts": [
+        {
+          "name": "review",
+          "writable": true
+        },
+        {
+          "name": "reviewer",
+          "signer": true,
+          "relations": [
+            "review"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "rating",
+          "type": {
+            "option": "u8"
+          }
+        },
+        {
+          "name": "review_text",
+          "type": {
+            "option": "string"
+          }
+        },
+        {
+          "name": "metadata",
+          "type": {
+            "option": "string"
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Review",
+      "discriminator": [
+        124,
+        63,
+        203,
+        215,
+        226,
+        30,
+        222,
+        15
+      ]
+    },
+    {
+      "name": "ReviewCounter",
+      "discriminator": [
+        89,
+        31,
+        82,
+        96,
+        68,
+        42,
+        80,
+        60
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "ReviewCreated",
+      "discriminator": [
+        178,
+        85,
+        104,
+        160,
+        165,
+        57,
+        215,
+        45
+      ]
+    },
+    {
+      "name": "ReviewDeleted",
+      "discriminator": [
+        136,
+        183,
+        132,
+        234,
+        177,
+        55,
+        246,
+        125
+      ]
+    },
+    {
+      "name": "ReviewUpdated",
+      "discriminator": [
+        109,
+        240,
+        217,
+        141,
+        161,
+        90,
+        162,
+        95
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidRating",
+      "msg": "Rating must be between 1 and 5"
+    },
+    {
+      "code": 6001,
+      "name": "ReviewTextTooLong",
+      "msg": "Review text must be 512 characters or less"
+    },
+    {
+      "code": 6002,
+      "name": "MetadataTooLong",
+      "msg": "Metadata must be 256 characters or less"
+    },
+    {
+      "code": 6003,
+      "name": "SelfReview",
+      "msg": "Cannot review yourself"
+    }
+  ],
+  "types": [
+    {
+      "name": "Review",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "reviewer",
+            "type": "pubkey"
+          },
+          {
+            "name": "rating",
+            "type": "u8"
+          },
+          {
+            "name": "review_text",
+            "type": "string"
+          },
+          {
+            "name": "metadata",
+            "type": "string"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "is_active",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReviewCounter",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "count",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReviewCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "reviewer",
+            "type": "pubkey"
+          },
+          {
+            "name": "rating",
+            "type": "u8"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReviewDeleted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "reviewer",
+            "type": "pubkey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReviewUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "reviewer",
+            "type": "pubkey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}

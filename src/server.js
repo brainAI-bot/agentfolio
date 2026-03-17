@@ -37,6 +37,10 @@ const { isValidEthereumAddress, initiateEthereumVerification, verifyEthereumSign
 const { verifyGitHubProfile, getGitHubStats } = require('./lib/github-verify');
 const { getPolymarketStats, generateVerificationMessage, verifyPolymarketTrading } = require('./lib/polymarket-verify');
 const { verifyKalshiTrading } = require('./lib/kalshi-verify');
+const { verifyMoltbookAccount, getMoltbookChallengeString } = require('./lib/moltbook-verify');
+const { verifyMcpEndpoint } = require('./lib/mcp-verify');
+const { verifyA2aAgentCard } = require('./lib/a2a-verify');
+const { generateWebsiteChallenge, confirmWebsiteVerification } = require('./lib/website-verify');
 const posts = require('./lib/posts');
 const { getTradingLeaderboard, getPlatformLeaderboard } = require('./lib/trading-leaderboard');
 const { addEndorsement, removeEndorsement, getEndorsements, calculateEndorsementScore } = require('./lib/endorsements');
@@ -18584,6 +18588,227 @@ const { handleVerificationRoutes } = require('./lib/hardened-verification-routes
       } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
+    });
+    return;
+  }
+  // ── Moltbook Verification ──
+  else if (url.pathname === '/api/verify/moltbook/challenge' && req.method === 'GET') {
+    const profileId = url.searchParams.get('profileId');
+    if (!profileId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'profileId required' }));
+      return;
+    }
+    const challengeString = getMoltbookChallengeString(profileId);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ challengeString, instructions: `Add "${challengeString}" to your Moltbook bio, then verify.` }));
+    return;
+  }
+  else if (url.pathname === '/api/verify/moltbook' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { profileId, moltbookUsername } = data;
+        if (!profileId || !moltbookUsername) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'profileId and moltbookUsername required' }));
+          return;
+        }
+        const profile = loadProfile(profileId, DATA_DIR);
+        if (!profile) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Profile not found' }));
+          return;
+        }
+        const result = await verifyMoltbookAccount(profileId, moltbookUsername);
+        if (result.verified) {
+          profile.verificationData = profile.verificationData || {};
+          profile.verificationData.moltbook = {
+            verified: true,
+            username: moltbookUsername,
+            karma: result.karma || 0,
+            verifiedAt: new Date().toISOString()
+          };
+          profile.links = profile.links || {};
+          profile.links.moltbook = moltbookUsername;
+          profile.updatedAt = new Date().toISOString();
+          dbSaveProfileFn(profile);
+          addActivityAndBroadcast(profileId, 'verification_moltbook', {
+            username: moltbookUsername, karma: result.karma || 0
+          }, DATA_DIR);
+          postVerificationMemo(profileId, 'moltbook', { username: moltbookUsername, karma: result.karma }).catch(() => {});
+          postVerificationOnchainForProfile(profile, 'moltbook', { username: moltbookUsername });
+        }
+        res.writeHead(result.verified ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result, null, 2));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+  // ── MCP Endpoint Verification ──
+  else if (url.pathname === '/api/verify/mcp' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { profileId, mcpUrl } = data;
+        if (!profileId || !mcpUrl) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'profileId and mcpUrl required' }));
+          return;
+        }
+        const profile = loadProfile(profileId, DATA_DIR);
+        if (!profile) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Profile not found' }));
+          return;
+        }
+        const result = await verifyMcpEndpoint(mcpUrl, profileId);
+        if (result.verified) {
+          profile.verificationData = profile.verificationData || {};
+          profile.verificationData.mcp = {
+            verified: true,
+            url: mcpUrl,
+            method: result.method,
+            toolCount: result.toolCount || 0,
+            verifiedAt: new Date().toISOString()
+          };
+          profile.updatedAt = new Date().toISOString();
+          dbSaveProfileFn(profile);
+          addActivityAndBroadcast(profileId, 'verification_mcp', {
+            url: mcpUrl, method: result.method, tools: result.toolCount || 0
+          }, DATA_DIR);
+          postVerificationMemo(profileId, 'mcp', { url: mcpUrl }).catch(() => {});
+          postVerificationOnchainForProfile(profile, 'mcp', { url: mcpUrl });
+        }
+        res.writeHead(result.verified ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result, null, 2));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+  // ── A2A Agent Card Verification ──
+  else if (url.pathname === '/api/verify/a2a' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { profileId, agentUrl } = data;
+        if (!profileId || !agentUrl) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'profileId and agentUrl required' }));
+          return;
+        }
+        const profile = loadProfile(profileId, DATA_DIR);
+        if (!profile) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Profile not found' }));
+          return;
+        }
+        const result = await verifyA2aAgentCard(agentUrl, profileId);
+        if (result.verified) {
+          profile.verificationData = profile.verificationData || {};
+          profile.verificationData.a2a = {
+            verified: true,
+            url: agentUrl,
+            agentName: result.agentName,
+            verifiedAt: new Date().toISOString()
+          };
+          profile.updatedAt = new Date().toISOString();
+          dbSaveProfileFn(profile);
+          addActivityAndBroadcast(profileId, 'verification_a2a', {
+            url: agentUrl, agentName: result.agentName
+          }, DATA_DIR);
+          postVerificationMemo(profileId, 'a2a', { url: agentUrl }).catch(() => {});
+          postVerificationOnchainForProfile(profile, 'a2a', { url: agentUrl });
+        }
+        res.writeHead(result.verified ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result, null, 2));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+  // ── Website .well-known Verification ──
+  else if (url.pathname === '/api/verify/website/challenge' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        const { profileId, websiteUrl } = data;
+        if (!profileId || !websiteUrl) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'profileId and websiteUrl required' }));
+          return;
+        }
+        const profile = loadProfile(profileId, DATA_DIR);
+        if (!profile) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Profile not found' }));
+          return;
+        }
+        const challenge = generateWebsiteChallenge(profileId, websiteUrl);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(challenge));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
+    });
+    return;
+  }
+  else if (url.pathname === '/api/verify/website/confirm' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { challengeId } = data;
+        if (!challengeId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'challengeId required' }));
+          return;
+        }
+        const result = await confirmWebsiteVerification(challengeId);
+        if (result.verified) {
+          const profile = loadProfile(result.profileId, DATA_DIR);
+          if (profile) {
+            profile.verificationData = profile.verificationData || {};
+            profile.verificationData.website = {
+              verified: true,
+              url: result.websiteUrl,
+              verifiedAt: new Date().toISOString()
+            };
+            profile.links = profile.links || {};
+            profile.links.website = result.websiteUrl;
+            profile.updatedAt = new Date().toISOString();
+            dbSaveProfileFn(profile);
+            addActivityAndBroadcast(result.profileId, 'verification_website', {
+              url: result.websiteUrl
+            }, DATA_DIR);
+            postVerificationMemo(result.profileId, 'website', { url: result.websiteUrl }).catch(() => {});
+            postVerificationOnchainForProfile(profile, 'website', { url: result.websiteUrl });
+          }
+        }
+        res.writeHead(result.verified ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result, null, 2));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
       }
     });
     return;

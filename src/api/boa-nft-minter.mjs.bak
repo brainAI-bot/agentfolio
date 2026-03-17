@@ -1,0 +1,113 @@
+/**
+ * BOA NFT Minter — Server-side Metaplex mint module
+ * Called after payment is confirmed to create the actual NFT
+ */
+import { createUmi } from '@metaplex-foundation/umi-bundle-defaults';
+import { 
+  createNft, verifyCollectionV1, findMetadataPda, mplTokenMetadata 
+} from '@metaplex-foundation/mpl-token-metadata';
+import { 
+  generateSigner, keypairIdentity, percentAmount, publicKey, some 
+} from '@metaplex-foundation/umi';
+import { irysUploader } from '@metaplex-foundation/umi-uploader-irys';
+import fs from 'fs';
+import path from 'path';
+
+const TREASURY = 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
+
+export async function mintBoaNft({ nftNumber, cluster, deployerKeypath, assetsDir, collectionMint }) {
+  const rpc = cluster === 'mainnet' 
+    ? 'https://api.mainnet-beta.solana.com'
+    : 'https://api.devnet.solana.com';
+
+  // Load metadata
+  const metadataPath = path.join(assetsDir, 'metadata', `${nftNumber}.json`);
+  const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
+
+  // Load image
+  const imagePath = path.join(assetsDir, 'images', `${nftNumber}.jpg`);
+  const imageBuffer = fs.readFileSync(imagePath);
+
+  // Setup UMI
+  const secretKey = JSON.parse(fs.readFileSync(deployerKeypath, 'utf-8'));
+  const umi = createUmi(rpc)
+    .use(mplTokenMetadata())
+    .use(irysUploader());
+
+  const umiKeypair = umi.eddsa.createKeypairFromSecretKey(Uint8Array.from(secretKey));
+  umi.use(keypairIdentity(umiKeypair));
+
+  // Upload image
+  const [imageUri] = await umi.uploader.upload([{
+    buffer: imageBuffer,
+    fileName: `${nftNumber}.jpg`,
+    displayName: `BOA #${nftNumber}`,
+    uniqueName: `boa-${nftNumber}-${Date.now()}`,
+    contentType: 'image/jpeg',
+    extension: 'jpg',
+    tags: [{ name: 'Content-Type', value: 'image/jpeg' }],
+  }]);
+
+  // Upload metadata
+  const fullMetadata = {
+    name: metadata.name,
+    symbol: 'BOA',
+    description: metadata.description,
+    image: imageUri,
+    external_url: `https://agentfolio.bot/nft/${nftNumber}`,
+    seller_fee_basis_points: 500,
+    attributes: metadata.attributes,
+    properties: {
+      category: 'image',
+      files: [{ uri: imageUri, type: 'image/jpeg' }],
+      creators: [{ address: TREASURY, share: 100 }],
+    },
+    collection: { name: 'Burned-Out Agents', family: 'BOA' },
+  };
+
+  const metadataUri = await umi.uploader.uploadJson(fullMetadata);
+
+  // Create NFT
+  const nftMint = generateSigner(umi);
+  await createNft(umi, {
+    mint: nftMint,
+    name: metadata.name,
+    symbol: 'BOA',
+    uri: metadataUri,
+    sellerFeeBasisPoints: percentAmount(5),
+    collection: some({ key: publicKey(collectionMint), verified: false }),
+    creators: [
+      { address: publicKey(TREASURY), verified: false, share: 100 },
+      { address: umiKeypair.publicKey, verified: true, share: 0 },
+    ],
+  }).sendAndConfirm(umi);
+
+  // Verify collection (with retry)
+  let verified = false;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await new Promise(r => setTimeout(r, 2000));
+    try {
+      const nftMetadataPda = findMetadataPda(umi, { mint: nftMint.publicKey });
+      await verifyCollectionV1(umi, {
+        metadata: nftMetadataPda,
+        collectionMint: publicKey(collectionMint),
+        authority: umi.identity,
+      }).sendAndConfirm(umi);
+      verified = true;
+      break;
+    } catch (e) {
+      if (attempt === 2) console.log('[BOA] Collection verify failed after 3 attempts:', e.message?.slice(0, 100));
+    }
+  }
+
+  return {
+    nftNumber,
+    mint: nftMint.publicKey.toString(),
+    collection: collectionMint,
+    metadataUri,
+    imageUri,
+    name: metadata.name,
+    traits: metadata.attributes,
+    collectionVerified: verified,
+  };
+}

@@ -21,8 +21,8 @@ function explorerUrl(address: string) {
   return `https://explorer.solana.com/address/${address}`;
 }
 
-export default function SATPPage() {
-  const agents = getAllAgents();
+export default async function SATPPage() {
+  const agents = await getAllAgents();
   const satpAgents = agents.filter((a) => a.verifications.satp?.verified);
   const totalRegistered = satpAgents.length;
   const totalAttestations = agents.reduce(

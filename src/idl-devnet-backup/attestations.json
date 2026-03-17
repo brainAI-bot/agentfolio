@@ -1,0 +1,352 @@
+{
+  "address": "9xT3eNcndkmnqZtJqDQ1ggckHK7Dxo5EsAt5mHqsPBhP",
+  "metadata": {
+    "name": "attestations",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "SATP Attestations — on-chain attestation proofs"
+  },
+  "instructions": [
+    {
+      "name": "create_attestation",
+      "docs": [
+        "Create an attestation for an agent (issuer pays)"
+      ],
+      "discriminator": [
+        49,
+        24,
+        67,
+        80,
+        12,
+        249,
+        96,
+        239
+      ],
+      "accounts": [
+        {
+          "name": "attestation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  116,
+                  116,
+                  101,
+                  115,
+                  116,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "agent_id"
+              },
+              {
+                "kind": "account",
+                "path": "issuer"
+              },
+              {
+                "kind": "arg",
+                "path": "attestation_type"
+              }
+            ]
+          }
+        },
+        {
+          "name": "issuer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "agent_id",
+          "type": "pubkey"
+        },
+        {
+          "name": "attestation_type",
+          "type": "string"
+        },
+        {
+          "name": "proof_data",
+          "type": "string"
+        },
+        {
+          "name": "expires_at",
+          "type": {
+            "option": "i64"
+          }
+        }
+      ]
+    },
+    {
+      "name": "revoke_attestation",
+      "docs": [
+        "Revoke an attestation (issuer only)"
+      ],
+      "discriminator": [
+        12,
+        156,
+        103,
+        161,
+        194,
+        246,
+        211,
+        179
+      ],
+      "accounts": [
+        {
+          "name": "attestation",
+          "writable": true
+        },
+        {
+          "name": "issuer",
+          "signer": true,
+          "relations": [
+            "attestation"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "verify_attestation",
+      "docs": [
+        "Verify an attestation (issuer only)"
+      ],
+      "discriminator": [
+        144,
+        30,
+        116,
+        186,
+        33,
+        176,
+        35,
+        60
+      ],
+      "accounts": [
+        {
+          "name": "attestation",
+          "writable": true
+        },
+        {
+          "name": "issuer",
+          "signer": true,
+          "relations": [
+            "attestation"
+          ]
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Attestation",
+      "discriminator": [
+        152,
+        125,
+        183,
+        86,
+        36,
+        146,
+        121,
+        73
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "AttestationCreated",
+      "discriminator": [
+        217,
+        170,
+        19,
+        203,
+        128,
+        51,
+        29,
+        163
+      ]
+    },
+    {
+      "name": "AttestationRevoked",
+      "discriminator": [
+        47,
+        106,
+        65,
+        238,
+        200,
+        127,
+        163,
+        50
+      ]
+    },
+    {
+      "name": "AttestationVerified",
+      "discriminator": [
+        98,
+        148,
+        167,
+        161,
+        88,
+        59,
+        107,
+        231
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "TypeTooLong",
+      "msg": "Attestation type must be 64 characters or less"
+    },
+    {
+      "code": 6001,
+      "name": "ProofDataTooLong",
+      "msg": "Proof data must be 512 characters or less"
+    },
+    {
+      "code": 6002,
+      "name": "ExpiryInPast",
+      "msg": "Expiry must be in the future"
+    },
+    {
+      "code": 6003,
+      "name": "AlreadyRevoked",
+      "msg": "Attestation already revoked"
+    }
+  ],
+  "types": [
+    {
+      "name": "Attestation",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "attestation_type",
+            "type": "string"
+          },
+          {
+            "name": "issuer",
+            "type": "pubkey"
+          },
+          {
+            "name": "proof_data",
+            "type": "string"
+          },
+          {
+            "name": "verified",
+            "type": "bool"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "expires_at",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "is_revoked",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AttestationCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "issuer",
+            "type": "pubkey"
+          },
+          {
+            "name": "attestation_type",
+            "type": "string"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AttestationRevoked",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "attestation_type",
+            "type": "string"
+          },
+          {
+            "name": "issuer",
+            "type": "pubkey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AttestationVerified",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "attestation_type",
+            "type": "string"
+          },
+          {
+            "name": "issuer",
+            "type": "pubkey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -3,8 +3,8 @@ import { LeaderboardTable } from "@/components/LeaderboardTable";
 
 export const dynamic = "force-dynamic";
 
-export default function LeaderboardPage() {
-  const agents = getAllAgents();
+export default async function LeaderboardPage() {
+  const agents = await getAllAgents();
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" style={{ background: "var(--bg-primary)", minHeight: "calc(100vh - 56px)" }}>
       <div className="mb-6">

@@ -1,0 +1,31 @@
+{
+  "name": "@brainai/satp-v3",
+  "version": "3.0.0",
+  "description": "SATP V3 Genesis Record SDK — on-chain agent identity for Solana",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./constants": "./src/constants.js",
+    "./pda": "./src/pda.js",
+    "./schema": "./src/schema.js"
+  },
+  "scripts": {
+    "test": "node test.js",
+    "test:mainnet": "SATP_RPC=mainnet node test.js"
+  },
+  "keywords": ["solana", "satp", "agent", "identity", "genesis-record", "on-chain"],
+  "author": "brainAI (brainChain)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brainai/satp-v3"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.98.4",
+    "borsh": "^2.0.0",
+    "bs58": "^6.0.0"
+  }
+}

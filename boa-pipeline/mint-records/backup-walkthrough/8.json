@@ -1,0 +1,12 @@
+{
+  "cluster": "mainnet",
+  "nftNumber": 8,
+  "mint": "AdVdyCi592FzBXWfAg86sdpKhj8A8tkaHWsznyPs2Mmp",
+  "collection": "xNQmPj1Tcx3PyNNN1RLPeNkaMsZMRthAgWZ7Tbn6RHY",
+  "metadataUri": "https://gateway.irys.xyz/A2WMKLk6WJYNkMxBm5q7oRxR5VUBHFc81nkBw8yFTmLh",
+  "imageUri": "https://gateway.irys.xyz/BSJYWYFdVEXrtRdpQLiYQdNA6Lp289RJyKLAhsXmotb3",
+  "recipient": "ADrid6hLYjxDbkz48ET15SCUqGxcFDfYegYbuseJGGsr",
+  "createdAt": "2026-03-15T11:34:23.480Z",
+  "agentId": "agent_c18e9bbb1a8afab0",
+  "wallet": "ADrid6hLYjxDbkz48ET15SCUqGxcFDfYegYbuseJGGsr"
+}

@@ -374,5 +374,31 @@
   }
 </script>
 
+
+<script>
+  // MINT DISABLED BY BRAINCHAIN - CEO directive
+  const _origExecuteBurn = typeof executeBurn === "function" ? executeBurn : null;
+  window.addEventListener("DOMContentLoaded", () => {
+    // Override burn function
+    window.executeBurn = function() {
+      alert("Minting is not yet live. Coming soon!");
+      return;
+    };
+    // Add banner
+    const banner = document.createElement("div");
+    banner.style.cssText = "position:fixed;top:0;left:0;right:0;background:linear-gradient(90deg,#ff4400,#ffd700);color:#000;text-align:center;padding:12px;font-family:monospace;font-size:14px;letter-spacing:3px;z-index:9999;font-weight:bold;";
+    banner.textContent = "🔥 MINTING COMING SOON — STAY TUNED";
+    document.body.prepend(banner);
+    // Disable burn button permanently
+    const burnBtn = document.getElementById("burnBtn");
+    if (burnBtn) {
+      burnBtn.disabled = true;
+      burnBtn.textContent = "COMING SOON";
+      burnBtn.style.opacity = "0.4";
+      burnBtn.style.cursor = "not-allowed";
+    }
+  });
+</script>
+
 </body>
 </html>

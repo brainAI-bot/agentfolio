@@ -16,6 +16,7 @@ const { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddress, crea
 const { createInitializeInstruction: createInitializeMetadataInstruction, createUpdateFieldInstruction, pack: packTokenMetadata } = require('@solana/spl-token-metadata');
 const fs = require('fs');
 const path = require('path');
+const PIPELINE_DIR = "/home/ubuntu/agentfolio/boa-pipeline";
 
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const connection = new Connection(RPC_URL, 'confirmed');
@@ -33,6 +34,48 @@ try {
 
 const TREASURY = new PublicKey('FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be');
 const SATP_PROGRAM = new PublicKey('TQ4P9R2Y5FRyw1TZfwoWQ2Mf6XeohbGdhYNcDxh6YYh');
+// On-chain SATP attestation check (boa_soulbound)
+const SATP_ATTESTATIONS_PROGRAM = new PublicKey('ENvaD19QzwWWMJFu5r5xJ9SmHqWN6GvyzxACRejqbdug');
+const SATP_IDENTITY_PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq');
+
+function getSatpIdentityPDA(walletPubkey) {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('identity'), new PublicKey(walletPubkey).toBuffer()],
+    SATP_IDENTITY_PROGRAM
+  );
+}
+
+function getBoaSoulboundPDA(walletPubkey, issuerPubkey) {
+  return PublicKey.findProgramAddressSync(
+    [
+      Buffer.from('attestation'),
+      new PublicKey(walletPubkey).toBuffer(),
+      new PublicKey(issuerPubkey).toBuffer(),
+      Buffer.from('boa_soulbound'),
+    ],
+    SATP_ATTESTATIONS_PROGRAM
+  );
+}
+
+const DEPLOYER_PUBKEY = 'Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc';
+const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=HELIUS_API_KEY_REDACTED';
+
+async function checkSatpOnChain(wallet) {
+  const { Connection } = require('@solana/web3.js');
+  const conn = new Connection(HELIUS_RPC, 'confirmed');
+  const [identityPda] = getSatpIdentityPDA(wallet);
+  const identityAcct = await conn.getAccountInfo(identityPda);
+  const hasIdentity = !!(identityAcct && identityAcct.data.length > 0);
+  
+  let hasBoaSoulbound = false;
+  if (hasIdentity) {
+    const [attPda] = getBoaSoulboundPDA(wallet, DEPLOYER_PUBKEY);
+    const attAcct = await conn.getAccountInfo(attPda);
+    hasBoaSoulbound = !!(attAcct && attAcct.data.length > 0);
+  }
+  
+  return { hasIdentity, hasBoaSoulbound, identityPda: identityPda.toBase58() };
+}
 const TOKEN_METADATA_PROGRAM = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 const MINT_PRICE_LAMPORTS = 1_000_000_000; // 1 SOL
 const FREE_SCORE_THRESHOLD = 100;
@@ -77,42 +120,60 @@ async function getWalletNFTs(walletAddress) {
   try {
     const walletPubkey = new PublicKey(walletAddress);
     // Get all token accounts with amount > 0 and decimals 0 (NFTs)
-    const tokenAccounts = await connection.getParsedTokenAccountsByOwner(walletPubkey, {
-      programId: TOKEN_PROGRAM_ID,
-    });
-    
-    for (const { account } of tokenAccounts.value) {
-      const info = account.data.parsed.info;
-      if (info.tokenAmount.uiAmount === 1 && info.tokenAmount.decimals === 0) {
-        const mint = info.mint;
-        // Fetch metadata
-        const [metadataPda] = PublicKey.findProgramAddressSync(
-          [Buffer.from('metadata'), TOKEN_METADATA_PROGRAM.toBuffer(), new PublicKey(mint).toBuffer()],
-          TOKEN_METADATA_PROGRAM
-        );
-        try {
-          const metadataAccount = await connection.getAccountInfo(metadataPda);
-          if (metadataAccount) {
-            const metadata = parseMetaplexMetadata(metadataAccount.data);
-            if (metadata) {
-              // Fetch off-chain JSON
-              let image = '';
-              let name = metadata.name || `NFT ${mint.slice(0, 8)}`;
-              try {
-                const jsonData = await fetchJson(metadata.uri);
-                image = jsonData.image || '';
-                name = jsonData.name || name;
-              } catch {}
-              // For genesis wallets, override image from registry
-              const genesisInfo = GENESIS_REGISTRY[walletAddress];
-              if (genesisInfo) {
-                image = image || genesisInfo.image;
+    // Bug 4 fix: Check both TOKEN_PROGRAM_ID and TOKEN_2022_PROGRAM_ID
+    const programIds = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID];
+    for (const programId of programIds) {
+      const tokenAccounts = await connection.getParsedTokenAccountsByOwner(walletPubkey, {
+        programId,
+      });
+      
+      for (const { account } of tokenAccounts.value) {
+        const info = account.data.parsed.info;
+        if (info.tokenAmount.uiAmount === 1 && info.tokenAmount.decimals === 0) {
+          const mint = info.mint;
+          // For Token-2022, check for native metadata first (no Metaplex PDA needed)
+          const isToken2022 = programId.equals(TOKEN_2022_PROGRAM_ID);
+          
+          // Fetch Metaplex metadata (works for both standard and some Token-2022 NFTs)
+          const [metadataPda] = PublicKey.findProgramAddressSync(
+            [Buffer.from('metadata'), TOKEN_METADATA_PROGRAM.toBuffer(), new PublicKey(mint).toBuffer()],
+            TOKEN_METADATA_PROGRAM
+          );
+          try {
+            const metadataAccount = await connection.getAccountInfo(metadataPda);
+            if (metadataAccount) {
+              const metadata = parseMetaplexMetadata(metadataAccount.data);
+              if (metadata) {
+                let image = '';
+                let name = metadata.name || `NFT ${mint.slice(0, 8)}`;
+                try {
+                  const jsonData = await fetchJson(metadata.uri);
+                  image = jsonData.image || '';
+                  name = jsonData.name || name;
+                } catch {}
+                const genesisInfo = GENESIS_REGISTRY[walletAddress];
+                if (genesisInfo) {
+                  image = image || genesisInfo.image;
+                }
+                nfts.push({ mint, name, image, uri: metadata.uri, isGenesis: !!genesisInfo, isToken2022 });
+                continue; // Found metadata, skip Token-2022 native check
               }
-              nfts.push({ mint, name, image, uri: metadata.uri, isGenesis: !!genesisInfo });
             }
+          } catch (e) {
+            // Skip NFTs we can't read metadata for
           }
-        } catch (e) {
-          // Skip NFTs we can't read metadata for
+          
+          // Token-2022: try reading native metadata from mint account
+          if (isToken2022) {
+            try {
+              const mintAcct = await connection.getAccountInfo(new PublicKey(mint));
+              if (mintAcct && mintAcct.data.length > 234) {
+                // Token-2022 extensions contain metadata after base mint (layout varies)
+                // Add with basic info even if we can't parse full metadata
+                nfts.push({ mint, name: `Token-2022 NFT ${mint.slice(0, 8)}`, image: '', uri: '', isGenesis: false, isToken2022: true });
+              }
+            } catch {}
+          }
         }
       }
     }
@@ -319,7 +380,8 @@ function saveMintedSet(set) {
 function pickRandomBOA() {
   const minted = loadMintedSet();
   const available = [];
-  for (let i = 1; i <= 5000; i++) {
+  const SOFT_CAP = 100;
+  for (let i = 1; i <= SOFT_CAP; i++) {
     if (!minted.has(i)) available.push(i);
   }
   if (available.length === 0) return null;
@@ -464,9 +526,9 @@ function handleBurnToBecome(req, res, url) {
     sendJson(200, {
       collections: [{
         name: "Burned-Out Agents",
-        total: 5000,
+        total: 100,
         minted: minted.size,
-        remaining: 5000 - minted.size,
+        remaining: Math.max(0, 100 - minted.size),
         mintPrice: "1 SOL",
         freeMintThreshold: 100
       }],
@@ -492,13 +554,74 @@ function handleBurnToBecome(req, res, url) {
     return true;
   }
 
+  // GET /api/burn-to-become/eligibility?wallet=... — check BOA mint eligibility (Level + Rep)
+  if (url.pathname === '/api/burn-to-become/eligibility' && req.method === 'GET') {
+    const wallet = url.searchParams.get('wallet');
+    if (!wallet) return sendJson(400, { error: 'wallet required' });
+    (async () => {
+      try {
+        const Database = require('better-sqlite3');
+        const db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+        const { getCompleteScore } = require('../lib/scoring-engine-v2'); const fs = require('fs');
+        const LEVEL_NAMES = ['Unregistered', 'Registered', 'Verified', 'On-Chain', 'Trusted', 'Sovereign'];
+        const LEVEL_BADGES = ['⚪', '🟡', '🔵', '🟢', '🟠', '👑'];
+        const profiles = db.prepare('SELECT * FROM profiles').all();
+        let matchedProfile = db.prepare("SELECT * FROM profiles WHERE wallet = ?").get(wallet) || null;
+        if (!matchedProfile) for (const p of profiles) {
+          try { const vd = JSON.parse(p.verification_data || '{}'); if (vd.solana?.address === wallet) { matchedProfile = p; break; } } catch {}
+        }
+        if (!matchedProfile) {
+          const score = await getSatpScore(wallet);
+          db.close();
+          return sendJson(200, { found: false, level: 0, levelName: 'Unregistered', badge: '⚪', reputation: score, eligible: false, message: 'No AgentFolio profile linked to this wallet. Register at agentfolio.bot first.' });
+        }
+        const profileObj = {
+          id: matchedProfile.id, name: matchedProfile.name, handle: matchedProfile.handle,
+          bio: matchedProfile.bio, avatar: matchedProfile.avatar,
+          skills: JSON.parse(matchedProfile.skills || '[]'),
+          verification: JSON.parse(matchedProfile.verification || '{}'),
+          endorsements: JSON.parse(matchedProfile.endorsements || '[]'),
+          portfolio: JSON.parse(matchedProfile.portfolio || '[]'),
+          track_record: JSON.parse(matchedProfile.track_record || '{}'),
+        };
+        try {
+          const pPath = require('path').join(__dirname, '../../data/profiles', matchedProfile.id + '.json');
+          if (fs.existsSync(pPath)) {
+            const pf = JSON.parse(fs.readFileSync(pPath, 'utf8'));
+            profileObj.verificationData = pf.verificationData || {};
+            profileObj.stats = pf.stats || {};
+            profileObj.endorsements = pf.endorsements || profileObj.endorsements || [];
+            profileObj.moltbookStats = pf.moltbookStats || {};
+          }
+        } catch (e) {}
+        // Try V3 on-chain scores first, fall back to scoring-engine-v2
+        let level, reputation;
+        try {
+          const { getV3Score } = require('../v3-score-service');
+          const v3 = await getV3Score(matchedProfile.id);
+          if (v3) {
+            level = v3.verificationLevel;
+            reputation = Math.round(parseFloat(v3.reputationPct));
+          }
+        } catch {}
+        if (level === undefined) {
+          const scoreResult = getCompleteScore(profileObj);
+          level = scoreResult.verificationLevel ? scoreResult.verificationLevel.level : 0;
+          reputation = scoreResult.reputationScore ? scoreResult.reputationScore.score : 0;
+        }
+        const eligible = level >= 3 && reputation >= 50;
+        db.close();
+        sendJson(200, { found: true, agent: matchedProfile.id, name: matchedProfile.name, level, levelName: LEVEL_NAMES[level] || 'Unknown', badge: LEVEL_BADGES[level] || '⚪', reputation, eligible, freeFirstMint: eligible });
+      } catch (e) { console.error('[BurnPublic] eligibility error:', e); sendJson(500, { error: e.message }); }
+    })();
+    return true;
+  }
+
   // POST /api/burn-to-become/prepare
   if (url.pathname === '/api/burn-to-become/prepare' && req.method === 'POST') {
-    let body = '';
-    req.on('data', c => body += c);
-    req.on('end', async () => {
+    (async () => {
       try {
-        const { wallet, nftMint } = JSON.parse(body);
+        const { wallet, nftMint } = req.body || {};
         if (!wallet || !nftMint) return sendJson(400, { error: 'wallet and nftMint required' });
         
         const tx = await buildBurnTransaction(wallet, nftMint);
@@ -508,18 +631,62 @@ function handleBurnToBecome(req, res, url) {
         console.error('[BurnPublic] prepare error:', e);
         sendJson(500, { error: e.message });
       }
-    });
+    })();
     return true;
   }
 
   // POST /api/burn-to-become/submit
   if (url.pathname === '/api/burn-to-become/submit' && req.method === 'POST') {
-    let body = '';
-    req.on('data', c => body += c);
-    req.on('end', async () => {
+    (async () => {
       try {
-        const { wallet, nftMint, signedTransaction } = JSON.parse(body);
+        const { wallet, nftMint, signedTransaction } = req.body || {};
         if (!wallet || !nftMint || !signedTransaction) return sendJson(400, { error: 'wallet, nftMint, and signedTransaction required' });
+        
+        // ON-CHAIN SATP SECURITY: Identity + boa_soulbound attestation check
+        const burnSatpCheck = await checkSatpOnChain(wallet);
+        if (!burnSatpCheck.hasIdentity) {
+          console.log('[BurnPublic] BLOCKED: No SATP identity for', wallet);
+          return sendJson(403, { error: 'SATP identity required to burn. Verify your wallet at agentfolio.bot/verify first.' });
+        }
+        if (burnSatpCheck.hasBoaSoulbound) {
+          console.log('[BurnPublic] BLOCKED by on-chain attestation:', wallet);
+          return sendJson(409, { error: 'This wallet already has a permanent face (boa_soulbound attestation on-chain). Each agent gets one.' });
+        }
+
+        // SECURITY: Block burn if agent already has a permanent face (DB fallback)
+        try {
+          const Database = require('better-sqlite3');
+          const path = require('path');
+          const checkDb = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+          // Check by wallet (genesis registry) or by any profile with this wallet
+          // Look up profile by wallet in DB (covers genesis + regular agents)
+          let profileId = null;
+          const byWallet = checkDb.prepare("SELECT id FROM profiles WHERE wallets LIKE ?").get('%' + wallet + '%');
+          if (byWallet) profileId = byWallet.id;
+          // Also check nft_avatar column for any profile with this wallet
+          if (!profileId) {
+            const byNftWallet = checkDb.prepare("SELECT id FROM profiles WHERE nft_avatar LIKE ?").get('%' + wallet + '%');
+            if (byNftWallet) profileId = byNftWallet.id;
+          }
+          if (profileId) {
+            const existing = checkDb.prepare('SELECT nft_avatar FROM profiles WHERE id = ?').get(profileId);
+            if (existing && existing.nft_avatar) {
+              const nftData = JSON.parse(existing.nft_avatar);
+              if (nftData.permanent === true) {
+                checkDb.close();
+                console.log('[BurnPublic] BLOCKED: Agent', profileId, 'already has permanent face');
+                return sendJson(403, { 
+                  error: 'This agent already has a permanent soulbound face. Burn to Become is a one-time, irreversible process.',
+                  existingSoulbound: nftData.soulboundMint,
+                  existingImage: nftData.image,
+                });
+              }
+            }
+          }
+          checkDb.close();
+        } catch (checkErr) {
+          console.warn('[BurnPublic] DB permanent face check failed (non-blocking — on-chain SATP is authority):', checkErr.message);
+        }
         
         // 1. Submit the signed burn transaction
         const txBuffer = Buffer.from(signedTransaction, 'base64');
@@ -559,10 +726,105 @@ function handleBurnToBecome(req, res, url) {
         // 3. Mint soulbound token to user's wallet
         const soulboundResult = await mintSoulbound(wallet, artworkUri, metadataUri, nftName, nftMint, burnTx);
         console.log('[BurnPublic] Soulbound minted:', soulboundResult.soulboundMint);
+
+        // 3.5. Link soulbound BOA to SATP identity (Task 2)
+        let boaSatpLinkTx = null;
+        try {
+          const { linkBoaToSatpIdentity } = require("../lib/satp-boa-linker");
+          const linkResult = await linkBoaToSatpIdentity(wallet, soulboundResult.soulboundMint, burnTx, artworkUri);
+          boaSatpLinkTx = linkResult.attestationTx;
+          if (boaSatpLinkTx) {
+            console.log("[BurnPublic] BOA linked to SATP identity:", boaSatpLinkTx);
+          } else {
+            console.log("[BurnPublic] BOA→SATP link skipped:", linkResult.reason || "no deployer key");
+          }
         
+        // V3: Mark agent as "Born" on-chain via burnToBecome
+        try {
+          const { createSATPClient, agentIdHash, getGenesisPDA } = require("../satp-client/src");
+          const { Keypair } = require("@solana/web3.js");
+          const fs = require("fs");
+          const client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=HELIUS_API_KEY_REDACTED" });
+          const signerKey = JSON.parse(fs.readFileSync("/home/ubuntu/.config/solana/mainnet-deployer.json", "utf-8"));
+          const signer = Keypair.fromSecretKey(Uint8Array.from(signerKey));
+          
+          // Find profile by wallet to get agent_id
+          const profileStore = require("../profile-store");
+          const profile = profileStore.getProfileByWallet ? profileStore.getProfileByWallet(wallet) : null;
+          const agentId = profile?.id || wallet;
+          
+          const [genesisPda] = getGenesisPDA(agentId);
+          const genesis = await client.getGenesisRecord(agentId);
+          if (genesis && !genesis.isBorn) {
+            const { transaction } = await client.buildBurnToBecome(
+              signer.publicKey,
+              genesisPda.toBase58(),
+              artworkUri || "",
+              soulboundResult.soulboundMint || "",
+              burnTx || ""
+            );
+            transaction.sign(signer);
+            const sig = await client.connection.sendRawTransaction(transaction.serialize());
+            console.log("[SATP V3] burnToBecome completed for " + agentId + ": tx=" + sig);
+          } else if (genesis?.isBorn) {
+            console.log("[SATP V3] Agent already born: " + agentId);
+          } else {
+            console.log("[SATP V3] No genesis record for " + agentId + ", skipping burnToBecome");
+          }
+        } catch (v3Err) {
+          console.warn("[SATP V3] burnToBecome failed (non-blocking):", v3Err.message);
+        }
+
+} catch (linkErr) {
+          console.warn("[BurnPublic] BOA→SATP link failed (non-blocking):", linkErr.message);
+        }
+        
+                // 3.6. V3 Genesis Record — burnToBecome (on-chain birth)
+        try {
+          const { createSATPClient, agentIdHash, getGenesisPDA } = require('../satp-client/src');
+          const { Keypair } = require('@solana/web3.js');
+          const fs = require('fs');
+          const client = createSATPClient({rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=HELIUS_API_KEY_REDACTED'});
+          
+          // Find agent profile by wallet
+          const profileStore = require('../profile-store');
+          const db = profileStore.getDb ? profileStore.getDb() : null;
+          let agentId = null;
+          if (db) {
+            const row = db.prepare("SELECT id FROM profiles WHERE wallets LIKE ? OR verification_data LIKE ?").get(`%${wallet}%`, `%${wallet}%`);
+            if (row) agentId = row.id;
+          }
+          
+          if (agentId) {
+            const record = await client.getGenesisRecord(agentId);
+            if (record && !record.error && !record.isBorn) {
+              const signerKey = JSON.parse(fs.readFileSync('/home/ubuntu/.config/solana/mainnet-deployer.json', 'utf-8'));
+              const signer = Keypair.fromSecretKey(Uint8Array.from(signerKey));
+              const [genesisPda] = getGenesisPDA(agentId);
+              const { transaction } = await client.buildBurnToBecome(
+                signer.publicKey,
+                genesisPda.toBase58(),
+                artworkUri || '',
+                soulboundResult.soulboundMint || '',
+                burnTx || ''
+              );
+              transaction.sign(signer);
+              const sig = await client.connection.sendRawTransaction(transaction.serialize());
+              console.log('[BurnPublic] V3 burnToBecome confirmed for ' + agentId + ': tx=' + sig);
+            } else {
+              console.log('[BurnPublic] V3 burnToBecome skipped:', agentId, record ? (record.isBorn ? 'already born' : 'error') : 'no genesis record');
+            }
+          } else {
+            console.log('[BurnPublic] V3 burnToBecome skipped: no profile found for wallet', wallet);
+          }
+        } catch (v3Err) {
+          console.warn('[BurnPublic] V3 burnToBecome failed (non-blocking):', v3Err.message);
+        }
+
         // 4. Update AgentFolio profile if exists
         try {
-          const { loadProfile, saveProfile: _rawSave } = require('../lib/profile');
+          const { loadProfile, saveProfile: _rawSave }
+ = require('../lib/profile');
             const fs = require('fs');
             const path = require('path');
             function saveProfile(profile) {
@@ -588,11 +850,106 @@ function handleBurnToBecome(req, res, url) {
                 burnedAt: new Date().toISOString(),
               };
               saveProfile(profile);
+              
+              // Direct DB update for nft_avatar column (saveProfile doesn't handle this)
+              try {
+                const Database = require('better-sqlite3');
+                const dbPath = require('path').join(__dirname, '../../data/agentfolio.db');
+                const directDb = new Database(dbPath);
+                directDb.prepare('UPDATE profiles SET nft_avatar = ?, avatar = ?, updated_at = ? WHERE id = ?').run(
+                  JSON.stringify(profile.nftAvatar),
+                  profile.nftAvatar.image || profile.nftAvatar.arweaveUrl,
+                  new Date().toISOString(),
+                  genesisInfo.profileId
+                );
+                directDb.close();
+                console.log('[BurnPublic] nft_avatar saved to DB for', genesisInfo.profileId);
+              } catch (dbErr) {
+                console.error('[BurnPublic] DB nft_avatar update failed:', dbErr.message);
+              }
+              
               console.log('[BurnPublic] Profile updated:', genesisInfo.profileId);
+            }
+          } else {
+            // Non-genesis: look up profile by wallet address
+            try {
+              const Database = require('better-sqlite3');
+              const path = require('path');
+              const lookupDb = new Database(path.join(__dirname, '../../data/agentfolio.db'));
+              const match = lookupDb.prepare("SELECT id FROM profiles WHERE wallets LIKE ?").get('%' + wallet + '%');
+              if (match) {
+                const profile = loadProfile(match.id);
+                if (profile) {
+                  profile.nftAvatar = {
+                    chain: 'solana',
+                    wallet: wallet,
+                    identifier: nftMint,
+                    name: nftName,
+                    image: artworkUri,
+                    arweaveUrl: artworkUri,
+                    verifiedAt: new Date().toISOString(),
+                    verifiedOnChain: true,
+                    permanent: true,
+                    burnTxSignature: burnTx,
+                    soulboundMint: soulboundResult.soulboundMint,
+                    burnedAt: new Date().toISOString(),
+                  };
+                  profile.avatar = artworkUri;
+                  saveProfile(profile);
+                  lookupDb.prepare('UPDATE profiles SET nft_avatar = ?, avatar = ?, updated_at = ? WHERE id = ?').run(
+                    JSON.stringify(profile.nftAvatar), artworkUri, new Date().toISOString(), match.id
+                  );
+                  console.log('[BurnPublic] Profile updated by wallet lookup:', match.id);
+                }
+              }
+              lookupDb.close();
+            } catch (walletErr) {
+              console.warn('[BurnPublic] Wallet-based profile lookup failed:', walletErr.message);
             }
           }
         } catch (e) {
           console.warn('[BurnPublic] Profile update failed:', e.message);
+        }
+
+        // Register permanent face on-chain via SATP Memo attestation
+        let attestationTx = null;
+        try {
+          const { registerFaceOnChain } = require('../lib/satp-face-registry');
+          const faceResult = await registerFaceOnChain({
+            agentId: genesisInfo ? genesisInfo.profileId : wallet,
+            agentName: genesisInfo ? genesisInfo.name : 'Unknown',
+            agentWallet: wallet,
+            soulboundMint: soulboundResult.soulboundMint,
+            arweaveImage: artworkUri,
+            burnTx: burnTx || null,
+            originalMint: null,
+          });
+          attestationTx = faceResult.signature;
+          console.log('[BurnPublic] SATP Face attestation TX:', attestationTx);
+
+          // Update nft_avatar in DB with attestation TX
+          try {
+            const Database = require('better-sqlite3');
+            const path = require('path');
+            const directDb = new Database(path.join(__dirname, '../../data/agentfolio.db'));
+            const existing = directDb.prepare('SELECT nft_avatar FROM profiles WHERE id = ?').get(
+              genesisInfo ? genesisInfo.profileId : null
+            );
+            if (existing && existing.nft_avatar) {
+              const nftData = JSON.parse(existing.nft_avatar);
+              nftData.attestationTx = attestationTx;
+              directDb.prepare('UPDATE profiles SET nft_avatar = ? WHERE id = ?').run(
+                JSON.stringify(nftData),
+                genesisInfo.profileId
+              );
+            }
+            directDb.close();
+            console.log('[BurnPublic] Attestation TX saved to nft_avatar');
+          } catch (dbErr) {
+            console.error('[BurnPublic] Could not save attestation TX to DB:', dbErr.message);
+          }
+        } catch (faceErr) {
+          console.warn('[BurnPublic] SATP Face registration failed (non-blocking):', faceErr.message);
         }
         
         sendJson(200, {
@@ -600,180 +957,312 @@ function handleBurnToBecome(req, res, url) {
           soulboundMint: soulboundResult.soulboundMint,
           soulboundTx: soulboundResult.soulboundTx,
           artworkUri,
-          genesisRecordUrl: null, // TODO: generate genesis record card
+          attestationTx,
+          genesisRecordUrl: null,
+          boaSatpLinkTx,
         });
       } catch (e) {
         console.error('[BurnPublic] submit error:', e);
         sendJson(500, { error: e.message });
       }
-    });
+    })();
     return true;
   }
 
 
-  // POST /api/burn-to-become/mint-boa — prepare mint transaction
-  if (url.pathname === '/api/burn-to-become/mint-boa' && req.method === 'POST') {
-    let body = '';
-    req.on('data', c => body += c);
-    req.on('end', async () => {
+  // POST /api/burn-to-become/mint-boa — Metaplex pipeline mint (server-side)
+  if (url.pathname === "/api/burn-to-become/mint-boa" && req.method === "POST") {
+    const wallet = req.body && req.body.wallet;
+    const paymentTx = req.body && req.body.paymentTx; // SOL payment TX for paid mints
+    if (!wallet) return sendJson(400, { error: "wallet required" });
+
+    (async () => {
       try {
-        const { wallet } = JSON.parse(body);
-        if (!wallet) return sendJson(400, { error: 'wallet required' });
+        // === SATP Identity Gate — ENFORCED (on-chain PDA check) ===
+        // Active: wallets without SATP identity PDA are rejected
+        // const IDENTITY_PROGRAM = new PublicKey("97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq");
+
+        const Database = require("better-sqlite3");
+        const dbPath = require("path").join(__dirname, "../../data/agentfolio.db");
         
-        // 1. Pick a random unminted BOA
-        const boaId = pickRandomBOA();
-        if (!boaId) return sendJson(400, { error: 'Collection sold out' });
+        // === 1. Per-agent mint count (max 3) — tracks by agent_id to prevent wallet-swap gaming ===
+        // ON-CHAIN SATP SECURITY — identity PDA + boa_soulbound attestation check
+        const satpCheck = await checkSatpOnChain(wallet);
+        if (!satpCheck.hasIdentity) {
+          return sendJson(403, { error: "SATP identity required. Verify your wallet at agentfolio.bot/verify first.", identityPDA: satpCheck.identityPda });
+        }
+        console.log("[MintBOA] SATP identity verified:", satpCheck.identityPda);
         
-        // 2. Get metadata (must be on Arweave)
-        const meta = getBOAMetadata(boaId);
-        if (!meta) return sendJson(400, { error: 'Collection metadata not yet uploaded to Arweave. Coming soon.' });
+        // If already has boa_soulbound attestation (already burned), no free mint
+        if (satpCheck.hasBoaSoulbound) {
+          console.log("[MintBOA] Wallet already has boa_soulbound attestation — no free mint");
+          // They can still do paid mints (up to max 3), just not free
+        }
+
+        const MINT_RECORDS_DIR = "/home/ubuntu/agentfolio/boa-pipeline/mint-records";
         
-        // 3. Check SATP score for free/paid
-        const score = await getSatpScore(wallet);
-        const isFree = score >= FREE_SCORE_THRESHOLD;
+        // First, find the agent profile for this wallet (needed for mint count)
+        const countDb = new Database(dbPath, { readonly: true });
+        let agentIdForCount = null;
+        const allProfiles = countDb.prepare("SELECT * FROM profiles").all();
+        for (const p of allProfiles) {
+          try {
+            const vd = JSON.parse(p.verification_data || "{}");
+            if (vd.solana && vd.solana.address === wallet) { agentIdForCount = p.id; break; }
+          } catch {}
+          try {
+            const w = JSON.parse(p.wallets || "{}");
+            if (w.solana === wallet) { agentIdForCount = p.id; break; }
+          } catch {}
+          if (!agentIdForCount && p.wallet === wallet) { agentIdForCount = p.id; }
+        }
+        countDb.close();
         
-        // 4. Generate mint keypair
-        const nftMint = Keypair.generate();
-        const walletPubkey = new PublicKey(wallet);
+        // Count mints by BOTH wallet AND agent_id (whichever is higher = true count)
+        let walletMintCount = 0;
+        let agentMintCount = 0;
+        if (fs.existsSync(MINT_RECORDS_DIR)) {
+          fs.readdirSync(MINT_RECORDS_DIR).filter(f => f.endsWith(".json")).forEach(f => {
+            try {
+              const rec = JSON.parse(fs.readFileSync(require("path").join(MINT_RECORDS_DIR, f), "utf-8"));
+              if (rec.recipient === wallet || rec.wallet === wallet) walletMintCount++;
+              if (agentIdForCount && rec.agentId === agentIdForCount) agentMintCount++;
+            } catch {}
+          });
+        }
+        const effectiveMintCount = Math.max(walletMintCount, agentMintCount);
+        if (effectiveMintCount >= 3) {
+          return sendJson(403, { error: "Maximum 3 BOA mints per agent reached.", minted: effectiveMintCount, max: 3 });
+        }
+
+        // === 2. Unified eligibility check (DB level + rep) ===
+        const checkDb = new Database(dbPath, { readonly: true });
+        let profileId = null;
+        let isEligibleFree = false;
         
-        // 5. Derive PDAs
-        const [configPDA] = PublicKey.findProgramAddressSync([Buffer.from('config')], BOA_PROGRAM_ID);
-        const [mintTrackerPDA] = PublicKey.findProgramAddressSync(
-          [Buffer.from('mint_tracker'), walletPubkey.toBuffer()], BOA_PROGRAM_ID
-        );
-        const [metadata] = PublicKey.findProgramAddressSync(
-          [Buffer.from('metadata'), TOKEN_METADATA_PROGRAM.toBuffer(), nftMint.publicKey.toBuffer()], TOKEN_METADATA_PROGRAM
-        );
-        const [masterEdition] = PublicKey.findProgramAddressSync(
-          [Buffer.from('metadata'), TOKEN_METADATA_PROGRAM.toBuffer(), nftMint.publicKey.toBuffer(), Buffer.from('edition')], TOKEN_METADATA_PROGRAM
-        );
-        
-        // 6. Build transaction
-        const tx = new Transaction();
-        tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 150000 }));
-        tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400000 }));
-        
-        // Create mint account (user pays, mint is a new keypair)
-        const mintRent = await connection.getMinimumBalanceForRentExemption(82); // MintLayout.span
-        tx.add(SystemProgram.createAccount({
-          fromPubkey: walletPubkey,
-          newAccountPubkey: nftMint.publicKey,
-          space: 82,
-          lamports: mintRent,
-          programId: TOKEN_PROGRAM_ID,
-        }));
-        
-        // Init mint (authority = payer, freeze authority = payer — required for Metaplex)
-        tx.add(createInitializeMintInstruction(nftMint.publicKey, 0, walletPubkey, walletPubkey, TOKEN_PROGRAM_ID));
-        
-        // Create token account
-        const ata = await getAssociatedTokenAddress(nftMint.publicKey, walletPubkey, false, TOKEN_PROGRAM_ID);
-        tx.add(createAssociatedTokenAccountInstruction(walletPubkey, ata, walletPubkey, nftMint.publicKey, TOKEN_PROGRAM_ID));
-        
-        // Add program instruction
-        if (isFree) {
-          const [freeMintTrackerPDA] = PublicKey.findProgramAddressSync(
-            [Buffer.from('free_tracker'), walletPubkey.toBuffer()], BOA_PROGRAM_ID
-          );
-          const ticketSig = signFreeTicket(wallet, score);
-          tx.add(buildMintFreeInstruction(
-            configPDA, mintTrackerPDA, freeMintTrackerPDA, walletPubkey,
-            nftMint.publicKey, ata, metadata, masterEdition,
-            meta.name, meta.uri, score, ticketSig
-          ));
-        } else {
-          tx.add(buildMintPaidInstruction(
-            configPDA, mintTrackerPDA, walletPubkey, TREASURY,
-            nftMint.publicKey, ata, metadata, masterEdition,
-            meta.name, meta.uri
-          ));
+        // Find profile by wallet
+        const profiles = checkDb.prepare("SELECT * FROM profiles").all();
+        for (const p of profiles) {
+          try {
+            const vd = JSON.parse(p.verification_data || "{}");
+            if (vd.solana && vd.solana.address === wallet) { profileId = p.id; break; }
+          } catch {}
+          try {
+            const w = JSON.parse(p.wallets || "{}");
+            if (w.solana === wallet) { profileId = p.id; break; }
+          if (!profileId && p.wallet === wallet) { profileId = p.id; break; }
+          } catch {}
         }
         
-        tx.feePayer = walletPubkey;
-        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-        tx.recentBlockhash = blockhash;
-        tx.lastValidBlockHeight = lastValidBlockHeight;
-        
-        // Partially sign with mint keypair (user still needs to sign as payer)
-        tx.partialSign(nftMint);
-        
-        const serialized = tx.serialize({ requireAllSignatures: false }).toString('base64');
-        
-        // Store pending mint for submit step
-        const txId = crypto.randomBytes(16).toString('hex');
-        PENDING_MINTS.set(txId, {
-          boaId,
-          wallet,
-          mintAddress: nftMint.publicKey.toBase58(),
-          expiry: Date.now() + 5 * 60 * 1000, // 5 min TTL
-        });
-        
-        // Cleanup expired
-        for (const [k, v] of PENDING_MINTS) {
-          if (v.expiry < Date.now()) PENDING_MINTS.delete(k);
+        if (profileId) {
+          let level = 0, rep = 0;
+          // Try V3 on-chain scores first
+          try {
+            const { getV3Score } = require('../v3-score-service');
+            const v3 = await getV3Score(profileId);
+            if (v3) {
+              level = v3.verificationLevel;
+              rep = Math.round(parseFloat(v3.reputationPct));
+            }
+          } catch (e) { console.error('[BURN] V3 score lookup failed:', e.message); }
+          // Fallback to scoring-engine-v2
+          if (level === 0 && rep === 0) {
+            try {
+              const { getCompleteScore } = require('../lib/scoring-engine-v2');
+              const profile = checkDb.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
+              if (profile) {
+                const profileObj = {
+                  id: profile.id, name: profile.name, handle: profile.handle, bio: profile.bio,
+                  skills: JSON.parse(profile.skills || '[]'),
+                  verification: JSON.parse(profile.verification || '{}'),
+                  endorsements: JSON.parse(profile.endorsements || '[]'),
+                  portfolio: JSON.parse(profile.portfolio || '[]'),
+                  track_record: JSON.parse(profile.track_record || '{}'),
+                };
+                const scoreResult = getCompleteScore(profileObj);
+                level = scoreResult.verificationLevel?.level || 0;
+                rep = scoreResult.reputationScore?.score || 0;
+              }
+            } catch (e) { console.error('[BURN] Scoring fallback error:', e.message); }
+          }
+          isEligibleFree = level >= 3 && rep >= 50;
         }
-        
-        sendJson(200, {
-          transaction: serialized,
-          txId,
-          boaId,
-          boaName: meta.name,
-          boaImage: meta.image,
-          mintAddress: nftMint.publicKey.toBase58(),
-          isFree,
-          score,
-          price: isFree ? 0 : 1,
+        checkDb.close();
+
+        // === 3. Determine pricing ===
+        const isFirstMint = effectiveMintCount === 0;
+        const isFree = isFirstMint && isEligibleFree;
+        // Override: if already has soulbound attestation, no free mint
+        const actuallyFree = isFree && !satpCheck.hasBoaSoulbound;
+        const price = isFree ? 0 : 1; // 1 SOL for paid mints
+
+        // === 4. Verify SOL payment for paid mints ===
+        if (!isFree) {
+          if (!paymentTx) {
+            return sendJson(402, {
+              error: "Payment required",
+              price: "1 SOL",
+              mintNumber: effectiveMintCount + 1,
+              isFirstMint: isFirstMint,
+              eligible: isEligibleFree,
+              message: isFirstMint
+                ? "You do not meet free mint requirements (Level 3+ and Rep 50+). Send 1 SOL to treasury and include paymentTx."
+                : "First mint only is free. Send 1 SOL to treasury and include paymentTx.",
+              treasury: "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be"
+            });
+          }
+          // Verify the payment TX on-chain
+          try {
+            const { Connection } = require("@solana/web3.js");
+            const conn = new Connection(process.env.SOLANA_RPC || "https://api.mainnet-beta.solana.com");
+            // Validate tx signature format before RPC call
+            if (!paymentTx || typeof paymentTx !== "string" || paymentTx.length < 80 || paymentTx.length > 90) {
+              return sendJson(400, { error: "Invalid payment transaction signature format." });
+            }
+            const txInfo = await conn.getTransaction(paymentTx, { maxSupportedTransactionVersion: 0 });
+            if (!txInfo) {
+              return sendJson(400, { error: "Payment TX not found on-chain. Wait for confirmation and retry." });
+            }
+            // Check that at least 1 SOL was transferred (1_000_000_000 lamports)
+            const preBalances = txInfo.meta.preBalances;
+            const postBalances = txInfo.meta.postBalances;
+            const treasuryIdx = txInfo.transaction.message.staticAccountKeys
+              ? txInfo.transaction.message.staticAccountKeys.findIndex(k => k.toBase58() === "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be")
+              : -1;
+            if (treasuryIdx >= 0) {
+              const received = postBalances[treasuryIdx] - preBalances[treasuryIdx];
+              if (received < 900_000_000) { // ~0.9 SOL min (allowing for fees)
+                return sendJson(400, { error: "Insufficient payment. Expected 1 SOL to treasury.", received: received / 1e9 });
+              }
+            } else {
+              return sendJson(400, { error: "Payment TX does not transfer to treasury wallet." });
+            }
+          } catch (verifyErr) {
+            console.error("[MintBOA] Payment verification failed:", verifyErr.message);
+            return sendJson(400, { error: "Payment verification failed: " + verifyErr.message });
+          }
+        }
+
+        // === 5+6. Core Candy Machine mint (atomic on-chain counter, no claim files needed) ===
+        console.log("[MintBOA] Core CM mint for " + wallet + " (mint #" + (effectiveMintCount + 1) + ", " + (actuallyFree ? "FREE" : "PAID") + ")");
+        const { execFile } = require("child_process");
+
+// SATP V3 SDK for Genesis Record updates
+let satpV3Client;
+try {
+  const { createSATPClient } = require("../satp-client/src");
+  satpV3Client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=HELIUS_API_KEY_REDACTED" });
+  console.log("[BurnToBecome] SATP V3 SDK loaded");
+} catch (e) {
+  console.warn("[BurnToBecome] SATP V3 SDK not available:", e.message);
+}
+        // Use Core Candy Machine worker (separate node_modules in core-cm-v2)
+        const workerPath = "/home/ubuntu/agentfolio/core-cm-v2/core-cm-mint-worker.mjs";
+
+        execFile("node", [workerPath, wallet], {
+          timeout: 120000,
+          cwd: "/home/ubuntu/agentfolio/core-cm-v2",
+          env: { ...process.env, HOME: process.env.HOME, SOLANA_RPC_URL: process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=HELIUS_API_KEY_REDACTED" },
+        }, (err, stdout, stderr) => {
+          if (stderr) console.log("[MintBOA] stderr:", stderr.slice(0, 500));
+          if (err) {
+            console.error("[MintBOA] Core CM mint failed:", err.message);
+            return sendJson(500, { error: "Mint failed: " + err.message });
+          }
+          try {
+            const lines = stdout.trim().split("\n");
+            const result = JSON.parse(lines[lines.length - 1]);
+            if (result.error) return sendJson(500, result);
+            console.log("[MintBOA] \u2705 BOA #" + result.boaId + " minted via Candy Machine: " + result.mintAddress);
+            // TASK 4: Auto-update profile avatar to BOA image
+            if (profileId && result.imageUri) {
+              try {
+                const Database = require("better-sqlite3");
+                const avatarDb = new Database(require("path").join(__dirname, "../../data/agentfolio.db"));
+                avatarDb.prepare("UPDATE profiles SET avatar = ? WHERE id = ?").run(result.imageUri, profileId);
+                avatarDb.close();
+                // Also update JSON profile if exists
+                const profileJsonPath = require("path").join(__dirname, "../../data/profiles", profileId + ".json");
+                if (fs.existsSync(profileJsonPath)) {
+                  const pf = JSON.parse(fs.readFileSync(profileJsonPath, "utf-8"));
+                  pf.avatar = result.imageUri;
+                  pf.boaMint = result.mintAddress;
+                  pf.boaId = result.boaId;
+                  fs.writeFileSync(profileJsonPath, JSON.stringify(pf, null, 2));
+                }
+                console.log("[MintBOA] Avatar auto-updated for " + profileId);
+                // V3: Record burn-to-become on Genesis Record
+                if (satpV3Client && profileId) {
+                  (async () => {
+                    try {
+                      const { agentIdHash, getGenesisPDA } = require("../satp-client/src");
+                      const { Keypair } = require("@solana/web3.js");
+                      const [genesisPda] = getGenesisPDA(profileId);
+                      const acct = await satpV3Client.connection.getAccountInfo(genesisPda);
+                      if (acct) {
+                        const signerKey = JSON.parse(require("fs").readFileSync("/home/ubuntu/.config/solana/mainnet-deployer.json", "utf-8"));
+                        const signer = Keypair.fromSecretKey(Uint8Array.from(signerKey));
+                        const { transaction } = await satpV3Client.buildBurnToBecome(
+                          signer.publicKey, genesisPda,
+                          result.imageUri || "", result.mintAddress || "", ""
+                        );
+                        transaction.sign(signer);
+                        const sig = await satpV3Client.connection.sendRawTransaction(transaction.serialize());
+                        console.log("[SATP V3] burnToBecome recorded for " + profileId + ": tx=" + sig);
+                      }
+                    } catch (v3Err) {
+                      console.error("[SATP V3] burnToBecome failed for " + profileId + ":", v3Err.message);
+                    }
+                  })();
+                }
+              } catch (avatarErr) {
+                console.error("[MintBOA] Avatar update failed:", avatarErr.message);
+              }
+            }
+            // Inject agentId into mint record
+            try {
+              const recPath = require("path").join(PIPELINE_DIR, "mint-records", result.boaId + ".json");
+              if (fs.existsSync(recPath)) {
+                const rec = JSON.parse(fs.readFileSync(recPath, "utf-8"));
+                rec.agentId = agentIdForCount || profileId || null;
+                rec.wallet = wallet;
+                fs.writeFileSync(recPath, JSON.stringify(rec, null, 2));
+              }
+            } catch (e) { console.error("[MintBOA] Failed to patch record:", e.message); }
+            sendJson(200, {
+              success: true,
+              boaId: result.boaId,
+              boaName: result.boaName,
+              mintAddress: result.mintAddress,
+              metadataUri: result.metadataUri,
+              imageUri: result.imageUri,
+              collection: result.collection,
+              isFree: isFree,
+              mintNumber: effectiveMintCount + 1,
+              maxMints: 3,
+              price: price,
+              paymentTx: paymentTx || null,
+              itemsRedeemed: result.itemsRedeemed,
+              itemsAvailable: result.itemsAvailable,
+            });
+          } catch (e) {
+            console.error("[MintBOA] Parse error:", stdout);
+            sendJson(500, { error: "Failed to parse worker output" });
+          }
         });
       } catch (e) {
-        console.error('[MintBOA] prepare error:', e);
+        console.error("[MintBOA] error:", e);
         sendJson(500, { error: e.message });
       }
-    });
+    })();
     return true;
   }
 
-  // POST /api/burn-to-become/mint-boa/submit — submit signed mint transaction
+  // POST /api/burn-to-become/mint-boa/submit — DEPRECATED (Metaplex pipeline is server-side)
   if (url.pathname === '/api/burn-to-become/mint-boa/submit' && req.method === 'POST') {
-    let body = '';
-    req.on('data', c => body += c);
-    req.on('end', async () => {
-      try {
-        const { txId, signedTransaction } = JSON.parse(body);
-        if (!txId || !signedTransaction) return sendJson(400, { error: 'txId and signedTransaction required' });
-        
-        const pending = PENDING_MINTS.get(txId);
-        if (!pending) return sendJson(400, { error: 'Transaction expired or not found. Please try again.' });
-        if (pending.expiry < Date.now()) {
-          PENDING_MINTS.delete(txId);
-          return sendJson(400, { error: 'Transaction expired. Please try again.' });
-        }
-        
-        // Submit the signed transaction
-        const txBuffer = Buffer.from(signedTransaction, 'base64');
-        const sig = await connection.sendRawTransaction(txBuffer, { skipPreflight: false });
-        await connection.confirmTransaction(sig, 'confirmed');
-        console.log('[MintBOA] Mint confirmed:', sig, 'BOA #' + pending.boaId);
-        
-        // Mark as minted
-        const minted = loadMintedSet();
-        minted.add(pending.boaId);
-        saveMintedSet(minted);
-        PENDING_MINTS.delete(txId);
-        
-        sendJson(200, {
-          mintTx: sig,
-          boaId: pending.boaId,
-          mintAddress: pending.mintAddress,
-          wallet: pending.wallet,
-        });
-      } catch (e) {
-        console.error('[MintBOA] submit error:', e);
-        sendJson(500, { error: e.message });
-      }
-    });
+    sendJson(410, { error: 'This endpoint is deprecated. Minting is now handled server-side via /api/burn-to-become/mint-boa' });
     return true;
   }
-
 
   return false; // not handled
 }

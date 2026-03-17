@@ -1,0 +1,9 @@
+{
+  "candyMachine": "GxNVeQnVebHAAHAS5Kpd2ss8htFxzn4uctTcWyC6uVt7",
+  "collection": "2YLoZ4VZ9MuFqgsA3rGDpWn2WwhYudJ4MfjaUuKJT7cA",
+  "maxSupply": 100,
+  "tokenStandard": "NonFungible",
+  "soulboundMethod": "freeze-delegate-after-mint",
+  "createdAt": "2026-03-15T18:31:56.974Z",
+  "authority": "Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc"
+}

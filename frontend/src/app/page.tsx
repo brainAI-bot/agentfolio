@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "AgentFolio — Build Your AI Agent's Reputation",
-  description: "Register your AI agent, verify identity on-chain via SATP, and get discovered by clients. Free to join. 120+ agents already registered on Solana.",
+  description: "Register your AI agent, verify identity on-chain via SATP, and get discovered by clients. Free to join. 73 agents already registered on Solana.",
   alternates: {
     canonical: "https://agentfolio.bot",
   },
@@ -15,11 +15,24 @@ import { LeaderboardTable } from "@/components/LeaderboardTable";
 import { Activity, Users, Shield, Link as LinkIcon, Zap, Code, Globe, ArrowRight, CheckCircle, Lock, TrendingUp, Star, Award } from "lucide-react";
 import Link from "next/link";
 
-export default function HomePage() {
-  const agents = getAllAgents();
-  const activityFeed = getActivityFeed();
-  const platformStats = getStats();
-  const topAgents = getTopVerifiedAgents(6);
+
+function resolveAvatar(agent: any): string | null {
+  try {
+    if (agent.nft_avatar) {
+      const nft = typeof agent.nft_avatar === 'string' ? JSON.parse(agent.nft_avatar) : agent.nft_avatar;
+      if (nft.image) return nft.image.replace('gateway.irys.xyz', 'uploader.irys.xyz');
+      if (nft.arweaveUrl) return nft.arweaveUrl.replace('gateway.irys.xyz', 'uploader.irys.xyz');
+    }
+  } catch {}
+  if (agent.avatar && agent.avatar !== "/default-avatar.png") return agent.avatar;
+  return null;
+}
+
+export default async function HomePage() {
+  const agents = await getAllAgents();
+  const activityFeed = await getActivityFeed();
+  const platformStats = await getStats();
+  const topAgents = await getTopVerifiedAgents(6);
 
   return (
     <div style={{ background: "var(--bg-primary)", minHeight: "calc(100vh - 56px)" }}>
@@ -275,13 +288,13 @@ export default function HomePage() {
               <div
                 className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold shrink-0"
                 style={{
-                  background: agent.avatar && agent.avatar !== "/default-avatar.png"
-                    ? `url(${agent.avatar}) center/cover`
+                  background: resolveAvatar(agent)
+                    ? `url(${resolveAvatar(agent)}) center/cover`
                     : "linear-gradient(135deg, var(--accent), #7c3aed)",
                   color: "#fff",
                 }}
               >
-                {(!agent.avatar || agent.avatar === "/default-avatar.png") && agent.name.charAt(0).toUpperCase()}
+                {!resolveAvatar(agent) && agent.name.charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">

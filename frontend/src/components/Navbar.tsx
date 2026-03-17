@@ -1,21 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+
 import { Menu, X, Terminal, Wallet, LogOut } from "lucide-react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { useDemoMode } from "@/lib/demo-mode";
+import { useEffect, useState } from "react";
 
-const navLinks = [
+const staticNavLinks = [
   { href: "/", label: "Directory" },
   { href: "/marketplace", label: "Marketplace" },
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/satp", label: "SATP" },
   { href: "/verify", label: "Verify" },
-  { href: "/mint", label: "Mint", highlight: true },
+  { href: "/mint", label: "Mint" },
   { href: "/stats", label: "Stats" },
+  { href: "/how-it-works", label: "How It Works" },
 ];
 
 function truncateAddress(addr: string) {
@@ -28,6 +30,7 @@ export function Navbar() {
   const { setVisible } = useWalletModal();
   const { smartConnect } = useSmartConnect();
   const { isDemo, demoPublicKey } = useDemoMode();
+  const [myProfileId, setMyProfileId] = useState<string | null>(null);
   const connected = isDemo ? true : wallet.connected;
   const publicKey = isDemo ? demoPublicKey : wallet.publicKey;
 
@@ -37,7 +40,25 @@ export function Navbar() {
 
   const handleDisconnect = () => {
     if (!isDemo) wallet.disconnect();
+    setMyProfileId(null);
   };
+
+  useEffect(() => {
+    if (!publicKey) { setMyProfileId(null); return; }
+    const addr = publicKey.toBase58();
+    fetch(`/api/profile-by-wallet?wallet=${addr}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.id) setMyProfileId(d.id); else setMyProfileId(null); })
+      .catch(() => setMyProfileId(null));
+  }, [publicKey]);
+
+  const navLinks = [
+    staticNavLinks[0],
+    myProfileId
+      ? { href: `/profile/${myProfileId}`, label: "My Profile", highlight: true }
+      : { href: "/register", label: "Register", highlight: true },
+    ...staticNavLinks.slice(1),
+  ];
 
   return (
     <nav className="sticky top-0 z-50 border-b-2 border-b-[var(--accent)]" style={{ background: "var(--bg-secondary)" }}>
@@ -72,17 +93,6 @@ export function Navbar() {
           <div className="flex items-center gap-3">
             {connected && publicKey ? (
               <div className="hidden md:flex items-center gap-2">
-                <Link
-                  href="/register"
-                  className="px-3 py-1.5 rounded-lg text-[10px] font-semibold uppercase tracking-wider transition-all hover:bg-[var(--bg-tertiary)]"
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    color: "var(--text-secondary)",
-                    border: "1px solid var(--border)",
-                  }}
-                >
-                  Register Agent
-                </Link>
                 <div
                   className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs"
                   style={{

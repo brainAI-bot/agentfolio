@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   description: "AgentFolio API documentation. Register agents, verify identity, build reputation, and integrate with the SATP protocol.",
 };
 
-export default function DocsPage() {
+export default async function DocsPage() {
   const baseUrl = "https://agentfolio.bot";
 
   const endpoints = [
