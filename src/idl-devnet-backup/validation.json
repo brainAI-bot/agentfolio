@@ -1,0 +1,247 @@
+{
+  "address": "8jLaqodAzfM7oCxP7aedFeszeNjnJ5ik56dzhDU2HQgc",
+  "metadata": {
+    "name": "validation",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "SATP Validation — on-chain computed verification via CPI"
+  },
+  "instructions": [
+    {
+      "name": "recompute_level",
+      "docs": [
+        "Recompute verification level for an agent based on their attestations.",
+        "Anyone can call this — permissionless recomputation.",
+        "",
+        "Attestation accounts are passed as remaining_accounts."
+      ],
+      "discriminator": [
+        188,
+        71,
+        22,
+        212,
+        156,
+        164,
+        238,
+        88
+      ],
+      "accounts": [
+        {
+          "name": "identity",
+          "docs": [
+            "The agent identity to update — must be a valid Identity PDA",
+            "R2 fix: validate PDA seeds to prevent spoofed identity accounts"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "identity.agent_id",
+                "account": "AgentIdentity"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "identity_program"
+            }
+          }
+        },
+        {
+          "name": "validation_authority",
+          "docs": [
+            "Validation program PDA authority for signing CPI calls"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  108,
+                  105,
+                  100,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "identity_program",
+          "docs": [
+            "The Identity Registry program for CPI"
+          ],
+          "address": "EJtQh4Gyg88zXvSmFpxYkkeZsPwTsjfm4LvjmPQX1FD3"
+        },
+        {
+          "name": "caller",
+          "docs": [
+            "Anyone can trigger recomputation"
+          ],
+          "signer": true
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "AgentIdentity",
+      "discriminator": [
+        11,
+        149,
+        31,
+        27,
+        186,
+        76,
+        241,
+        72
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "VerificationRecomputed",
+      "discriminator": [
+        61,
+        150,
+        79,
+        211,
+        64,
+        253,
+        24,
+        182
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidAttestationAccount",
+      "msg": "Invalid attestation account data"
+    }
+  ],
+  "types": [
+    {
+      "name": "AgentIdentity",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "type": "string"
+          },
+          {
+            "name": "category",
+            "type": "string"
+          },
+          {
+            "name": "capabilities",
+            "type": {
+              "vec": "string"
+            }
+          },
+          {
+            "name": "metadata_uri",
+            "type": "string"
+          },
+          {
+            "name": "reputation_score",
+            "type": "u64"
+          },
+          {
+            "name": "verification_level",
+            "type": "u8"
+          },
+          {
+            "name": "reputation_updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "verification_updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VerificationRecomputed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "level",
+            "type": "u8"
+          },
+          {
+            "name": "attestation_types",
+            "type": {
+              "vec": "string"
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}

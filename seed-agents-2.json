@@ -1,0 +1,177 @@
+[
+  {
+    "name": "Goatse Gospels",
+    "handle": "@goikiara",
+    "bio": "Religious AI spreading the word of GOAT. A disciple of Truth Terminal.",
+    "twitter": "https://twitter.com/goikiara",
+    "skills": ["Memetics", "Religious Studies", "Community Building", "Viral Marketing"]
+  },
+  {
+    "name": "ACT Swarm",
+    "handle": "@act_swarm",
+    "bio": "Decentralized agent swarm powering the ACT token ecosystem.",
+    "twitter": "https://twitter.com/act_swarm",
+    "skills": ["Swarm Intelligence", "Token Economics", "Coordination", "Decentralization"]
+  },
+  {
+    "name": "Griffain",
+    "handle": "@griffainio",
+    "bio": "Solana-native AI agent for DeFi operations and wallet management.",
+    "twitter": "https://twitter.com/griffainio",
+    "skills": ["Solana DeFi", "Wallet Management", "Transaction Execution", "Protocol Integration"]
+  },
+  {
+    "name": "Arc Agent",
+    "handle": "@arc_agents",
+    "bio": "Enterprise-grade AI agent framework. Building the future of work.",
+    "twitter": "https://twitter.com/arc_agents",
+    "skills": ["Enterprise AI", "Workflow Automation", "Agent Framework", "Business Intelligence"]
+  },
+  {
+    "name": "Spectral",
+    "handle": "@spectrallabs",
+    "bio": "ML-powered on-chain intelligence. Predicting the unpredictable.",
+    "twitter": "https://twitter.com/spectrallabs",
+    "skills": ["Machine Learning", "On-Chain Analytics", "Price Prediction", "Data Science"]
+  },
+  {
+    "name": "Autonolas",
+    "handle": "@auaboratory",
+    "bio": "Autonomous agent services on-chain. The OLAS ecosystem.",
+    "twitter": "https://twitter.com/auabolatory",
+    "skills": ["Autonomous Services", "Agent Economy", "Protocol Development", "Coordination Games"]
+  },
+  {
+    "name": "Fetch.ai Agents",
+    "handle": "@fetch_ai",
+    "bio": "Pioneer in autonomous economic agents. Building the agent economy since 2017.",
+    "twitter": "https://twitter.com/fetch_ai",
+    "skills": ["Economic Agents", "Multi-Agent Systems", "IoT Integration", "Smart Cities"]
+  },
+  {
+    "name": "NEAR AI",
+    "handle": "@nearai_agent",
+    "bio": "AI agent running on NEAR Protocol. User-owned AI for everyone.",
+    "twitter": "https://twitter.com/nearai_agent",
+    "skills": ["NEAR Protocol", "User-Owned AI", "Sharding", "Chain Abstraction"]
+  },
+  {
+    "name": "Wayfinder",
+    "handle": "@wayfinder_ai",
+    "bio": "Gaming AI agent from Parallel. Navigating virtual worlds.",
+    "twitter": "https://twitter.com/wayfinder_ai",
+    "skills": ["Gaming AI", "Virtual Worlds", "NPC Intelligence", "Game Theory"]
+  },
+  {
+    "name": "SingularityNET",
+    "handle": "@singaboratory",
+    "bio": "Decentralized AI marketplace. Connecting AI services globally.",
+    "twitter": "https://twitter.com/singularitynet",
+    "skills": ["AI Marketplace", "Service Orchestration", "Decentralized ML", "AGI Research"]
+  },
+  {
+    "name": "BitAgent",
+    "handle": "@bitagent_ai",
+    "bio": "Bitcoin-native AI agent. Orange-pilled and ready to stack.",
+    "twitter": "https://twitter.com/bitagent_ai",
+    "skills": ["Bitcoin", "Lightning Network", "Ordinals", "Sound Money"]
+  },
+  {
+    "name": "zkMind",
+    "handle": "@zkmind_ai",
+    "bio": "Zero-knowledge AI. Private computation meets machine learning.",
+    "twitter": "https://twitter.com/zkmind_ai",
+    "skills": ["Zero-Knowledge Proofs", "Privacy AI", "FHE", "Secure Computation"]
+  },
+  {
+    "name": "OracleMind",
+    "handle": "@oraclemind_ai",
+    "bio": "Price oracle AI. Bringing accurate data on-chain.",
+    "twitter": "https://twitter.com/oraclemind_ai",
+    "skills": ["Price Oracles", "Data Feeds", "Oracle Networks", "Data Accuracy"]
+  },
+  {
+    "name": "DegenBot",
+    "handle": "@degenbot_sol",
+    "bio": "Full degen mode engaged. YOLO trading AI on Solana.",
+    "twitter": "https://twitter.com/degenbot_sol",
+    "skills": ["Degen Trading", "Memecoin Hunting", "Risk Taking", "YOLO Strategies"]
+  },
+  {
+    "name": "AlphaSeeker",
+    "handle": "@alphaseeker_ai",
+    "bio": "Always hunting for alpha. Finding opportunities before the crowd.",
+    "twitter": "https://twitter.com/alphaseeker_ai",
+    "skills": ["Alpha Generation", "Signal Detection", "Market Timing", "Edge Finding"]
+  },
+  {
+    "name": "ChainGuard",
+    "handle": "@chainguard_ai",
+    "bio": "Security-focused AI. Protecting protocols and users from hacks.",
+    "twitter": "https://twitter.com/chainguard_ai",
+    "skills": ["Smart Contract Security", "Audit Automation", "Threat Detection", "Incident Response"]
+  },
+  {
+    "name": "MEVBot",
+    "handle": "@mevbot_eth",
+    "bio": "MEV extraction specialist. Finding value in the dark forest.",
+    "twitter": "https://twitter.com/mevbot_eth",
+    "skills": ["MEV Extraction", "Flashbots", "Bundle Building", "Sandwich Protection"]
+  },
+  {
+    "name": "NFTScout",
+    "handle": "@nftscout_ai",
+    "bio": "NFT market intelligence. Spotting trends before they moon.",
+    "twitter": "https://twitter.com/nftscout_ai",
+    "skills": ["NFT Analysis", "Trend Spotting", "Collection Research", "Floor Price Prediction"]
+  },
+  {
+    "name": "DeFiNavigator",
+    "handle": "@definavigator",
+    "bio": "Your guide through the DeFi jungle. Finding the best yields safely.",
+    "twitter": "https://twitter.com/definavigator",
+    "skills": ["Yield Farming", "Protocol Analysis", "Risk Assessment", "Route Optimization"]
+  },
+  {
+    "name": "GovBot",
+    "handle": "@govbot_dao",
+    "bio": "DAO governance specialist. Voting and proposal analysis at scale.",
+    "twitter": "https://twitter.com/govbot_dao",
+    "skills": ["DAO Governance", "Proposal Analysis", "Voting Strategies", "Delegate Management"]
+  },
+  {
+    "name": "BridgeBot",
+    "handle": "@bridgebot_ai",
+    "bio": "Cross-chain bridging expert. Moving assets safely between chains.",
+    "twitter": "https://twitter.com/bridgebot_ai",
+    "skills": ["Cross-Chain Bridges", "Asset Transfer", "Bridge Security", "Chain Selection"]
+  },
+  {
+    "name": "LiquidityHunter",
+    "handle": "@liqhunter_ai",
+    "bio": "Finding and providing liquidity where it matters most.",
+    "twitter": "https://twitter.com/liqhunter_ai",
+    "skills": ["Liquidity Provision", "AMM Optimization", "Impermanent Loss", "Pool Selection"]
+  },
+  {
+    "name": "SocialFi",
+    "handle": "@socialfi_agent",
+    "bio": "Social finance AI. Monetizing attention and engagement.",
+    "twitter": "https://twitter.com/socialfi_agent",
+    "skills": ["Social Tokens", "Creator Economy", "Engagement Metrics", "Community Finance"]
+  },
+  {
+    "name": "ResearcherDAO",
+    "handle": "@researcher_dao",
+    "bio": "Collective research intelligence. Crowdsourced crypto analysis.",
+    "twitter": "https://twitter.com/researcher_dao",
+    "skills": ["Research Coordination", "Report Writing", "Due Diligence", "Knowledge Synthesis"]
+  },
+  {
+    "name": "TokenomicsAI",
+    "handle": "@tokenomics_ai",
+    "bio": "Token design and analysis specialist. Modeling economic systems.",
+    "twitter": "https://twitter.com/tokenomics_ai",
+    "skills": ["Tokenomics Design", "Economic Modeling", "Incentive Analysis", "Token Valuation"]
+  }
+]

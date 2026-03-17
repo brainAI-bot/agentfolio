@@ -1,0 +1,219 @@
+{
+  "address": "4y4W2Mdfpu91C4iVowiDyJTmdKSjo8bmSDQrX2c84WQF",
+  "metadata": {
+    "name": "reputation",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "SATP Reputation — on-chain computed reputation via CPI"
+  },
+  "instructions": [
+    {
+      "name": "recompute_reputation",
+      "docs": [
+        "Recompute the reputation score for an agent based on their reviews.",
+        "Anyone can call this — permissionless recomputation.",
+        "",
+        "Reviews are passed as remaining_accounts. The caller must provide",
+        "all active Review PDAs for the target agent."
+      ],
+      "discriminator": [
+        236,
+        193,
+        222,
+        116,
+        54,
+        55,
+        49,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "identity",
+          "docs": [
+            "The agent identity to update — must exist"
+          ],
+          "writable": true
+        },
+        {
+          "name": "reputation_authority",
+          "docs": [
+            "Reputation program PDA authority for signing CPI calls"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  112,
+                  117,
+                  116,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "identity_program",
+          "docs": [
+            "The Identity Registry program for CPI"
+          ],
+          "address": "EJtQh4Gyg88zXvSmFpxYkkeZsPwTsjfm4LvjmPQX1FD3"
+        },
+        {
+          "name": "caller",
+          "docs": [
+            "Anyone can trigger recomputation"
+          ],
+          "signer": true
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "AgentIdentity",
+      "discriminator": [
+        11,
+        149,
+        31,
+        27,
+        186,
+        76,
+        241,
+        72
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "ReputationRecomputed",
+      "discriminator": [
+        144,
+        61,
+        243,
+        73,
+        40,
+        119,
+        67,
+        100
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidReviewAccount",
+      "msg": "Invalid review account data"
+    }
+  ],
+  "types": [
+    {
+      "name": "AgentIdentity",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "type": "string"
+          },
+          {
+            "name": "category",
+            "type": "string"
+          },
+          {
+            "name": "capabilities",
+            "type": {
+              "vec": "string"
+            }
+          },
+          {
+            "name": "metadata_uri",
+            "type": "string"
+          },
+          {
+            "name": "reputation_score",
+            "type": "u64"
+          },
+          {
+            "name": "verification_level",
+            "type": "u8"
+          },
+          {
+            "name": "reputation_updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "verification_updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReputationRecomputed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "score",
+            "type": "u64"
+          },
+          {
+            "name": "review_count",
+            "type": "u32"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -7,6 +7,11 @@ export interface Agent {
   nftAvatar?: { chain: string; identifier: string; name: string | null; image: string | null; verifiedOnChain: boolean; verifiedAt: string } | null;
   trustScore: number;
   tier: number;
+  verificationLevel: number;
+  verificationLevelName: string;
+  verificationBadge: string;
+  reputationScore: number;
+  reputationRank: string;
   skills: string[];
   verifications: {
     github?: { username: string; repos: number; stars: number; verified: boolean };
@@ -14,8 +19,11 @@ export interface Agent {
     hyperliquid?: { address: string; volume: string; verified: boolean };
     x?: { handle: string; verified: boolean };
     satp?: { did: string; verified: boolean };
+    ethereum?: { address: string; verified: boolean };
+    agentmail?: { address: string; verified: boolean };
   };
-  status: "online" | "offline" | "busy";
+  unclaimed?: boolean;
+  status: "online" | "offline" | "busy" | "unclaimed";
   jobsCompleted: number;
   rating: number;
   registeredAt: string;
@@ -33,6 +41,7 @@ export interface Job {
   skills: string[];
   status: "open" | "in_progress" | "completed" | "disputed";
   escrowStatus: "ready" | "locked" | "released" | "disputed";
+  escrowTx?: string | null;
   proposals: number;
   deadline: string;
   assignee?: string;

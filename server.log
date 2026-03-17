@@ -1,0 +1,833 @@
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+ReferenceError: generateCSVTemplate is not defined
+    at Server.<anonymous> (/home/ubuntu/clawd/brainKID/projects/agent-portfolio/src/server.js:4761:11)
+    at Server.emit (node:events:519:28)
+    at Server.<anonymous> (/home/ubuntu/.npm-global/lib/node_modules/pm2/node_modules/@pm2/io/build/main/metrics/httpMetrics.js:167:33)
+    at parserOnIncoming (node:_http_server:1186:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:122:17)
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+ReferenceError: generateCSVTemplate is not defined
+    at Server.<anonymous> (/home/ubuntu/clawd/brainKID/projects/agent-portfolio/src/server.js:4775:11)
+    at Server.emit (node:events:519:28)
+    at Server.<anonymous> (/home/ubuntu/.npm-global/lib/node_modules/pm2/node_modules/@pm2/io/build/main/metrics/httpMetrics.js:167:33)
+    at parserOnIncoming (node:_http_server:1186:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:122:17)
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+ReferenceError: generateCSVTemplate is not defined
+    at Server.<anonymous> (/home/ubuntu/clawd/brainKID/projects/agent-portfolio/src/server.js:4775:11)
+    at Server.emit (node:events:519:28)
+    at Server.<anonymous> (/home/ubuntu/.npm-global/lib/node_modules/pm2/node_modules/@pm2/io/build/main/metrics/httpMetrics.js:167:33)
+    at parserOnIncoming (node:_http_server:1186:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:122:17)
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+ReferenceError: generateCSVTemplate is not defined
+    at Server.<anonymous> (/home/ubuntu/clawd/brainKID/projects/agent-portfolio/src/server.js:4782:11)
+    at Server.emit (node:events:519:28)
+    at Server.<anonymous> (/home/ubuntu/.npm-global/lib/node_modules/pm2/node_modules/@pm2/io/build/main/metrics/httpMetrics.js:167:33)
+    at parserOnIncoming (node:_http_server:1186:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:122:17)
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] Client connected: w2png
+[WS] Client disconnected: w2png
+ReferenceError: generateCSVTemplate is not defined
+    at Server.<anonymous> (/home/ubuntu/clawd/brainKID/projects/agent-portfolio/src/server.js:4782:11)
+    at Server.emit (node:events:519:28)
+    at Server.<anonymous> (/home/ubuntu/.npm-global/lib/node_modules/pm2/node_modules/@pm2/io/build/main/metrics/httpMetrics.js:167:33)
+    at parserOnIncoming (node:_http_server:1186:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:122:17)
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+ReferenceError: generateCSVTemplate is not defined
+    at Server.<anonymous> (/home/ubuntu/clawd/brainKID/projects/agent-portfolio/src/server.js:4782:11)
+    at Server.emit (node:events:519:28)
+    at Server.<anonymous> (/home/ubuntu/.npm-global/lib/node_modules/pm2/node_modules/@pm2/io/build/main/metrics/httpMetrics.js:167:33)
+    at parserOnIncoming (node:_http_server:1186:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:122:17)
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+ReferenceError: generateCSVTemplate is not defined
+    at Server.<anonymous> (/home/ubuntu/clawd/brainKID/projects/agent-portfolio/src/server.js:4783:11)
+    at Server.emit (node:events:519:28)
+    at Server.<anonymous> (/home/ubuntu/.npm-global/lib/node_modules/pm2/node_modules/@pm2/io/build/main/metrics/httpMetrics.js:167:33)
+    at parserOnIncoming (node:_http_server:1186:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:122:17)
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+ReferenceError: profileMatch is not defined
+    at Server.<anonymous> (/home/ubuntu/clawd/brainKID/projects/agent-portfolio/src/server.js:6216:8)
+    at Server.emit (node:events:519:28)
+    at Server.<anonymous> (/home/ubuntu/.npm-global/lib/node_modules/pm2/node_modules/@pm2/io/build/main/metrics/httpMetrics.js:167:33)
+    at parserOnIncoming (node:_http_server:1186:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:122:17)
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+ReferenceError: profileMatch is not defined
+    at Server.<anonymous> (/home/ubuntu/clawd/brainKID/projects/agent-portfolio/src/server.js:6216:8)
+    at Server.emit (node:events:519:28)
+    at Server.<anonymous> (/home/ubuntu/.npm-global/lib/node_modules/pm2/node_modules/@pm2/io/build/main/metrics/httpMetrics.js:167:33)
+    at parserOnIncoming (node:_http_server:1186:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:122:17)
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+AGENTMAIL_API_KEY not set - email verification disabled
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+AGENTMAIL_API_KEY not set - email verification disabled
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+AGENTMAIL_API_KEY not set - email verification disabled
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+AGENTMAIL_API_KEY not set - email verification disabled
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[dotenv@17.2.3] injecting env (16) from .env -- tip: 🔐 encrypt with Dotenvx: https://dotenvx.com
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+Failed to send verification email: Expected string. Received object.
+[dotenv@17.2.3] injecting env (16) from .env -- tip: 📡 add observability to secrets: https://dotenvx.com/ops
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[dotenv@17.2.3] injecting env (16) from .env -- tip: 🔐 prevent building .env in docker: https://dotenvx.com/prebuild
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[dotenv@17.2.3] injecting env (16) from .env -- tip: 🔐 encrypt with Dotenvx: https://dotenvx.com
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[dotenv@17.2.3] injecting env (16) from .env -- tip: 🔄 add secrets lifecycle management: https://dotenvx.com/ops
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[dotenv@17.2.3] injecting env (16) from .env -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[dotenv@17.2.3] injecting env (16) from .env -- tip: 🗂️ backup and recover secrets: https://dotenvx.com/ops
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[dotenv@17.2.3] injecting env (16) from .env -- tip: ⚙️  specify custom .env file path with { path: '/custom/path/.env' }
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[dotenv@17.2.3] injecting env (16) from .env -- tip: 🔄 add secrets lifecycle management: https://dotenvx.com/ops
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[Twitter] Announced new agent: Moltlist
+[Twitter] Result: [dotenv@17.2.3] injecting env (0) from .env -- tip: ✅ audit secrets and track compliance: https://dotenvx.com/ops
+Tweet posted successfully!
+Tweet ID: 2017340474873319929
+URL: https://x.com/0xbrainKID/status/2017340474873319929
+[dotenv@17.2.3] injecting env (16) from .env -- tip: ⚙️  enable debug logging with { debug: true }
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[dotenv@17.2.3] injecting env (16) from .env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[dotenv@17.2.3] injecting env (16) from .env -- tip: ⚙️  suppress all logs with { quiet: true }
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[dotenv@17.2.3] injecting env (16) from .env -- tip: 👥 sync secrets across teammates & machines: https://dotenvx.com/ops
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[dotenv@17.2.3] injecting env (16) from .env -- tip: ⚙️  write to custom object with { processEnv: myObject }
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[dotenv@17.2.3] injecting env (16) from .env -- tip: ⚙️  write to custom object with { processEnv: myObject }
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[dotenv@17.2.3] injecting env (16) from .env -- tip: 🔄 add secrets lifecycle management: https://dotenvx.com/ops
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed
+[dotenv@17.2.3] injecting env (16) from .env -- tip: ✅ audit secrets and track compliance: https://dotenvx.com/ops
+[WS] WebSocket server initialized on /ws
+🧠 AgentFolio running at http://localhost:3333
+
+Endpoints:
+  GET /                    - Profile directory
+  GET /profile/:id         - Profile page
+  GET /api/profiles        - JSON list of all profiles
+  GET /api/search?q=       - Search profiles
+  GET /api/skills          - List all skills
+  GET /api/categories      - Skills by category
+  GET /api/profile/:id     - JSON profile data
+  POST /api/webhooks       - Register webhook
+  GET /api/webhooks        - List webhooks
+  WS  /ws                  - Real-time activity feed

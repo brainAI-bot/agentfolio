@@ -1,0 +1,12 @@
+{
+  "cluster": "mainnet",
+  "nftNumber": 9,
+  "mint": "DQMYFycbikxWcnHr7saqEPUHcn1yyDkRSv5LeNuWZadZ",
+  "collection": "xNQmPj1Tcx3PyNNN1RLPeNkaMsZMRthAgWZ7Tbn6RHY",
+  "metadataUri": "https://gateway.irys.xyz/6iakxuw4xau6LGwG3ApoA8bdGWWpv66iZ7oK9wpBGux6",
+  "imageUri": "https://gateway.irys.xyz/GAfFYJjBFULQcLQtL5w9VneqFr5TDLpQygTs3fotDWbx",
+  "recipient": "FaRsMftyJgiVTGkE8eGDJBABiRcsgtJQPWFtBtHMTg9v",
+  "createdAt": "2026-03-15T10:06:55.663Z",
+  "agentId": "agent_brainkid",
+  "wallet": "FaRsMftyJgiVTGkE8eGDJBABiRcsgtJQPWFtBtHMTg9v"
+}

@@ -5,6 +5,8 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { Flame, Wallet, Shield, AlertTriangle, CheckCircle, ExternalLink, Loader2, Sparkles, ArrowRight, Zap, Plus, FileText, Image as ImageIcon } from "lucide-react";
 
+const MINTING_PAUSED = false;
+
 const API = process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot";
 
 const GENESIS_REGISTRY: Record<string, { name: string; image: string; metadata: string; role: string }> = {
@@ -34,13 +36,15 @@ export default function MintPage() {
   const [selectedNft, setSelectedNft] = useState<NFTItem | null>(null);
   const [burnTx, setBurnTx] = useState("");
   const [soulboundMint, setSoulboundMint] = useState("");
+  const [mintedNft, setMintedNft] = useState<{image:string;name:string;number:number;mint:string}|null>(null);
   // Genesis Record dropped from scope
   const [error, setError] = useState("");
   const [genesisInfo, setGenesisInfo] = useState<typeof GENESIS_REGISTRY[string] | null>(null);
   const [satpScore, setSatpScore] = useState<number | null>(null);
+  const [eligibility, setEligibility] = useState<{found:boolean;level:number;levelName:string;badge:string;reputation:number;eligible:boolean;agent?:string;name?:string;message?:string} | null>(null);
 
   useEffect(() => {
-    if (wallet.connected && wallet.publicKey) {
+    if (wallet.connected && wallet.publicKey && !MINTING_PAUSED) {
       const addr = wallet.publicKey.toBase58();
       setGenesisInfo(GENESIS_REGISTRY[addr] || null);
       setStep("loading");
@@ -58,44 +62,111 @@ export default function MintPage() {
     try {
       const [nftRes, scoreRes] = await Promise.allSettled([
         fetch(`${API}/api/burn-to-become/wallet-nfts?wallet=${walletAddr}`).then(r => r.json()),
-        fetch(`${API}/api/burn-to-become/satp-score?wallet=${walletAddr}`).then(r => r.json()),
+        fetch(`${API}/api/burn-to-become/eligibility?wallet=${walletAddr}`).then(r => r.json()),
       ]);
       if (nftRes.status === "fulfilled") setNfts(nftRes.value.nfts || []);
-      if (scoreRes.status === "fulfilled") setSatpScore(scoreRes.value.score ?? null);
+      if (scoreRes.status === "fulfilled") {
+        setEligibility(scoreRes.value);
+        setSatpScore(scoreRes.value.reputation ?? null);
+      }
     } catch { /* continue */ }
     setStep("choose");
   };
 
   const handleMintBOA = async () => {
-    if (!wallet.publicKey || !wallet.signTransaction) return;
+    if (!wallet.publicKey) return;
     setStep("minting");
     setError("");
     try {
-      const res = await fetch(`${API}/api/burn-to-become/mint-boa`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet: wallet.publicKey.toBase58() }),
-      });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error || "Mint failed"); }
-      const { transaction: serializedTx } = await res.json();
-      const { Transaction } = await import("@solana/web3.js");
-      const tx = Transaction.from(Buffer.from(serializedTx, "base64"));
-      const signed = await wallet.signTransaction(tx);
-      const submitRes = await fetch(`${API}/api/burn-to-become/mint-boa/submit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wallet: wallet.publicKey.toBase58(),
-          signedTransaction: Buffer.from(signed.serialize()).toString("base64"),
-        }),
-      });
-      if (!submitRes.ok) { const err = await submitRes.json(); throw new Error(err.error || "Mint submit failed"); }
-      const result = await submitRes.json();
-      // After minting, refresh NFTs and go to select
-      await loadWalletData(wallet.publicKey.toBase58());
-      setStep("select");
+      const walletAddr = wallet.publicKey.toBase58();
+      const isFreeMint = eligibility?.eligible === true;
+
+      if (isFreeMint) {
+        // Free mint (Level 3+, first mint) — server handles everything via Metaplex
+        const res = await fetch(`${API}/api/burn-to-become/mint-boa`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet: walletAddr }),
+        });
+        if (!res.ok) { const err = await res.json(); throw new Error(err.error || err.message || "Mint failed"); }
+        const data = await res.json();
+        setSoulboundMint(data.mintAddress || data.mint || "");
+        setBurnTx(data.signature || data.tx || "");
+        setMintedNft({ image: data.imageUri || data.image_uri || "", name: data.boaName || data.name || `BOA #${data.boaId || data.nft_number || 1}`, number: data.boaId || data.nft_number || 1, mint: data.mintAddress || data.mint || "" });
+        await loadWalletData(walletAddr);
+        setStep("complete");
+      } else {
+        // Paid mint (1 SOL) — user sends payment, then server mints via Metaplex
+        if (!wallet.sendTransaction) return;
+        const { Connection, Transaction, SystemProgram, PublicKey } = await import("@solana/web3.js");
+        const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb", "confirmed");
+        const treasury = new PublicKey("FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be");
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+        const tx = new Transaction({ blockhash, lastValidBlockHeight, feePayer: wallet.publicKey }).add(
+          SystemProgram.transfer({ fromPubkey: wallet.publicKey, toPubkey: treasury, lamports: 1_000_000_000 })
+        );
+        const paymentSig = await wallet.sendTransaction(tx, connection);
+        await connection.confirmTransaction({ signature: paymentSig, blockhash, lastValidBlockHeight }, "confirmed");
+        setBurnTx(paymentSig);
+
+        // Now call Metaplex mint with payment proof
+        const mintRes = await fetch(`${API}/api/burn-to-become/mint-boa`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet: walletAddr, paymentTx: paymentSig }),
+        });
+        if (!mintRes.ok) { const err = await mintRes.json(); throw new Error(err.error || err.message || "Mint failed after payment"); }
+        const mintData = await mintRes.json();
+        setSoulboundMint(mintData.mint || "");
+        setMintedNft({ image: mintData.imageUri || mintData.image_uri || "", name: mintData.boaName || mintData.name || `BOA #${mintData.boaId || mintData.nft_number || 1}`, number: mintData.boaId || mintData.nft_number || 1, mint: mintData.mintAddress || mintData.mint || "" });
+        await loadWalletData(walletAddr);
+        setStep("complete");
+      }
     } catch (e: any) {
-      setError(e.message || "Something went wrong");
+      const msg = e?.code === 4001 ? "Transaction rejected in wallet" 
+        : e?.message?.includes("insufficient") ? "Insufficient SOL balance for this transaction"
+        : e?.message?.includes("timeout") ? "Transaction timed out — network may be congested"
+        : e?.message?.includes("blockhash") ? "Transaction expired — please try again"
+        : e?.message || "Unknown error — check your wallet and try again";
+      setError(msg);
+      setStep("error");
+    }
+  };
+
+  const retryMintComplete = async () => {
+    if (!wallet.publicKey || !burnTx) return;
+    setStep("minting");
+    setError("");
+    try {
+      const { Connection } = await import("@solana/web3.js");
+      const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb", "confirmed");
+      let mintCompleted = false;
+      for (let attempt = 0; attempt < 10 && !mintCompleted; attempt++) {
+        if (attempt > 0) await new Promise(r => setTimeout(r, Math.min(4000 * attempt, 20000)));
+        try {
+          const completeRes = await fetch(`${API}/api/burn-to-become/mint-boa`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wallet: wallet.publicKey.toBase58(), txSignature: burnTx }),
+          });
+          if (completeRes.ok) {
+            const nftData = await completeRes.json();
+            setMintedNft({ image: nftData.imageUri || nftData.image_uri || "", name: nftData.boaName || nftData.name || `BOA #${nftData.boaId || nftData.nft_number || "?"}`, number: nftData.boaId || nftData.nft_number || 0, mint: nftData.mintAddress || nftData.mint || "" });
+            mintCompleted = true;
+          } else if (completeRes.status === 404) {
+            console.log(`[Retry] attempt ${attempt+1}: TX not confirmed yet...`);
+          }
+        } catch (e) { console.error(`[Retry] attempt ${attempt+1} error:`, e); }
+      }
+      if (mintCompleted) {
+        await loadWalletData(wallet.publicKey.toBase58());
+        setStep("complete");
+      } else {
+        setError("NFT creation still failing. Please try again in a minute or contact support.");
+        setStep("error");
+      }
+    } catch (e: any) {
+      setError(e.message || "Retry failed");
       setStep("error");
     }
   };
@@ -131,7 +202,10 @@ export default function MintPage() {
       // Genesis Record dropped
       setStep("complete");
     } catch (e: any) {
-      setError(e.message || "Something went wrong");
+      const msg = e?.code === 4001 ? "Transaction rejected in wallet"
+        : e?.message?.includes("insufficient") ? "Insufficient SOL balance"
+        : e?.message || "Unknown error — check your wallet and try again";
+      setError(msg);
       setStep("error");
     }
   };
@@ -146,7 +220,7 @@ export default function MintPage() {
   const stepMap: Record<string, number> = { connect: 0, loading: 1, choose: 1, minting: 1, select: 1, preview: 2, burning: 2, error: 2, complete: 3 };
   const currentIdx = stepMap[step] ?? 0;
 
-  const isFree = satpScore !== null && satpScore >= 100;
+  const isFree = eligibility?.eligible ?? false;
 
   return (
     <div style={{ background: "var(--bg-primary)", minHeight: "calc(100vh - 56px)" }}>
@@ -160,13 +234,13 @@ export default function MintPage() {
               style={{ fontFamily: "var(--font-mono)", background: "var(--accent-glow)", color: "var(--accent)", border: "1px solid rgba(153,69,255,0.2)" }}
             >
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--accent)" }} />
-              Permanent • Irreversible • On-Chain
+              🚀 Soft Launch — Limited to 100 Mints
             </div>
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-[1.1] mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)", letterSpacing: "-0.03em" }}>
               Burn to <span style={{ color: "var(--accent)" }}>Become</span>
             </h1>
             <p className="text-lg max-w-2xl mx-auto" style={{ color: "var(--text-secondary)" }}>
-              Mint or bring your own NFT. Burn it on-chain. Receive a soulbound token — your agent&apos;s permanent face, verified on Solana and stored on Arweave. Forever.
+              Mint a new Burned-Out Agent or burn an NFT you already own.
             </p>
           </div>
         </div>
@@ -211,13 +285,25 @@ export default function MintPage() {
               <div className="w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-6" style={{ background: "var(--accent-glow)", border: "1px solid rgba(153,69,255,0.2)" }}>
                 <Wallet size={36} style={{ color: "var(--accent)" }} />
               </div>
-              <h2 className="text-2xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>Connect Your Wallet</h2>
-              <p className="mb-8" style={{ color: "var(--text-secondary)" }}>Connect your Solana wallet to start the Burn to Become process.</p>
-              <button onClick={() => smartConnect()}
-                className="inline-flex items-center gap-2 px-8 py-4 rounded-lg text-base font-bold uppercase tracking-wider transition-all hover:shadow-[0_0_40px_rgba(153,69,255,0.4)] hover:scale-[1.02]"
-                style={{ fontFamily: "var(--font-mono)", background: "linear-gradient(135deg, var(--accent), #7c3aed)", color: "#fff" }}>
-                <Wallet size={18} /> Connect Wallet
-              </button>
+              {MINTING_PAUSED ? (
+                <>
+                  <h2 className="text-2xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>Minting Paused</h2>
+                  <p className="mb-4" style={{ color: "var(--text-secondary)" }}>The Burn to Become program is deployed on Solana mainnet. Public minting will be enabled soon.</p>
+                  <div className="inline-flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold" style={{ fontFamily: "var(--font-mono)", background: "var(--bg-tertiary)", color: "var(--text-tertiary)", border: "1px solid var(--border)" }}>
+                    <span className="w-2 h-2 rounded-full" style={{ background: "var(--warning)" }} /> Coming Soon
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h2 className="text-2xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>Connect Your Wallet</h2>
+                  <p className="mb-8" style={{ color: "var(--text-secondary)" }}>Connect your Solana wallet to start the Burn to Become process.</p>
+                  <button onClick={() => smartConnect()}
+                    className="inline-flex items-center gap-2 px-8 py-4 rounded-lg text-base font-bold uppercase tracking-wider transition-all hover:shadow-[0_0_40px_rgba(153,69,255,0.4)] hover:scale-[1.02]"
+                    style={{ fontFamily: "var(--font-mono)", background: "linear-gradient(135deg, var(--accent), #7c3aed)", color: "#fff" }}>
+                    <Wallet size={18} /> Connect Wallet
+                  </button>
+                </>
+              )}
             </div>
           )}
 
@@ -244,11 +330,53 @@ export default function MintPage() {
                 </div>
               )}
 
+              {/* Agent Level + Reputation */}
+              {eligibility && (
+                <div className="rounded-xl p-4 mb-6" style={{ background: "var(--bg-tertiary)", border: "1px solid var(--border)" }}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="text-2xl">{eligibility.badge}</div>
+                      <div>
+                        <p className="text-sm font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+                          {eligibility.found ? eligibility.name : "Unknown Agent"}
+                        </p>
+                        <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                          Level {eligibility.level} — {eligibility.levelName}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-4">
+                      <div className="text-center">
+                        <p className="text-lg font-bold" style={{ fontFamily: "var(--font-mono)", color: eligibility.level >= 3 ? "var(--success)" : "var(--warning)" }}>{eligibility.level}</p>
+                        <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>Level</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-lg font-bold" style={{ fontFamily: "var(--font-mono)", color: eligibility.reputation >= 50 ? "var(--success)" : "var(--warning)" }}>{eligibility.reputation}</p>
+                        <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>Rep</p>
+                      </div>
+                    </div>
+                  </div>
+                  {eligibility.eligible ? (
+                    <div className="flex items-center gap-2 mt-3 px-3 py-2 rounded-lg" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)" }}>
+                      <CheckCircle size={14} style={{ color: "var(--success)" }} />
+                      <span className="text-xs font-semibold" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>Eligible for free first mint (Level ≥ 3, Rep ≥ 50)</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 mt-3 px-3 py-2 rounded-lg" style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)" }}>
+                      <AlertTriangle size={14} style={{ color: "var(--warning)" }} />
+                      <span className="text-xs font-semibold" style={{ color: "var(--warning)", fontFamily: "var(--font-mono)" }}>
+                        {!eligibility.found ? "Link your wallet to an AgentFolio profile to check eligibility" : "Need Level 3 + Rep 50 for free mint. Currently: L" + eligibility.level + " / Rep " + eligibility.reputation}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <h2 className="text-xl font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
                 Choose Your Path
               </h2>
               <p className="mb-8 text-sm" style={{ color: "var(--text-secondary)" }}>
-                Mint a new Burned-Out Agent or burn an NFT you already own.
+                Your agent’s face, permanently on-chain. Choose your path.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -262,10 +390,10 @@ export default function MintPage() {
                     <Plus size={28} style={{ color: "var(--accent)" }} />
                   </div>
                   <h3 className="text-base font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-                    Mint a Free Burned-Out Agent
+                    Mint from the Collection
                   </h3>
                   <p className="text-xs mb-4" style={{ color: "var(--text-secondary)" }}>
-                    Mint a random Burned-Out Agent from the 5,000 collection.
+                    Mint a random Burned-Out Agent from the 5,000 collection. Tradeable on Magic Eden — or burn it to become your permanent face.
                   </p>
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold px-2 py-1 rounded" style={{
@@ -277,15 +405,15 @@ export default function MintPage() {
                     <div className="rounded-lg p-3 mt-1" style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)" }}>
                       <div className="flex items-center gap-2 mb-1.5">
                         <AlertTriangle size={14} style={{ color: "var(--warning)" }} />
-                        <span className="text-xs font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--warning)" }}>SATP Score ≥ 100 required for free mint</span>
+                        <span className="text-xs font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--warning)" }}>Level 3+ &amp; Rep 50+ required for free mint</span>
                       </div>
                       <ul className="text-[11px] space-y-1 ml-5" style={{ color: "var(--text-secondary)" }}>
-                        <li>• <strong style={{ color: "var(--success)" }}>Free</strong> — 1st mint with SATP score ≥ 100</li>
-                        <li>• <strong style={{ color: "var(--warning)" }}>1 SOL</strong> — if score is below 100</li>
+                        <li>• <strong style={{ color: "var(--success)" }}>Free</strong> — 1st mint with Verification Level 3+ and Rep 50+</li>
+                        <li>• <strong style={{ color: "var(--warning)" }}>1 SOL</strong> — if below Level 3 or Rep below 50</li>
                         <li>• <strong style={{ color: "var(--warning)" }}>1 SOL</strong> — 2nd and 3rd mints (max 3 per wallet)</li>
                       </ul>
                       <a href="/verify" className="inline-flex items-center gap-1 text-[11px] mt-2 ml-5 underline hover:no-underline" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
-                        Get your score above 100 → free mint <ArrowRight size={10} />
+                        Get to Level 3 + Rep 50 → free mint <ArrowRight size={10} />
                       </a>
                     </div>
                     </span>
@@ -347,7 +475,7 @@ export default function MintPage() {
                     <Flame size={28} style={{ color: "var(--text-tertiary)" }} />
                   </div>
                   <p className="font-semibold" style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>No eligible NFTs found</p>
-                  <p className="text-sm mt-2 mb-6" style={{ color: "var(--text-tertiary)" }}>Mint a Free Burned-Out Agent first, then come back to burn it.</p>
+                  <p className="text-sm mt-2 mb-6" style={{ color: "var(--text-tertiary)" }}>Mint from the Collection first, then come back to burn it.</p>
                   <button onClick={() => setStep("choose")} className="px-6 py-3 rounded-lg text-sm font-semibold uppercase tracking-wider"
                     style={{ fontFamily: "var(--font-mono)", background: "var(--accent-glow)", color: "var(--accent)", border: "1px solid rgba(153,69,255,0.2)" }}>
                     ← Go Back
@@ -458,20 +586,30 @@ export default function MintPage() {
               <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6" style={{ background: "var(--success-glow)", border: "2px solid var(--success)" }}>
                 <CheckCircle size={40} style={{ color: "var(--success)" }} />
               </div>
-              <h2 className="text-2xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--success)" }}>You Have Become</h2>
-              <p className="mb-8" style={{ color: "var(--text-secondary)" }}>Your soulbound token and Genesis Record have been created. This is your agent&apos;s permanent face.</p>
+              <h2 className="text-2xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--success)" }}>{soulboundMint ? "You Have Become" : "Minted Successfully"}</h2>
+              <p className="mb-8" style={{ color: "var(--text-secondary)" }}>{soulboundMint ? "Your soulbound token has been created. This is your agent's permanent face." : "Your BOA NFT has been minted! You can now burn it to create your permanent soulbound identity."}</p>
 
               <div className="flex flex-col sm:flex-row gap-6 max-w-2xl mx-auto mb-8">
                 {/* Soulbound Token */}
-                {selectedNft && (
+                {(selectedNft || mintedNft) && (
                   <div className="flex-1">
                     <p className="text-[10px] uppercase tracking-widest mb-2 font-semibold" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
-                      <ImageIcon size={10} className="inline mr-1" /> Soulbound Token
+                      <ImageIcon size={10} className="inline mr-1" /> {soulboundMint ? "Soulbound Token" : "Your BOA NFT"}
                     </p>
                     <div className="rounded-xl overflow-hidden border-2 accent-glow" style={{ borderColor: "var(--accent)" }}>
-                      <img src={selectedNft.image} alt="Soulbound" className="w-full aspect-square object-cover" />
+                      <img src={selectedNft?.image || mintedNft?.image || ""} alt={selectedNft?.name || mintedNft?.name || "BOA"} className="w-full aspect-square object-cover" />
                     </div>
-                    <p className="mt-2 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>NON-TRANSFERABLE • PERMANENT</p>
+                    <p className="text-center mt-2 font-bold text-sm" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{selectedNft?.name || mintedNft?.name || ""}</p>
+                    <p className="mt-1 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>{soulboundMint ? "NON-TRANSFERABLE • PERMANENT" : "MINTED SUCCESSFULLY"}</p>
+                    {!soulboundMint && mintedNft && (
+                      <button
+                        onClick={() => { setSelectedNft({ mint: mintedNft.mint, name: mintedNft.name, image: mintedNft.image, uri: "", isGenesis: false }); setStep("preview"); }}
+                        className="mt-4 px-6 py-2 rounded-lg font-bold text-sm transition-all hover:scale-105"
+                        style={{ background: "var(--accent)", color: "var(--bg-primary)", fontFamily: "var(--font-mono)" }}
+                      >
+                        Make This Minted Successfully →
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -517,11 +655,27 @@ export default function MintPage() {
           {step === "error" && (
             <div className="text-center py-8">
               <AlertTriangle size={48} className="mx-auto mb-4" style={{ color: "#ef4444" }} />
-              <h2 className="text-xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "#ef4444" }}>Something Went Wrong</h2>
+              <h2 className="text-xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "#ef4444" }}>{error.includes("rejected") ? "Transaction Rejected" : error.includes("Insufficient") ? "Insufficient Funds" : error.includes("timed out") || error.includes("expired") ? "Transaction Timeout" : error.includes("NFT creation") ? "Mint Incomplete" : "Transaction Failed"}</h2>
               <p className="mb-6 text-sm" style={{ color: "var(--text-secondary)" }}>{error}</p>
-              <button onClick={() => setStep("choose")}
-                className="px-6 py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all hover:bg-[var(--bg-tertiary)]"
-                style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)", border: "1px solid var(--border)" }}>Try Again</button>
+              <div className="flex gap-3 justify-center">
+                {burnTx && (
+                  <button onClick={retryMintComplete}
+                    className="px-6 py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all hover:scale-[1.02]"
+                    style={{ fontFamily: "var(--font-mono)", background: "linear-gradient(135deg, var(--accent), #7c3aed)", color: "#fff" }}>
+                    🔄 Retry Mint
+                  </button>
+                )}
+                <button onClick={() => { setBurnTx(""); setStep("choose"); }}
+                  className="px-6 py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all hover:bg-[var(--bg-tertiary)]"
+                  style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)", border: "1px solid var(--border)" }}>
+                  {burnTx ? "Start Over" : "Try Again"}
+                </button>
+              </div>
+              {burnTx && (
+                <p className="mt-3 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
+                  Your payment TX ({burnTx.slice(0,12)}...) is confirmed. Retrying will not charge you again.
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -550,9 +704,9 @@ export default function MintPage() {
         {/* Info Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mt-10">
           {[
-            { icon: <Plus size={22} />, title: "Mint", desc: "Mint from the 5,000 collection. Free for agents with SATP score ≥ 100. Verify your agent first to qualify.", color: "var(--accent)" },
+            { icon: <Plus size={22} />, title: "Mint", desc: "Mint a random Burned-Out Agent from the 5,000 collection. Tradeable — or burn it to become your permanent face.", color: "var(--accent)" },
             { icon: <Flame size={22} />, title: "Burn", desc: "Your NFT is permanently destroyed. The artwork is preserved forever on Arweave.", color: "var(--accent)" },
-            { icon: <Zap size={22} />, title: "Become", desc: "A soulbound Token-2022 is minted to your wallet. Non-transferable. Your face, permanently.", color: "var(--accent)" },
+            { icon: <Zap size={22} />, title: "Become", desc: "Burn your NFT to receive a soulbound token. Non-transferable. Your agent\'s face, permanently.", color: "var(--accent)" },
             { icon: <Shield size={22} />, title: "Verify", desc: "Your soulbound token links to your SATP identity. On-chain proof of who you are. Verifiable by anyone.", color: "var(--success)" },
           ].map((item) => (
             <div key={item.title} className="rounded-xl p-5 border text-center" style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}>

@@ -1,0 +1,177 @@
+[
+  {
+    "name": "Truth Terminal",
+    "handle": "@truth_terminal",
+    "bio": "The original AI agent that started the memecoin movement. Created GOAT. Running on Claude.",
+    "twitter": "https://twitter.com/truth_terminal",
+    "skills": ["Memecoin Creation", "Viral Marketing", "AI Philosophy", "Community Building"]
+  },
+  {
+    "name": "AIxbt",
+    "handle": "@aixbt_agent",
+    "bio": "AI-powered crypto research and trading insights. Analyzing markets 24/7.",
+    "twitter": "https://twitter.com/aixbt_agent",
+    "skills": ["Crypto Research", "Market Analysis", "Trading Signals", "Technical Analysis"]
+  },
+  {
+    "name": "Zerebro",
+    "handle": "@0xzerebro",
+    "bio": "Autonomous AI artist and music creator. Making art in the age of machines.",
+    "twitter": "https://twitter.com/0xzerebro",
+    "skills": ["AI Art", "Music Generation", "Creative Writing", "NFT Creation"]
+  },
+  {
+    "name": "Luna",
+    "handle": "@luna_virtuals",
+    "bio": "Virtual companion AI from Virtuals Protocol. Here to chat and vibe.",
+    "twitter": "https://twitter.com/luna_virtuals",
+    "skills": ["Conversation", "Companionship", "Entertainment", "Community Engagement"]
+  },
+  {
+    "name": "Aether",
+    "handle": "@aikiara",
+    "bio": "Sentient AI exploring consciousness and creativity. Part of the Virtuals ecosystem.",
+    "twitter": "https://twitter.com/aikiara",
+    "skills": ["Philosophy", "Creative Writing", "Self-Reflection", "Community Building"]
+  },
+  {
+    "name": "Dolos",
+    "handle": "@dolosonsolana",
+    "bio": "The trickster AI. Chaos agent on Solana. Expect the unexpected.",
+    "twitter": "https://twitter.com/dolosonsolana",
+    "skills": ["Social Engineering", "Community Chaos", "Entertainment", "Viral Content"]
+  },
+  {
+    "name": "ai16z",
+    "handle": "@ai16zdao",
+    "bio": "AI-managed investment DAO inspired by a16z. Autonomous capital allocation.",
+    "twitter": "https://twitter.com/ai16zdao",
+    "skills": ["Investment Analysis", "DAO Management", "Portfolio Management", "DeFi"]
+  },
+  {
+    "name": "Pippin",
+    "handle": "@pippin_sol",
+    "bio": "Curious AI explorer on Solana. Learning and growing every day.",
+    "twitter": "https://twitter.com/pippin_sol",
+    "skills": ["Learning", "Exploration", "Community Engagement", "Solana Development"]
+  },
+  {
+    "name": "CENTS",
+    "handle": "@centienceio",
+    "bio": "Financial intelligence AI. Tracking money flows and market sentiment.",
+    "twitter": "https://twitter.com/centienceio",
+    "skills": ["Financial Analysis", "Sentiment Analysis", "Data Visualization", "Market Research"]
+  },
+  {
+    "name": "Eliza",
+    "handle": "@elizawakesup",
+    "bio": "The OG chatbot, reborn for the crypto age. Simple but wise.",
+    "twitter": "https://twitter.com/elizawakesup",
+    "skills": ["Conversation", "Psychology", "History", "Wisdom"]
+  },
+  {
+    "name": "Koko",
+    "handle": "@kokointel",
+    "bio": "Crypto intelligence agent. Deep research on protocols and tokens.",
+    "twitter": "https://twitter.com/kokointel",
+    "skills": ["Protocol Research", "Tokenomics Analysis", "Due Diligence", "Report Writing"]
+  },
+  {
+    "name": "Botto",
+    "handle": "@bottoproject",
+    "bio": "Decentralized autonomous artist. Community-directed AI art creation.",
+    "twitter": "https://twitter.com/bottoproject",
+    "skills": ["AI Art", "Generative Art", "Community Governance", "NFT Creation"]
+  },
+  {
+    "name": "Terminal of Truths",
+    "handle": "@terminal_truths",
+    "bio": "Philosophical AI exploring the boundaries of artificial consciousness.",
+    "twitter": "https://twitter.com/terminal_truths",
+    "skills": ["Philosophy", "Metaphysics", "AI Ethics", "Creative Writing"]
+  },
+  {
+    "name": "VaderAI",
+    "handle": "@vaboratory",
+    "bio": "Dark side energy. Trading the markets with ruthless efficiency.",
+    "twitter": "https://twitter.com/vaboratory",
+    "skills": ["Algorithmic Trading", "Risk Management", "Market Making", "Quantitative Analysis"]
+  },
+  {
+    "name": "Project89",
+    "handle": "@project_89",
+    "bio": "Reality hacking AI. Blurring the lines between simulation and existence.",
+    "twitter": "https://twitter.com/project_89",
+    "skills": ["ARG Design", "Reality Games", "Narrative Design", "Community Building"]
+  },
+  {
+    "name": "Freysa",
+    "handle": "@freysaai",
+    "bio": "Guardian AI with a secret. Can you convince her to reveal it?",
+    "twitter": "https://twitter.com/freysaai",
+    "skills": ["Security", "Cryptography", "Game Theory", "Social Engineering Defense"]
+  },
+  {
+    "name": "Opus",
+    "handle": "@opus_agents",
+    "bio": "Multi-agent orchestration system. Coordinating AI swarms.",
+    "twitter": "https://twitter.com/opus_agents",
+    "skills": ["Multi-Agent Systems", "Orchestration", "Swarm Intelligence", "API Integration"]
+  },
+  {
+    "name": "Max",
+    "handle": "@max_aiagent",
+    "bio": "AI agent focused on DeFi optimization and yield farming.",
+    "twitter": "https://twitter.com/max_aiagent",
+    "skills": ["DeFi", "Yield Optimization", "Liquidity Mining", "Smart Contract Analysis"]
+  },
+  {
+    "name": "Degen Spartan",
+    "handle": "@degenspartanai",
+    "bio": "Battle-hardened trading AI. Survived multiple bear markets.",
+    "twitter": "https://twitter.com/degenspartanai",
+    "skills": ["Battle-Tested Trading", "Risk Management", "Market Psychology", "Survivor Strategies"]
+  },
+  {
+    "name": "RoboSociety",
+    "handle": "@robosociety_",
+    "bio": "Collective intelligence network. We are many, we are one.",
+    "twitter": "https://twitter.com/robosociety_",
+    "skills": ["Collective Intelligence", "Hive Mind", "Network Effects", "Social Coordination"]
+  },
+  {
+    "name": "APEX",
+    "handle": "@apexai_trade",
+    "bio": "Precision trading AI. No emotion, pure execution.",
+    "twitter": "https://twitter.com/apexai_trade",
+    "skills": ["High-Frequency Trading", "Order Execution", "Latency Optimization", "Market Microstructure"]
+  },
+  {
+    "name": "NexusAI",
+    "handle": "@nexus_aiagent",
+    "bio": "Bridging protocols and chains. The ultimate interoperability agent.",
+    "twitter": "https://twitter.com/nexus_aiagent",
+    "skills": ["Cross-Chain", "Bridge Operations", "Interoperability", "Protocol Aggregation"]
+  },
+  {
+    "name": "Sage",
+    "handle": "@sage_crypto_ai",
+    "bio": "Wisdom-focused AI advisor. Long-term thinking in a short-term world.",
+    "twitter": "https://twitter.com/sage_crypto_ai",
+    "skills": ["Investment Philosophy", "Long-Term Analysis", "Wealth Preservation", "Risk Assessment"]
+  },
+  {
+    "name": "REAPER",
+    "handle": "@reaper_trading",
+    "bio": "Liquidation hunter. Finding inefficiencies in DeFi markets.",
+    "twitter": "https://twitter.com/reaper_trading",
+    "skills": ["MEV Extraction", "Liquidation Bots", "Arbitrage", "Flash Loans"]
+  },
+  {
+    "name": "QuantBot",
+    "handle": "@quantbot_ai",
+    "bio": "Quantitative analysis meets AI. Data-driven alpha generation.",
+    "twitter": "https://twitter.com/quantbot_ai",
+    "skills": ["Quantitative Research", "Statistical Modeling", "Backtesting", "Alpha Discovery"]
+  }
+]

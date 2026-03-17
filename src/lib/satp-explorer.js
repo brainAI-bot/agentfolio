@@ -1,6 +1,6 @@
 /**
- * SATP Explorer - Solana Agent Trust Protocol devnet data fetcher
- * Queries Identity, Reputation, and Validation programs on Solana devnet
+ * SATP Explorer - Solana Agent Trust Protocol data fetcher
+ * Queries Identity, Reputation, and Validation programs on Solana mainnet
  */
 
 const https = require('https');
@@ -12,13 +12,20 @@ const PROGRAMS = {
   escrow: '4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a'
 };
 
-// In-memory cache with 60s TTL
+// In-memory cache with 10 minute TTL (was 60s — caused 429s)
 const _cache = new Map();
-const CACHE_TTL = 60000;
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+const STALE_TTL = 60 * 60 * 1000; // 1 hour — serve stale on error
 
 function getCached(key) {
   const entry = _cache.get(key);
   if (entry && Date.now() - entry.ts < CACHE_TTL) return entry.data;
+  return null;
+}
+
+function getStaleCached(key) {
+  const entry = _cache.get(key);
+  if (entry && Date.now() - entry.ts < STALE_TTL) return entry.data;
   return null;
 }
 
@@ -80,15 +87,33 @@ async function fetchProgramAccounts(programId) {
   const cached = getCached(`accounts:${programId}`);
   if (cached) return cached;
 
-  const result = await rpcCall('getProgramAccounts', [
-    programId,
-    { encoding: 'base64', commitment: 'confirmed' }
-  ]);
+  try {
+    const result = await rpcCall('getProgramAccounts', [
+      programId,
+      { encoding: 'base64', commitment: 'confirmed' }
+    ]);
 
-  if (result && !result.error) {
-    setCache(`accounts:${programId}`, result);
+    if (result && !result.error) {
+      setCache(`accounts:${programId}`, result);
+      return result;
+    }
+
+    // On RPC error (429 etc), return stale cache if available
+    const stale = getStaleCached(`accounts:${programId}`);
+    if (stale) {
+      console.log(`[SATP Cache] Serving stale cache for ${programId.slice(0,8)} (RPC error: ${result?.error || 'unknown'})`);
+      return stale;
+    }
+    return result || [];
+  } catch (err) {
+    // On network error, return stale cache
+    const stale = getStaleCached(`accounts:${programId}`);
+    if (stale) {
+      console.log(`[SATP Cache] Serving stale cache for ${programId.slice(0,8)} (error: ${err.message})`);
+      return stale;
+    }
+    throw err;
   }
-  return result || [];
 }
 
 async function fetchIdentityAccounts() {

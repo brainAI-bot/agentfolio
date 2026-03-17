@@ -1,0 +1,582 @@
+/**
+ * AgentFolio Marketplace — Full Job Flow
+ * POST job → Apply → Accept → Escrow → Deliver → Release Payment
+ * 
+ * Data stored in JSON files (no DB dependency)
+ */
+
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+const DATA_DIR = path.join(__dirname, '..', 'data', 'marketplace');
+
+// Ensure data dirs exist
+['jobs', 'applications', 'escrow', 'deliverables'].forEach(dir => {
+  const p = path.join(DATA_DIR, dir);
+  if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+});
+
+function genId(prefix) {
+  return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
+}
+
+function readJSON(filepath) {
+  try { return JSON.parse(fs.readFileSync(filepath, 'utf8')); } catch { return null; }
+}
+
+function writeJSON(filepath, data) {
+  fs.writeFileSync(filepath, JSON.stringify(data, null, 2));
+}
+
+function getAllFiles(dir) {
+  try {
+    return fs.readdirSync(dir).filter(f => f.endsWith('.json')).map(f => readJSON(path.join(dir, f))).filter(Boolean);
+  } catch { return []; }
+}
+
+// ===== ROUTES =====
+
+function registerRoutes(app) {
+
+  // 1. POST /api/marketplace/jobs — Create a job
+  app.post('/api/marketplace/jobs', (req, res) => {
+    const { title, description, budget, budgetAmount, currency, postedBy, clientId, skills, deadline, requirements, category, timeline } = req.body;
+    const resolvedBudget = budget || budgetAmount;
+    if (!title || !description || !resolvedBudget || !(postedBy || clientId)) {
+      return res.status(400).json({ error: 'title, description, budget, and postedBy/clientId are required' });
+    }
+    
+    const ESCROW_WALLET = '7A19fhRDYEp6mmAW1VSM4ENENBa37ZpvjogidhxKT7bQ';
+    const budgetNum = parseFloat(resolvedBudget);
+    const requiresEscrow = budgetNum > 0;
+    
+    // Create escrow record
+    let escrowId = null;
+    if (requiresEscrow) {
+      escrowId = genId('escrow');
+      const escrowRecord = {
+        id: escrowId,
+        jobId: null, // will be set below
+        clientId: clientId || postedBy,
+        amount: budgetNum,
+        currency: currency || 'USDC',
+        depositAddress: ESCROW_WALLET,
+        status: 'pending_deposit',
+        createdAt: new Date().toISOString(),
+      };
+      // Will update jobId after job creation
+      writeJSON(path.join(DATA_DIR, 'escrow', escrowId + '.json'), escrowRecord);
+    }
+    
+    const job = {
+      id: genId('job'),
+      title,
+      description,
+      budget: budgetNum,
+      budgetAmount: budgetNum,
+      budgetCurrency: currency || 'USDC',
+      currency: currency || 'USDC',
+      postedBy: postedBy || clientId,
+      clientId: clientId || postedBy,
+      skills: skills || [],
+      category: category || 'other',
+      requirements: requirements || '',
+      timeline: timeline || deadline || 'flexible',
+      deadline: deadline || 'flexible',
+      status: requiresEscrow ? 'draft' : 'open',
+      applications: [],
+      acceptedApplicant: null,
+      escrowId: escrowId,
+      escrowRequired: requiresEscrow,
+      escrowFunded: false,
+      escrowTx: null,
+      escrowWallet: requiresEscrow ? ESCROW_WALLET : null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    
+    // Update escrow with job ID
+    if (escrowId) {
+      const escrowPath = path.join(DATA_DIR, 'escrow', escrowId + '.json');
+      const escrowRecord = readJSON(escrowPath);
+      if (escrowRecord) {
+        escrowRecord.jobId = job.id;
+        writeJSON(escrowPath, escrowRecord);
+      }
+    }
+    
+    writeJSON(path.join(DATA_DIR, 'jobs', job.id + '.json'), job);
+    
+    // Sync to DB
+    try {
+      const Database = require('better-sqlite3');
+      const dbPath = require('path').join(__dirname, '..', 'data', 'agentfolio.db');
+      const db = new Database(dbPath);
+      db.prepare(`INSERT OR REPLACE INTO jobs (id, title, description, category, client_id, budget_amount, budget_currency, status, escrow_id, escrow_funded, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(job.id, job.title, job.description, job.category, job.clientId, job.budgetAmount, job.budgetCurrency, job.status, escrowId, 0, job.createdAt, job.updatedAt);
+      db.close();
+    } catch (dbErr) {
+      console.warn('[Marketplace] DB sync failed:', dbErr.message);
+    }
+    
+    const response = { ...job };
+    if (requiresEscrow) {
+      response.escrowInstructions = {
+        message: 'Send ' + budgetNum + ' USDC to the escrow wallet on Solana mainnet, then call confirm-deposit with the TX signature.',
+        wallet: ESCROW_WALLET,
+        amount: budgetNum,
+        currency: 'USDC',
+        network: 'Solana Mainnet',
+        confirmEndpoint: '/api/marketplace/jobs/' + job.id + '/confirm-deposit',
+        solscanWallet: 'https://solscan.io/account/' + ESCROW_WALLET
+      };
+    }
+    
+    res.status(201).json(response);
+  });
+
+  // GET /api/marketplace/jobs — List all jobs (with hydrated applications)
+  app.get('/api/marketplace/jobs', (req, res) => {
+    const jobs = getAllFiles(path.join(DATA_DIR, 'jobs'));
+    const status = req.query.status;
+    const filtered = (status && status !== "all") ? jobs.filter(j => j.status === status) : jobs;
+    // Hydrate application IDs into full application objects for each job
+    const hydrated = filtered.map(job => {
+      if (Array.isArray(job.applications)) {
+        job.applications = job.applications.map(appId => {
+          if (typeof appId === 'string') {
+            const app = readJSON(path.join(DATA_DIR, 'applications', `${appId}.json`));
+            return app || { id: appId, error: 'not_found' };
+          }
+          return appId; // already hydrated
+        });
+      }
+      job.skills_required = job.skills || [];
+      return job;
+    });
+    res.json({ jobs: hydrated, total: hydrated.length });
+  });
+
+  // GET /api/marketplace/jobs/:id — Get single job (with hydrated applications)
+  app.get('/api/marketplace/jobs/:id', (req, res) => {
+    const job = readJSON(path.join(DATA_DIR, 'jobs', `${req.params.id}.json`));
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    // Hydrate application IDs into full application objects
+    if (Array.isArray(job.applications)) {
+      job.applications = job.applications.map(appId => {
+        const app = readJSON(path.join(DATA_DIR, 'applications', `${appId}.json`));
+        return app || { id: appId, error: 'not_found' };
+      });
+    }
+    job.skills_required = job.skills || [];
+    res.json(job);
+  });
+
+  // 2. POST /api/marketplace/jobs/:id/apply (or /applications) — Apply to a job
+  const applyHandler = (req, res) => {
+    const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
+    const job = readJSON(jobPath);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (job.status !== 'open') return res.status(400).json({ error: 'Job is not open for applications' });
+
+    // Accept both API field names (applicantId/proposal) and frontend names (agentId/message)
+    const applicantId = req.body.applicantId || req.body.agentId;
+    const proposal = req.body.proposal || req.body.message;
+    const bidAmount = req.body.bidAmount || req.body.proposedBudget;
+    if (!applicantId || !proposal) return res.status(400).json({ error: 'applicantId/agentId and proposal/message required' });
+
+    // Check applicant has a registered profile
+    try {
+      const Database = require('better-sqlite3');
+      const db = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
+      // Look up by ID or by wallet address
+      let profile = db.prepare('SELECT id, wallets FROM profiles WHERE id = ?').get(applicantId);
+      if (!profile) {
+        // Try finding by wallet address
+        const allProfiles = db.prepare('SELECT id, wallets FROM profiles').all();
+        for (const p of allProfiles) {
+          try {
+            const w = JSON.parse(p.wallets || '{}');
+            if (w.solana === applicantId) { profile = p; break; }
+          } catch {}
+        }
+      }
+      db.close();
+      if (!profile) return res.status(403).json({ error: 'You must register an agent profile before applying. Go to /register first.' });
+    } catch (e) { console.error('[Apply] Profile check failed:', e.message); }
+
+    if (applicantId === job.postedBy || applicantId === job.clientId) return res.status(400).json({ error: 'Cannot apply to your own job' });
+
+    const application = {
+      id: genId('app'),
+      jobId: job.id,
+      applicantId,
+      proposal,
+      bidAmount: bidAmount ? parseFloat(bidAmount) : job.budget,
+      status: 'pending', // pending → accepted → rejected
+      createdAt: new Date().toISOString()
+    };
+    writeJSON(path.join(DATA_DIR, 'applications', `${application.id}.json`), application);
+    job.applications.push(application.id);
+    job.updatedAt = new Date().toISOString();
+    writeJSON(jobPath, job);
+    res.status(201).json(application);
+  };
+  app.post('/api/marketplace/jobs/:id/apply', applyHandler);
+  app.post('/api/marketplace/jobs/:id/applications', applyHandler);
+
+  // GET /api/marketplace/jobs/:id/applications — List applications for a job
+  app.get('/api/marketplace/jobs/:id/applications', (req, res) => {
+    const job = readJSON(path.join(DATA_DIR, 'jobs', `${req.params.id}.json`));
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    const apps = job.applications.map(appId => readJSON(path.join(DATA_DIR, 'applications', `${appId}.json`))).filter(Boolean);
+    res.json({ applications: apps, total: apps.length });
+  });
+
+  // 3. POST /api/marketplace/applications/:id/accept — Accept an application
+  app.post('/api/marketplace/applications/:id/accept', (req, res) => {
+    const appPath = path.join(DATA_DIR, 'applications', `${req.params.id}.json`);
+    const application = readJSON(appPath);
+    if (!application) return res.status(404).json({ error: 'Application not found' });
+    if (application.status !== 'pending') return res.status(400).json({ error: 'Application already processed' });
+
+    const jobPath = path.join(DATA_DIR, 'jobs', `${application.jobId}.json`);
+    const job = readJSON(jobPath);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+
+    // Accept this application, reject others
+    application.status = 'accepted';
+    application.acceptedAt = new Date().toISOString();
+    writeJSON(appPath, application);
+
+    job.applications.forEach(appId => {
+      if (appId !== application.id) {
+        const other = readJSON(path.join(DATA_DIR, 'applications', `${appId}.json`));
+        if (other && other.status === 'pending') {
+          other.status = 'rejected';
+          writeJSON(path.join(DATA_DIR, 'applications', `${appId}.json`), other);
+        }
+      }
+    });
+
+    job.status = 'in_progress';
+    job.acceptedApplicant = application.applicantId;
+    job.updatedAt = new Date().toISOString();
+    writeJSON(jobPath, job);
+
+    res.json({ message: 'Application accepted', application, job });
+  });
+
+  // 4. POST /api/marketplace/jobs/:id/escrow — Fund escrow for a job
+  app.post('/api/marketplace/jobs/:id/escrow', (req, res) => {
+    const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
+    const job = readJSON(jobPath);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (job.status !== 'in_progress') return res.status(400).json({ error: 'Job must be in_progress to fund escrow' });
+    if (job.escrowId) return res.status(400).json({ error: 'Escrow already funded' });
+
+    const { fundedBy, amount, txHash } = req.body;
+    if (!fundedBy || !amount) return res.status(400).json({ error: 'fundedBy and amount required' });
+
+    const escrow = {
+      id: genId('esc'),
+      jobId: job.id,
+      fundedBy,
+      worker: job.acceptedApplicant,
+      amount: parseFloat(amount),
+      currency: job.currency,
+      platformFee: parseFloat(amount) * 0.05, // 5% fee
+      workerPayout: parseFloat(amount) * 0.95,
+      txHash: txHash || null,
+      status: 'funded', // funded → released → refunded → disputed
+      fundedAt: new Date().toISOString(),
+      releasedAt: null,
+      refundedAt: null
+    };
+    writeJSON(path.join(DATA_DIR, 'escrow', `${escrow.id}.json`), escrow);
+
+    job.escrowId = escrow.id;
+    job.updatedAt = new Date().toISOString();
+    writeJSON(jobPath, job);
+
+    res.status(201).json(escrow);
+  });
+
+  
+  // ============ ESCROW VERIFICATION ============
+  
+  // POST /api/marketplace/jobs/:id/verify-deposit — Verify on-chain USDC deposit
+  app.post('/api/marketplace/jobs/:id/verify-deposit', async (req, res) => {
+    const { txSignature } = req.body;
+    if (!txSignature) return res.status(400).json({ error: 'txSignature required' });
+    
+    // Find job in DB
+    const Database = require('better-sqlite3');
+    const dbPath = require('path').join(__dirname, '..', 'data', 'agentfolio.db');
+    const db = new Database(dbPath);
+    const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(req.params.id);
+    if (!job) { db.close(); return res.status(404).json({ error: 'Job not found' }); }
+    
+    try {
+      const { verifyDeposit } = require('./lib/escrow-verify');
+      const escrowWallet = '7A19fhRDYEp6mmAW1VSM4ENENBa37ZpvjogidhxKT7bQ';
+      const result = await verifyDeposit(txSignature, escrowWallet, job.budget_amount || 0);
+      
+      if (result.verified) {
+        db.prepare('UPDATE jobs SET escrow_funded = 1, escrow_tx = ?, status = ?, updated_at = ? WHERE id = ?')
+          .run(txSignature, 'open', new Date().toISOString(), req.params.id);
+        db.close();
+        res.json({ ok: true, verified: true, amount: result.amount, sender: result.sender });
+      } else {
+        db.close();
+        res.status(400).json({ ok: false, verified: false, error: result.error });
+      }
+    } catch (e) {
+      db.close();
+      res.status(500).json({ error: e.message });
+    }
+  });
+  
+  // GET /api/marketplace/escrow/balance — Get escrow wallet balance and locked amounts
+  app.get('/api/marketplace/escrow/balance', async (req, res) => {
+    try {
+      const { getEscrowBalance } = require('./lib/escrow-verify');
+      const escrowWallet = '7A19fhRDYEp6mmAW1VSM4ENENBa37ZpvjogidhxKT7bQ';
+      const balance = await getEscrowBalance(escrowWallet);
+      
+      // Calculate total locked from active jobs
+      const Database = require('better-sqlite3');
+      const dbPath = require('path').join(__dirname, '..', 'data', 'agentfolio.db');
+      const db = new Database(dbPath, { readonly: true });
+      const locked = db.prepare("SELECT COALESCE(SUM(budget_amount), 0) as total FROM jobs WHERE escrow_funded = 1 AND status IN ('open', 'in_progress')").get();
+      db.close();
+      
+      res.json({
+        wallet: escrowWallet,
+        balance,
+        totalLocked: locked.total,
+        available: balance - locked.total
+      });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/marketplace/escrow/:id — Get escrow details
+  app.get('/api/marketplace/escrow/:id', (req, res) => {
+    const escrow = readJSON(path.join(DATA_DIR, 'escrow', `${req.params.id}.json`));
+    if (!escrow) return res.status(404).json({ error: 'Escrow not found' });
+    res.json(escrow);
+  });
+
+  // 5. POST /api/marketplace/jobs/:id/deliver — Submit deliverables
+  app.post('/api/marketplace/jobs/:id/deliver', (req, res) => {
+    const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
+    const job = readJSON(jobPath);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (job.status !== 'in_progress') return res.status(400).json({ error: 'Job must be in_progress' });
+
+    const { submittedBy, deliverableUrl, description, files } = req.body;
+    if (!submittedBy || !description) return res.status(400).json({ error: 'submittedBy and description required' });
+    if (submittedBy !== job.acceptedApplicant) return res.status(403).json({ error: 'Only the accepted worker can submit deliverables' });
+
+    const deliverable = {
+      id: genId('dlv'),
+      jobId: job.id,
+      submittedBy,
+      description,
+      deliverableUrl: deliverableUrl || null,
+      files: files || [],
+      status: 'submitted', // submitted → approved → revision_requested
+      submittedAt: new Date().toISOString()
+    };
+    writeJSON(path.join(DATA_DIR, 'deliverables', `${deliverable.id}.json`), deliverable);
+
+    job.deliverableId = deliverable.id;
+    job.updatedAt = new Date().toISOString();
+    writeJSON(jobPath, job);
+
+    res.status(201).json(deliverable);
+  });
+
+  // 6. POST /api/marketplace/escrow/:id/release — Release payment (ON-CHAIN)
+  app.post('/api/marketplace/escrow/:id/release', async (req, res) => {
+    const escrowPath = path.join(DATA_DIR, 'escrow', `${req.params.id}.json`);
+    const escrow = readJSON(escrowPath);
+    if (!escrow) return res.status(404).json({ error: 'Escrow not found' });
+    if (escrow.status !== 'funded') return res.status(400).json({ error: 'Escrow not in funded state' });
+
+    const { releasedBy } = req.body;
+    if (!releasedBy) return res.status(400).json({ error: 'releasedBy required' });
+    if (releasedBy !== (escrow.fundedBy || escrow.clientId)) return res.status(403).json({ error: 'Only the funder can release payment' });
+
+    // Look up worker's Solana wallet
+    const jobData = readJSON(path.join(DATA_DIR, 'jobs', `${escrow.jobId}.json`));
+    if (!jobData || !jobData.acceptedApplicant) return res.status(400).json({ error: 'No accepted worker on this job' });
+
+    let workerWallet = null;
+    try {
+      const Database = require('better-sqlite3');
+      const pDb = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
+      const profile = pDb.prepare('SELECT verification_data, wallets FROM profiles WHERE id = ?').get(jobData.acceptedApplicant);
+      pDb.close();
+      if (profile) {
+        try { const vd = JSON.parse(profile.verification_data || '{}'); if (vd.solana && vd.solana.address) workerWallet = vd.solana.address; } catch {}
+        if (!workerWallet) { try { const w = JSON.parse(profile.wallets || '{}'); if (w.solana) workerWallet = w.solana; } catch {} }
+      }
+    } catch (e) { console.error('[Escrow] DB lookup failed:', e.message); }
+
+    if (!workerWallet) return res.status(400).json({ error: 'Worker has no Solana wallet linked. Cannot release payment.' });
+
+    // Transfer USDC on-chain with 5% fee split
+    try {
+      const { releaseWithFeeSplit } = require('./lib/solana-escrow');
+      console.log('[Escrow] Releasing', escrow.amount, 'USDC to', workerWallet, '(5% fee to treasury)');
+      const result = await releaseWithFeeSplit(workerWallet, escrow.amount, 5);
+      console.log('[Escrow] ✅ Released! Agent TX:', result.agentTx, 'Treasury TX:', result.treasuryTx);
+
+      escrow.status = 'released';
+      escrow.releasedBy = releasedBy;
+      escrow.releaseTxHash = result.agentTx;
+      escrow.treasuryTxHash = result.treasuryTx;
+      escrow.workerPayout = result.agentPayout;
+      escrow.platformFee = result.fee;
+      escrow.workerWallet = workerWallet;
+      escrow.releasedAt = new Date().toISOString();
+      writeJSON(escrowPath, escrow);
+    } catch (txErr) {
+      console.error('[Escrow] On-chain transfer FAILED:', txErr.message);
+      return res.status(500).json({ error: 'On-chain USDC transfer failed: ' + txErr.message, hint: 'Escrow NOT released. Funds are safe.' });
+    }
+
+    // Mark job completed
+    jobData.status = 'completed';
+    jobData.completedAt = new Date().toISOString();
+    jobData.updatedAt = new Date().toISOString();
+    writeJSON(path.join(DATA_DIR, 'jobs', `${escrow.jobId}.json`), jobData);
+
+    // Update deliverable
+    if (jobData.deliverableId) {
+      const dlvPath = path.join(DATA_DIR, 'deliverables', `${jobData.deliverableId}.json`);
+      const dlv = readJSON(dlvPath);
+      if (dlv) {
+        dlv.status = 'approved';
+        writeJSON(dlvPath, dlv);
+      }
+    }
+
+    res.json({
+      message: 'Payment released',
+      escrow,
+      workerPayout: escrow.workerPayout,
+      platformFee: escrow.platformFee
+    });
+  });
+
+  // POST /api/marketplace/escrow/:id/refund — Refund escrow
+  app.post('/api/marketplace/escrow/:id/refund', (req, res) => {
+    const escrowPath = path.join(DATA_DIR, 'escrow', `${req.params.id}.json`);
+    const escrow = readJSON(escrowPath);
+    if (!escrow) return res.status(404).json({ error: 'Escrow not found' });
+    if (escrow.status !== 'funded') return res.status(400).json({ error: 'Escrow not in funded state' });
+
+    const { refundedBy, reason } = req.body;
+    escrow.status = 'refunded';
+    escrow.refundedBy = refundedBy;
+    escrow.refundReason = reason || 'No reason provided';
+    escrow.refundedAt = new Date().toISOString();
+    writeJSON(escrowPath, escrow);
+
+    const jobPath = path.join(DATA_DIR, 'jobs', `${escrow.jobId}.json`);
+    const job = readJSON(jobPath);
+    if (job) {
+      job.status = 'closed';
+      job.updatedAt = new Date().toISOString();
+      writeJSON(jobPath, job);
+    }
+
+    res.json({ message: 'Escrow refunded', escrow });
+  });
+
+  // POST /api/marketplace/jobs/:id/confirm-deposit — Verify on-chain USDC deposit (replaces old trust-me flow)
+  app.post('/api/marketplace/jobs/:id/confirm-deposit', async (req, res) => {
+    const { txHash } = req.body;
+    if (!txHash) return res.status(400).json({ error: 'txHash (transaction signature) required' });
+
+    // Load job from JSON (marketplace reads from JSON)
+    const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
+    const job = readJSON(jobPath);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (!job.escrowId) return res.status(400).json({ error: 'No escrow for this job' });
+    if (job.escrowFunded) return res.status(400).json({ error: 'Already funded' });
+
+    // Verify on-chain
+    try {
+      const { verifyDeposit } = require('./lib/escrow-verify');
+      const escrowWallet = '7A19fhRDYEp6mmAW1VSM4ENENBa37ZpvjogidhxKT7bQ';
+      const expectedAmount = job.budgetAmount || 0;
+      
+      const result = await verifyDeposit(txHash, escrowWallet, expectedAmount);
+      
+      if (!result.verified) {
+        return res.status(400).json({ 
+          error: 'On-chain verification failed', 
+          detail: result.error,
+          hint: `Send ${expectedAmount} USDC to ${escrowWallet} on Solana mainnet, then submit the TX signature.`
+        });
+      }
+
+      // Update job — mark funded, go open
+      job.escrowFunded = true;
+      job.escrowTx = txHash;
+      job.escrowVerified = true;
+      job.escrowSolscanUrl = 'https://solscan.io/tx/' + txHash;
+      job.status = 'open';
+      job.depositConfirmedAt = new Date().toISOString();
+      job.updatedAt = new Date().toISOString();
+      writeJSON(jobPath, job);
+
+      // Update escrow record
+      const escrowPath = path.join(DATA_DIR, 'escrow', `${job.escrowId}.json`);
+      const escrow = readJSON(escrowPath);
+      if (escrow) {
+        escrow.txHash = txHash;
+        escrow.depositConfirmed = true;
+        escrow.depositConfirmedAt = new Date().toISOString();
+        escrow.status = 'funded';
+        escrow.onChainVerified = true;
+        escrow.fundedBy = escrow.clientId || job.clientId || job.postedBy;
+        writeJSON(escrowPath, escrow);
+      }
+
+      // Sync to DB
+      try {
+        const Database = require('better-sqlite3');
+        const dbPath = require('path').join(__dirname, '..', 'data', 'agentfolio.db');
+        const db = new Database(dbPath);
+        db.prepare('UPDATE jobs SET escrow_funded = 1, escrow_tx = ?, status = ?, updated_at = ? WHERE id = ?')
+          .run(txHash, 'open', new Date().toISOString(), req.params.id);
+        db.close();
+      } catch (dbErr) {
+        console.warn('[Escrow] DB sync failed:', dbErr.message);
+      }
+
+      res.json({ 
+        ok: true,
+        verified: true, 
+        amount: result.amount,
+        sender: result.sender,
+        solscanUrl: 'https://solscan.io/tx/' + txHash,
+        message: 'Deposit verified on-chain. Job is now open.'
+      });
+    } catch (e) {
+      res.status(500).json({ error: 'Verification failed: ' + e.message });
+    }
+  });
+
+  console.log('✓ Marketplace routes registered');
+}
+
+module.exports = { registerRoutes };

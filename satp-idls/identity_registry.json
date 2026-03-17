@@ -1,0 +1,742 @@
+{
+  "address": "EJtQh4Gyg88zXvSmFpxYkkeZsPwTsjfm4LvjmPQX1FD3",
+  "metadata": {
+    "name": "identity_registry",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "SATP Identity Registry — agent identity with CPI-updated scores"
+  },
+  "instructions": [
+    {
+      "name": "create_identity",
+      "docs": [
+        "Create a new agent identity (soulbound — one per agent_id)"
+      ],
+      "discriminator": [
+        12,
+        253,
+        209,
+        41,
+        176,
+        51,
+        195,
+        179
+      ],
+      "accounts": [
+        {
+          "name": "identity",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "type": "string"
+        },
+        {
+          "name": "category",
+          "type": "string"
+        },
+        {
+          "name": "capabilities",
+          "type": {
+            "vec": "string"
+          }
+        },
+        {
+          "name": "metadata_uri",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "init_mint_tracker",
+      "docs": [
+        "Initialize a mint tracker for an identity (one per identity PDA).",
+        "Tracks how many free mints this identity has claimed — prevents wallet-swap gaming."
+      ],
+      "discriminator": [
+        176,
+        203,
+        116,
+        40,
+        206,
+        205,
+        156,
+        145
+      ],
+      "accounts": [
+        {
+          "name": "identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint_tracker",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  116,
+                  114,
+                  97,
+                  99,
+                  107,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "identity"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "identity"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "record_mint",
+      "docs": [
+        "Record a mint against this identity. Enforces max 3 free mints.",
+        "Can be called by the mint program via CPI or directly by the identity authority."
+      ],
+      "discriminator": [
+        162,
+        92,
+        105,
+        126,
+        18,
+        1,
+        158,
+        242
+      ],
+      "accounts": [
+        {
+          "name": "identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint_tracker",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  116,
+                  114,
+                  97,
+                  99,
+                  107,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "identity"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "identity"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "update_identity",
+      "docs": [
+        "Update identity fields (owner only)"
+      ],
+      "discriminator": [
+        130,
+        54,
+        88,
+        104,
+        222,
+        124,
+        238,
+        252
+      ],
+      "accounts": [
+        {
+          "name": "identity",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "identity"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "name",
+          "type": {
+            "option": "string"
+          }
+        },
+        {
+          "name": "description",
+          "type": {
+            "option": "string"
+          }
+        },
+        {
+          "name": "category",
+          "type": {
+            "option": "string"
+          }
+        },
+        {
+          "name": "capabilities",
+          "type": {
+            "option": {
+              "vec": "string"
+            }
+          }
+        },
+        {
+          "name": "metadata_uri",
+          "type": {
+            "option": "string"
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_reputation",
+      "docs": [
+        "CPI-only: Called by the Reputation program to update computed score",
+        "Authority must be the Reputation program's PDA signer"
+      ],
+      "discriminator": [
+        194,
+        220,
+        43,
+        201,
+        54,
+        209,
+        49,
+        178
+      ],
+      "accounts": [
+        {
+          "name": "identity",
+          "writable": true
+        },
+        {
+          "name": "caller_authority",
+          "docs": [
+            "The Reputation program's PDA authority — must match registered program"
+          ],
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "score",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "update_verification",
+      "docs": [
+        "CPI-only: Called by the Validation program to update verification level",
+        "Authority must be the Validation program's PDA signer"
+      ],
+      "discriminator": [
+        81,
+        184,
+        217,
+        235,
+        163,
+        170,
+        228,
+        38
+      ],
+      "accounts": [
+        {
+          "name": "identity",
+          "writable": true
+        },
+        {
+          "name": "caller_authority",
+          "docs": [
+            "The Validation program's PDA authority — must match registered program"
+          ],
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "level",
+          "type": "u8"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "AgentIdentity",
+      "discriminator": [
+        11,
+        149,
+        31,
+        27,
+        186,
+        76,
+        241,
+        72
+      ]
+    },
+    {
+      "name": "MintTracker",
+      "discriminator": [
+        217,
+        230,
+        22,
+        187,
+        250,
+        88,
+        11,
+        174
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "IdentityCreated",
+      "discriminator": [
+        247,
+        185,
+        231,
+        174,
+        133,
+        94,
+        200,
+        142
+      ]
+    },
+    {
+      "name": "IdentityUpdated",
+      "discriminator": [
+        93,
+        70,
+        231,
+        144,
+        0,
+        172,
+        155,
+        159
+      ]
+    },
+    {
+      "name": "MintRecorded",
+      "discriminator": [
+        72,
+        62,
+        178,
+        93,
+        79,
+        156,
+        145,
+        243
+      ]
+    },
+    {
+      "name": "ReputationUpdated",
+      "discriminator": [
+        26,
+        36,
+        187,
+        150,
+        235,
+        90,
+        106,
+        89
+      ]
+    },
+    {
+      "name": "VerificationUpdated",
+      "discriminator": [
+        91,
+        67,
+        202,
+        40,
+        27,
+        251,
+        132,
+        221
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "NameTooLong",
+      "msg": "Name must be 32 characters or less"
+    },
+    {
+      "code": 6001,
+      "name": "DescriptionTooLong",
+      "msg": "Description must be 256 characters or less"
+    },
+    {
+      "code": 6002,
+      "name": "CategoryTooLong",
+      "msg": "Category must be 32 characters or less"
+    },
+    {
+      "code": 6003,
+      "name": "TooManyCapabilities",
+      "msg": "Maximum 10 capabilities allowed"
+    },
+    {
+      "code": 6004,
+      "name": "CapabilityTooLong",
+      "msg": "Each capability must be 32 characters or less"
+    },
+    {
+      "code": 6005,
+      "name": "MetadataUriTooLong",
+      "msg": "Metadata URI must be 200 characters or less"
+    },
+    {
+      "code": 6006,
+      "name": "ScoreOutOfRange",
+      "msg": "Reputation score must be between 0 and 1,000,000"
+    },
+    {
+      "code": 6007,
+      "name": "LevelOutOfRange",
+      "msg": "Verification level must be between 0 and 5"
+    },
+    {
+      "code": 6008,
+      "name": "MintLimitReached",
+      "msg": "Maximum 3 free mints per identity"
+    }
+  ],
+  "types": [
+    {
+      "name": "AgentIdentity",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "type": "string"
+          },
+          {
+            "name": "category",
+            "type": "string"
+          },
+          {
+            "name": "capabilities",
+            "type": {
+              "vec": "string"
+            }
+          },
+          {
+            "name": "metadata_uri",
+            "type": "string"
+          },
+          {
+            "name": "reputation_score",
+            "type": "u64"
+          },
+          {
+            "name": "verification_level",
+            "type": "u8"
+          },
+          {
+            "name": "reputation_updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "verification_updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "IdentityCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "IdentityUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MintRecorded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_identity",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint_count",
+            "type": "u8"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MintTracker",
+      "docs": [
+        "Anti-gaming mint tracker — seeded by identity PDA, not wallet.",
+        "Wallet swaps cannot reset mint count since identity is soulbound."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_identity",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint_count",
+            "type": "u8"
+          },
+          {
+            "name": "last_mint_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReputationUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "score",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VerificationUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "agent_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "level",
+            "type": "u8"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}
