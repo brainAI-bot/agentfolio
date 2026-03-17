@@ -1,0 +1,13 @@
+{
+  "cluster": "mainnet",
+  "nftNumber": 5,
+  "mint": "6qM7sKXoqbuHY1yjUiLVUW6HQbF99yrnjeqJ9PDS4Qbu",
+  "collection": "CCw8NjAS3QpfDU4fBYkJ2kD4znNy468e3wqAJQKoJCFk",
+  "metadataUri": "https://uploader.irys.xyz/A1SYEC7kkXEEbmCQHvc2zmydrKSfBeJCXDdDqCgUArNa",
+  "imageUri": "https://uploader.irys.xyz/4ibh86DutpCK74ZDmgXRf1tMZSF8Er3HUmDBx1msaGXD",
+  "recipient": "HnnYsWiVL4g7fRDAoh7aXYSJ3VYYJD5hEigqpq6nmfHc",
+  "createdAt": "2026-03-15T23:00:15.835Z",
+  "source": "core-candy-machine",
+  "candyMachine": "2BmStMMfG8uH1crHwEopbrcPPevQ3qj9SN7Y67M8DYPV",
+  "cmIndex": 4
+}

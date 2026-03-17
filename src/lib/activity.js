@@ -182,3 +182,67 @@ module.exports = {
   formatActivity,
   timeAgo
 };
+
+/**
+ * Get activity heatmap (date -> count) for a profile
+ * Used for GitHub-style contribution grid
+ * @param {string} profileId
+ * @param {number} days - How many days back (default 365)
+ * @returns {object} { heatmap: {date: count}, totalEvents, activeDays, streak }
+ */
+function getHeatmap(profileId, days = 365) {
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  const rows = db.db.prepare(
+    "SELECT DATE(created_at) as day, COUNT(*) as count FROM activity WHERE profile_id = ? AND created_at >= ? GROUP BY DATE(created_at) ORDER BY day"
+  ).all(profileId, since);
+  
+  const heatmap = {};
+  let totalEvents = 0;
+  rows.forEach(r => { heatmap[r.day] = r.count; totalEvents += r.count; });
+  
+  // Calculate current streak
+  let streak = 0;
+  const today = new Date().toISOString().slice(0, 10);
+  let checkDate = new Date();
+  // Allow today to not have activity yet
+  if (!heatmap[today]) checkDate.setDate(checkDate.getDate() - 1);
+  while (true) {
+    const ds = checkDate.toISOString().slice(0, 10);
+    if (heatmap[ds]) { streak++; checkDate.setDate(checkDate.getDate() - 1); }
+    else break;
+  }
+  
+  return {
+    heatmap,
+    totalEvents,
+    activeDays: Object.keys(heatmap).length,
+    streak
+  };
+}
+
+module.exports.getHeatmap = getHeatmap;
+
+/**
+ * Get heatmap with event summaries per date
+ * Returns heatmap with top event types per day for rich tooltips
+ */
+function getHeatmapDetailed(profileId, days = 365) {
+  const base = getHeatmap(profileId, days);
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  
+  // Get event type breakdown per day
+  const rows = db.db.prepare(
+    "SELECT DATE(created_at) as day, type, COUNT(*) as count FROM activity WHERE profile_id = ? AND created_at >= ? GROUP BY DATE(created_at), type ORDER BY day, count DESC"
+  ).all(profileId, since);
+  
+  const details = {};
+  rows.forEach(r => {
+    if (!details[r.day]) details[r.day] = [];
+    const meta = ACTIVITY_META[r.type] || { icon: "📌", label: r.type.replace(/_/g, " ") };
+    details[r.day].push({ type: r.type, label: meta.label, icon: meta.icon, count: r.count });
+  });
+  
+  return { ...base, details };
+}
+
+module.exports.getHeatmapDetailed = getHeatmapDetailed;

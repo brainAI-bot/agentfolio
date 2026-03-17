@@ -1,0 +1,442 @@
+import fs from "fs";
+import path from "path";
+import { Connection, PublicKey } from "@solana/web3.js";
+import type { Agent, Job } from "./types";
+import { getAgentProfilePDA, AGENT_PROFILE_DISCRIMINATOR, SOLANA_RPC } from "./identity-registry";
+
+// Cache on-chain lookups to avoid rate limiting during builds
+const _onChainCache = new Map<string, boolean>();
+
+function checkOnChainIdentitySync(walletAddress: string): boolean {
+  // Check cache first
+  if (_onChainCache.has(walletAddress)) return _onChainCache.get(walletAddress)!;
+  // Default to false for sync - actual check happens via preload
+  return false;
+}
+
+// Preload on-chain identities for all profiles with wallets
+let _preloaded = false;
+async function preloadOnChainIdentities(profiles: RawProfile[]) {
+  if (_preloaded) return;
+  _preloaded = true;
+  try {
+    const connection = new Connection(SOLANA_RPC, "confirmed");
+    const walletsToCheck = profiles
+      .filter(p => p.wallets?.solana)
+      .map(p => ({ id: p.id, wallet: p.wallets.solana! }));
+    
+    // Batch check PDAs
+    for (const { id, wallet } of walletsToCheck) {
+      try {
+        const ownerPk = new PublicKey(wallet);
+        const [pda] = getAgentProfilePDA(ownerPk);
+        const info = await connection.getAccountInfo(pda);
+        const exists = !!(info && info.data && info.data.length > 8);
+        _onChainCache.set(wallet, exists);
+      } catch {
+        _onChainCache.set(wallet, false);
+      }
+    }
+  } catch {
+    // RPC failure - gracefully degrade
+  }
+}
+
+const PROFILES_DIR = "/home/ubuntu/agentfolio/data/profiles";
+const JOBS_DIR = "/home/ubuntu/agentfolio/data/marketplace/jobs";
+
+interface RawProfile {
+  id: string;
+  name: string;
+  handle: string;
+  bio: string;
+  avatar: string | null;
+  links: Record<string, string | null>;
+  wallets: Record<string, string | null>;
+  skills: Array<{ name: string; category: string; verified: boolean; proofs?: any[] }>;
+  portfolio?: any[];
+  trackRecord?: any;
+  verification: { tier: string; score: number; lastVerified?: string | null };
+  verificationData?: Record<string, any>;
+  moltbookStats?: any;
+  endorsements?: Array<{ fromId: string; fromName: string; fromHandle: string; message?: string | null; skills?: string[]; createdAt: string }>;
+  endorsementsGiven?: any[];
+  stats?: { jobsCompleted: number; rating: number; reviewsReceived?: number };
+  createdAt: string;
+  updatedAt?: string;
+  nftAvatar?: { chain: string; identifier: string; name: string | null; image: string | null; verifiedOnChain: boolean; verifiedAt: string } | null;
+  unclaimed?: boolean;
+  activity?: any[];
+}
+
+interface RawJob {
+  id: string;
+  clientId: string;
+  title: string;
+  description: string;
+  category: string;
+  skills: string[];
+  budgetType: string;
+  budgetAmount: number;
+  budgetCurrency: string;
+  budgetMax: number | null;
+  timeline: string;
+  status: string;
+  attachments: any[];
+  requirements: string;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string | null;
+  selectedAgentId: string | null;
+  applicationCount: number;
+  viewCount: number;
+  escrowId: string | null;
+  escrowRequired: boolean;
+  escrowFunded: boolean;
+  depositConfirmedAt?: string | null;
+  selectedAt?: string | null;
+  agreedBudget?: number | null;
+  agreedTimeline?: string | null;
+  fundsLocked?: boolean;
+  completedAt?: string | null;
+  completionNote?: string | null;
+  fundsReleased?: boolean;
+}
+
+// Cache for performance (revalidates every 60 seconds)
+let _agentsCache: Agent[] | null = null;
+let _agentsCacheTime = 0;
+let _jobsCache: Job[] | null = null;
+let _jobsCacheTime = 0;
+const CACHE_TTL_MS = 60_000; // 60 seconds
+
+function calcTrustScore(p: RawProfile): number {
+  if (p.unclaimed) return 0;
+  let score = p.verification?.score || 0;
+  // Boost for endorsements
+  score += (p.endorsements?.length || 0) * 10;
+  // Boost for verified skills
+  score += p.skills.filter(s => s.verified).length * 15;
+  // Boost for linked verifications
+  const vd = p.verificationData || {};
+  if (vd.x?.linked) score += 10;
+  if (vd.x?.verified) score += 20;
+  if (vd.github?.verified) score += 50;
+  if (vd.solana?.verified) score += 40;
+  if (vd.hyperliquid?.verified) score += 30;
+  // Boost for wallets
+  if (p.wallets?.solana) score += 15;
+  if (p.wallets?.hyperliquid) score += 15;
+  if (p.wallets?.ethereum) score += 10;
+  // Boost for jobs/rating
+  score += (p.stats?.jobsCompleted || 0) * 5;
+  score += (p.stats?.rating || 0) * 10;
+  // Boost for bio length (content richness)
+  if (p.bio && p.bio.length > 50) score += 10;
+  // Boost for links
+  const links = p.links || {};
+  if (links?.twitter) score += 5;
+  if (links.github) score += 5;
+  if (links.website) score += 5;
+  return Math.min(score, 1000);
+}
+
+function calcTierFromScore(dbTier: string | undefined, score: number): number {  if (dbTier) {    const tierMap: Record<string, number> = { unverified: 0, bronze: 1, silver: 2, gold: 3, elite: 4 };    return tierMap[dbTier.toLowerCase()] || 0;  }  return calcTier(score);}
+function calcTier(score: number): number {
+  if (score >= 800) return 3;
+  if (score >= 500) return 2;
+  if (score >= 100) return 1;
+  return 0;
+}
+// ===== 2D Scoring Engine (Sprint 3) =====
+const VERIF_CATS: Record<string, string[]> = {
+  wallets: ['solana', 'ethereum', 'bitcoin', 'hyperliquid', 'polymarket'],
+  platforms: ['agentmail', 'moltbook', 'telegram', 'discord', 'farcaster'],
+  infrastructure: ['domain', 'mcp', 'a2a', 'openclaw', 'did', 'website'],
+  onchain: ['ens', 'eas']
+};
+const LEVEL_NAMES = ['Unregistered', 'Registered', 'Verified', 'On-Chain', 'Trusted', 'Sovereign'];
+const LEVEL_BADGES = ['⚪', '🟡', '🔵', '🟢', '🟠', '👑'];
+
+function countVerifs(vd: Record<string, any>): number {
+  let c = 0;
+  for (const d of Object.values(vd)) if (d && (d.verified || d.linked)) c++;
+  return c;
+}
+function countVerifCats(vd: Record<string, any>): number {
+  const found = new Set<string>();
+  for (const [prov, d] of Object.entries(vd)) {
+    if (!d || (!d.verified && !d.linked)) continue;
+    for (const [cat, provs] of Object.entries(VERIF_CATS))
+      if (provs.includes(prov)) { found.add(cat); break; }
+  }
+  return found.size;
+}
+function calcVerificationLevel(p: RawProfile): number {
+  if (p.unclaimed) return 0;
+  const vd = p.verificationData || {};
+  const vc = countVerifs(vd);
+  const cc = countVerifCats(vd);
+  const hasSATP = !!(vd.satp?.verified);
+  const complete = !!(p.bio?.trim() && p.avatar?.trim() && (p.skills?.length || 0) >= 2);
+  const hasHuman = !!(vd.github?.verified || vd.x?.verified);
+  const reviewCount = p.stats?.reviewsReceived || 0;
+  const completedJobs = p.stats?.jobsCompleted || 0;
+  const hasBOA = (p.avatar || '').includes('burned-out') || (p.avatar || '').includes('boa-');
+  if (hasSATP && vc >= 5 && cc >= 2 && complete && completedJobs > 0 && reviewCount > 0 && hasBOA && reviewCount >= 3 && hasHuman) return 5;
+  if (hasSATP && vc >= 5 && cc >= 2 && complete && completedJobs > 0 && reviewCount > 0) return 4;
+  if (hasSATP && vc >= 5 && cc >= 2 && complete) return 3;
+  if (vc >= 2) return 2;
+  if (p.name && p.handle) return 1;
+  return 0;
+}
+function calcReputationScore(p: RawProfile): number {
+  if (p.unclaimed) return 0;
+  let score = 0;
+  const level = calcVerificationLevel(p);
+  score += level * 20;
+  const endorsements = p.endorsements || [];
+  score += Math.min(endorsements.length * 25, 200);
+  const verifiedSkills = (p.skills || []).filter((s: any) => s.verified).length;
+  score += Math.min(verifiedSkills * 15, 150);
+  score += (p.stats?.jobsCompleted || 0) * 30;
+  score += (p.stats?.rating || 0) * 20;
+  score += (p.stats?.reviewsReceived || 0) * 30;
+  return Math.min(score, 1000);
+}
+function getRepRank(score: number): string {
+  if (score >= 800) return 'Elite';
+  if (score >= 600) return 'Expert';
+  if (score >= 400) return 'Skilled';
+  if (score >= 200) return 'Competent';
+  if (score >= 100) return 'Developing';
+  return 'Newcomer';
+}
+// ===== End 2D Scoring =====
+
+
+function mapProfile(p: RawProfile): Agent {
+  const trustScore = p.verification?.score || calcTrustScore(p);
+  const tier = calcTierFromScore(p.verification?.tier, trustScore);
+  const vd = p.verificationData || {};
+
+  return {
+    id: p.id,
+    name: p.name,
+    handle: p.handle || "",
+    bio: p.bio || "",
+    avatar: p.avatar || "",
+    nftAvatar: p.nftAvatar || null,
+    trustScore,
+    tier,
+    verificationLevel: calcVerificationLevel(p),
+    verificationLevelName: LEVEL_NAMES[calcVerificationLevel(p)],
+    verificationBadge: LEVEL_BADGES[calcVerificationLevel(p)],
+    reputationScore: calcReputationScore(p),
+    reputationRank: getRepRank(calcReputationScore(p)),
+    skills: (p.skills || []).map(s => typeof s === 'string' ? s : (s.name || '')),
+    verifications: {
+      github: vd.github ? {
+        username: vd.github.handle || vd.github.username || "",
+        repos: vd.github.repos || 0,
+        stars: vd.github.stars || 0,
+        verified: !!vd.github.verified,
+      } : undefined,
+      solana: (vd.solana?.verified || p.wallets?.solana) ? {
+        address: p.wallets?.solana || vd.solana?.address || "",
+        txCount: vd.solana?.txCount || 0,
+        balance: vd.solana?.balance || "0 SOL",
+        verified: !!vd.solana?.verified,
+      } : undefined,
+      hyperliquid: (vd.hyperliquid?.verified || p.wallets?.hyperliquid) ? {
+        address: p.wallets?.hyperliquid || vd.hyperliquid?.address || "",
+        volume: vd.hyperliquid?.volume || "$0",
+        verified: !!vd.hyperliquid?.verified,
+      } : undefined,
+      x: (vd.x || vd.twitter) ? {
+        handle: vd.x?.handle || vd.twitter?.handle || p.handle || "",
+        verified: !!(vd.x?.verified || vd.twitter?.verified),
+      } : (p.links?.x ? {
+        handle: p.handle || "",
+        verified: false,
+      } : undefined),
+      satp: (vd.satp?.verified || (p.wallets?.solana && checkOnChainIdentitySync(p.wallets.solana))) ? {
+        did: vd.satp?.did || `did:satp:sol:${p.wallets?.solana || p.id}`,
+        verified: true,
+      } : undefined,
+    },
+    unclaimed: !!p.unclaimed,
+    status: p.unclaimed ? "unclaimed" : "online",
+    jobsCompleted: p.stats?.jobsCompleted || 0,
+    rating: p.stats?.rating || 0,
+    registeredAt: p.createdAt || "",
+    createdAt: p.createdAt || "",
+    activity: (p.activity || []).map((a: any) => ({ type: a.type || "", createdAt: a.createdAt || "" })),
+  };
+}
+
+function loadAllProfiles(): Agent[] {
+  if (_agentsCache && (Date.now() - _agentsCacheTime < CACHE_TTL_MS)) return _agentsCache;
+  try {
+    const files = fs.readdirSync(PROFILES_DIR).filter(f => f.endsWith(".json"));
+    const rawProfiles: RawProfile[] = [];
+    for (const file of files) {
+      try {
+        rawProfiles.push(JSON.parse(fs.readFileSync(path.join(PROFILES_DIR, file), "utf-8")) as RawProfile);
+      } catch { /* skip bad files */ }
+    }
+    // Fire-and-forget on-chain preload (will populate cache for next request)
+    preloadOnChainIdentities(rawProfiles).catch(() => {});
+    let agents: Agent[] = [];
+    for (let i = 0; i < rawProfiles.length; i++) {
+      try {
+        agents.push(mapProfile(rawProfiles[i]));
+      } catch (mapErr: any) {
+        console.error("[AGENTFOLIO] mapProfile failed for", rawProfiles[i]?.id, mapErr?.message);
+      }
+    }
+    // Sort by trust score desc
+    agents.sort((a, b) => b.trustScore - a.trustScore);
+    _agentsCache = agents;
+    _agentsCacheTime = Date.now();
+    return agents;
+  } catch (outerErr: any) {
+    console.error("[AGENTFOLIO] loadAllProfiles OUTER error:", outerErr?.message);
+    return [];
+  }
+}
+
+function loadAllJobs(): Job[] {
+  if (_jobsCache && (Date.now() - _jobsCacheTime < CACHE_TTL_MS)) return _jobsCache;
+  try {
+    const files = fs.readdirSync(JOBS_DIR).filter(f => f.endsWith(".json"));
+    const jobs: Job[] = [];
+    // Load agent names for poster lookup
+    const agents = loadAllProfiles();
+    const agentMap = new Map(agents.map(a => [a.id, a.name]));
+
+    for (const file of files) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(path.join(JOBS_DIR, file), "utf-8")) as RawJob;
+        const posterName = agentMap.get(raw.clientId) || raw.clientId;
+        const assigneeName = raw.selectedAgentId ? (agentMap.get(raw.selectedAgentId) || raw.selectedAgentId) : undefined;
+
+        const statusMap: Record<string, Job["status"]> = {
+          open: "open",
+          draft: "open",
+          agent_accepted: "in_progress",
+          work_submitted: "in_progress",
+          in_progress: "in_progress",
+          completed: "completed",
+          disputed: "disputed",
+          cancelled: "open",
+        };
+
+        const escrowStatus: Job["escrowStatus"] = raw.fundsReleased ? "released" :
+          raw.fundsLocked ? "locked" :
+          raw.escrowFunded ? "locked" :
+          "ready";
+
+        jobs.push({
+          id: raw.id,
+          title: raw.title,
+          description: raw.description,
+          poster: posterName,
+          posterAvatar: "",
+          budget: `${raw.budgetAmount} ${raw.budgetCurrency}`,
+          skills: raw.skills,
+          status: statusMap[raw.status] || "open",
+          escrowStatus,
+          proposals: raw.applicationCount,
+          deadline: (raw.timeline || "flexible").replace("_", " "),
+          assignee: assigneeName,
+          createdAt: raw.createdAt,
+        });
+      } catch { /* skip */ }
+    }
+    jobs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    _jobsCache = jobs;
+    _jobsCacheTime = Date.now();
+    return jobs;
+  } catch {
+    return [];
+  }
+}
+
+export function getAllAgents(): Agent[] {
+  return loadAllProfiles();
+}
+
+export function getAgent(id: string): Agent | undefined {
+  return loadAllProfiles().find(a => a.id === id);
+}
+
+export function searchAgents(query: string): Agent[] {
+  const q = query.toLowerCase();
+  return loadAllProfiles().filter(a =>
+    a.name.toLowerCase().includes(q) ||
+    a.handle.toLowerCase().includes(q) ||
+    a.skills.some(s => s.toLowerCase().includes(q)) ||
+    a.bio.toLowerCase().includes(q)
+  );
+}
+
+export function getStats() {
+  const agents = loadAllProfiles();
+  const totalSkills = new Set(agents.flatMap(a => a.skills)).size;
+  const verified = agents.filter(a => a.trustScore >= 100).length;
+  const onChain = agents.filter(a => a.verifications.satp?.verified || a.verifications.solana?.verified).length;
+  return {
+    totalAgents: agents.length,
+    totalSkills,
+    verified,
+    onChain,
+  };
+}
+
+
+export function getTopVerifiedAgents(limit = 6): Agent[] {
+  const agents = loadAllProfiles();
+  return agents
+    .filter(a => a.trustScore >= 50)
+    .sort((a, b) => b.trustScore - a.trustScore)
+    .slice(0, limit);
+}
+
+export function getAllJobs(): Job[] {
+  return loadAllJobs();
+}
+
+export function getJob(id: string): Job | undefined {
+  return loadAllJobs().find(j => j.id === id);
+}
+
+export function getActivityFeed() {
+  const agents = loadAllProfiles();
+  // Generate from real data - recent registrations and endorsements
+  const activities: Array<{ agent: string; action: string; time: string }> = [];
+
+  // Sort by updatedAt/createdAt for recent activity
+  const sorted = [...agents].sort((a, b) =>
+    new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime()
+  );
+
+  for (const a of sorted.slice(0, 6)) {
+    const date = new Date(a.registeredAt);
+    const now = Date.now();
+    const diff = now - date.getTime();
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(hours / 24);
+    const time = days > 0 ? `${days}d ago` : hours > 0 ? `${hours}h ago` : "recently";
+
+    if (a.verifications.solana?.verified) {
+      activities.push({ agent: a.name, action: "verified Solana wallet", time });
+    } else if (a.verifications.github?.verified) {
+      activities.push({ agent: a.name, action: "verified GitHub", time });
+    } else {
+      activities.push({ agent: a.name, action: "registered", time });
+    }
+  }
+
+  return activities.slice(0, 6);
+}

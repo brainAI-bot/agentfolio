@@ -1,0 +1,10 @@
+{
+  "cluster": "devnet",
+  "nftNumber": 5,
+  "mint": "2toATspK6wDCJXztGS3FVWXaP7HHsVR26v1hCTYeRsU7",
+  "collection": "BM5fX3SEgv9Lj3CvGvyQeB1WZi4tvSibVziqXTctt9aa",
+  "metadataUri": "https://gateway.irys.xyz/DmxRHhfU3APjwDbLBtdDDfBrPk6BYLVMXvQjcq8MaBb1",
+  "imageUri": "https://gateway.irys.xyz/J8JoNFVmwXdxutwYebqNUC4WCve8gR32QvnAcC2uN11w",
+  "recipient": "Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc",
+  "createdAt": "2026-03-09T22:25:30.588Z"
+}

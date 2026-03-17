@@ -1,0 +1,348 @@
+{
+  "address": "4JUGpKNdhAbQPQc9EG1q25NyaJidziszMMQ4phtg5S4o",
+  "metadata": {
+    "name": "boa_nft",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "initialize",
+      "docs": [
+        "Initialize the collection state (admin only, once)"
+      ],
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "collection_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  108,
+                  108,
+                  101,
+                  99,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "soft_cap",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "migrate_collection",
+      "docs": [
+        "Migrate collection state to add soft_cap field (one-time, authority only)",
+        "Manually reallocs the PDA since Anchor can't deserialize the old (smaller) layout"
+      ],
+      "discriminator": [
+        23,
+        210,
+        133,
+        21,
+        57,
+        239,
+        124,
+        148
+      ],
+      "accounts": [
+        {
+          "name": "collection_state",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "soft_cap",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "mint_nft",
+      "docs": [
+        "Mint a Bored Agent NFT",
+        "",
+        "Security: Authority MUST co-sign every mint. The server verifies eligibility",
+        "(verification_level >= 3, reputation_score >= 50) off-chain, then co-signs",
+        "with the authority keypair. No client-provided eligibility data is trusted.",
+        "",
+        "- 1st mint free, 2nd-3rd cost 1 SOL each",
+        "- Max 3 per wallet",
+        "- Soft cap enforced if > 0"
+      ],
+      "discriminator": [
+        211,
+        57,
+        6,
+        167,
+        15,
+        219,
+        35,
+        251
+      ],
+      "accounts": [
+        {
+          "name": "collection_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  108,
+                  108,
+                  101,
+                  99,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint_tracker",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  97,
+                  99,
+                  107,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "minter"
+              }
+            ]
+          }
+        },
+        {
+          "name": "minter",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Authority must co-sign (server-side eligibility attestation)"
+          ],
+          "signer": true,
+          "relations": [
+            "collection_state"
+          ]
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "update_soft_cap",
+      "docs": [
+        "Update the soft cap (authority only)",
+        "0 = no soft cap (full supply)"
+      ],
+      "discriminator": [
+        175,
+        243,
+        183,
+        90,
+        126,
+        156,
+        167,
+        168
+      ],
+      "accounts": [
+        {
+          "name": "collection_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  108,
+                  108,
+                  101,
+                  99,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "collection_state"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "new_soft_cap",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "CollectionState",
+      "discriminator": [
+        228,
+        135,
+        148,
+        4,
+        244,
+        41,
+        118,
+        165
+      ]
+    },
+    {
+      "name": "MintTracker",
+      "discriminator": [
+        217,
+        230,
+        22,
+        187,
+        250,
+        88,
+        11,
+        174
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "MaxSupplyReached",
+      "msg": "Maximum supply of 5000 reached"
+    },
+    {
+      "code": 6001,
+      "name": "MaxMintsReached",
+      "msg": "Maximum 3 mints per wallet reached"
+    },
+    {
+      "code": 6002,
+      "name": "SoftCapReached",
+      "msg": "Soft launch cap reached — stay tuned for full launch"
+    }
+  ],
+  "types": [
+    {
+      "name": "CollectionState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "total_minted",
+            "type": "u64"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "soft_cap",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MintTracker",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "mints",
+            "type": "u8"
+          },
+          {
+            "name": "initialized",
+            "type": "bool"
+          }
+        ]
+      }
+    }
+  ]
+}

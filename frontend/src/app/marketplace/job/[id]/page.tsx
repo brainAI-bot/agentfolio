@@ -6,8 +6,8 @@ import { JobApplyForm } from "@/components/JobApplyForm";
 
 export const dynamic = "force-dynamic";
 
-export function generateStaticParams() {
-  return getAllJobs().map((j) => ({ id: j.id }));
+export async function generateStaticParams() {
+  return (await getAllJobs()).map((j) => ({ id: j.id }));
 }
 
 const statusConfig: Record<string, { label: string; color: string }> = {
@@ -26,7 +26,7 @@ const escrowLabels: Record<string, string> = {
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const job = getJob(id);
+  const job = await getJob(id);
   if (!job) return notFound();
 
   const sc = statusConfig[job.status] || statusConfig.open;

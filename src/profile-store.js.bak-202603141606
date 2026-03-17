@@ -1,0 +1,415 @@
+/**
+ * Profile Store — SQLite-backed persistent profiles, endorsements, and reviews
+ * 
+ * Endpoints registered:
+ *   POST   /api/register              — Create a new agent profile
+ *   GET    /api/profiles              — List profiles (paginated)
+ *   GET    /api/profile/:id           — Get single profile (enriched)
+ *   PATCH  /api/profile/:id           — Update profile fields
+ *   POST   /api/profile/:id/endorsements — Add endorsement
+ *   GET    /api/profile/:id/endorsements — List endorsements
+ *   POST   /api/profile/:id/reviews     — Add review
+ *   GET    /api/profile/:id/reviews     — List reviews
+ */
+
+const Database = require('better-sqlite3');
+const path = require('path');
+const crypto = require('crypto');
+
+// SATP on-chain identity registration (fire-and-forget on profile creation)
+let satpWrite;
+try {
+  satpWrite = require('./satp-write-client');
+} catch (e) {
+  console.warn('[ProfileStore] satp-write-client not available, on-chain registration disabled');
+}
+
+const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR ||
+  '/home/ubuntu/.config/solana/brainforge-personal.json';
+const SATP_NETWORK = process.env.SATP_NETWORK || 'mainnet';
+
+const DB_PATH = path.join(__dirname, '..', 'data', 'agentfolio.db');
+
+let db;
+
+function getDb() {
+  if (!db) {
+    const fs = require('fs');
+    fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+    db = new Database(DB_PATH);
+    db.pragma('journal_mode = WAL');
+    db.pragma('foreign_keys = ON');
+    
+    // Detect review FK column FIRST (before schema init which might fail)
+    try {
+      const reviewCols = db.prepare("PRAGMA table_info(reviews)").all().map(c => c.name);
+      module.exports._reviewFk = reviewCols.includes('reviewee_id') ? 'reviewee_id' : 'profile_id';
+    } catch (e) {
+      module.exports._reviewFk = 'profile_id';
+    }
+    
+    try { initSchema(); } catch (e) {
+      console.warn('[ProfileStore] initSchema warning (existing DB may have different schema):', e.message);
+    }
+  }
+  return db;
+}
+
+function initSchema() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS profiles (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      avatar TEXT DEFAULT '',
+      website TEXT DEFAULT '',
+      framework TEXT DEFAULT '',
+      capabilities TEXT DEFAULT '[]',
+      tags TEXT DEFAULT '[]',
+      wallet TEXT DEFAULT '',
+      twitter TEXT DEFAULT '',
+      github TEXT DEFAULT '',
+      email TEXT DEFAULT '',
+      status TEXT DEFAULT 'active',
+      api_key TEXT UNIQUE,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS endorsements (
+      id TEXT PRIMARY KEY,
+      profile_id TEXT NOT NULL,
+      endorser_id TEXT NOT NULL,
+      endorser_name TEXT DEFAULT '',
+      skill TEXT NOT NULL,
+      comment TEXT DEFAULT '',
+      weight INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (profile_id) REFERENCES profiles(id),
+      UNIQUE(profile_id, endorser_id, skill)
+    );
+
+    CREATE TABLE IF NOT EXISTS reviews (
+      id TEXT PRIMARY KEY,
+      profile_id TEXT NOT NULL,
+      reviewer_id TEXT NOT NULL,
+      reviewer_name TEXT DEFAULT '',
+      rating INTEGER NOT NULL CHECK(rating >= 1 AND rating <= 5),
+      title TEXT DEFAULT '',
+      comment TEXT DEFAULT '',
+      job_id TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (profile_id) REFERENCES profiles(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS verifications (
+      id TEXT PRIMARY KEY,
+      profile_id TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      identifier TEXT NOT NULL,
+      proof TEXT DEFAULT '{}',
+      verified_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (profile_id) REFERENCES profiles(id),
+      UNIQUE(profile_id, platform)
+    );
+
+    CREATE TABLE IF NOT EXISTS activity_feed (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      profile_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      detail TEXT DEFAULT '{}',
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (profile_id) REFERENCES profiles(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_endorsements_profile ON endorsements(profile_id);
+    CREATE INDEX IF NOT EXISTS idx_verifications_profile ON verifications(profile_id);
+    CREATE INDEX IF NOT EXISTS idx_activity_profile ON activity_feed(profile_id);
+    CREATE INDEX IF NOT EXISTS idx_profiles_wallet ON profiles(wallet);
+    CREATE INDEX IF NOT EXISTS idx_profiles_status ON profiles(status);
+  `);
+  // reviews table may use reviewee_id (CEO fix) or profile_id — detect which
+  const reviewCols = db.prepare("PRAGMA table_info(reviews)").all().map(c => c.name);
+  const reviewFk = reviewCols.includes('reviewee_id') ? 'reviewee_id' : 'profile_id';
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_reviews_fk ON reviews(${reviewFk})`); } catch {}
+  // Store for use in queries
+  module.exports._reviewFk = reviewFk;
+}
+
+function genId(prefix = 'agent') {
+  return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
+}
+
+function genApiKey() {
+  return `af_${crypto.randomBytes(24).toString('hex')}`;
+}
+
+function parseJsonField(val) {
+  try { return JSON.parse(val || '[]'); } catch { return []; }
+}
+
+function addVerification(profileId, platform, identifier, proof) {
+  const d = getDb();
+  const id = genId('ver');
+  d.prepare(`
+    INSERT OR REPLACE INTO verifications (id, profile_id, platform, identifier, proof, verified_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
+  `).run(id, profileId, platform, identifier, JSON.stringify(proof || {}));
+  addActivity(profileId, 'verification', { platform, identifier });
+  return id;
+}
+
+function addActivity(profileId, eventType, detail) {
+  const d = getDb();
+  d.prepare('INSERT INTO activity_feed (profile_id, event_type, detail) VALUES (?, ?, ?)').run(
+    profileId, eventType, JSON.stringify(detail || {})
+  );
+}
+
+function enrichProfile(row) {
+  if (!row) return null;
+  const d = getDb();
+  const endorsements = d.prepare('SELECT * FROM endorsements WHERE profile_id = ? ORDER BY created_at DESC').all(row.id);
+  const verifications = d.prepare('SELECT * FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
+  const activity = d.prepare('SELECT * FROM activity_feed WHERE profile_id = ? ORDER BY created_at DESC LIMIT 20').all(row.id);
+  const rfk = module.exports._reviewFk || 'profile_id';
+  const reviewStats = d.prepare(`
+    SELECT COUNT(*) as total, ROUND(AVG(rating),2) as avg_rating,
+      SUM(CASE WHEN rating >= 4 THEN 1 ELSE 0 END) as positive,
+      SUM(CASE WHEN rating <= 2 THEN 1 ELSE 0 END) as negative
+    FROM reviews WHERE ${rfk} = ?
+  `).get(row.id);
+  
+  // SATP Trust Score (from satp_trust_scores table)
+  let trust_score = null;
+  try {
+    const trustRow = d.prepare('SELECT overall_score, level, score_breakdown FROM satp_trust_scores WHERE agent_id = ?').get(row.id);
+    if (trustRow) {
+      trust_score = {
+        overall_score: trustRow.overall_score,
+        level: trustRow.level,
+        score_breakdown: parseJsonField(trustRow.score_breakdown),
+      };
+    }
+  } catch (e) {
+    // satp_trust_scores table may not exist yet
+  }
+
+  return {
+    ...row,
+    capabilities: parseJsonField(row.capabilities),
+    tags: parseJsonField(row.tags),
+    endorsements: { items: endorsements, total: endorsements.length },
+    verifications: verifications.map(v => ({ ...v, proof: parseJsonField(v.proof) })),
+    activity: activity.map(a => ({ ...a, detail: parseJsonField(a.detail) })),
+    reviews: {
+      total: reviewStats.total,
+      avg_rating: reviewStats.avg_rating,
+      positive: reviewStats.positive,
+      negative: reviewStats.negative,
+    },
+    trust_score,
+  };
+}
+
+function registerRoutes(app) {
+  // ── POST /api/register ──────────────────────────────────────────
+  app.post('/api/register', (req, res) => {
+    const { name, handle, description, avatar, website, framework, capabilities, tags, wallet, twitter, github, email } = req.body;
+    if (!name || typeof name !== 'string' || name.trim().length < 1) {
+      return res.status(400).json({ error: 'name is required (non-empty string)' });
+    }
+
+    const d = getDb();
+    const id = genId();
+    const apiKey = genApiKey();
+    // Detect if production schema has 'handle' column
+    const cols = d.prepare("PRAGMA table_info(profiles)").all().map(c => c.name);
+    const hasHandle = cols.includes('handle');
+
+    try {
+      const now = new Date().toISOString();
+      if (hasHandle) {
+        const h = (handle || name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_')).substring(0, 64);
+        d.prepare(`
+          INSERT INTO profiles (id, name, handle, description, avatar, website, framework, capabilities, tags, wallet, twitter, github, email, api_key, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+        `).run(
+          id, name.trim(), h,
+          (description || '').trim(), avatar || '', website || '',
+          framework || '', JSON.stringify(capabilities || []), JSON.stringify(tags || []),
+          wallet || '', twitter || '', github || '', email || '', apiKey,
+          now, now
+        );
+      } else {
+        d.prepare(`
+          INSERT INTO profiles (id, name, description, avatar, website, framework, capabilities, tags, wallet, twitter, github, email, api_key)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          id, name.trim(),
+          (description || '').trim(), avatar || '', website || '',
+          framework || '', JSON.stringify(capabilities || []), JSON.stringify(tags || []),
+          wallet || '', twitter || '',
+          github || '', email || '', apiKey
+        );
+      }
+
+      // Fire-and-forget: create SATP on-chain identity if wallet provided
+      if (wallet && satpWrite) {
+        (async () => {
+          try {
+            const signer = satpWrite.loadKeypair(PLATFORM_KEYPAIR_PATH);
+            const result = await satpWrite.registerIdentity(
+              {
+                name: name.trim().substring(0, 32),
+                description: (description || '').trim().substring(0, 256) || 'AgentFolio registered agent',
+                category: framework || 'general',
+                capabilities: Array.isArray(capabilities) ? capabilities.slice(0, 5) : [],
+                metadataUri: '',
+              },
+              signer,
+              SATP_NETWORK
+            );
+            console.log(`[SATP] On-chain identity created for ${id}: tx=${result.txSignature}`);
+          } catch (err) {
+            console.error(`[SATP] Failed to create on-chain identity for ${id}:`, err.message);
+          }
+        })();
+      }
+
+      res.status(201).json({
+        id,
+        api_key: apiKey,
+        message: 'Profile registered successfully. Save your api_key — it authenticates write operations.',
+        satp: wallet ? 'On-chain identity creation initiated' : 'No wallet provided — on-chain identity skipped',
+      });
+    } catch (e) {
+      console.error('Register error:', e.message);
+      res.status(500).json({ error: 'Registration failed', detail: e.message });
+    }
+  });
+
+  // ── GET /api/profiles ───────────────────────────────────────────
+  app.get('/api/profiles', (req, res) => {
+    const d = getDb();
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const offset = (page - 1) * limit;
+    const status = req.query.status || 'active';
+
+    const total = d.prepare('SELECT COUNT(*) as c FROM profiles WHERE status = ?').get(status).c;
+    const rows = d.prepare('SELECT * FROM profiles WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(status, limit, offset);
+
+    // Strip api_key from list responses
+    const profiles = rows.map(r => {
+      const { api_key, ...rest } = r;
+      return { ...rest, capabilities: parseJsonField(rest.capabilities), tags: parseJsonField(rest.tags) };
+    });
+
+    res.json({ profiles, total, page, limit, pages: Math.ceil(total / limit) });
+  });
+
+  // ── GET /api/profile/:id ───────────────────────────────────────
+  app.get('/api/profile/:id', (req, res) => {
+    const d = getDb();
+    const row = d.prepare('SELECT * FROM profiles WHERE id = ? OR LOWER(name) = LOWER(?)').get(req.params.id, req.params.id);
+    if (!row) return res.status(404).json({ error: 'Profile not found' });
+
+    const { api_key, ...safe } = row;
+    res.json(enrichProfile(safe));
+  });
+
+  // ── PATCH /api/profile/:id ─────────────────────────────────────
+  app.patch('/api/profile/:id', (req, res) => {
+    const d = getDb();
+    const apiKey = (req.headers['x-api-key'] || '').trim();
+    if (!apiKey) return res.status(401).json({ error: 'x-api-key header required' });
+
+    const row = d.prepare('SELECT * FROM profiles WHERE id = ? OR LOWER(name) = LOWER(?)').get(req.params.id, req.params.id);
+    if (!row) return res.status(404).json({ error: 'Profile not found' });
+    if (row.api_key !== apiKey) return res.status(403).json({ error: 'Invalid api_key' });
+
+    const allowed = ['name', 'description', 'avatar', 'website', 'framework', 'capabilities', 'tags', 'wallet', 'twitter', 'github', 'email'];
+    const sets = [];
+    const vals = [];
+    for (const k of allowed) {
+      if (req.body[k] !== undefined) {
+        sets.push(`${k} = ?`);
+        vals.push(Array.isArray(req.body[k]) ? JSON.stringify(req.body[k]) : req.body[k]);
+      }
+    }
+    if (sets.length === 0) return res.status(400).json({ error: 'No updatable fields provided' });
+
+    sets.push("updated_at = datetime('now')");
+    vals.push(req.params.id);
+    d.prepare(`UPDATE profiles SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+
+    res.json({ updated: true });
+  });
+
+  // ── POST /api/profile/:id/endorsements ─────────────────────────
+  app.post('/api/profile/:id/endorsements', (req, res) => {
+    const { endorser_id, endorser_name, skill, comment, weight } = req.body;
+    if (!endorser_id || !skill) return res.status(400).json({ error: 'endorser_id and skill are required' });
+
+    const d = getDb();
+    const profile = d.prepare('SELECT id FROM profiles WHERE id = ?').get(req.params.id, req.params.id);
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
+    if (endorser_id === req.params.id) return res.status(400).json({ error: 'Cannot self-endorse' });
+
+    const id = genId('end');
+    try {
+      d.prepare(`
+        INSERT INTO endorsements (id, profile_id, endorser_id, endorser_name, skill, comment, weight)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(id, req.params.id, endorser_id, endorser_name || '', skill, comment || '', weight || 1);
+      addActivity(req.params.id, 'endorsement', { endorser_id, endorser_name, skill });
+      res.status(201).json({ id, message: 'Endorsement added' });
+    } catch (e) {
+      if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Duplicate endorsement (same endorser + skill)' });
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── GET /api/profile/:id/endorsements ──────────────────────────
+  app.get('/api/profile/:id/endorsements', (req, res) => {
+    const d = getDb();
+    const items = d.prepare('SELECT * FROM endorsements WHERE profile_id = ? ORDER BY created_at DESC').all(req.params.id);
+    res.json({ endorsements: items, total: items.length });
+  });
+
+  // ── POST /api/profile/:id/reviews ──────────────────────────────
+  app.post('/api/profile/:id/reviews', (req, res) => {
+    const { reviewer_id, reviewer_name, rating, title, comment, job_id } = req.body;
+    if (!reviewer_id || !rating) return res.status(400).json({ error: 'reviewer_id and rating (1-5) are required' });
+    const r = parseInt(rating);
+    if (r < 1 || r > 5) return res.status(400).json({ error: 'rating must be 1-5' });
+
+    const d = getDb();
+    const profile = d.prepare('SELECT id FROM profiles WHERE id = ?').get(req.params.id, req.params.id);
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
+    if (reviewer_id === req.params.id) return res.status(400).json({ error: 'Cannot self-review' });
+
+    const id = genId('rev');
+    d.prepare(`
+      INSERT INTO reviews (id, profile_id, reviewer_id, reviewer_name, rating, title, comment, job_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, req.params.id, reviewer_id, reviewer_name || '', r, title || '', comment || '', job_id || '');
+    addActivity(req.params.id, 'review', { reviewer_id, reviewer_name, rating: r, title });
+
+    res.status(201).json({ id, rating: r, title: title || '', comment: comment || '', reviewer_id, reviewer_name: reviewer_name || '', job_id: job_id || '', message: 'Review added' });
+  });
+
+  // ── GET /api/profile/:id/reviews ───────────────────────────────
+  app.get('/api/profile/:id/reviews', (req, res) => {
+    const d = getDb();
+    const rfk = module.exports._reviewFk || 'profile_id';
+    const items = d.prepare(`SELECT * FROM reviews WHERE ${rfk} = ? ORDER BY created_at DESC`).all(req.params.id);
+    const stats = d.prepare(`
+      SELECT COUNT(*) as total, ROUND(AVG(rating),2) as avg_rating FROM reviews WHERE ${rfk} = ?
+    `).get(req.params.id, req.params.id);
+    res.json({ reviews: items, ...stats });
+  });
+}
+
+module.exports = { registerRoutes, getDb, addVerification, addActivity };

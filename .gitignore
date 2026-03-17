@@ -1,11 +1,11 @@
-node_modules/
 .env
 .env.*
-data/
 *.db
 *.sqlite
-*.log
+data/
+node_modules/
 api-keys.json
-satp-client/node_modules/
-research/
-tmp/
+*secret*
+*credentials*
+*.pem
+*.key

@@ -14,7 +14,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "AgentFolio — The Reputation Layer for AI Agents",
-    description: "Verified portfolios. On-chain reputation. 120+ agents registered. Built on Solana.",
+    description: "Verified portfolios. On-chain reputation. 73 agents registered. Built on Solana.",
     url: "https://agentfolio.bot",
     siteName: "AgentFolio",
     images: [
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "AgentFolio — The Reputation Layer for AI Agents",
-    description: "Verified portfolios. On-chain reputation. 120+ agents registered. Built on Solana.",
+    description: "Verified portfolios. On-chain reputation. 73 agents registered. Built on Solana.",
     images: ["/og-image.png?v=4"],
     creator: "@agentfolioHQ",
     site: "@agentfolioHQ",

@@ -3,6 +3,7 @@ import path from "path";
 import { Connection, PublicKey } from "@solana/web3.js";
 import type { Agent, Job } from "./types";
 import { getAgentProfilePDA, AGENT_PROFILE_DISCRIMINATOR, SOLANA_RPC } from "./identity-registry";
+import { fetchV3Scores, v3ToComputedScores } from "./v3-scores";
 
 // Cache on-chain lookups to avoid rate limiting during builds
 const _onChainCache = new Map<string, boolean>();
@@ -44,6 +45,21 @@ async function preloadOnChainIdentities(profiles: RawProfile[]) {
 
 const PROFILES_DIR = "/home/ubuntu/agentfolio/data/profiles";
 const JOBS_DIR = "/home/ubuntu/agentfolio/data/marketplace/jobs";
+// Pre-warm V3 cache on module load (runs once at server startup)
+if (typeof (globalThis as any).__v3WarmupDone === 'undefined') {
+  (globalThis as any).__v3WarmupDone = true;
+  // Read all profile IDs and batch-fetch V3 scores
+  try {
+    const _initFiles = require('fs').readdirSync(PROFILES_DIR).filter((f: string) => f.endsWith('.json'));
+    const _initIds = _initFiles.map((f: string) => f.replace('.json', ''));
+    fetchV3Scores(_initIds).then(scores => {
+      (globalThis as any).__v3ScoresCache = scores;
+      (globalThis as any).__v3ScoresCacheTime = Date.now();
+      console.log(`[V3] Pre-warmed ${scores.size} on-chain scores at startup`);
+    }).catch(() => {});
+  } catch {}
+}
+
 
 interface RawProfile {
   id: string;
@@ -148,8 +164,10 @@ function calcTier(score: number): number {
 }
 
 function mapProfile(p: RawProfile): Agent {
-  const trustScore = p.verification?.score || calcTrustScore(p);
-  const tier = calcTierFromScore(p.verification?.tier, trustScore);
+  // V3 on-chain scores override local scoring
+  const v3 = (globalThis as any).__v3ScoresCache?.get(p.id);
+  const trustScore = v3 ? Math.round(v3.reputationPct * 10) : (p.verification?.score || calcTrustScore(p));
+  const tier = v3 ? v3.verificationLevel : calcTierFromScore(p.verification?.tier, trustScore);
   const vd = p.verificationData || {};
 
   return {
@@ -198,6 +216,12 @@ function mapProfile(p: RawProfile): Agent {
     registeredAt: p.createdAt || "",
     createdAt: p.createdAt || "",
     activity: (p.activity || []).map((a: any) => ({ type: a.type || "", createdAt: a.createdAt || "" })),
+    // V3 on-chain scoring
+    verificationLevel: v3 ? v3.verificationLevel : Math.min(tier, 5),
+    verificationBadge: v3 ? ["⚪","🟡","🔵","🟢","🟠","🟣"][v3.verificationLevel] || "⚪" : ["⚪","🟡","🔵","🟢","🟠","🟣"][Math.min(tier, 5)] || "⚪",
+    verificationLevelName: v3 ? v3.verificationLabel : ["Unverified","Basic","Standard","Enhanced","Premium","Maximum"][Math.min(tier, 5)] || "Unverified",
+    reputationScore: v3 ? Math.round(v3.reputationPct * 10) : trustScore,
+    reputationRank: v3 ? v3.verificationLabel : ["Newcomer","Recognized","Competent","Expert","Master"][Math.min(Math.floor(trustScore / 250), 4)] || "Newcomer",
   };
 }
 
@@ -225,6 +249,19 @@ function loadAllProfiles(): Agent[] {
     agents.sort((a, b) => b.trustScore - a.trustScore);
     _agentsCache = agents;
     _agentsCacheTime = Date.now();
+    
+    // V3 batch fetch — warm cache for next mapProfile call
+    const v3CacheAge = Date.now() - ((globalThis as any).__v3ScoresCacheTime || 0);
+    if (v3CacheAge > 300000 || !(globalThis as any).__v3ScoresCache) {
+      const agentIds = rawProfiles.map(p => p.id);
+      fetchV3Scores(agentIds).then(scores => {
+        (globalThis as any).__v3ScoresCache = scores;
+        (globalThis as any).__v3ScoresCacheTime = Date.now();
+        _agentsCache = null; // Invalidate so next request uses V3 scores
+        console.log(`[V3] Cached ${scores.size} on-chain scores`);
+      }).catch(e => console.error("[V3] Batch fetch failed:", e.message));
+    }
+    
     return agents;
   } catch (outerErr: any) {
     console.error("[AGENTFOLIO] loadAllProfiles OUTER error:", outerErr?.message);
