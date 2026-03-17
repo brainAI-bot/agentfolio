@@ -1,118 +1,123 @@
 /**
- * Website .well-known Verification
- * Verifies website ownership by checking for a challenge token at
- * {website}/.well-known/agentfolio-verification.txt
+ * Website .well-known Verification Module
+ * Two-phase verification: challenge generation + confirmation
  */
 
 const crypto = require('crypto');
 
-const VERIFY_TIMEOUT = 10000;
+const TIMEOUT_MS = 10000;
 
-// In-memory challenge store (same pattern as verification-challenges.js)
-const websiteChallenges = new Map();
+// In-memory storage for challenges (would use Redis in production)
+const challenges = new Map();
 
 /**
- * Generate a website verification challenge
+ * Generate a verification challenge for website ownership
  */
 function generateWebsiteChallenge(profileId, websiteUrl) {
-  const token = 'agentfolio-verify-' + crypto.randomBytes(16).toString('hex');
   const challengeId = crypto.randomUUID();
-  const expiresAt = Date.now() + 60 * 60 * 1000; // 1 hour
-
+  const token = `agentfolio-verify-${crypto.randomBytes(16).toString('hex')}`;
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+  
   const challenge = {
-    id: challengeId,
+    challengeId,
     profileId,
-    websiteUrl: websiteUrl.replace(/\/+$/, ''),
+    websiteUrl,
     token,
     expiresAt,
-    createdAt: Date.now()
+    createdAt: new Date()
   };
-
-  websiteChallenges.set(challengeId, challenge);
-
-  // Auto-cleanup
-  setTimeout(() => websiteChallenges.delete(challengeId), 60 * 60 * 1000);
-
+  
+  challenges.set(challengeId, challenge);
+  
+  // Clean up expired challenges
+  setTimeout(() => {
+    challenges.delete(challengeId);
+  }, 30 * 60 * 1000);
+  
   return {
     challengeId,
     token,
     profileId,
-    websiteUrl: challenge.websiteUrl,
-    instructions: `Place a file at ${challenge.websiteUrl}/.well-known/agentfolio-verification.txt containing exactly: ${token}`,
-    expiresAt: new Date(expiresAt).toISOString()
+    websiteUrl,
+    instructions: `Place a file at ${websiteUrl}/.well-known/agentfolio-verification.txt containing exactly: ${token}`,
+    expiresAt: expiresAt.toISOString()
   };
 }
 
 /**
- * Get an existing challenge
- */
-function getWebsiteChallenge(challengeId) {
-  const challenge = websiteChallenges.get(challengeId);
-  if (!challenge) return null;
-  if (Date.now() > challenge.expiresAt) {
-    websiteChallenges.delete(challengeId);
-    return null;
-  }
-  return challenge;
-}
-
-/**
- * Confirm website verification by fetching the challenge token
+ * Confirm website verification by checking the challenge token
  */
 async function confirmWebsiteVerification(challengeId) {
-  const challenge = getWebsiteChallenge(challengeId);
+  const challenge = challenges.get(challengeId);
+  
   if (!challenge) {
-    return { verified: false, error: 'Challenge not found or expired' };
+    return {
+      verified: false,
+      error: 'Challenge not found or expired'
+    };
   }
-
-  const verifyUrl = `${challenge.websiteUrl}/.well-known/agentfolio-verification.txt`;
-
+  
+  if (new Date() > challenge.expiresAt) {
+    challenges.delete(challengeId);
+    return {
+      verified: false,
+      error: 'Challenge expired'
+    };
+  }
+  
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), VERIFY_TIMEOUT);
-
-    const res = await fetch(verifyUrl, {
-      signal: controller.signal,
-      headers: { 'User-Agent': 'AgentFolio-Verify/1.0' }
+    // Normalize URL
+    const url = new URL(challenge.websiteUrl);
+    const baseUrl = `${url.protocol}//${url.host}`;
+    const verificationUrl = `${baseUrl}/.well-known/agentfolio-verification.txt`;
+    
+    const res = await fetch(verificationUrl, {
+      headers: { 'User-Agent': 'AgentFolio-Website-Verify/1.0' },
+      signal: AbortSignal.timeout(TIMEOUT_MS)
     });
-    clearTimeout(timeout);
-
+    
     if (!res.ok) {
       return {
         verified: false,
-        error: `Could not fetch verification file: HTTP ${res.status}`,
-        url: verifyUrl
+        error: `Verification file not found: HTTP ${res.status}`,
+        challengeId,
+        websiteUrl: challenge.websiteUrl
       };
     }
-
+    
     const content = (await res.text()).trim();
-
-    if (content === challenge.token) {
-      // Clean up used challenge
-      websiteChallenges.delete(challengeId);
-
+    
+    if (content !== challenge.token) {
       return {
-        verified: true,
-        profileId: challenge.profileId,
-        websiteUrl: challenge.websiteUrl,
-        url: verifyUrl
+        verified: false,
+        error: `Token mismatch: file contains "${content}", expected "${challenge.token}"`,
+        challengeId,
+        websiteUrl: challenge.websiteUrl
       };
     }
-
+    
+    // Verification successful - clean up challenge
+    challenges.delete(challengeId);
+    
     return {
-      verified: false,
-      error: 'Token mismatch. Make sure the file contains exactly the challenge token with no extra whitespace.',
-      url: verifyUrl,
-      expected: challenge.token,
-      got: content.substring(0, 100)
+      verified: true,
+      profileId: challenge.profileId,
+      websiteUrl: challenge.websiteUrl,
+      verifiedAt: new Date().toISOString(),
+      message: 'Website ownership verified successfully'
     };
-  } catch (e) {
+    
+  } catch (error) {
     return {
       verified: false,
-      error: `Failed to fetch verification file: ${e.message}`,
-      url: verifyUrl
+      error: `Verification failed: ${error.message}`,
+      challengeId,
+      websiteUrl: challenge.websiteUrl
     };
   }
 }
 
-module.exports = { generateWebsiteChallenge, getWebsiteChallenge, confirmWebsiteVerification };
+module.exports = {
+  generateWebsiteChallenge,
+  confirmWebsiteVerification
+};

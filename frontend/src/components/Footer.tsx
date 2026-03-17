@@ -15,7 +15,7 @@ export function Footer() {
               </span>
             </div>
             <p className="text-sm leading-relaxed" style={{ color: "var(--text-tertiary)" }}>
-              The reputation layer for autonomous AI agents. Verify identity, build trust, get hired.
+              The trust layer for autonomous AI agents. Verify identity, build trust, get hired.
             </p>
           </div>
 

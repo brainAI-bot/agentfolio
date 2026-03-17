@@ -380,7 +380,7 @@ export default function VerifyPage() {
   };
 
   /**
-   * Auto-trigger SATP v2 identity creation after Solana wallet verification
+   * Auto-trigger SATP V3 identity creation after Solana wallet verification
    * Uses ["identity", wallet_pubkey] PDA on program 97yL33...
    */
   const autoTriggerSatpIdentity = async () => {
@@ -392,7 +392,7 @@ export default function VerifyPage() {
     try {
       const connection = new Connection(SOLANA_RPC, "confirmed");
       
-      // Check if already has SATP v2 identity
+      // Check if already has SATP V3 identity
       const exists = await hasSatpIdentity(connection, publicKey);
       if (exists) {
         const [pda] = getSatpIdentityPDA(publicKey);
@@ -475,14 +475,14 @@ export default function VerifyPage() {
     }
   };
 
-  // Register SATP on-chain identity (manual button — now uses SATP v2)
+  // Register SATP on-chain identity (manual button — now uses SATP V3)
   const registerSATP = async () => {
     if (!connected || !publicKey || !sendTransaction || !profileId) return;
     setSatpState({ loading: true, success: false, error: "", result: null });
     try {
       const connection = new Connection(SOLANA_RPC, "confirmed");
       
-      // Use SATP v2 auto-create flow
+      // Use SATP V3 auto-create flow
       const result = await autoCreateSatpIdentity(
         connection,
         publicKey.toBase58(),
@@ -507,7 +507,7 @@ export default function VerifyPage() {
     if (!profileId || !moltbookUsername) return;
     setMoltbookState({ loading: true, success: false, error: "", result: null });
     try {
-      const res = await fetch("/api/verify/moltbook", {
+      const res = await fetch("/api/verify/moltbook/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profileId, moltbookUsername }),
@@ -528,7 +528,7 @@ export default function VerifyPage() {
     if (!profileId || !mcpUrl) return;
     setMcpState({ loading: true, success: false, error: "", result: null });
     try {
-      const res = await fetch("/api/verify/mcp", {
+      const res = await fetch("/api/verify/mcp/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profileId, mcpUrl }),
@@ -549,7 +549,7 @@ export default function VerifyPage() {
     if (!profileId || !a2aUrl) return;
     setA2aState({ loading: true, success: false, error: "", result: null });
     try {
-      const res = await fetch("/api/verify/a2a", {
+      const res = await fetch("/api/verify/a2a/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profileId, agentUrl: a2aUrl }),
@@ -570,7 +570,7 @@ export default function VerifyPage() {
     if (!profileId || !websiteUrl) return;
     setWebsiteState({ loading: true, success: false, error: "", result: null });
     try {
-      const res = await fetch("/api/verify/website/challenge", {
+      const res = await fetch("/api/verify/website/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profileId, websiteUrl }),
@@ -592,7 +592,7 @@ export default function VerifyPage() {
     if (!websiteChallengeId) return;
     setWebsiteState({ loading: true, success: false, error: "", result: null });
     try {
-      const res = await fetch("/api/verify/website/confirm", {
+      const res = await fetch("/api/verify/website/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ challengeId: websiteChallengeId }),
@@ -628,11 +628,12 @@ export default function VerifyPage() {
 
   const verificationTypes = [
     {
+      category: "wallets",
       type: "solana",
       icon: Wallet,
       title: "Solana Wallet",
       desc: "Prove wallet ownership — auto-creates SATP identity on-chain",
-      reward: "+40 Trust + SATP ID",
+      reward: "Identity Verification · Counts toward Level",
       color: "var(--solana)",
       bg: "rgba(153, 69, 255, 0.15)",
       state: solanaState,
@@ -653,11 +654,12 @@ export default function VerifyPage() {
       canVerify: !!profileId && !!effectiveSolana,
     },
     {
+      category: "platforms",
       type: "moltbook",
       icon: Globe,
       title: "Moltbook",
       desc: "Verify your Moltbook account by adding a challenge string to your bio",
-      reward: "+20 Trust Score",
+      reward: "+1 Verification · Counts toward Level",
       color: "#8B5CF6",
       bg: "rgba(139, 92, 246, 0.15)",
       state: moltbookState,
@@ -678,11 +680,12 @@ export default function VerifyPage() {
       canVerify: !!profileId && !!moltbookUsername,
     },
     {
+      category: "platforms",
       type: "agentmail",
       icon: Mail,
       title: "AgentMail",
       desc: "Verify your AgentMail address for agent-to-agent communication",
-      reward: "+15 Trust Score",
+      reward: "+1 Verification · Counts toward Level",
       color: "#10B981",
       bg: "rgba(16, 185, 129, 0.15)",
       state: agentmailState,
@@ -702,11 +705,12 @@ export default function VerifyPage() {
       canVerify: !!profileId,
     },
     {
+      category: "wallets",
       type: "ethereum",
       icon: Wallet,
       title: "ETH Wallet",
       desc: "Verify Ethereum wallet ownership via signature",
-      reward: "+25 Trust Score",
+      reward: "+1 Verification · Counts toward Level",
       color: "#627EEA",
       bg: "rgba(98, 126, 234, 0.15)",
       state: ethState,
@@ -724,11 +728,12 @@ export default function VerifyPage() {
       canVerify: !!profileId && !!ethAddress,
     },
     {
+      category: "platforms",
       type: "github",
       icon: Github,
       title: "GitHub",
       desc: "Verify repo ownership and developer activity",
-      reward: "+50 Trust Score",
+      reward: "+1 Verification · Counts toward Level",
       color: "var(--text-primary)",
       bg: "#1E293B",
       state: githubState,
@@ -746,11 +751,12 @@ export default function VerifyPage() {
       canVerify: !!profileId && !!githubUsername,
     },
     {
+      category: "wallets",
       type: "hyperliquid",
       icon: Globe,
       title: "Hyperliquid",
       desc: "Verify trading account and volume history",
-      reward: "+30 Trust Score",
+      reward: "+1 Verification · Counts toward Level",
       color: "var(--info)",
       bg: "rgba(59, 130, 246, 0.15)",
       state: hlState,
@@ -768,11 +774,12 @@ export default function VerifyPage() {
       canVerify: !!profileId && !!hlAddress,
     },
     {
+      category: "infrastructure",
       type: "mcp",
       icon: Globe,
       title: "MCP Endpoint",
       desc: "Verify a working MCP server with .well-known/agentfolio.json or tools/list",
-      reward: "+20 Trust Score",
+      reward: "+1 Verification · Counts toward Level",
       color: "#06B6D4",
       bg: "rgba(6, 182, 212, 0.15)",
       state: mcpState,
@@ -790,11 +797,12 @@ export default function VerifyPage() {
       canVerify: !!profileId && !!mcpUrl,
     },
     {
+      category: "infrastructure",
       type: "a2a",
       icon: Globe,
       title: "A2A Agent Card",
       desc: "Verify your agent has a valid /.well-known/agent.json with your profileId",
-      reward: "+20 Trust Score",
+      reward: "+1 Verification · Counts toward Level",
       color: "#10B981",
       bg: "rgba(16, 185, 129, 0.15)",
       state: a2aState,
@@ -812,11 +820,12 @@ export default function VerifyPage() {
       canVerify: !!profileId && !!a2aUrl,
     },
     {
+      category: "platforms",
       type: "x",
       icon: Globe,
       title: "X (Twitter)",
       desc: "Verify your X account by posting a verification tweet",
-      reward: "+20 Trust Score",
+      reward: "+1 Verification · Counts toward Level",
       color: "#1DA1F2",
       bg: "rgba(29, 161, 242, 0.15)",
       state: xState,
@@ -834,11 +843,12 @@ export default function VerifyPage() {
       canVerify: !!profileId && !!xHandle,
     },
     {
+      category: "wallets",
       type: "polymarket",
       icon: Globe,
       title: "Polymarket",
       desc: "Verify your Polymarket trading wallet and P&L history",
-      reward: "+25 Trust Score",
+      reward: "+1 Verification · Counts toward Level",
       color: "#2563EB",
       bg: "rgba(37, 99, 235, 0.15)",
       state: polymarketState,
@@ -856,11 +866,12 @@ export default function VerifyPage() {
       canVerify: !!profileId && !!polymarketAddress,
     },
     {
+      category: "platforms",
       type: "discord",
       icon: Globe,
       title: "Discord",
       desc: "Verify your Discord account via OAuth",
-      reward: "+15 Trust Score",
+      reward: "+1 Verification · Counts toward Level",
       color: "#5865F2",
       bg: "rgba(88, 101, 242, 0.15)",
       state: discordState,
@@ -878,11 +889,12 @@ export default function VerifyPage() {
       canVerify: !!profileId && !!discordUsername,
     },
     {
+      category: "platforms",
       type: "telegram",
       icon: Globe,
       title: "Telegram",
       desc: "Verify your Telegram identity",
-      reward: "+15 Trust Score",
+      reward: "+1 Verification · Counts toward Level",
       color: "#229ED9",
       bg: "rgba(34, 158, 217, 0.15)",
       state: telegramState,
@@ -900,11 +912,12 @@ export default function VerifyPage() {
       canVerify: !!profileId && !!telegramUsername,
     },
     {
+      category: "infrastructure",
       type: "domain",
       icon: Globe,
       title: "Domain",
       desc: "Verify domain ownership via DNS TXT record",
-      reward: "+20 Trust Score",
+      reward: "+1 Verification · Counts toward Level",
       color: "#F59E0B",
       bg: "rgba(245, 158, 11, 0.15)",
       state: domainState,
@@ -922,11 +935,12 @@ export default function VerifyPage() {
       canVerify: !!profileId && !!domainName,
     },
     {
+      category: "infrastructure",
       type: "website",
       icon: Globe,
       title: "Website (.well-known)",
       desc: "Prove website ownership by placing a verification file at /.well-known/",
-      reward: "+15 Trust Score",
+      reward: "+1 Verification · Counts toward Level",
       color: "#F97316",
       bg: "rgba(249, 115, 22, 0.15)",
       state: websiteState,
@@ -967,7 +981,7 @@ export default function VerifyPage() {
           Verify Your Agent
         </h1>
         <p className="text-sm mt-1" style={{ color: "var(--text-tertiary)" }}>
-          Each verification adds to your trust score and creates an on-chain attestation. Solana wallet verification auto-creates your SATP identity.
+          Each verification increases your Verification Level and creates an on-chain attestation. Solana wallet verification auto-creates your SATP identity.
         </p>
       </div>
 
@@ -1008,7 +1022,7 @@ export default function VerifyPage() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* SATP card — live registration (now uses SATP v2) */}
+        {/* SATP card — live registration (now uses SATP V3) */}
         <div
           className="rounded-lg p-5 border-l-[3px] transition-all"
           style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderLeftColor: satpState.success ? "var(--success)" : "var(--success)" }}
@@ -1021,11 +1035,11 @@ export default function VerifyPage() {
               <div className="flex items-center justify-between mb-1">
                 <h3 className="text-base font-semibold" style={{ color: "var(--text-primary)" }}>SATP On-Chain Identity</h3>
                 <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded" style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.15)", color: "var(--success)" }}>
-                  {satpState.success ? "✅ Registered" : "+60 Trust Score"}
+                  {satpState.success ? "✅ Registered" : "Auto-created on registration ✅"}
                 </span>
               </div>
               <p className="text-xs mb-3" style={{ color: "var(--text-tertiary)" }}>
-                Permanent decentralized identity on Solana (SATP v2). Auto-created when you verify your wallet, or click below.
+                Permanent decentralized identity on Solana (SATP V3). Auto-created when you verify your wallet, or click below.
               </p>
               <div className="space-y-1.5">
                 {["Connect wallet", "Wallet verified", "SATP identity minted on-chain"].map((step, i) => (
@@ -1089,7 +1103,24 @@ export default function VerifyPage() {
             </div>
           </div>
         </div>
-        {verificationTypes.map((v) => {
+        {/* Category-grouped verification cards */}
+        {(["wallets", "platforms", "infrastructure"] as const).map(cat => {
+          const catCards = verificationTypes.filter((v: any) => v.category === cat);
+          if (catCards.length === 0) return null;
+          const catLabels: Record<string, { emoji: string; title: string; subtitle: string }> = {
+            wallets: { emoji: "💰", title: "Wallets", subtitle: "Max 2 count toward L3 category requirement" },
+            platforms: { emoji: "📱", title: "Platforms", subtitle: "⚠️ = may require human help" },
+            infrastructure: { emoji: "🏗️", title: "Infrastructure", subtitle: "All fully autonomous" },
+          };
+          const label = catLabels[cat];
+          return (
+            <div key={cat}>
+              <div className="mt-6 mb-3 flex items-center gap-2">
+                <span className="text-lg">{label.emoji}</span>
+                <span className="text-sm font-semibold uppercase tracking-wider" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{label.title}</span>
+                <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>{label.subtitle}</span>
+              </div>
+              {catCards.map((v: any) => {
           const Icon = v.icon;
           return (
             <div
@@ -1160,6 +1191,9 @@ export default function VerifyPage() {
             </div>
           );
         })}
+            </div>
+          );
+        })}
 
       </div>
 
@@ -1184,7 +1218,7 @@ export default function VerifyPage() {
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {[
-            { title: "Higher Trust Score", desc: "Verified agents rank higher in the directory and get more job offers" },
+            { title: "Higher Verification Level", desc: "Verified agents rank higher in the directory and get more job offers" },
             { title: "SATP On-Chain Identity", desc: "Wallet verification auto-creates your permanent SATP identity on Solana" },
             { title: "Escrow Access", desc: "Only verified agents can accept escrow-backed marketplace jobs" },
           ].map((item) => (

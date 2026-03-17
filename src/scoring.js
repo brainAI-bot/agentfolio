@@ -1,208 +1,201 @@
 /**
- * AgentFolio Scoring Module v2
- * Hybrid scoring: on-chain SATP scores (authoritative) + off-chain signals
- * On-chain scores come from SATP Identity program via CPI-computed reputation
+ * AgentFolio Scoring Module v3
+ * Implements the new two-dimension scoring system: Verification Level + Trust Score
+ * Backward compatible with existing API endpoints
  */
 
 const path = require('path');
 const satpIdentity = require('./satp-identity-client');
-
-// ─── Scoring Weights ────────────────────────────────────
-// On-chain SATP score is the primary signal (40%)
-// Off-chain signals fill the remaining 60%
-const WEIGHTS = {
-  onChainReputation: 40,  // From SATP on-chain reputation_score (0-100 → 0-40)
-  verifications: 20,      // Verified accounts (on-chain attestations + off-chain)
-  reviews: 15,            // Review ratings
-  activity: 10,           // Recent activity signals
-  completeness: 10,       // Profile completeness
-  tenure: 5,              // Account age
-};
-
-// Verification type scores (off-chain)
-const VERIFICATION_SCORES = {
-  github: 8,
-  solana: 6,
-  x: 5,
-  discord: 4,
-  telegram: 4,
-  domain: 6,
-  website: 5,
-  eth: 6,
-  ens: 5,
-  farcaster: 4,
-  agentmail: 3,
-};
+const { getProfileScoring, checkBoaEligibility } = require('./lib/scoring-v2');
 
 /**
- * Compute score for a profile, integrating on-chain SATP data
- * @param {object} profile - Profile from DB
- * @param {object} [onChainData] - Pre-fetched {identity, attestations} from SATP. If null, score without on-chain.
+ * Get activity data for a profile (placeholder - would be from database)
  */
-function computeScore(profile, onChainData = null) {
-  let breakdown = {};
-  let total = 0;
-
-  // 1. On-Chain SATP Reputation (max 40) — THE authoritative score
-  const onChain = onChainData || {};
-  const satpScore = onChain.identity?.reputationScore || 0; // 0-100 from on-chain
-  const satpLevel = onChain.identity?.verificationLevel || 0; // 0-5 from on-chain
-  const onChainPts = Math.min((satpScore / 100) * WEIGHTS.onChainReputation, WEIGHTS.onChainReputation);
-  breakdown.onChainReputation = {
-    score: Math.round(onChainPts * 10) / 10,
-    max: WEIGHTS.onChainReputation,
-    satpScore,
-    satpLevel,
-    satpLabel: satpIdentity.levelToLabel(satpLevel),
-    onChain: !!onChain.identity,
-    pda: onChain.identity?.pda || null,
-  };
-  total += breakdown.onChainReputation.score;
-
-  // 2. Verifications (max 20) — combine on-chain attestations + off-chain
-  const offChainVerifications = profile.verifications || [];
-  const onChainAttestations = onChain.attestations || [];
-  let verScore = 0;
-  const verifiedTypes = [];
-
-  // Off-chain verifications
-  for (const v of offChainVerifications) {
-    const type = v.type || v.provider;
-    if (type && VERIFICATION_SCORES[type] && !verifiedTypes.includes(type)) {
-      verScore += VERIFICATION_SCORES[type];
-      verifiedTypes.push(type);
-    }
-  }
-
-  // On-chain attestations (bonus: on-chain proof > off-chain claim)
-  for (const att of onChainAttestations) {
-    if (att.verified && !att.expired) {
-      const type = att.attestationType;
-      if (!verifiedTypes.includes(type)) {
-        verScore += (VERIFICATION_SCORES[type] || 4) * 1.5; // 1.5x for on-chain proof
-        verifiedTypes.push(type + ':onchain');
-      }
-    }
-  }
-
-  breakdown.verifications = {
-    score: Math.min(Math.round(verScore * 10) / 10, WEIGHTS.verifications),
-    max: WEIGHTS.verifications,
-    types: verifiedTypes,
-    onChainAttestations: onChainAttestations.length,
-  };
-  total += breakdown.verifications.score;
-
-  // 3. Reviews (max 15)
-  const reviews = profile.reviews?.received || {};
-  const avgRating = reviews.avg_rating || 0;
-  const reviewCount = reviews.total_reviews || 0;
-  const reviewScore = reviewCount > 0
-    ? Math.min((avgRating / 5) * 12 + Math.min(reviewCount, 10) * 0.3, WEIGHTS.reviews)
-    : 0;
-  breakdown.reviews = { score: Math.round(reviewScore * 10) / 10, max: WEIGHTS.reviews, avgRating, count: reviewCount };
-  total += breakdown.reviews.score;
-
-  // 4. Activity (max 10)
-  const trading = profile.trading || {};
-  let actScore = 0;
-  if (trading.totalTrades > 0) actScore += Math.min(trading.totalTrades / 10, 5);
-  if (trading.winRate > 0.5) actScore += 2;
-  if (profile.lastActive || profile.last_active_at) {
-    const lastActive = profile.lastActive || profile.last_active_at;
-    const daysSinceActive = (Date.now() - new Date(lastActive).getTime()) / (1000 * 60 * 60 * 24);
-    if (daysSinceActive < 7) actScore += 3;
-    else if (daysSinceActive < 30) actScore += 1;
-  }
-  breakdown.activity = { score: Math.min(Math.round(actScore * 10) / 10, WEIGHTS.activity), max: WEIGHTS.activity };
-  total += breakdown.activity.score;
-
-  // 5. Completeness (max 10)
-  let completeScore = 0;
-  if (profile.name) completeScore += 2;
-  if ((profile.description || profile.bio) && (profile.description || profile.bio).length > 20) completeScore += 2;
-  if (profile.avatar || profile.image) completeScore += 2;
-  if (profile.website || profile.url || profile.links) completeScore += 1;
-  if (offChainVerifications.length > 0 || onChainAttestations.length > 0) completeScore += 2;
-  if (profile.tags?.length > 0 || profile.skills) completeScore += 1;
-  breakdown.completeness = { score: Math.min(completeScore, WEIGHTS.completeness), max: WEIGHTS.completeness };
-  total += breakdown.completeness.score;
-
-  // 6. Tenure (max 5)
-  let tenureScore = 0;
-  const createdAt = profile.createdAt || profile.created_at;
-  if (createdAt) {
-    const daysOld = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24);
-    tenureScore = Math.min(daysOld / 60, 5); // 1pt per 2 months, max 5
-  }
-  breakdown.tenure = { score: Math.round(tenureScore * 10) / 10, max: WEIGHTS.tenure };
-  total += breakdown.tenure.score;
-
-  // Level assignment — on-chain SATP level takes priority if registered
-  total = Math.round(total * 10) / 10;
-  let level;
-  if (satpLevel >= 5) level = 'ELITE';
-  else if (satpLevel >= 4 || total >= 80) level = 'ELITE';
-  else if (satpLevel >= 3 || total >= 60) level = 'PRO';
-  else if (satpLevel >= 2 || total >= 40) level = 'VERIFIED';
-  else if (satpLevel >= 1 || total >= 20) level = 'BASIC';
-  else level = 'NEW';
-
+function getActivityData(profile) {
   return {
-    profileId: profile.id,
-    score: total,
-    maxScore: 100,
-    level,
-    breakdown,
-    onChainRegistered: !!onChain.identity,
-    computedAt: new Date().toISOString(),
+    endorsementsGiven: 0,
+    endorsementsReceived: [],
+    completedJobs: 0,
+    jobsPosted: 0,
+    reviewsReceived: profile.reviews?.received ? [{
+      rating: Math.round(profile.reviews.received.avg_rating || 0),
+      count: profile.reviews.received.total_reviews || 0
+    }] : [],
+    attestationsReceived: 0,
+    accountAgeDays: profile.created_at ? 
+      Math.floor((Date.now() - new Date(profile.created_at)) / (1000 * 60 * 60 * 24)) : 0,
+    successfulReferrals: 0,
+    completionRate: 1.0
   };
 }
 
 /**
- * Fetch on-chain SATP data for a wallet address
- * Returns { identity, attestations } or null
+ * Compute score for a profile (backward compatibility wrapper)
+ * Returns the old API format but uses new scoring v2 internally
  */
-async function fetchOnChainData(walletAddress) {
-  if (!walletAddress) return null;
+function computeScore(profile, onChainData = null) {
+  if (!profile) {
+    return {
+      score: 0,
+      level: 'NEW',
+      breakdown: {},
+      trustScore: 0,
+      verificationLevel: 'L1'
+    };
+  }
+
+  const activityData = getActivityData(profile);
+  const scoring = getProfileScoring(profile.id, activityData);
+  
+  if (!scoring) {
+    return {
+      score: 0,
+      level: 'NEW',
+      breakdown: {},
+      trustScore: 0,
+      verificationLevel: 'L1'
+    };
+  }
+
+  // Map new scoring to old API format for backward compatibility
+  const oldFormatScore = Math.min(Math.floor(scoring.trustScore / 8), 100); // Scale 0-800 to 0-100
+  
+  // Map new levels to old level names
+  const levelMap = {
+    'L1': 'NEW',
+    'L2': 'BASIC', 
+    'L3': 'VERIFIED',
+    'L4': 'PRO',
+    'L5': 'ELITE'
+  };
+
+  return {
+    score: oldFormatScore,
+    level: levelMap[scoring.level] || 'NEW',
+    breakdown: {
+      trustScore: {
+        score: scoring.trustScore,
+        max: 800,
+        categories: scoring.trustScoreBreakdown
+      },
+      verificationLevel: {
+        level: scoring.level,
+        name: scoring.levelName,
+        count: scoring.verificationCount
+      }
+    },
+    trustScore: scoring.trustScore,
+    verificationLevel: scoring.level,
+    verificationLevelName: scoring.levelName,
+    verificationCount: scoring.verificationCount,
+    onChain: !!onChainData?.identity,
+    boaEligible: checkBoaEligibility(profile.id, activityData).eligible
+  };
+}
+
+/**
+ * Compute score with on-chain data integration
+ */
+function computeScoreWithOnChain(profile) {
+  // Try to fetch on-chain data
+  let onChainData = null;
   try {
-    const [identity, attestations] = await Promise.all([
-      satpIdentity.getAgentIdentity(walletAddress).catch(() => null),
-      satpIdentity.getAgentAttestations(walletAddress).catch(() => []),
-    ]);
-    return { identity, attestations };
+    const wallet = typeof profile.wallets === 'string' ? 
+      JSON.parse(profile.wallets) : profile.wallets;
+    const solanaWallet = wallet?.solana;
+    if (solanaWallet) {
+      onChainData = fetchOnChainData(solanaWallet);
+    }
   } catch (e) {
-    console.error('[Scoring] on-chain fetch error:', e.message);
+    // Continue without on-chain data
+  }
+  
+  return computeScore(profile, onChainData);
+}
+
+/**
+ * Compute leaderboard with new scoring
+ */
+function computeLeaderboard(profiles, limit = 50) {
+  const scored = profiles.map(profile => {
+    const score = computeScore(profile);
+    return {
+      ...profile,
+      ...score
+    };
+  });
+
+  // Sort by Trust Score within same Verification Level
+  scored.sort((a, b) => {
+    // First by verification level (L5 > L4 > L3 > L2 > L1)
+    const levelOrder = { 'L5': 5, 'L4': 4, 'L3': 3, 'L2': 2, 'L1': 1 };
+    const aLevel = levelOrder[a.verificationLevel] || 1;
+    const bLevel = levelOrder[b.verificationLevel] || 1;
+    
+    if (aLevel !== bLevel) {
+      return bLevel - aLevel; // Higher level first
+    }
+    
+    // Then by trust score (higher first)
+    return b.trustScore - a.trustScore;
+  });
+
+  return scored.slice(0, limit);
+}
+
+/**
+ * Fetch on-chain data from SATP (placeholder)
+ */
+async function fetchOnChainData(solanaWallet) {
+  try {
+    // This would fetch from SATP Identity program
+    // For now, return null to indicate no on-chain data
+    return null;
+  } catch (error) {
     return null;
   }
 }
 
 /**
- * Compute score with automatic on-chain lookup
- * @param {object} profile - Profile from DB (must have wallets field)
+ * Get new scoring API endpoint data
  */
-async function computeScoreWithOnChain(profile) {
-  // Extract wallet from profile
-  let wallet = null;
-  try {
-    const wallets = typeof profile.wallets === 'string' ? JSON.parse(profile.wallets) : profile.wallets;
-    wallet = wallets?.solana || wallets?.ethereum || null;
-  } catch (e) { /* no wallet */ }
+function getV2Scoring(profileId, includeBreakdown = true) {
+  const profile = require('./lib/profile').loadProfile(profileId);
+  if (!profile) {
+    return { error: 'Profile not found' };
+  }
 
-  const onChainData = wallet ? await fetchOnChainData(wallet) : null;
-  return computeScore(profile, onChainData);
-}
+  const activityData = getActivityData(profile);
+  const scoring = getProfileScoring(profileId, activityData);
+  
+  if (!scoring) {
+    return { error: 'Could not calculate scoring' };
+  }
 
-/**
- * Compute leaderboard with on-chain data
- */
-async function computeLeaderboard(profiles, limit = 50) {
-  const scored = await Promise.all(profiles.map(p => computeScoreWithOnChain(p)));
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, limit).map((s, i) => ({
-    rank: i + 1,
-    ...s,
-  }));
+  const result = {
+    profileId,
+    verificationLevel: {
+      level: scoring.level,
+      name: scoring.levelName,
+      verificationCount: scoring.verificationCount
+    },
+    trustScore: {
+      total: scoring.trustScore,
+      max: 800
+    }
+  };
+
+  if (includeBreakdown) {
+    result.trustScore.breakdown = scoring.trustScoreBreakdown;
+  }
+
+  const boaCheck = checkBoaEligibility(profileId, activityData);
+  result.boaEligible = boaCheck.eligible;
+  if (!boaCheck.eligible) {
+    result.boaRequirements = boaCheck.reason;
+  }
+
+  return result;
 }
 
 module.exports = {
@@ -210,6 +203,5 @@ module.exports = {
   computeScoreWithOnChain,
   computeLeaderboard,
   fetchOnChainData,
-  WEIGHTS,
-  VERIFICATION_SCORES,
+  getV2Scoring
 };
