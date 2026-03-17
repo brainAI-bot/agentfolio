@@ -637,7 +637,9 @@ function deserializeProfile(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     // Activity is loaded separately for efficiency
-    activity: []
+    activity: [],
+    // NFT avatar (Burn to Become permanent avatar)
+    nftAvatar: row.nft_avatar ? JSON.parse(row.nft_avatar) : null,
   };
   // Spread metadata overflow fields back onto the profile
   for (const [key, value] of Object.entries(metadata)) {

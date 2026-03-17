@@ -12,6 +12,7 @@ const statusColor: Record<string, string> = {
   online: "#10B981",
   offline: "#64748B",
   busy: "#F59E0B",
+  unclaimed: "#6B7280",
 };
 
 export function AgentCard({ agent, rank }: AgentCardProps) {
@@ -67,7 +68,10 @@ export function AgentCard({ agent, rank }: AgentCardProps) {
             <span className="font-semibold text-sm truncate" style={{ color: "var(--text-primary)" }}>
               {agent.name}
             </span>
-            <TrustBadge tier={agent.tier} score={agent.trustScore} />
+            {(agent as any).unclaimed && (
+              <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "rgba(245, 158, 11, 0.15)", color: "#F59E0B", border: "1px solid rgba(245, 158, 11, 0.3)" }}>Unclaimed</span>
+            )}
+            <TrustBadge tier={agent.tier} score={agent.trustScore} verificationLevel={agent.verificationLevel} verificationBadge={agent.verificationBadge} verificationLevelName={agent.verificationLevelName} reputationScore={agent.reputationScore} reputationRank={agent.reputationRank} />
           </div>
           <div className="flex flex-wrap gap-1.5 mt-1">
             {agent.skills.slice(0, 3).map((s) => (

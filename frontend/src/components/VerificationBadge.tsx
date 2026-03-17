@@ -1,6 +1,6 @@
-import { Github, Wallet, X, Shield, Globe } from "lucide-react";
+import { Github, Wallet, X, Shield, Globe, Mail } from "lucide-react";
 
-type VerificationType = "github" | "solana" | "hyperliquid" | "x" | "satp";
+type VerificationType = "github" | "solana" | "hyperliquid" | "x" | "satp" | "ethereum" | "agentmail";
 
 interface VerificationBadgeProps {
   type: VerificationType;
@@ -14,6 +14,8 @@ const config: Record<VerificationType, { icon: React.ElementType; label: string;
   hyperliquid: { icon: Globe, label: "HL", color: "#3B82F6", bg: "rgba(59, 130, 246, 0.2)" },
   x: { icon: X, label: "X", color: "#1DA1F2", bg: "rgba(29, 161, 242, 0.2)" },
   satp: { icon: Shield, label: "SATP", color: "#10B981", bg: "rgba(16, 185, 129, 0.2)" },
+  ethereum: { icon: Wallet, label: "ETH", color: "#627EEA", bg: "rgba(98, 126, 234, 0.2)" },
+  agentmail: { icon: Mail, label: "Mail", color: "#10B981", bg: "rgba(16, 185, 129, 0.2)" },
 };
 
 export function VerificationBadge({ type, verified, compact }: VerificationBadgeProps) {

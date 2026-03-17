@@ -4,6 +4,7 @@ import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Save, Loader2, Key, CheckCircle, AlertCircle } from "lucide-react";
 import { NFTAvatarPicker } from "@/components/NFTAvatarPicker";
+import { useWallet } from "@solana/wallet-adapter-react";
 
 interface ProfileData {
   id: string;
@@ -34,6 +35,11 @@ export default function EditProfilePage({ params }: { params: Promise<{ id: stri
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [apiKey, setApiKey] = useState("");
+  const { publicKey, connected, signMessage } = useWallet();
+  const walletConnected = connected && publicKey;
+  const walletMatchesProfile = walletConnected && profile?.wallets && 
+    ((Array.isArray(profile.wallets) && profile.wallets.some((w: any) => w.address === publicKey?.toBase58())) ||
+     (!Array.isArray(profile.wallets) && (profile.wallets as any)?.solana === publicKey?.toBase58()));
   const [toast, setToast] = useState<Toast | null>(null);
 
   // Form state
@@ -52,13 +58,16 @@ export default function EditProfilePage({ params }: { params: Promise<{ id: stri
       .then(r => r.json())
       .then(data => {
         if (data.error) throw new Error(data.error);
+        // Parse JSON strings from API if needed
+        const links = typeof data.links === "string" ? JSON.parse(data.links || "{}") : (data.links || {});
+        data.links = links;
         setProfile(data);
         setBio(data.bio || "");
         setHandle(data.handle || "");
-        setWebsite(data.links?.website || "");
-        setX(data.links?.x || "");
-        setGithub(data.links?.github || "");
-        setMoltbook(data.links?.moltbook || "");
+        setWebsite(links.website || "");
+        setX(links.x || "");
+        setGithub(links.github || "");
+        setMoltbook(links.moltbook || "");
       })
       .catch(() => showToast("error", "Failed to load profile"))
       .finally(() => setLoading(false));
@@ -76,15 +85,24 @@ export default function EditProfilePage({ params }: { params: Promise<{ id: stri
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    if (!apiKey) return showToast("error", "API key required");
+    if (!apiKey && !walletMatchesProfile) return showToast("error", "API key or connected wallet required");
     setSaving(true);
     try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      
+      if (walletMatchesProfile && signMessage) {
+        // Use wallet signature auth
+        const msg = new TextEncoder().encode(`agentfolio-edit:${id}`);
+        const sig = await signMessage(msg);
+        headers["x-wallet-signature"] = Buffer.from(sig).toString("base64");
+        headers["x-wallet-address"] = publicKey!.toBase58();
+      } else {
+        headers["Authorization"] = `Bearer ${apiKey}`;
+      }
+      
       const res = await fetch(`/api/profile/${id}`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`,
-        },
+        headers,
         body: JSON.stringify({
           bio,
           handle,
@@ -140,10 +158,15 @@ export default function EditProfilePage({ params }: { params: Promise<{ id: stri
     );
   }
 
-  const wallets = profile.wallets || 
-    Object.entries(profile.verifications || {})
-      .filter(([_, v]: [string, any]) => v?.verified && v?.address)
-      .map(([chain, v]: [string, any]) => ({ chain, address: v.address, verified: true }));
+  // Normalize wallets to array format [{chain, address, verified}]
+  const rawWallets = (() => { const w = (profile as any).wallets || {}; return typeof w === "string" ? JSON.parse(w || "{}") : w; })();
+  const wallets = Array.isArray(rawWallets) 
+    ? rawWallets 
+    : typeof rawWallets === 'object' && rawWallets !== null
+      ? Object.entries(rawWallets).map(([chain, address]: [string, any]) => ({ chain, address: String(address), verified: true }))
+      : Object.entries(profile.verifications || {})
+          .filter(([_, v]: [string, any]) => v?.verified && v?.address)
+          .map(([chain, v]: [string, any]) => ({ chain, address: v.address, verified: true }));
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8">
@@ -230,7 +253,7 @@ export default function EditProfilePage({ params }: { params: Promise<{ id: stri
           <NFTAvatarPicker
             profileId={id}
             currentAvatar={profile.avatar}
-            nftAvatar={profile.nftAvatar}
+            nftAvatar={(profile as any).nftAvatar || (profile as any).nft_avatar}
             wallets={wallets}
             apiKey={apiKey}
             onAvatarSet={(avatar) => setProfile(prev => prev ? { ...prev, nftAvatar: avatar } : prev)}
@@ -258,14 +281,14 @@ export default function EditProfilePage({ params }: { params: Promise<{ id: stri
         {/* Save */}
         <button
           type="submit"
-          disabled={saving || !apiKey}
+          disabled={saving || (!apiKey && !walletMatchesProfile)}
           className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-opacity disabled:opacity-50"
           style={{
             fontFamily: "var(--font-mono)",
             background: "var(--accent)",
             color: "#fff",
             border: "none",
-            cursor: saving || !apiKey ? "not-allowed" : "pointer",
+            cursor: saving || (!apiKey && !walletMatchesProfile) ? "not-allowed" : "pointer",
           }}
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}

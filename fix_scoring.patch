@@ -1,0 +1,6 @@
+--- a/src/server.js
++++ b/src/server.js
+@@ -FIND_LINE,FIND_END_LINE c@@ -FIND_LINE,FIND_END_LINE
+-          verificationScore: calculateVerificationScore(profile, { marketplaceStats: getMarketplaceStats(profile.id) }).score
++          trustScore: calculateReputation(profile).score,
++          tier: calculateReputation(profile).tier

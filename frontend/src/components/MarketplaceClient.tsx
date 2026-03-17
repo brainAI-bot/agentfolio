@@ -94,6 +94,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           skills: j.skills || [],
           status: j.status === "in_progress" ? "in_progress" : j.status || "open",
           escrowStatus: j.fundsReleased ? "released" : j.escrowFunded ? "locked" : "ready",
+          escrowTx: j.escrowTx || j.escrow_tx || null,
           proposals: j.applicationCount || 0,
           deadline: (j.timeline || "").replace("_", " "),
           assignee: j.selectedAgentId || undefined,
@@ -268,14 +269,17 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Toast */}
       {message && (
-        <div className="fixed top-4 right-4 z-50 px-4 py-3 rounded-lg text-sm font-medium shadow-lg"
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] px-6 py-4 rounded-xl text-base font-bold shadow-2xl animate-bounce-in"
           style={{
-            background: message.type === "success" ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)",
-            color: message.type === "success" ? "#10b981" : "#ef4444",
-            border: `1px solid ${message.type === "success" ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)"}`,
+            background: message.type === "success" ? "rgba(16,185,129,0.95)" : "rgba(239,68,68,0.95)",
+            color: "#fff",
+            border: `2px solid ${message.type === "success" ? "#10b981" : "#ef4444"}`,
             fontFamily: "var(--font-mono)",
+            minWidth: "300px",
+            textAlign: "center",
+            backdropFilter: "blur(8px)",
           }}>
-          {message.text}
+          {message.type === "error" ? "⚠️ " : "✅ "}{message.text}
         </div>
       )}
 
@@ -374,7 +378,11 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                     <span style={{ color: "var(--text-tertiary)" }}>·</span>
                     <span className="flex items-center gap-1" style={{ color: "var(--text-secondary)" }}>
                       <EscrowIcon size={12} />
-                      {ec.label}
+                      {job.escrowTx ? (
+                        <a href={`https://solscan.io/tx/${job.escrowTx}`} target="_blank" rel="noopener noreferrer" style={{ color: "var(--solana)", textDecoration: "underline" }}>
+                          {ec.label} ↗
+                        </a>
+                      ) : ec.label}
                     </span>
                     {job.assignee && (
                       <>

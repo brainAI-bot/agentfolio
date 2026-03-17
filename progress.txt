@@ -1,0 +1,32 @@
+# Progress Log
+Run: 72089237-352d-4b21-b73e-ea6a9eb739f5
+Task: Build SATP Explorer page for AgentFolio
+Started: 2026-02-10T16:32:00Z
+
+## Codebase Patterns
+- Node 22 project, use built-in `node:test` and `node:assert` (no install needed)
+- Test script: `node --test 'tests/**/*.test.js'` (glob pattern required, bare dir path fails)
+- Plain Node.js project, no build/compile step
+- Tests dir: `tests/` at project root
+- Database uses `better-sqlite3` (synchronous), schema init runs on module load
+- `database.js` exports `db` directly — can use `db.prepare()` for custom queries
+- Reputation module: `calculateReputation(profile)` returns `{ score, breakdown, tier }`
+- Profile verification data stored as JSON in `verification_data` column, keyed by platform
+
+---
+
+## 2026-02-10 16:32 - US-001: Set up test framework and create feature branch
+- Created `tests/` directory and `tests/satp-registry.test.js` with placeholder test
+- Updated package.json test script to use `node --test 'tests/**/*.test.js'`
+- Branch `feature/satp-explorer` was already checked out
+- **Learnings:** `node --test tests/` fails with MODULE_NOT_FOUND; must use glob pattern `'tests/**/*.test.js'`
+---
+
+## 2026-02-10 17:33 - US-002: Create SATP registry database schema and module
+- Added `satp_attestations` and `satp_trust_scores` tables to database.js initializeSchema
+- Created `src/lib/satp-registry.js` with exports: computeTrustScore, getAttestation, listAttestations, getTrustScore, getRegistryStats, syncAllTrustScores
+- Auto-syncs verification_data (solana, github, twitter, polymarket, telegram, discord) + endorsements into attestation rows
+- computeTrustScore aggregates reputation breakdown into verification/activity/social sub-scores
+- Files changed: src/lib/database.js, src/lib/satp-registry.js, tests/satp-registry.test.js
+- **Learnings:** `better-sqlite3` INSERT OR REPLACE works well for attestation dedup; reputation breakdown keys match exactly what's documented in reputation.js
+---

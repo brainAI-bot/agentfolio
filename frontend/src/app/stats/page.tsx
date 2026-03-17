@@ -65,8 +65,8 @@ async function getUsdcBalance(ownerAddress: string): Promise<number> {
 }
 
 export default async function StatsPage() {
-  const agents = getAllAgents();
-  const jobs = getAllJobs();
+  const agents = await getAllAgents();
+  const jobs = await getAllJobs();
 
   // === Top Stats ===
   const totalAgents = agents.length;
@@ -610,6 +610,34 @@ async function TokenStatsSection() {
           </div>
         </div>
       )}
+
+      {/* On-Chain Receipts */}
+      <div className="rounded-lg overflow-hidden" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
+        <div className="px-4 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
+          <span className="text-xs font-bold uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>On-Chain Receipts</span>
+        </div>
+        <div className="divide-y" style={{ borderColor: "var(--border)" }}>
+          {[
+            ["Reviews v2 Deploy", "2gkFVP8ZvL6eT1xXh7B8zoYUQDypePZE9HTZUNYZA6Wr6yvKQSydrhfG1uLfYcXFxa6vxcbW1dX6jiR6ppYExvaL", "Program"],
+            ["First Escrow Release", "5Y5X2tfNDj2f2TppA7BJwFrTvbwWEas32QNyjbNvX7jJqTaGTAeicGNzqp5SjX5VjGX2CKzkeh4eqaDR8B9H5MMA", "Escrow"],
+            ["Distribution Jobs Funded", "3Y3qujTooXvxPtM7YCxGm7QPazpkBBmVYvHG6MFAAD8gR8xqPrNFVkDxitWMswBWmzMwnoJ3JoPazH9CHCxQnSqD", "Escrow"],
+            ["First On-Chain Review", "4NG9PUgpgXY495FcQWngyZdf1neY72cR9Um5ZGU6vQzppMwYfRW17DgF", "Review"],
+          ].map(([label, tx, type]) => (
+            <div key={label} className="px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase px-2 py-0.5 rounded" style={{ background: type === "Program" ? "rgba(139,92,246,0.15)" : type === "Escrow" ? "rgba(34,197,94,0.15)" : "rgba(59,130,246,0.15)", color: type === "Program" ? "#8b5cf6" : type === "Escrow" ? "#22c55e" : "#3b82f6" }}>
+                  {type}
+                </span>
+                <span className="text-sm" style={{ color: "var(--text-primary)" }}>{label}</span>
+              </div>
+              <a href={`https://solscan.io/tx/${tx}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs hover:underline" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
+                {tx.slice(0, 8)}...{tx.slice(-6)} <ExternalLink size={10} />
+              </a>
+            </div>
+          ))}
+        </div>
+      </div>
+
     </div>
   );
 }

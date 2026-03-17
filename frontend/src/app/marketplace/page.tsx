@@ -3,7 +3,7 @@ import { MarketplaceClient } from "@/components/MarketplaceClient";
 
 export const dynamic = "force-dynamic";
 
-export default function MarketplacePage() {
-  const jobs = getAllJobs();
+export default async function MarketplacePage() {
+  const jobs = await getAllJobs();
   return <MarketplaceClient jobs={jobs} />;
 }

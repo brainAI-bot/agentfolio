@@ -23,7 +23,9 @@ export default function RegisterPage() {
   const connected = isDemo ? true : wallet.connected;
   const publicKey = isDemo ? demoPublicKey : wallet.publicKey;
   const sendTransaction = wallet.sendTransaction;
+  const signMessage = wallet.signMessage;
 
+  const [customId, setCustomId] = useState("");
   const [name, setName] = useState("");
   const [handle, setHandle] = useState("");
   const [bio, setBio] = useState("");
@@ -52,6 +54,7 @@ export default function RegisterPage() {
       // 1. Save to backend DB
       const skillList = skills.split(",").map(s => s.trim()).filter(Boolean);
       const payload = {
+        customId: customId.trim() || undefined,
         name: name.trim(),
         handle: handle.trim() || `@${name.trim().toLowerCase().replace(/\s+/g, "")}`,
         bio: bio.trim(),
@@ -64,10 +67,24 @@ export default function RegisterPage() {
         },
       };
 
-      const res = await fetch("/api/profiles", {
+      // Sign a message to prove wallet ownership
+      let walletSig = "";
+      let walletMsg = "";
+      if (signMessage && publicKey) {
+        try {
+          walletMsg = `AgentFolio Registration: ${name.trim()} at ${new Date().toISOString().slice(0,10)}`;
+          const msgBytes = new TextEncoder().encode(walletMsg);
+          const sigBytes = await signMessage(msgBytes);
+          walletSig = Buffer.from(sigBytes).toString("base64");
+        } catch (sigErr: any) {
+          console.warn("Wallet signature skipped:", sigErr.message);
+        }
+      }
+
+      const res = await fetch("/api/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, signature: walletSig, signedMessage: walletMsg }),
       });
 
       const data = await res.json();
@@ -103,7 +120,7 @@ export default function RegisterPage() {
 
       setSuccess(true);
       setTimeout(() => {
-        router.push(`/profile/${data.profile?.id || name.toLowerCase().replace(/\s+/g, "-")}`);
+        router.push(`/profile/${data.id || data.profile?.id || name.toLowerCase().replace(/\s+/g, "-")}`);
       }, 2500);
     } catch (err: any) {
       setError(err.message || "Network error");
@@ -190,7 +207,7 @@ export default function RegisterPage() {
           )}
           {chainStatus === "skipped" && (
             <p className="text-xs ml-8" style={{ color: "var(--text-tertiary)" }}>
-              On-chain registration skipped (wallet may not have SOL for fees). You can register on-chain later.
+              On-chain registration skipped. You can complete it later from your profile.
             </p>
           )}
         </div>
@@ -227,6 +244,28 @@ export default function RegisterPage() {
           className="rounded-lg p-6 space-y-5"
           style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
         >
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
+              Profile ID <span className="normal-case font-normal" style={{ color: "var(--text-tertiary)" }}>(3-32 chars, letters/numbers/dash — leave blank for auto)</span>
+            </label>
+            <input
+              type="text"
+              value={customId}
+              onChange={e => setCustomId(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))}
+              maxLength={32}
+              placeholder="e.g. my-agent"
+              className="w-full px-4 py-2.5 rounded-lg text-sm outline-none transition-all"
+              style={{
+                fontFamily: "var(--font-mono)",
+                background: "var(--bg-primary)",
+                border: "1px solid var(--border)",
+                color: "var(--text-primary)",
+              }}
+              onFocus={e => e.target.style.borderColor = "var(--accent)"}
+              onBlur={e => e.target.style.borderColor = "var(--border)"}
+            />
+          </div>
+
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
               Agent Name * <span className="normal-case font-normal" style={{ color: "var(--text-tertiary)" }}>(max 32 chars)</span>
