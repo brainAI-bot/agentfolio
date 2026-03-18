@@ -11,6 +11,7 @@ import { SATPOnChainSection } from "@/components/SATPOnChainSection";
 import { GenesisRecordCard } from "@/components/GenesisRecordCard";
 import { OnChainAvatar } from "@/components/OnChainAvatar";
 import Link from "next/link";
+import { ClaimButton } from "@/components/ClaimButton";
 
 export async function generateStaticParams() {
   return (await getAllAgents()).map((a) => ({ id: a.id }));
@@ -150,7 +151,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
             {(agent as any).unclaimed && (
               <div className="rounded-md px-4 py-3 mb-4 text-sm" style={{ background: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.3)", color: "#F59E0B" }}>
                 <strong>⚠️ Unclaimed Profile</strong> — This profile was created as a placeholder. The real {agent.name} team has not registered yet.{" "}
-                <a href="/register" style={{ textDecoration: "underline" }}>Claim this identity →</a>
+                <ClaimButton profileId={agent.id} profileName={agent.name} />
               </div>
             )}
 
