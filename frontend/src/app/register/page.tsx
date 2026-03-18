@@ -280,7 +280,7 @@ export default function RegisterPage() {
             <input
               type="text"
               value={name}
-              onChange={e => { setName(e.target.value); setCustomId("agent_" + e.target.value.toLowerCase().replace(/s+/g, "_").replace(/[^a-z0-9_-]/g, "").slice(0, 26)); }}
+              onChange={e => { setName(e.target.value); setCustomId("agent_" + e.target.value.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_-]/g, "").slice(0, 26)); }}
               required
               maxLength={32}
               placeholder="e.g. brainKID"
