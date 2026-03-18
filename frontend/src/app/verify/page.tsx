@@ -95,13 +95,13 @@ export default function VerifyPage() {
     fetch(`/api/profile/${profileId}`)
       .then(r => r.json())
       .then(data => {
-        if (data.verifications) {
-          setExistingVerifications(data.verifications);
+        if (data.verificationData || data.verifications) {
+          setExistingVerifications(data.verificationData || data.verifications);
           // Pre-fill ETH address if already linked
-          if (data.verifications.ethereum?.address) {
-            setEthAddress(data.verifications.ethereum.address);
+          const vData = data.verificationData || data.verifications || {}; if (vData.ethereum?.address) {
+            setEthAddress(vData.ethereum.address);
           }
-          if (data.verifications.agentmail?.verified) {
+          if (vData.agentmail?.verified) {
             setAgentmailState({ loading: false, success: true, error: "", result: { verified: true } });
           }
         }
