@@ -168,7 +168,7 @@ function mapProfile(p: RawProfile): Agent {
   const v3 = (globalThis as any).__v3ScoresCache?.get(p.id);
   // Trust Score: SATP on-chain is source of truth (synced by backend score engine)
   // V3 reputationPct is 0-100 scale, multiply by 8 to get 0-800 v2 trust score
-  const trustScore = v3 ? Math.round(v3.reputationPct * 8) : (p.verification?.score || calcTrustScore(p));
+  const trustScore = v3 ? v3.reputationScore : (p.verification?.score || calcTrustScore(p));
   const vd = p.verificationData || {};
   // Count local verifications for level fallback
   const localVerifCount = Object.values(vd).filter((v: any) => v && v.verified).length;
@@ -194,7 +194,7 @@ function mapProfile(p: RawProfile): Agent {
     nftAvatar: p.nftAvatar || null,
     trustScore,
     tier,
-    skills: (p.skills || []).map(s => typeof s === 'string' ? s : (s.name || '')),
+    skills: [...new Set((p.skills || []).map(s => typeof s === 'string' ? s : (s.name || '')).filter(Boolean))],
     verifications: {
       github: vd.github ? {
         username: vd.github.handle || vd.github.username || "",
@@ -261,7 +261,7 @@ function loadAllProfiles(): Agent[] {
       }
     }
     // Sort by trust score desc
-    agents.sort((a, b) => b.trustScore - a.trustScore);
+    agents.sort((a, b) => (b.verificationLevel ?? b.tier) - (a.verificationLevel ?? a.tier) || b.trustScore - a.trustScore);
     // Filter out test profiles from public views
     const TEST_NAMES = ["SmokeTest", "brainTEST", "test_satp", "TestCLI", "test-no-sig", "test-check-id", "CEOTestAgent", "test"];
     agents = agents.filter(a => !TEST_NAMES.some(t => a.name === t || a.name?.includes(t) || a.id?.includes("test_satp") || a.id?.includes("test-no-sig") || a.id?.includes("test-check-id")));
@@ -365,7 +365,7 @@ export function searchAgents(query: string): Agent[] {
 export function getStats() {
   const agents = loadAllProfiles();
   const totalSkills = new Set(agents.flatMap(a => a.skills)).size;
-  const verified = agents.filter(a => a.trustScore >= 100).length;
+  const verified = agents.filter(a => (a.verificationLevel ?? a.tier ?? 0) >= 1).length;
   const onChain = agents.filter(a => a.verifications.satp?.verified || a.verifications.solana?.verified).length;
   return {
     totalAgents: agents.length,
