@@ -9,6 +9,8 @@ const { initiateXVerification, verifyXTweet } = require('./x-verify-hardened');
 const { initiateAgentMailVerification, verifyAgentMailCode } = require('./agentmail-verify-hardened');
 const { initiateSolanaVerification, verifySolanaSignature } = require('./solana-verify-hardened');
 const { initiateDiscordVerification, confirmDiscordVerification } = require('./discord-verify-hardened');
+const { initiateEthVerification, verifyEthSignature } = require('./eth-verify-hardened');
+const { initiateDomainVerification, verifyDomainOwnership } = require('./domain-verify-hardened');
 const { getChallenge } = require('./verification-challenges');
 
 /**
@@ -85,10 +87,12 @@ function handleVerificationRoutes(url, req, res, DATA_DIR) {
     req.on('data', chunk => body += chunk);
     req.on('end', async () => {
       try {
-        const { profileId, username } = JSON.parse(body || '{}');
+        const data = JSON.parse(body || '{}');
+        const { profileId } = data;
+        const username = data.username || data.handle; // accept both field names
         if (!profileId || !username) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'profileId and username required' }));
+          res.end(JSON.stringify({ error: 'profileId and username/handle required' }));
           return;
         }
         
@@ -268,6 +272,187 @@ function handleVerificationRoutes(url, req, res, DATA_DIR) {
     return true;
   }
 
+
+  // POST /api/verify/eth/initiate
+  if (url.pathname === '/api/verify/eth/initiate' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const { profileId, walletAddress } = JSON.parse(body || '{}');
+        if (!profileId || !walletAddress) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'profileId and walletAddress required' }));
+          return;
+        }
+        const result = await initiateEthVerification(profileId, walletAddress);
+        res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return true;
+  }
+
+  // POST /api/verify/eth/verify
+  if (url.pathname === '/api/verify/eth/verify' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const { challengeId, signature } = JSON.parse(body || '{}');
+        if (!challengeId || !signature) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'challengeId and signature required' }));
+          return;
+        }
+        const result = await verifyEthSignature(challengeId, signature);
+        if (result.verified) {
+          const challenge = await getChallenge(challengeId);
+          if (challenge) {
+            const profile = loadProfile(challenge.challengeData.profileId, DATA_DIR);
+            if (profile) {
+              if (!profile.verificationData) profile.verificationData = {};
+              profile.verificationData.ethereum = result;
+              saveProfile(profile);
+            }
+          }
+        }
+        res.writeHead(result.verified ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return true;
+  }
+
+  // POST /api/verify/domain/initiate
+  if (url.pathname === '/api/verify/domain/initiate' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const { profileId, domain } = JSON.parse(body || '{}');
+        if (!profileId || !domain) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'profileId and domain required' }));
+          return;
+        }
+        const result = await initiateDomainVerification(profileId, domain);
+        res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return true;
+  }
+
+  // POST /api/verify/domain/verify
+  if (url.pathname === '/api/verify/domain/verify' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const { challengeId } = JSON.parse(body || '{}');
+        if (!challengeId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'challengeId required' }));
+          return;
+        }
+        const result = await verifyDomainOwnership(challengeId);
+        if (result.verified) {
+          const challenge = await getChallenge(challengeId);
+          if (challenge) {
+            const profile = loadProfile(challenge.challengeData.profileId, DATA_DIR);
+            if (profile) {
+              if (!profile.verificationData) profile.verificationData = {};
+              profile.verificationData.domain = result;
+              saveProfile(profile);
+            }
+          }
+        }
+        res.writeHead(result.verified ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return true;
+  }
+
+  // POST /api/verify/telegram/initiate
+  if (url.pathname === '/api/verify/telegram/initiate' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const { profileId, username } = JSON.parse(body || '{}');
+        if (!profileId || !username) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'profileId and username required' }));
+          return;
+        }
+        // Telegram verification uses same challenge pattern
+        const challenge = require('./verification-challenges');
+        const ch = challenge.generateChallenge(profileId, 'telegram', username);
+        const challengeId = await challenge.storeChallenge(ch);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          challengeId,
+          username,
+          message: 'Send a DM to @AgentFolioBot with your verification code',
+          code: challengeId.slice(0, 8).toUpperCase(),
+          expiresAt: ch.expiresAt,
+        }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return true;
+  }
+
+  // POST /api/verify/telegram/verify
+  if (url.pathname === '/api/verify/telegram/verify' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const { challengeId } = JSON.parse(body || '{}');
+        if (!challengeId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'challengeId required' }));
+          return;
+        }
+        // For now, check if challenge was completed via bot
+        const challenge = await getChallenge(challengeId);
+        if (!challenge) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ verified: false, error: 'Challenge not found or expired' }));
+          return;
+        }
+        if (challenge.status === 'completed') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ verified: true, username: challenge.challengeData.identifier, verifiedAt: new Date().toISOString() }));
+        } else {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ verified: false, error: 'Verification not yet completed. Send code to Telegram bot.' }));
+        }
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return true;
+  }
 
   // POST /api/verify/discord/initiate
   if (url.pathname === '/api/verify/discord/initiate' && req.method === 'POST') {
