@@ -33,6 +33,13 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     }
   } catch {}
 
+  let githubStats: any = null;
+  if (v?.github?.verified && v.github.username) {
+    try {
+      const ghRes = await fetch(`http://localhost:3333/api/verify/github/stats?username=${encodeURIComponent(v.github.username)}`, { cache: "no-store" });
+      if (ghRes.ok) githubStats = await ghRes.json();
+    } catch {}
+  }
 
   // Fetch reviews from DB + peer reviews (with on-chain tx links when available)
   let reviews: any[] = [];
@@ -239,7 +246,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                 <VerificationRow
                   icon={<Github size={16} />}
                   label="GitHub"
-                  detail={`@${v.github?.username || "?"} — ${v.github?.repos || 0} repos, ${(v.github?.stars || 0).toLocaleString()}⭐`}
+                  detail={`@${githubStats?.username || v.github?.username || "?"} — ${githubStats?.repos ?? v.github?.repos ?? 0} repos, ${(githubStats?.stars ?? v.github?.stars ?? 0).toLocaleString()}⭐`}
                   verified
                 />
               )}
@@ -256,7 +263,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                 <VerificationRow
                   icon={<Globe size={16} />}
                   label="Hyperliquid"
-                  detail={`${v.hyperliquid.address} — ${v.hyperliquid.volume} vol`}
+                  detail={v.hyperliquid.volume && v.hyperliquid.volume !== "$0" && v.hyperliquid.volume !== "0" ? `${v.hyperliquid.address.slice(0, 8)}...${v.hyperliquid.address.slice(-4)} · ${v.hyperliquid.volume} vol` : `${v.hyperliquid.address.slice(0, 8)}...${v.hyperliquid.address.slice(-4)} · Verified ✅`}
                   verified
                   color="var(--info)"
                 />
