@@ -87,6 +87,43 @@ const { postVerificationOnchain, postReputationOnchain } = require('./lib/verifi
 const { handleVerificationRoutes } = require('./lib/hardened-verification-routes');
 
 // Helper: post verification on-chain (non-blocking, needs solana wallet)
+
+// ============ SATP ON-CHAIN SCORES CACHE ============
+// In-memory cache for SATP on-chain trust scores (TTL: 5 minutes)
+const _satpScoresCache = new Map();
+const SATP_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+async function getOnChainScores(profileId) {
+  // Check in-memory cache first
+  const cached = _satpScoresCache.get(profileId);
+  if (cached && (Date.now() - cached.timestamp < SATP_CACHE_TTL)) {
+    return cached;
+  }
+  
+  try {
+    const { createSATPClient } = require('./satp-client/src');
+    const client = createSATPClient({ 
+      rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY' 
+    });
+    const genesis = await client.getGenesisRecord(profileId);
+    if (genesis && genesis.reputationScore !== undefined) {
+      const tiers = ["unverified", "registered", "verified", "established", "trusted", "sovereign"];
+      const result = {
+        trustScore: genesis.reputationScore,
+        verificationLevel: genesis.verificationLevel,
+        tier: tiers[genesis.verificationLevel] || "unverified",
+        timestamp: Date.now(),
+        fromSATP: true
+      };
+      _satpScoresCache.set(profileId, result);
+      return result;
+    }
+  } catch (e) {
+    // Silently fail — fall back to old calculation
+  }
+  return null;
+}
+// ============ END SATP CACHE ============
 function postVerificationOnchainForProfile(profile, platform, proofData) {
   const wallet = profile?.wallets?.solana;
   if (!wallet) return;
@@ -14686,37 +14723,6 @@ function computeTrustData(agentId) {
   const profile = loadProfile(agentId);
   if (!profile) {
 
-  // SATP V3 API Fix: Check for on-chain scores first
-  try {
-    const http = require("http");
-    const options = {
-      hostname: "localhost", 
-      port: 3000,
-      path: `/api/profile/${agentId}/genesis`,
-      timeout: 1000
-    };
-    
-    // We'll use a quick internal check for cached SATP data
-    const satpCacheFile = `/tmp/satp-trust-${agentId}.json`;
-    if (fs.existsSync(satpCacheFile)) {
-      const cached = JSON.parse(fs.readFileSync(satpCacheFile, "utf8"));
-      const age = Date.now() - (cached.timestamp || 0);
-      if (age < 300000) { // 5 minutes
-        console.log(`[SATP API] Using cached scores for ${agentId}: trust=${cached.trustScore}`);
-        return {
-          agentId,
-          trustScore: cached.trustScore,
-          tier: cached.tier,
-          verifications: Object.keys(profile.verificationData || {}).filter(k => profile.verificationData[k]?.verified),
-          profileUrl: `https://agentfolio.bot/profile/${agentId}`,
-          lastUpdated: new Date().toISOString(),
-          fromSATP: true
-        };
-      }
-    }
-  } catch (e) {
-    // Fall back to calculated scores
-  }
     return {
       agentId,
       trustScore: 0,
@@ -16422,7 +16428,7 @@ ${THEME_SCRIPT}
       const basic = profiles.map(p => ({
         id: p.id, name: p.name, handle: p.handle, bio: p.bio, avatar: p.avatar,
         skills: (p.skills || []).map(s => s.name),
-        verification: { tier: p.verification?.tier, score: p.verification?.score }, trustScore: (() => { try { const fs = require("fs"); const cache = "/tmp/satp-trust-" + p.id + ".json"; if (fs.existsSync(cache)) { const data = JSON.parse(fs.readFileSync(cache, "utf8")); if (Date.now() - data.timestamp < 300000) return data.trustScore; } } catch (e) {} return p.verification?.score || 0; })()
+        verification: { tier: p.verification?.tier, score: p.verification?.score }, trustScore: (_satpScoresCache.get(p.id)?.trustScore ?? p.verification?.score ?? 0)
       }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(basic, null, 2));
@@ -16877,17 +16883,18 @@ ${THEME_SCRIPT}
     });
     return;
   }
-  else if (url.pathname.match(/^\/api\/profile\/([^/]+)$/)) {
-    // Public read access
-    const keyInfo = { tier: "free" }; // Public access
-    // Auth removed for public read
-    
+  else if (url.pathname.match(/^\/api\/profile\/([^\/]+)$/)) {
+    // Public read access — SATP on-chain is source of truth for scores
     const profileId = url.pathname.replace('/api/profile/', '');
     const profile = loadProfile(profileId, DATA_DIR);
     
     if (profile) {
-      // Free tier: basic data only
-      if (keyInfo.tier === 'free') {
+      // Fetch SATP on-chain scores (async)
+      getOnChainScores(profile.id).then(satpScores => {
+        const rep = calculateReputation(profile);
+        const trustScore = satpScores ? satpScores.trustScore : rep.score;
+        const tier = satpScores ? satpScores.tier : rep.tier;
+        
         const basic = {
           id: profile.id, name: profile.name, handle: profile.handle, bio: profile.bio,
           avatar: profile.avatar, links: profile.links,
@@ -16903,17 +16910,36 @@ ${THEME_SCRIPT}
           registeredOnChain: profile.registeredOnChain || false,
           onChainRegisteredAt: profile.onChainRegisteredAt || null,
           createdAt: profile.createdAt,
-          trustScore: (() => { try { const fs = require("fs"); const cache = "/tmp/satp-trust-" + profile.id + ".json"; if (fs.existsSync(cache)) { const data = JSON.parse(fs.readFileSync(cache, "utf8")); if (Date.now() - data.timestamp < 300000) return data.trustScore; } } catch (e) {} return calculateReputation(profile).score; })(), tier: (() => { try { const fs = require("fs"); const cache = "/tmp/satp-trust-" + profile.id + ".json"; if (fs.existsSync(cache)) { const data = JSON.parse(fs.readFileSync(cache, "utf8")); if (Date.now() - data.timestamp < 300000) return data.tier; } } catch (e) {} return calculateReputation(profile).tier; })()
+          trustScore,
+          tier
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(basic, null, 2));
-      } else {
-        // Enrich with premium data + computed trust score
-        const trust = computeTrustData(profile.id);
-        const enriched = { ...profile, trustScore: trust.trustScore, tier: trust.tier, premiumTier: getProfileTier(profile.id), customBadges: getCustomBadges(profile.id) };
+      }).catch(err => {
+        // Fallback: serve with old scores if SATP fetch fails entirely
+        const rep = calculateReputation(profile);
+        const basic = {
+          id: profile.id, name: profile.name, handle: profile.handle, bio: profile.bio,
+          avatar: profile.avatar, links: profile.links,
+          wallets: profile.wallets || {},
+          skills: (profile.skills || []).map(s => ({ name: s.name, category: s.category })),
+          verification: profile.verification,
+          verificationData: {
+            satp: profile.verificationData?.satp || null,
+            github: profile.verificationData?.github ? { verified: profile.verificationData.github.verified } : null,
+            x: profile.verificationData?.x ? { verified: profile.verificationData.x.verified } : null,
+            solana: profile.verificationData?.solana ? { verified: profile.verificationData.solana.verified } : null,
+          },
+          registeredOnChain: profile.registeredOnChain || false,
+          onChainRegisteredAt: profile.onChainRegisteredAt || null,
+          createdAt: profile.createdAt,
+          trustScore: rep.score,
+          tier: rep.tier
+        };
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(enriched, null, 2));
-      }
+        res.end(JSON.stringify(basic, null, 2));
+      });
+      return; // Important: prevent falling through to next handler
     } else {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Profile not found' }));
