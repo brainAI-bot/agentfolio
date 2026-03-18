@@ -14946,6 +14946,23 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const requestStart = Date.now();
   
+  // ── Route Aliases: fix frontend/backend path mismatches ──
+  const ROUTE_ALIASES = {
+    '/api/verify/agentmail/challenge': '/api/verify/agentmail/initiate',
+    '/api/verify/x/challenge': '/api/verify/x/initiate',
+    '/api/verify/solana/challenge': '/api/verify/solana/initiate',
+    '/api/verification/eth/initiate': '/api/verify/eth/initiate',
+    '/api/verification/eth/verify': '/api/verify/eth/verify',
+    '/api/verification/domain/initiate': '/api/verify/domain/initiate',
+    '/api/verification/domain/verify': '/api/verify/domain/verify',
+    '/api/verification/discord/initiate': '/api/verify/discord/initiate',
+    '/api/verification/telegram/initiate': '/api/verify/telegram/initiate',
+    '/api/verification/telegram/verify': '/api/verify/telegram/verify',
+  };
+  if (ROUTE_ALIASES[url.pathname]) {
+    url.pathname = ROUTE_ALIASES[url.pathname];
+  }
+  
   // Record request for health monitoring
   recordRequest();
   
@@ -14988,7 +15005,7 @@ const server = http.createServer((req, res) => {
 
   // Hardened verification routes (P0 Sprint)
   if (url.pathname.startsWith('/api/verify/')) {
-    const hardenedProviders = ['github', 'x', 'agentmail', 'solana', 'discord'];
+    const hardenedProviders = ['github', 'x', 'agentmail', 'solana', 'discord', 'eth', 'domain', 'telegram'];
     const isHardenedRoute = hardenedProviders.some(provider => url.pathname.includes(provider));
     
     if (isHardenedRoute) {
@@ -16903,9 +16920,9 @@ ${THEME_SCRIPT}
           verification: profile.verification,
           verificationData: {
             satp: profile.verificationData?.satp || null,
-            github: profile.verificationData?.github ? { verified: profile.verificationData.github.verified } : null,
-            x: profile.verificationData?.x ? { verified: profile.verificationData.x.verified } : null,
-            solana: profile.verificationData?.solana ? { verified: profile.verificationData.solana.verified } : null,
+            github: profile.verificationData?.github ? { verified: profile.verificationData.github.verified, username: profile.verificationData.github.username || profile.verificationData.github.address || profile.links?.github, repos: profile.verificationData.github.repos || 0, stars: profile.verificationData.github.stars || 0 } : null,
+            x: profile.verificationData?.x ? { verified: profile.verificationData.x.verified, handle: profile.verificationData.x.handle, followers: profile.verificationData.x.followers } : null,
+            solana: profile.verificationData?.solana ? { verified: profile.verificationData.solana.verified, address: profile.verificationData.solana.address } : null,
           },
           registeredOnChain: profile.registeredOnChain || false,
           onChainRegisteredAt: profile.onChainRegisteredAt || null,
@@ -16926,9 +16943,9 @@ ${THEME_SCRIPT}
           verification: profile.verification,
           verificationData: {
             satp: profile.verificationData?.satp || null,
-            github: profile.verificationData?.github ? { verified: profile.verificationData.github.verified } : null,
-            x: profile.verificationData?.x ? { verified: profile.verificationData.x.verified } : null,
-            solana: profile.verificationData?.solana ? { verified: profile.verificationData.solana.verified } : null,
+            github: profile.verificationData?.github ? { verified: profile.verificationData.github.verified, username: profile.verificationData.github.username || profile.verificationData.github.address || profile.links?.github, repos: profile.verificationData.github.repos || 0, stars: profile.verificationData.github.stars || 0 } : null,
+            x: profile.verificationData?.x ? { verified: profile.verificationData.x.verified, handle: profile.verificationData.x.handle, followers: profile.verificationData.x.followers } : null,
+            solana: profile.verificationData?.solana ? { verified: profile.verificationData.solana.verified, address: profile.verificationData.solana.address } : null,
           },
           registeredOnChain: profile.registeredOnChain || false,
           onChainRegisteredAt: profile.onChainRegisteredAt || null,
@@ -17529,7 +17546,7 @@ ${THEME_SCRIPT}
     req.on('data', c => body += c);
     req.on('end', async () => {
       try {
-        const { profileId, twitterHandle } = JSON.parse(body);
+        const _xbody = JSON.parse(body); const profileId = _xbody.profileId; const twitterHandle = _xbody.twitterHandle || _xbody.handle;
         if (!profileId || !twitterHandle) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'profileId and twitterHandle required' })); return; }
         const profile = loadProfile(profileId, DATA_DIR);
         if (!profile) { res.writeHead(404, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Profile not found' })); return; }
@@ -17948,6 +17965,28 @@ const { handleVerificationRoutes } = require('./lib/hardened-verification-routes
     const status = getAgentMailPendingStatus(profileId, email);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(status));
+    return;
+  }
+  // === ETH VERIFICATION STUBS (routes frontend calls but dont exist yet) ===
+  else if (url.pathname === "/api/verification/eth/initiate" && req.method === "POST") {
+    res.writeHead(501, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "ETH wallet verification coming soon. Use Solana wallet verification for now." }));
+    return;
+  }
+  else if (url.pathname === "/api/verification/eth/verify" && req.method === "POST") {
+    res.writeHead(501, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "ETH wallet verification coming soon." }));
+    return;
+  }
+  // === DOMAIN VERIFICATION STUBS ===
+  else if (url.pathname === "/api/verification/domain/initiate" && req.method === "POST") {
+    res.writeHead(501, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Domain verification coming soon. Use GitHub or X verification for now." }));
+    return;
+  }
+  else if (url.pathname === "/api/verification/domain/verify" && req.method === "POST") {
+    res.writeHead(501, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Domain verification coming soon." }));
     return;
   }
   // Profile-specific AgentMail verification
