@@ -197,7 +197,7 @@ function mapProfile(p: RawProfile): Agent {
     skills: [...new Set((p.skills || []).map(s => typeof s === 'string' ? s : (s.name || '')).filter(Boolean))],
     verifications: {
       github: vd.github ? {
-        username: vd.github.handle || vd.github.username || "",
+        username: vd.github.handle || vd.github.username || vd.github.address || "",
         repos: vd.github.repos || 0,
         stars: vd.github.stars || 0,
         verified: !!vd.github.verified,
