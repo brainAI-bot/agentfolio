@@ -132,7 +132,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
               <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
                 {agent.name}
               </h1>
-              <TrustBadge tier={agent.tier} score={genesis ? Math.round(parseFloat(genesis.reputationPct) * 10) : agent.trustScore} verificationLevel={agent.verificationLevel} verificationBadge={agent.verificationBadge} verificationLevelName={agent.verificationLevelName} reputationScore={genesis ? Math.round(parseFloat(genesis.reputationPct) * 10) : agent.reputationScore} reputationRank={genesis?.verificationLabel || agent.reputationRank} />
+              <TrustBadge tier={agent.tier} score={genesis ? genesis.reputationScore : agent.trustScore} verificationLevel={agent.verificationLevel} verificationBadge={agent.verificationBadge} verificationLevelName={agent.verificationLevelName} reputationScore={genesis ? genesis.reputationScore : agent.reputationScore} reputationRank={genesis?.verificationLabel || agent.reputationRank} />
             </div>
             <div className="text-sm mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
               {agent.handle}
@@ -239,7 +239,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                 <VerificationRow
                   icon={<Github size={16} />}
                   label="GitHub"
-                  detail={`@${v.github.username} — ${v.github.repos} repos, ${v.github.stars.toLocaleString()}⭐`}
+                  detail={`@${v.github?.username || "?"} — ${v.github?.repos || 0} repos, ${(v.github?.stars || 0).toLocaleString()}⭐`}
                   verified
                 />
               )}
@@ -319,7 +319,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                 const v3Level = genesis ? genesis.verificationLevel : null;
                 if (genesis) {
                   return [
-                    { label: "Trust Score", pct: Math.round(v3Rep || 0) },
+                    { label: "Trust Score", pct: Math.min(100, Math.round((genesis.reputationScore || 0) / 8)) },
                     { label: "Verification", pct: Math.round(((v3Level || 0) / 5) * 100) },
                   ];
                 }
