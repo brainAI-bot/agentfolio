@@ -116,10 +116,10 @@ export default function VerifyPage() {
   useEffect(() => {
     if (!connected || !publicKey || profileId) return;
     const walletAddr = publicKey.toBase58();
-    fetch(`/api/profile-by-wallet?wallet=${encodeURIComponent(walletAddr)}`)
+    fetch(`/api/wallet/lookup/${walletAddr}`)
       .then(res => res.ok ? res.json() : null)
       .then(data => {
-        if (data && data.id) setProfileId(data.id);
+        if (data?.profile?.id) setProfileId(data.profile.id);
       })
       .catch(() => {});
   }, [connected, publicKey]);
@@ -248,7 +248,7 @@ export default function VerifyPage() {
     if (!profileId || !xHandle) return;
     setXState({ loading: true, success: false, error: "", result: null });
     try {
-      const res = await fetch("/api/verify/x/challenge", {
+      const res = await fetch("/api/verify/x", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profileId, handle: xHandle }),
@@ -266,7 +266,7 @@ export default function VerifyPage() {
     if (!xChallenge) return;
     setXState({ loading: true, success: false, error: "", result: null });
     try {
-      const res = await fetch("/api/verify/x/confirm", {
+      const res = await fetch("/api/verify/x", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profileId, challengeId: xChallenge.challengeId, handle: xHandle }),
@@ -285,7 +285,7 @@ export default function VerifyPage() {
     if (!profileId) return;
     setAgentmailState({ loading: true, success: false, error: "", result: null });
     try {
-      const res = await fetch("/api/verify/agentmail/challenge", {
+      const res = await fetch("/api/verify/agentmail/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profileId }),
