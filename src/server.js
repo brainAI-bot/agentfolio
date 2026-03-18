@@ -1811,39 +1811,55 @@ function generateConnectPage() {
     
     try {
       const address = window.AgentFolioWallet.address;
-      // Get unsigned transaction from server
-      const res = await fetch('/api/wallet/build-register-tx', {
+      // Get unsigned genesis transaction (user pays rent + fees via SATP)
+      const res = await fetch('/api/satp/genesis/prepare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress: address, profileId: currentProfileId })
+        body: JSON.stringify({ agentId: currentProfileId, payer: address })
       });
       const data = await res.json();
       
-      if (!data.success) {
-        box.innerHTML = '<span style="color:#ef4444;">❌ ' + (data.error || 'Failed to build transaction') + '</span>';
+      if (data.error) {
+        // Already registered is OK
+        if (res.status === 409) {
+          box.innerHTML = '<span style="color:#14F195;">✅ Already registered on-chain</span>';
+          btn.innerHTML = '✅ Already Registered';
+          btn.style.background = 'var(--bg-surface)';
+          btn.style.color = '#14F195';
+          document.getElementById('step-success').style.display = 'block';
+          return;
+        }
+        box.innerHTML = '<span style="color:#ef4444;">❌ ' + data.error + '</span>';
         btn.textContent = '🔗 Register Identity On-Chain';
         btn.disabled = false;
         return;
       }
       
-      btn.textContent = '⏳ Sign transaction in wallet...';
-      box.innerHTML = '<span style="color:#f59e0b;">Please approve the transaction in your wallet...</span>';
+      btn.textContent = '⏳ Sign transaction (~0.0105 SOL)...';
+      box.innerHTML = '<span style="color:#f59e0b;">Please approve in your wallet...<br><span style="font-size:11px;">Cost: ~0.0105 SOL (on-chain rent + fees — you pay)</span></span>';
       
-      // Sign and send transaction
+      // Deserialize and sign+send via wallet
       const provider = window.AgentFolioWallet.provider;
       const txBytes = Uint8Array.from(atob(data.transaction), c => c.charCodeAt(0));
       
-      // Use provider to sign and send
       const { signature } = await provider.signAndSendTransaction(
         { serialize: () => txBytes }
       );
       
-      box.innerHTML = '<span style="color:#14F195;">✅ Transaction sent!</span><br><span style="font-size:11px;color:var(--text-muted);">Signature: <a href="https://solscan.io/tx/' + signature + '" target="_blank" style="color:#a78bfa;">' + signature.slice(0, 20) + '...</a></span>';
+      // Confirm registration on backend (non-blocking)
+      try {
+        await fetch('/api/wallet/confirm-register-tx', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profileId: currentProfileId, txSignature: signature })
+        });
+      } catch (e) { /* non-blocking */ }
+      
+      box.innerHTML = '<span style="color:#14F195;">✅ Genesis record created!</span><br><span style="font-size:11px;color:var(--text-muted);">TX: <a href="https://solscan.io/tx/' + signature + '" target="_blank" style="color:#a78bfa;">' + signature.slice(0, 20) + '...</a></span><br><span style="font-size:11px;color:var(--text-muted);">PDA: ' + data.genesisPda + '</span>';
       btn.innerHTML = '✅ Registered On-Chain';
       btn.style.background = 'var(--bg-surface)';
       btn.style.color = '#14F195';
       
-      // Show success
       document.getElementById('step-success').style.display = 'block';
       
     } catch (err) {
@@ -16684,6 +16700,85 @@ ${THEME_SCRIPT}
     return;
   }
 
+
+  // ── POST /api/satp/genesis/prepare — User-paid Genesis Record (returns unsigned TX) ──
+  else if (url.pathname === '/api/satp/genesis/prepare' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const { createSATPClient, agentIdHash } = require('./satp-client/src');
+        const client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY' });
+        
+        const data = JSON.parse(body);
+        const { agentId, payer } = data;
+        if (!agentId || !payer) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'agentId and payer required' }));
+          return;
+        }
+
+        // Check if genesis record already exists
+        try {
+          const existing = await client.getGenesisRecord(agentId);
+          if (existing && !existing.error) {
+            res.writeHead(409, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Genesis record already exists', genesis: existing }));
+            return;
+          }
+        } catch (e) { /* no record = good, continue */ }
+
+        // Get profile data
+        const profile = loadProfile(agentId, DATA_DIR);
+        const name = profile ? (profile.name || agentId).substring(0, 32) : agentId.substring(0, 32);
+        const bio = profile ? (profile.bio || 'AgentFolio registered agent').substring(0, 256) : 'AgentFolio registered agent';
+        const skills = profile?.skills ? (Array.isArray(profile.skills) ? profile.skills : []).slice(0, 5).map(s => s.name || s) : [];
+        const category = profile?.framework || 'general';
+
+        const hashBuf = agentIdHash(agentId);
+        const { PublicKey, Keypair } = require('@solana/web3.js');
+        const payerKey = new PublicKey(payer);
+
+        // Load deployer keypair for authority signing
+        const KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/brainforge-personal.json';
+        const deployerKey = JSON.parse(fs.readFileSync(KEYPAIR_PATH, 'utf-8'));
+        const deployer = Keypair.fromSecretKey(Uint8Array.from(deployerKey));
+
+        const { transaction, genesisPda } = await client.buildCreateGenesisRecord(
+          deployer.publicKey, hashBuf, name, bio, category, skills, ''
+        );
+
+        // User pays the transaction fee + rent
+        transaction.feePayer = payerKey;
+        const { blockhash, lastValidBlockHeight } = await client.connection.getLatestBlockhash();
+        transaction.recentBlockhash = blockhash;
+
+        // Deployer signs as creator/authority
+        transaction.partialSign(deployer);
+
+        // Serialize (user's wallet will add their signature)
+        const serialized = transaction.serialize({ requireAllSignatures: false });
+        const base64Tx = serialized.toString('base64');
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          transaction: base64Tx,
+          genesisPda: genesisPda.toBase58(),
+          agentId,
+          payer,
+          blockhash,
+          lastValidBlockHeight,
+          estimatedCost: '~0.0105 SOL'
+        }));
+      } catch (e) {
+        console.error('[SATP V3] Genesis prepare error:', e.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
   // ===== END GENESIS RECORD ENDPOINTS =====
   else if (url.pathname.startsWith('/api/profile/') && req.method === 'PATCH') {
     const profileId = url.pathname.replace('/api/profile/', '');
@@ -17434,6 +17529,14 @@ ${THEME_SCRIPT}
   }
   // === HEADLESS SATP REGISTRATION (server-side, no browser wallet needed) ===
   else if (url.pathname === '/api/verify/satp/headless' && req.method === 'POST') {
+    // ADMIN-ONLY: Server-paid registration restricted to admin API key
+    const authKey = req.headers['x-api-key'] || (req.headers['authorization'] || '').replace('Bearer ', '');
+    const ADMIN_KEY = process.env.ADMIN_API_KEY || 'agentfolio-admin-2026';
+    if (authKey !== ADMIN_KEY) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Admin access required. Use wallet-based registration at /register instead.' }));
+      return;
+    }
     let body = '';
     req.on('data', c => body += c);
     req.on('end', async () => {

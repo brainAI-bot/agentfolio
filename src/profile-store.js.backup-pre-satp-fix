@@ -172,7 +172,7 @@ function parseJsonField(val, defaultVal = []) {
   try { return JSON.parse(val); } catch { return defaultVal; }
 }
 
-function addVerification(profileId, platform, identifier, proof, userPaidGenesis = false) {
+function addVerification(profileId, platform, identifier, proof) {
   const d = getDb();
   const id = genId('ver');
   d.prepare(`
@@ -209,7 +209,7 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
 
   // [S4 FIX] Removed duplicate SATP update block — single block below handles it
 
-  // V3: Update verification level AND reputation on-chain (unified)
+  // V3: Update verification level on-chain (fire-and-forget)
   if (satpV3 && !userPaidGenesis) {
     (async () => {
       try {
@@ -220,16 +220,15 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
         // Check if genesis record exists first
         const genesis = await satpV3.client.getGenesisRecord(profileId);
         if (!genesis || genesis.error) {
-          console.log(`[SATP V3] No genesis record for ${profileId}, skipping on-chain updates`);
+          console.log(`[SATP V3] No genesis record for ${profileId}, skipping verification update`);
           return;
         }
         
-        // Get all verifications for this profile
+        // Calculate new verification level with category awareness (S3 fix)
         const d = getDb();
         const allVerifs = d.prepare('SELECT platform FROM verifications WHERE profile_id = ?').all(profileId);
         const verifCount = allVerifs.length;
-        
-        // Calculate new verification level with category awareness
+        // Map platforms to categories
         const CATEGORY_MAP = {
           solana: 'wallets', ethereum: 'wallets', hyperliquid: 'wallets', polymarket: 'wallets',
           moltbook: 'platforms', agentmail: 'platforms', github: 'platforms', x: 'platforms', twitter: 'platforms', discord: 'platforms', telegram: 'platforms',
@@ -238,66 +237,32 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
         };
         const categories = new Set(allVerifs.map(v => CATEGORY_MAP[v.platform] || 'other'));
         const catCount = categories.size;
-        
-        // Verification level calculation: L0-L5
-        let newLevel = 0;
-        if (verifCount >= 8 && catCount >= 3) newLevel = 4; // L4 Trusted
-        else if (verifCount >= 5 && catCount >= 2) newLevel = 3; // L3 Established  
-        else if (verifCount >= 2) newLevel = 2; // L2 Verified
-        else if (verifCount >= 1) newLevel = 1; // L1 Registered
+        // L3 requires 5+ verifications AND 2+ distinct categories
+        let newLevel;
+        if (verifCount >= 8 && catCount >= 3) newLevel = 4;
+        else if (verifCount >= 5 && catCount >= 2) newLevel = 3;
+        else if (verifCount >= 2) newLevel = 2;
+        else if (verifCount >= 1) newLevel = 1;
+        else newLevel = 0;
         newLevel = Math.min(5, newLevel);
         
-        // Calculate v2 Trust Score (0-800 scale)
-        // Profile completeness (30 max): name + bio + skills + avatar
-        const profile = d.prepare('SELECT name, bio, skills, avatar FROM profiles WHERE id = ?').get(profileId);
-        let profileScore = 0;
-        if (profile?.name) profileScore += 8;
-        if (profile?.bio && profile.bio.length > 20) profileScore += 8;
-        if (profile?.skills) profileScore += 8;
-        if (profile?.avatar) profileScore += 6;
-        profileScore = Math.min(30, profileScore);
-        
-        // Social verifications (200 max): github, x, discord, telegram, etc
-        const socialPlatforms = ['github', 'x', 'twitter', 'discord', 'telegram'];
-        const socialCount = allVerifs.filter(v => socialPlatforms.includes(v.platform)).length;
-        const socialScore = Math.min(200, socialCount * 50);
-        
-        // Marketplace verifications (300 max): polymarket, hyperliquid, mcp, a2a
-        const marketplacePlatforms = ['polymarket', 'hyperliquid', 'mcp', 'a2a'];
-        const marketplaceCount = allVerifs.filter(v => marketplacePlatforms.includes(v.platform)).length;
-        const marketplaceScore = Math.min(300, marketplaceCount * 100);
-        
-        // On-chain verifications (100 max): solana, ethereum, satp
-        const onchainPlatforms = ['solana', 'ethereum', 'satp'];
-        const onchainCount = allVerifs.filter(v => onchainPlatforms.includes(v.platform)).length;
-        const onchainScore = Math.min(100, onchainCount * 50);
-        
-        // Tenure bonus (170 max): based on profile age
-        const profileCreated = new Date(profile?.created_at || Date.now());
-        const ageInDays = Math.floor((Date.now() - profileCreated.getTime()) / (1000 * 60 * 60 * 24));
-        const tenureScore = Math.min(170, Math.floor(ageInDays / 7) * 10); // 10 points per week, max 170
-        
-        const newTrustScore = profileScore + socialScore + marketplaceScore + onchainScore + tenureScore;
-        console.log(`[SATP V3] Calculated trust score for ${profileId}: P=${profileScore} S=${socialScore} M=${marketplaceScore} O=${onchainScore} T=${tenureScore} = ${newTrustScore}`);
-        
-        // Update verification level if changed
         if (newLevel > genesis.verificationLevel) {
           const { transaction } = await satpV3.client.buildUpdateVerification(signer.publicKey, profileId, newLevel);
           transaction.sign(signer);
           const sig = await satpV3.client.connection.sendRawTransaction(transaction.serialize());
           console.log(`[SATP V3] Verification updated for ${profileId}: level ${genesis.verificationLevel} → ${newLevel}, tx=${sig}`);
+          
+          // Also bump reputation: +100k per verification level
+          const newRep = Math.min(1000000, 500000 + (verifCount * 50000));
+          if (newRep > genesis.reputationScore) {
+            const repTx = await satpV3.client.buildUpdateReputation(signer.publicKey, profileId, newRep);
+            repTx.transaction.sign(signer);
+            const repSig = await satpV3.client.connection.sendRawTransaction(repTx.transaction.serialize());
+            console.log(`[SATP V3] Reputation updated for ${profileId}: ${genesis.reputationScore} → ${newRep}, tx=${repSig}`);
+          }
         }
-        
-        // Update reputation score if changed
-        if (newTrustScore > genesis.reputationScore) {
-          const repTx = await satpV3.client.buildUpdateReputation(signer.publicKey, profileId, newTrustScore);
-          repTx.transaction.sign(signer);
-          const repSig = await satpV3.client.connection.sendRawTransaction(repTx.transaction.serialize());
-          console.log(`[SATP V3] Reputation updated for ${profileId}: ${genesis.reputationScore} → ${newTrustScore}, tx=${repSig}`);
-        }
-        
       } catch (err) {
-        console.error(`[SATP V3] On-chain update failed for ${profileId}:`, err.message);
+        console.error(`[SATP V3] Verification update failed for ${profileId}:`, err.message);
       }
     })();
   }

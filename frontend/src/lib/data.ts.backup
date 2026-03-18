@@ -177,8 +177,8 @@ function mapProfile(p: RawProfile): Agent {
   let tier: number;
   if (v3) {
     tier = v3.verificationLevel;
-  } else if (localVerifCount >= 2) {
-    tier = localVerifCount >= 5 ? 3 : (localVerifCount >= 2 ? 2 : 1); // L1 registered, L2 verified (2+), L3 established (5+)
+  } else if (localVerifCount >= 5 || (hasSATP && localVerifCount >= 3)) {
+    tier = Math.min(3, 1 + Math.floor(localVerifCount / 2)); // L1-L3 based on verif count
   } else if (hasSATP || localVerifCount >= 1) {
     tier = 1; // L1 Registered — has SATP or at least 1 verification
   } else {
