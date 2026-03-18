@@ -104,6 +104,21 @@ export default function VerifyPage() {
           if (vData.agentmail?.verified) {
             setAgentmailState({ loading: false, success: true, error: "", result: { verified: true } });
           }
+          if (vData.satp?.registered) {
+            setSatpState({ loading: false, success: true, error: "", result: { registered: true } });
+          }
+          if (vData.solana?.verified) {
+            setSolanaState({ loading: false, success: true, error: "", result: { verified: true } });
+          }
+          if (vData.github?.verified) {
+            setGithubState({ loading: false, success: true, error: "", result: { verified: true } });
+          }
+          if (vData.hyperliquid?.verified) {
+            setHlState({ loading: false, success: true, error: "", result: { verified: true } });
+          }
+          if (vData.moltbook?.verified) {
+            setMoltbookState({ loading: false, success: true, error: "", result: { verified: true } });
+          }
         }
       })
       .catch(() => {});
@@ -1087,13 +1102,13 @@ export default function VerifyPage() {
               ) : (
                 <button
                   onClick={registerSATP}
-                  disabled={!profileId || satpState.loading || satpState.success}
+                  disabled={!profileId || satpState.loading || satpState.success || existingVerifications?.satp?.registered}
                   className="mt-4 flex items-center gap-2 px-4 py-2 rounded-lg text-[11px] font-semibold uppercase tracking-wider transition-all disabled:opacity-40"
-                  style={{ fontFamily: "var(--font-mono)", background: satpState.success ? "var(--success)" : "var(--accent)", color: "#fff" }}
+                  style={{ fontFamily: "var(--font-mono)", background: (satpState.success || existingVerifications?.satp?.registered) ? "var(--success)" : "var(--accent)", color: "#fff" }}
                 >
                   {satpState.loading ? (
                     <>Registering... <Loader2 size={12} className="animate-spin" /></>
-                  ) : satpState.success ? (
+                  ) : (satpState.success || existingVerifications?.satp?.registered) ? (
                     <>Registered <CheckCircle size={12} /></>
                   ) : (
                     <>Register On-Chain <ArrowRight size={12} /></>

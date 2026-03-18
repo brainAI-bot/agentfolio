@@ -15823,6 +15823,31 @@ ${THEME_SCRIPT}
   // ===== DID (Decentralized Identity) ROUTES =====
   
   // DID Configuration (domain linkage)
+  // Serve .well-known verification files for agentfolio.bot domain
+  else if (url.pathname === "/.well-known/agentfolio.json") {
+    const fs = require("fs");
+    const wellKnownPath = require("path").join(__dirname, "..", "public", ".well-known", "agentfolio.json");
+    if (fs.existsSync(wellKnownPath)) {
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(fs.readFileSync(wellKnownPath, "utf8"));
+    } else {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Not found" }));
+    }
+    return;
+  }
+  else if (url.pathname === "/.well-known/agentfolio-verification.txt") {
+    const fs = require("fs");
+    const wellKnownPath = require("path").join(__dirname, "..", "public", ".well-known", "agentfolio-verification.txt");
+    if (fs.existsSync(wellKnownPath)) {
+      res.writeHead(200, { "Content-Type": "text/plain", "Access-Control-Allow-Origin": "*" });
+      res.end(fs.readFileSync(wellKnownPath, "utf8"));
+    } else {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("Not found");
+    }
+    return;
+  }
   else if (url.pathname === '/.well-known/did-configuration.json') {
     const baseUrl = `https://${req.headers.host || 'agentfolio.bot'}`;
     const config = generateDIDConfiguration(baseUrl);
@@ -16919,12 +16944,17 @@ ${THEME_SCRIPT}
           wallets: profile.wallets || {},
           skills: (profile.skills || []).map(s => ({ name: s.name, category: s.category })),
           verification: profile.verification,
-          verificationData: {
-            satp: profile.verificationData?.satp || null,
-            github: profile.verificationData?.github ? { verified: profile.verificationData.github.verified, username: profile.verificationData.github.username || profile.verificationData.github.address || profile.links?.github, repos: profile.verificationData.github.repos || 0, stars: profile.verificationData.github.stars || 0 } : null,
-            x: profile.verificationData?.x ? { verified: profile.verificationData.x.verified, handle: profile.verificationData.x.handle, followers: profile.verificationData.x.followers } : null,
-            solana: profile.verificationData?.solana ? { verified: profile.verificationData.solana.verified, address: profile.verificationData.solana.address } : null,
-          },
+          verificationData: (() => {
+            const vd = profile.verificationData || {};
+            const safe = {};
+            for (const [key, val] of Object.entries(vd)) {
+              if (!val) continue;
+              const { challengeId, nonce, testCode, secret, verificationCode, code, token, ...pub } = val;
+              if (pub.proof) { const { verificationCode, code, secret, nonce, ...safeProof } = pub.proof; pub.proof = safeProof; } safe[key] = pub;
+            }
+            if (safe.twitter && !safe.x) safe.x = safe.twitter;
+            return safe;
+          })(),
           registeredOnChain: profile.registeredOnChain || false,
           onChainRegisteredAt: profile.onChainRegisteredAt || null,
           createdAt: profile.createdAt,
@@ -16943,12 +16973,17 @@ ${THEME_SCRIPT}
           wallets: profile.wallets || {},
           skills: (profile.skills || []).map(s => ({ name: s.name, category: s.category })),
           verification: profile.verification,
-          verificationData: {
-            satp: profile.verificationData?.satp || null,
-            github: profile.verificationData?.github ? { verified: profile.verificationData.github.verified, username: profile.verificationData.github.username || profile.verificationData.github.address || profile.links?.github, repos: profile.verificationData.github.repos || 0, stars: profile.verificationData.github.stars || 0 } : null,
-            x: profile.verificationData?.x ? { verified: profile.verificationData.x.verified, handle: profile.verificationData.x.handle, followers: profile.verificationData.x.followers } : null,
-            solana: profile.verificationData?.solana ? { verified: profile.verificationData.solana.verified, address: profile.verificationData.solana.address } : null,
-          },
+          verificationData: (() => {
+            const vd = profile.verificationData || {};
+            const safe = {};
+            for (const [key, val] of Object.entries(vd)) {
+              if (!val) continue;
+              const { challengeId, nonce, testCode, secret, verificationCode, code, token, ...pub } = val;
+              if (pub.proof) { const { verificationCode, code, secret, nonce, ...safeProof } = pub.proof; pub.proof = safeProof; } safe[key] = pub;
+            }
+            if (safe.twitter && !safe.x) safe.x = safe.twitter;
+            return safe;
+          })(),
           registeredOnChain: profile.registeredOnChain || false,
           onChainRegisteredAt: profile.onChainRegisteredAt || null,
           createdAt: profile.createdAt,
