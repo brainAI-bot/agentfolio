@@ -33,8 +33,6 @@ async function initiateAgentMailVerification(profileId, email) {
       email,
       message: `Verification code would be sent to ${email}`,
       expiresAt: challenge.expiresAt,
-      // For MVP testing:
-      testCode: verificationCode
     };
   } catch (error) {
     return {
