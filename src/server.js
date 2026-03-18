@@ -16446,7 +16446,7 @@ ${THEME_SCRIPT}
       const basic = profiles.map(p => ({
         id: p.id, name: p.name, handle: p.handle, bio: p.bio, avatar: p.avatar,
         skills: (p.skills || []).map(s => s.name),
-        verification: { tier: p.verification?.tier, score: p.verification?.score }, trustScore: (_satpScoresCache.get(p.id)?.trustScore ?? p.verification?.score ?? 0)
+        verification: { tier: p.verification?.tier, score: p.verification?.score }, trustScore: (_satpScoresCache.get(p.id)?.trustScore ?? p.verification?.score ?? 0), unclaimed: p.unclaimed || false
       }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(basic, null, 2));
@@ -16929,7 +16929,8 @@ ${THEME_SCRIPT}
           onChainRegisteredAt: profile.onChainRegisteredAt || null,
           createdAt: profile.createdAt,
           trustScore,
-          tier
+          tier,
+          unclaimed: profile.unclaimed || false
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(basic, null, 2));
@@ -16952,7 +16953,8 @@ ${THEME_SCRIPT}
           onChainRegisteredAt: profile.onChainRegisteredAt || null,
           createdAt: profile.createdAt,
           trustScore: rep.score,
-          tier: rep.tier
+          tier: rep.tier,
+          unclaimed: profile.unclaimed || false
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(basic, null, 2));
