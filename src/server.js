@@ -14685,6 +14685,38 @@ function generateUnsubscribePage(result) {
 function computeTrustData(agentId) {
   const profile = loadProfile(agentId);
   if (!profile) {
+
+  // SATP V3 API Fix: Check for on-chain scores first
+  try {
+    const http = require("http");
+    const options = {
+      hostname: "localhost", 
+      port: 3000,
+      path: `/api/profile/${agentId}/genesis`,
+      timeout: 1000
+    };
+    
+    // We'll use a quick internal check for cached SATP data
+    const satpCacheFile = `/tmp/satp-trust-${agentId}.json`;
+    if (fs.existsSync(satpCacheFile)) {
+      const cached = JSON.parse(fs.readFileSync(satpCacheFile, "utf8"));
+      const age = Date.now() - (cached.timestamp || 0);
+      if (age < 300000) { // 5 minutes
+        console.log(`[SATP API] Using cached scores for ${agentId}: trust=${cached.trustScore}`);
+        return {
+          agentId,
+          trustScore: cached.trustScore,
+          tier: cached.tier,
+          verifications: Object.keys(profile.verificationData || {}).filter(k => profile.verificationData[k]?.verified),
+          profileUrl: `https://agentfolio.bot/profile/${agentId}`,
+          lastUpdated: new Date().toISOString(),
+          fromSATP: true
+        };
+      }
+    }
+  } catch (e) {
+    // Fall back to calculated scores
+  }
     return {
       agentId,
       trustScore: 0,
@@ -16390,7 +16422,7 @@ ${THEME_SCRIPT}
       const basic = profiles.map(p => ({
         id: p.id, name: p.name, handle: p.handle, bio: p.bio, avatar: p.avatar,
         skills: (p.skills || []).map(s => s.name),
-        verification: { tier: p.verification?.tier, score: p.verification?.score }
+        verification: { tier: p.verification?.tier, score: p.verification?.score }, trustScore: (() => { try { const fs = require("fs"); const cache = "/tmp/satp-trust-" + p.id + ".json"; if (fs.existsSync(cache)) { const data = JSON.parse(fs.readFileSync(cache, "utf8")); if (Date.now() - data.timestamp < 300000) return data.trustScore; } } catch (e) {} return p.verification?.score || 0; })()
       }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(basic, null, 2));
@@ -16871,7 +16903,7 @@ ${THEME_SCRIPT}
           registeredOnChain: profile.registeredOnChain || false,
           onChainRegisteredAt: profile.onChainRegisteredAt || null,
           createdAt: profile.createdAt,
-          trustScore: calculateReputation(profile).score, tier: calculateReputation(profile).tier
+          trustScore: (() => { try { const fs = require("fs"); const cache = "/tmp/satp-trust-" + profile.id + ".json"; if (fs.existsSync(cache)) { const data = JSON.parse(fs.readFileSync(cache, "utf8")); if (Date.now() - data.timestamp < 300000) return data.trustScore; } } catch (e) {} return calculateReputation(profile).score; })(), tier: (() => { try { const fs = require("fs"); const cache = "/tmp/satp-trust-" + profile.id + ".json"; if (fs.existsSync(cache)) { const data = JSON.parse(fs.readFileSync(cache, "utf8")); if (Date.now() - data.timestamp < 300000) return data.tier; } } catch (e) {} return calculateReputation(profile).tier; })()
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(basic, null, 2));
