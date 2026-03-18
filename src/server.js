@@ -66,6 +66,7 @@ const { STATUS: COLLAB_STATUS, createCollaboration, confirmCollaboration: confir
 const { importFromJSON, importFromCSV, generateCSVTemplate, generateJSONTemplate } = require('./lib/batch-import');
 const { PERMISSIONS, TIERS, createApiKey, validateApiKey, hasPermission, revokeApiKey, listApiKeys, extractApiKey, requireAuth, requireTieredApiKey, checkTierRateLimit, getKeyStats } = require('./lib/api-keys');
 const { STATUS: CLAIM_STATUS, canClaim, createClaim, verifyClaim, getClaim, getClaimsForProfile, getPendingClaims, rejectClaim, cleanupExpiredClaims } = require('./lib/claims');
+const claimFlow = require('./lib/claim-flow');
 const { initWebSocket, broadcastActivity, broadcastToProfile, broadcastSystem, getStats: getWsStats } = require('./lib/websocket');
 const { followProfile, unfollowProfile, isFollowing, getFollowing, getFollowers, getFollowerCount, getMostFollowed } = require('./lib/follows');
 const { submitRequest: submitFeatureRequest, voteRequest, addComment: addRequestComment, updateStatus: updateRequestStatus, getRequests: getFeatureRequests, getRequest: getFeatureRequest, getStats: getFeedbackStats } = require('./lib/feedback');
@@ -21659,6 +21660,65 @@ ${THEME_SCRIPT}
   // ============ PROFILE CLAIMS ============
   
   // Check if a profile can be claimed
+  // Self-Service Claim: Check eligibility + available methods
+  else if (url.pathname === '/api/claims/eligible' && req.method === 'GET') {
+    const profileId = url.searchParams.get('profileId');
+    if (!profileId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'profileId required' }));
+      return;
+    }
+    const result = claimFlow.canClaim(profileId, DATA_DIR);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result, null, 2));
+  }
+
+  // Self-Service Claim: Initiate challenge
+  else if (url.pathname === '/api/claims/initiate' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body || '{}');
+        const { profileId, method, wallet } = data;
+        if (!profileId || !method || !wallet) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'profileId, method, and wallet required' }));
+          return;
+        }
+        const result = claimFlow.initiateClaim(profileId, method, wallet, DATA_DIR);
+        res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result, null, 2));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+  }
+
+  // Self-Service Claim: Verify proof and transfer ownership
+  else if (url.pathname === '/api/claims/self-verify' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body || '{}');
+        const { challengeId, proof } = data;
+        if (!challengeId || !proof) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'challengeId and proof required' }));
+          return;
+        }
+        const result = await claimFlow.verifyClaim(challengeId, proof, DATA_DIR);
+        res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result, null, 2));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+  }
+
   else if (url.pathname === '/api/claims/check' && req.method === 'GET') {
     const profileId = url.searchParams.get('profileId');
     if (!profileId) {
