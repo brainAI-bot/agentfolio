@@ -46,9 +46,9 @@ export function Navbar() {
   useEffect(() => {
     if (!publicKey) { setMyProfileId(null); return; }
     const addr = publicKey.toBase58();
-    fetch(`/api/profile-by-wallet?wallet=${addr}`)
+    fetch(`/api/wallet/lookup/${addr}`)
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.id) setMyProfileId(d.id); else setMyProfileId(null); })
+      .then(d => { if (d?.profile?.id) setMyProfileId(d.profile.id); else setMyProfileId(null); })
       .catch(() => setMyProfileId(null));
   }, [publicKey]);
 
