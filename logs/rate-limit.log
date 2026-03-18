@@ -353,3 +353,7 @@
 2026-03-17T08:52:02.551Z | BLOCKED | IP: 13.49.175.225 | GET /api/verify/x?username=brainGrowth | Tier: verify (5/min)
 2026-03-17T09:11:06.734Z | BLOCKED | IP: 13.49.175.225 | POST /api/verify/telegram | Tier: verify (5/min)
 2026-03-17T09:24:35.547Z | BLOCKED | IP: 13.63.56.231 | POST /api/verify/github/challenge | Tier: verify (5/min)
+2026-03-17T19:09:21.167Z | BLOCKED | IP: 31.153.13.149 | POST /api/satp-auto/identity/create | Tier: write (10/min)
+2026-03-17T19:09:24.128Z | BLOCKED | IP: 31.153.13.149 | POST /api/satp-auto/identity/create | Tier: write (10/min)
+2026-03-17T19:09:35.387Z | BLOCKED | IP: 31.153.13.149 | POST /api/satp-auto/identity/create | Tier: write (10/min)
+2026-03-17T19:09:39.606Z | BLOCKED | IP: 31.153.13.149 | POST /api/verify/solana/challenge | Tier: verify (5/min)
