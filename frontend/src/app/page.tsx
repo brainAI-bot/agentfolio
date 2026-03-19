@@ -298,7 +298,7 @@ export default async function HomePage() {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold truncate" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+                  <span className="text-sm font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)", wordBreak: "break-word" }}>
                     {agent.name}
                   </span>
                   {agent.verifications.satp?.verified && <span title="On-Chain Verified">⛓️</span>}
