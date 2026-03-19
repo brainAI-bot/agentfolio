@@ -87,7 +87,7 @@ function parseGenesisRecord(data) {
       reputationScore,
       reputationPct: (reputationScore / 10000).toFixed(2),
       verificationLevel,
-      verificationLabel: ['Unverified','Basic','Standard','Enhanced','Premium','Maximum'][verificationLevel] || 'Unknown',
+      verificationLabel: ['Unverified','Registered','Verified','Established','Trusted','Sovereign'][verificationLevel] || 'Unknown',
       isBorn: genesisRecord > 0,
       bornAt: genesisRecord > 0 ? new Date(genesisRecord * 1000).toISOString() : null,
       faceImage,
