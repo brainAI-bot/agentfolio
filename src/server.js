@@ -15005,14 +15005,15 @@ const server = http.createServer((req, res) => {
     }
   }
 
-  // Hardened verification routes (P0 Sprint)
-  if (url.pathname.startsWith('/api/verify/')) {
-    const hardenedProviders = ['github', 'x', 'agentmail', 'solana', 'discord', 'eth', 'domain', 'telegram'];
+  // Hardened verification routes (Sprint 2 — all providers)
+  const hardenedHelpers = { loadProfile, dbSaveProfileFn, addActivityAndBroadcast, postVerificationMemo, postVerificationOnchainForProfile };
+  if (url.pathname.startsWith('/api/verify/') || url.pathname.match(/^\/api\/profile\/[^/]+\/verify\//)) {
+    const hardenedProviders = ['github', 'x', 'agentmail', 'solana', 'discord', 'eth', 'domain', 'telegram', 'hyperliquid', 'polymarket', 'moltbook', 'website'];
     const isHardenedRoute = hardenedProviders.some(provider => url.pathname.includes(provider));
     
     if (isHardenedRoute) {
       try {
-        if (handleVerificationRoutes(url, req, res, DATA_DIR)) {
+        if (handleVerificationRoutes(url, req, res, DATA_DIR, hardenedHelpers)) {
           return;
         }
       } catch (e) {

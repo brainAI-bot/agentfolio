@@ -114,7 +114,7 @@ class SATPV3SDK {
         reputationScore,
         reputationPct: (reputationScore / 10000).toFixed(2),
         verificationLevel,
-        verificationLabel: ['Unverified','Basic','Standard','Enhanced','Premium','Maximum'][verificationLevel] || 'Unknown',
+        verificationLabel: ['Unverified','Basic','Verified','Established','Trusted','Sovereign'][verificationLevel] || 'Unknown',
         reputationUpdatedAt,
         verificationUpdatedAt,
         createdAt,
