@@ -28,6 +28,10 @@ let initiateAgentMailVerification, verifyAgentMailCode;
 try { ({ initiateAgentMailVerification, verifyAgentMailCode } = require('./agentmail-verify-hardened')); } catch(e) { console.warn('[Hardened] agentmail-verify-hardened not loaded:', e.message); }
 let initiateSolanaVerification, verifySolanaSignature;
 try { ({ initiateSolanaVerification, verifySolanaSignature } = require('./solana-verify-hardened')); } catch(e) { console.warn('[Hardened] solana-verify-hardened not loaded:', e.message); }
+// Profile store for SQLite verification + on-chain updates
+let addVerification;
+try { ({ addVerification } = require('../profile-store')); } catch(e) { console.warn('[Hardened] profile-store addVerification not loaded:', e.message); }
+
 let getChallenge;
 try { ({ getChallenge } = require('./verification-challenges')); } catch(e) { console.warn('[Hardened] verification-challenges not loaded:', e.message); }
 
@@ -100,7 +104,10 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
             profile.wallets = profile.wallets || {};
             if (!profile.wallets.hyperliquid) profile.wallets.hyperliquid = result.identifier;
             profile.updatedAt = new Date().toISOString();
-            dbSaveProfileFn(profile);
+            
+              // Save to SQLite + trigger on-chain updates
+              if (addVerification) try { addVerification(profileId, 'hyperliquid', result.identifier || result.walletAddress, { verifiedAt: new Date().toISOString() }); } catch(avErr) { console.error("[Hardened] addVerification:", avErr.message); }
+              dbSaveProfileFn(profile);
           }
           if (addActivityAndBroadcast) {
             addActivityAndBroadcast(profileId, 'verification_hyperliquid', {
@@ -160,7 +167,10 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
             profile.wallets = profile.wallets || {};
             if (!profile.wallets.polymarket) profile.wallets.polymarket = result.identifier;
             profile.updatedAt = new Date().toISOString();
-            dbSaveProfileFn(profile);
+            
+              // Save to SQLite + trigger on-chain updates
+              if (addVerification) try { addVerification(profileId, 'polymarket', result.identifier || result.walletAddress, { verifiedAt: new Date().toISOString() }); } catch(avErr) { console.error("[Hardened] addVerification:", avErr.message); }
+              dbSaveProfileFn(profile);
           }
           if (addActivityAndBroadcast) {
             addActivityAndBroadcast(profileId, 'verification_polymarket', {
@@ -222,7 +232,10 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
             profile.links = profile.links || {};
             profile.links.moltbook = result.username;
             profile.updatedAt = new Date().toISOString();
-            dbSaveProfileFn(profile);
+            
+              // Save to SQLite + trigger on-chain updates
+              if (addVerification) try { addVerification(profileId, 'moltbook', result.username, { verifiedAt: new Date().toISOString() }); } catch(avErr) { console.error("[Hardened] addVerification:", avErr.message); }
+              dbSaveProfileFn(profile);
           }
           if (addActivityAndBroadcast) {
             addActivityAndBroadcast(profileId, 'verification_moltbook', {
@@ -283,7 +296,10 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
             profile.links = profile.links || {};
             profile.links.website = result.websiteUrl;
             profile.updatedAt = new Date().toISOString();
-            dbSaveProfileFn(profile);
+            
+              // Save to SQLite + trigger on-chain updates
+              if (addVerification) try { addVerification(profileId, 'website', result.url, { verifiedAt: new Date().toISOString() }); } catch(avErr) { console.error("[Hardened] addVerification:", avErr.message); }
+              dbSaveProfileFn(profile);
           }
           if (addActivityAndBroadcast) {
             addActivityAndBroadcast(profileId, 'verification_website', {
@@ -344,7 +360,10 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
             profile.links = profile.links || {};
             profile.links.telegram = result.handle;
             profile.updatedAt = new Date().toISOString();
-            dbSaveProfileFn(profile);
+            
+              // Save to SQLite + trigger on-chain updates
+              if (addVerification) try { addVerification(profileId, 'telegram', result.telegramHandle || result.username, { verifiedAt: new Date().toISOString() }); } catch(avErr) { console.error("[Hardened] addVerification:", avErr.message); }
+              dbSaveProfileFn(profile);
           }
           if (addActivityAndBroadcast) {
             addActivityAndBroadcast(profileId, 'verification_telegram', {
@@ -417,7 +436,10 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
             profile.links = profile.links || {};
             profile.links.discord = result.username;
             profile.updatedAt = new Date().toISOString();
-            dbSaveProfileFn(profile);
+            
+              // Save to SQLite + trigger on-chain updates
+              if (addVerification) try { addVerification(profileId, 'discord', result.discordUserId || result.identifier, { verifiedAt: new Date().toISOString() }); } catch(avErr) { console.error("[Hardened] addVerification:", avErr.message); }
+              dbSaveProfileFn(profile);
           }
           if (addActivityAndBroadcast) {
             addActivityAndBroadcast(profileId, 'verification_discord', {
@@ -469,6 +491,9 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
               profile.verificationData = profile.verificationData || {};
               profile.verificationData.github = { ...result, method: 'hardened_gist', verifiedAt: new Date().toISOString() };
               profile.updatedAt = new Date().toISOString();
+              
+              // Save to SQLite + trigger on-chain updates
+              if (addVerification) try { addVerification(profileId, 'github', result.username || result.identifier, { verifiedAt: new Date().toISOString() }); } catch(avErr) { console.error("[Hardened] addVerification:", avErr.message); }
               dbSaveProfileFn(profile);
             }
           }
@@ -577,14 +602,46 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
         const result = await verifySolanaSignature(challengeId, signature);
         if (result.verified && getChallenge) {
           const challenge = await getChallenge(challengeId);
-          if (challenge && loadProfile && dbSaveProfileFn) {
-            const profile = loadProfile(challenge.challengeData.profileId, DATA_DIR);
-            if (profile) {
-              profile.verificationData = profile.verificationData || {};
-              profile.verificationData.solana = { ...result, method: 'hardened_signature', verifiedAt: new Date().toISOString() };
-              profile.updatedAt = new Date().toISOString();
-              dbSaveProfileFn(profile);
+          if (challenge) {
+            const profileId = challenge.challengeData.profileId;
+            const walletAddr = result.walletAddress;
+            
+            // Save to SQLite verifications table + trigger on-chain updates
+            if (addVerification) {
+              try {
+                addVerification(profileId, 'solana', walletAddr, {
+                  type: 'ed25519_signature',
+                  signature: result.signature,
+                  message: result.proof?.message,
+                  challengeId,
+                  cryptoVerified: true,
+                  verifiedAt: new Date().toISOString(),
+                });
+              } catch (avErr) { console.error('[Hardened] addVerification error:', avErr.message); }
             }
+            
+            // Update profile JSON (wallets + verificationData)
+            if (loadProfile && dbSaveProfileFn) {
+              const profile = loadProfile(profileId, DATA_DIR);
+              if (profile) {
+                profile.verificationData = profile.verificationData || {};
+                profile.verificationData.solana = {
+                  address: walletAddr,
+                  verified: true,
+                  linked: true,
+                  method: 'hardened_ed25519_signature',
+                  verifiedAt: new Date().toISOString(),
+                };
+                profile.wallets = profile.wallets || {};
+                profile.wallets.solana = walletAddr;
+                profile.updatedAt = new Date().toISOString();
+                dbSaveProfileFn(profile);
+              }
+            }
+            
+            // Activity + memo attestation
+            if (addActivityAndBroadcast) addActivityAndBroadcast(profileId, 'verification_solana', { address: walletAddr.slice(0,8) + '...' }, DATA_DIR);
+            if (postVerificationMemo) postVerificationMemo(profileId, 'solana', { address: walletAddr }).catch(() => {});
           }
         }
         json(res, result.verified ? 200 : 400, result);
