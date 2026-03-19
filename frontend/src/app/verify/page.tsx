@@ -513,7 +513,15 @@ export default function VerifyPage() {
       setSatpTxSig(result.txSignature || "");
       setSatpState({ loading: false, success: true, error: "", result });
     } catch (err: any) {
-      setSatpState({ loading: false, success: false, error: err.message || "SATP registration failed", result: null });
+      // BUG-004 fix: sanitize raw Solana errors for user display
+      const rawErr = err.message || "SATP registration failed";
+      const userError = rawErr.includes("custom program error") ? "On-chain registration failed. The SATP program may be unavailable. Try again later."
+        : rawErr.includes("0x1") ? "Transaction simulation failed. Please check your wallet has enough SOL."
+        : rawErr.includes("insufficient") ? "Insufficient SOL for transaction fees. Please add SOL to your wallet."
+        : rawErr.length > 200 ? rawErr.slice(0, 150) + "... (see console for details)"
+        : rawErr;
+      console.error("[SATP] Full error:", err);
+      setSatpState({ loading: false, success: false, error: userError, result: null });
     }
   };
 
@@ -907,8 +915,8 @@ export default function VerifyPage() {
       category: "platforms",
       type: "telegram",
       icon: Globe,
-      title: "Telegram",
-      desc: "Verify your Telegram identity",
+      title: "Telegram (Operator)",
+      desc: "Verify the Telegram of the human operating this agent",
       reward: "+1 Verification · Counts toward Level",
       color: "#229ED9",
       bg: "rgba(34, 158, 217, 0.15)",
@@ -1073,7 +1081,7 @@ export default function VerifyPage() {
 
 
 
-                          {satpState.error && (
+                          {satpState.error && !satpState.success && (
                 <div className="flex items-center gap-2 mt-2 text-xs" style={{ color: "var(--accent)" }}>
                   <AlertCircle size={12} /> {satpState.error}
                 </div>
