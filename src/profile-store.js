@@ -48,6 +48,15 @@ let scoringEngineV2;
 try {
   scoringEngineV2 = require('./lib/scoring-engine-v2');
   console.log('[ProfileStore] Scoring Engine V2 loaded');
+
+// Memo attestation for on-chain verification records
+let postMemoAttestation;
+try {
+  postMemoAttestation = require('./lib/memo-attestation').postVerificationMemo;
+  console.log('[ProfileStore] Memo attestation loaded');
+} catch (e) {
+  console.warn('[ProfileStore] Memo attestation not available:', e.message);
+}
 } catch (e) {
   console.warn('[ProfileStore] Scoring Engine V2 not available:', e.message);
 }
@@ -331,6 +340,15 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
   }
 
     addActivity(profileId, 'verification', { platform, identifier });
+
+  // Fire-and-forget: post on-chain Memo attestation
+  if (postMemoAttestation) {
+    postMemoAttestation(profileId, platform, { identifier, verified_at: new Date().toISOString() })
+      .then(result => {
+        if (result) console.log(`[ProfileStore] Memo attestation posted for ${profileId}/${platform}: ${result.explorerUrl}`);
+      })
+      .catch(err => console.error(`[ProfileStore] Memo attestation failed for ${profileId}/${platform}:`, err.message));
+  }
 
   // Fire-and-forget: update V3 on-chain verification level
   if (satpV3 && !userPaidGenesis) {

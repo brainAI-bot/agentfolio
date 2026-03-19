@@ -84,7 +84,7 @@ const { REPORT_REASONS, REPORT_STATUS, submitReport, getReports, getReport, upda
 const { BUG_CATEGORIES, BUG_SEVERITY, BUG_STATUS, CATEGORY_LABELS, SEVERITY_LABELS, STATUS_LABELS, submitBugReport, getBugReports, getBugReport, updateBugReport, getBugReportStats } = require('./lib/bug-reports');
 const { FLAG_REASONS, FLAG_STATUS, THRESHOLDS: SPAM_THRESHOLDS, calculateSpamScore, scanProfile, scanAllProfiles, flagProfile, getFlaggedProfiles, getFlag, getProfileFlag, updateFlagStatus, getSpamStats, isProfileFlagged, cleanupOldFlags } = require('./lib/spam-detection');
 const { getPerformanceHistory, getPerformanceSummary, verifyProofHash, getVerifiedPerformanceRanking, formatTrade } = require('./lib/verified-performance');
-const { postVerificationMemo } = require('./lib/memo-attestation');
+const { postVerificationMemo, getAttestations } = require('./lib/memo-attestation');
 const { postTrustScoreMemo } = require('./lib/memo-trust-score');
 const { postVerificationOnchain, postReputationOnchain } = require('./lib/verification-onchain');
 const { handleVerificationRoutes } = require('./lib/hardened-verification-routes');
@@ -4891,7 +4891,7 @@ Username: ' + confirmData.username);
         });
         const data = await res.json();
         if (data.success) {
-          alert('Verification started!\\n\\nSend this code to our Telegram bot:\\n\\n' + data.code + '\\n\\nBot: @' + (data.botUsername || 'AgentFolioBot') + '\\n\\nCode expires in ' + data.expiresIn);
+          alert('Verification started!\\n\\nSend this code to our Telegram bot:\\n\\n' + data.code + '\\n\\nBot: @' + (data.botUsername || 'brainKIDbot') + '\\n\\nCode expires in ' + data.expiresIn);
           btn.textContent = 'Awaiting...';
         } else if (data.alreadyVerified) {
           alert('Telegram is already verified!');
@@ -16964,7 +16964,17 @@ ${THEME_SCRIPT}
           trustScore,
           tier,
           unclaimed: profile.unclaimed || false,
-          verificationProofs: buildVerificationProofs(profile.verificationData)
+          verificationProofs: (() => {
+            const proofs = buildVerificationProofs(profile.verificationData);
+            const attestationTxs = getAttestations(profile.id);
+            for (const att of attestationTxs) {
+              if (proofs[att.platform]) {
+                proofs[att.platform].attestation_tx = att.tx_signature;
+                proofs[att.platform].solscan_url = att.solscan_url;
+              }
+            }
+            return proofs;
+          })()
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(basic, null, 2));
@@ -16994,7 +17004,17 @@ ${THEME_SCRIPT}
           trustScore: rep.score,
           tier: rep.tier,
           unclaimed: profile.unclaimed || false,
-          verificationProofs: buildVerificationProofs(profile.verificationData)
+          verificationProofs: (() => {
+            const proofs = buildVerificationProofs(profile.verificationData);
+            const attestationTxs = getAttestations(profile.id);
+            for (const att of attestationTxs) {
+              if (proofs[att.platform]) {
+                proofs[att.platform].attestation_tx = att.tx_signature;
+                proofs[att.platform].solscan_url = att.solscan_url;
+              }
+            }
+            return proofs;
+          })()
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(basic, null, 2));
@@ -17005,7 +17025,22 @@ ${THEME_SCRIPT}
       res.end(JSON.stringify({ error: 'Profile not found' }));
     }
   }
-  // ============ AVAILABILITY API ============
+
+  // GET /api/agent/:id/attestations — On-chain verification attestation TXs
+  else if (url.pathname.match(/^\/api\/(?:agent|profile)\/([^/]+)\/attestations$/) && req.method === 'GET') {
+    const profileId = url.pathname.split('/')[3];
+    const attestations = getAttestations(profileId);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      profileId,
+      attestations,
+      total: attestations.length,
+      description: 'On-chain Memo TX attestations for each verified platform. Each TX contains: VERIFY|agent_id|platform|timestamp|proof_hash',
+    }, null, 2));
+    return;
+  }
+
+    // ============ AVAILABILITY API ============
   
   // Get agent availability status
   else if (url.pathname.match(/^\/api\/profile\/([^/]+)\/availability$/) && req.method === 'GET') {
