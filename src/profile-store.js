@@ -240,12 +240,15 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
         const catCount = categories.size;
         
         // Verification level calculation: L0-L5
+        // L5 Sovereign: L4 + human-proof verification (X or GitHub verified)
+        const HUMAN_PLATFORMS = ['github', 'x', 'twitter'];
+        const hasHumanProof = allVerifs.some(v => HUMAN_PLATFORMS.includes(v.platform));
         let newLevel = 0;
-        if (verifCount >= 8 && catCount >= 3) newLevel = 4; // L4 Trusted
+        if (verifCount >= 8 && catCount >= 3 && hasHumanProof) newLevel = 5; // L5 Sovereign
+        else if (verifCount >= 8 && catCount >= 3) newLevel = 4; // L4 Trusted
         else if (verifCount >= 5 && catCount >= 2) newLevel = 3; // L3 Established  
         else if (verifCount >= 2) newLevel = 2; // L2 Verified
         else if (verifCount >= 1) newLevel = 1; // L1 Registered
-        newLevel = Math.min(5, newLevel);
         
         // Calculate v2 Trust Score (0-800 scale)
         // Profile completeness (30 max): name + bio + skills + avatar
@@ -319,8 +322,12 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
         const d = getDb();
         const verifs = d.prepare('SELECT platform FROM verifications WHERE profile_id = ?').all(profileId);
         const platforms = new Set(verifs.map(v => v.platform));
+        const HUMAN_PLATS = ['github', 'x', 'twitter'];
+        const hasHuman = [...platforms].some(p => HUMAN_PLATS.includes(p));
         let newLevel = 0;
-        if (platforms.size >= 5) newLevel = 3;
+        if (platforms.size >= 8 && hasHuman) newLevel = 5;
+        else if (platforms.size >= 8) newLevel = 4;
+        else if (platforms.size >= 5) newLevel = 3;
         else if (platforms.size >= 3) newLevel = 2;
         else if (platforms.size >= 1) newLevel = 1;
 
