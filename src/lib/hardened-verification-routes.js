@@ -100,6 +100,7 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
             profile.verificationData.hyperliquid = {
               verified: true, address: result.identifier, accountValue: result.accountValue,
               stats: result.stats, method: 'hardened_signature', verifiedAt: new Date().toISOString(),
+              proof: { challengeId, signature, signatureVerified: result.signatureVerified },
             };
             profile.wallets = profile.wallets || {};
             if (!profile.wallets.hyperliquid) profile.wallets.hyperliquid = result.identifier;
@@ -163,6 +164,7 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
             profile.verificationData.polymarket = {
               verified: true, address: result.identifier, stats: result.stats,
               method: 'hardened_signature', verifiedAt: new Date().toISOString(),
+              proof: { challengeId, signature, signatureVerified: result.signatureVerified },
             };
             profile.wallets = profile.wallets || {};
             if (!profile.wallets.polymarket) profile.wallets.polymarket = result.identifier;
@@ -228,6 +230,7 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
             profile.verificationData.moltbook = {
               verified: true, username: result.username, karma: result.karma,
               method: 'hardened_bio_nonce', verifiedAt: new Date().toISOString(),
+              proof: { challengeId, nonce: result.nonce || null },
             };
             profile.links = profile.links || {};
             profile.links.moltbook = result.username;
@@ -292,6 +295,7 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
             profile.verificationData.website = {
               verified: true, url: result.websiteUrl,
               method: 'hardened_well_known', verifiedAt: new Date().toISOString(),
+              proof: { challengeId, verificationUrl: result.websiteUrl + '/.well-known/agentfolio-verification.txt' },
             };
             profile.links = profile.links || {};
             profile.links.website = result.websiteUrl;
@@ -356,6 +360,7 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
             profile.verificationData.telegram = {
               verified: true, handle: result.handle, telegramUserId: result.telegramUserId,
               method: result.method, verifiedAt: new Date().toISOString(),
+              proof: { challengeId, telegramUserId: result.telegramUserId },
             };
             profile.links = profile.links || {};
             profile.links.telegram = result.handle;
@@ -432,6 +437,7 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
             profile.verificationData.discord = {
               verified: true, username: result.username, discordUserId: result.discordUserId,
               method: 'hardened_dm_challenge', verifiedAt: new Date().toISOString(),
+              proof: { challengeId, discordUserId: result.discordUserId },
             };
             profile.links = profile.links || {};
             profile.links.discord = result.username;
