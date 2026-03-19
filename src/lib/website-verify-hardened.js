@@ -9,7 +9,7 @@ const crypto = require('crypto');
 
 const challenges = new Map();
 const CHALLENGE_TTL_MS = 30 * 60 * 1000; // 30 minutes
-const MAX_CHALLENGES_PER_PROFILE = 10;
+const MAX_CHALLENGES_PER_PROFILE = 30;
 const FETCH_TIMEOUT_MS = 10000;
 
 /**
