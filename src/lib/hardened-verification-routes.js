@@ -19,6 +19,18 @@ const { initiateWebsiteVerification, completeWebsiteVerification } = require('./
 const { initiateTelegramVerification, completeTelegramVerification, markBotVerified } = require('./telegram-verify-hardened');
 const { initiateDiscordVerification, confirmDiscordVerification } = require('./discord-verify-hardened');
 
+// P0 Sprint hardened modules (GitHub, X, AgentMail, Solana)
+let initiateGitHubVerification, verifyGitHubGist;
+try { ({ initiateGitHubVerification, verifyGitHubGist } = require('./github-verify-hardened')); } catch(e) { console.warn('[Hardened] github-verify-hardened not loaded:', e.message); }
+let initiateXVerification, verifyXTweet;
+try { ({ initiateXVerification, verifyXTweet } = require('./x-verify-hardened')); } catch(e) { console.warn('[Hardened] x-verify-hardened not loaded:', e.message); }
+let initiateAgentMailVerification, verifyAgentMailCode;
+try { ({ initiateAgentMailVerification, verifyAgentMailCode } = require('./agentmail-verify-hardened')); } catch(e) { console.warn('[Hardened] agentmail-verify-hardened not loaded:', e.message); }
+let initiateSolanaVerification, verifySolanaSignature;
+try { ({ initiateSolanaVerification, verifySolanaSignature } = require('./solana-verify-hardened')); } catch(e) { console.warn('[Hardened] solana-verify-hardened not loaded:', e.message); }
+let getChallenge;
+try { ({ getChallenge } = require('./verification-challenges')); } catch(e) { console.warn('[Hardened] verification-challenges not loaded:', e.message); }
+
 /**
  * Parse JSON body from request
  */
@@ -419,6 +431,164 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
       } catch (e) {
         json(res, 500, { error: e.message });
       }
+    })();
+    return true;
+  }
+
+
+  // ═══════════════════════════════════════════════════
+  // P0 Sprint routes (GitHub, X, AgentMail, Solana)
+  // These use /api/verify/{provider}/initiate|confirm pattern
+  // ═══════════════════════════════════════════════════
+
+  // ── GitHub Hardened ──
+  if (pathname === '/api/verify/github/initiate' && method === 'POST' && initiateGitHubVerification) {
+    (async () => {
+      const parsed = await parseBody(req);
+      const { profileId, username } = parsed;
+      if (!profileId || !username) return json(res, 400, { error: 'profileId and username required' });
+      try {
+        const result = await initiateGitHubVerification(profileId, username);
+        json(res, result.success ? 200 : 400, result);
+      } catch (e) { json(res, 500, { error: e.message }); }
+    })();
+    return true;
+  }
+  if (pathname === '/api/verify/github/confirm' && method === 'POST' && verifyGitHubGist) {
+    (async () => {
+      const parsed = await parseBody(req);
+      const { challengeId, gistUrl } = parsed;
+      if (!challengeId || !gistUrl) return json(res, 400, { error: 'challengeId and gistUrl required' });
+      try {
+        const result = await verifyGitHubGist(challengeId, gistUrl);
+        if (result.verified && getChallenge) {
+          const challenge = await getChallenge(challengeId);
+          if (challenge && loadProfile && dbSaveProfileFn) {
+            const profile = loadProfile(challenge.challengeData.profileId, DATA_DIR);
+            if (profile) {
+              profile.verificationData = profile.verificationData || {};
+              profile.verificationData.github = { ...result, method: 'hardened_gist', verifiedAt: new Date().toISOString() };
+              profile.updatedAt = new Date().toISOString();
+              dbSaveProfileFn(profile);
+            }
+          }
+        }
+        json(res, result.verified ? 200 : 400, result);
+      } catch (e) { json(res, 500, { error: e.message }); }
+    })();
+    return true;
+  }
+
+  // ── X Hardened ──
+  if (pathname === '/api/verify/x/initiate' && method === 'POST' && initiateXVerification) {
+    (async () => {
+      const parsed = await parseBody(req);
+      const { profileId, username } = parsed;
+      if (!profileId || !username) return json(res, 400, { error: 'profileId and username required' });
+      try {
+        const result = await initiateXVerification(profileId, username);
+        json(res, result.success ? 200 : 400, result);
+      } catch (e) { json(res, 500, { error: e.message }); }
+    })();
+    return true;
+  }
+  if (pathname === '/api/verify/x/confirm' && method === 'POST' && verifyXTweet) {
+    (async () => {
+      const parsed = await parseBody(req);
+      const { challengeId, tweetUrl } = parsed;
+      if (!challengeId || !tweetUrl) return json(res, 400, { error: 'challengeId and tweetUrl required' });
+      try {
+        const result = await verifyXTweet(challengeId, tweetUrl);
+        if (result.verified && getChallenge) {
+          const challenge = await getChallenge(challengeId);
+          if (challenge && loadProfile && dbSaveProfileFn) {
+            const profile = loadProfile(challenge.challengeData.profileId, DATA_DIR);
+            if (profile) {
+              profile.verificationData = profile.verificationData || {};
+              profile.verificationData.x = { ...result, method: 'hardened_tweet', verifiedAt: new Date().toISOString() };
+              profile.updatedAt = new Date().toISOString();
+              dbSaveProfileFn(profile);
+            }
+          }
+        }
+        json(res, result.verified ? 200 : 400, result);
+      } catch (e) { json(res, 500, { error: e.message }); }
+    })();
+    return true;
+  }
+
+  // ── AgentMail Hardened ──
+  if (pathname === '/api/verify/agentmail/initiate' && method === 'POST' && initiateAgentMailVerification) {
+    (async () => {
+      const parsed = await parseBody(req);
+      const { profileId, email } = parsed;
+      if (!profileId || !email) return json(res, 400, { error: 'profileId and email required' });
+      try {
+        const result = await initiateAgentMailVerification(profileId, email);
+        json(res, result.success ? 200 : 400, result);
+      } catch (e) { json(res, 500, { error: e.message }); }
+    })();
+    return true;
+  }
+  if (pathname === '/api/verify/agentmail/confirm' && method === 'POST' && verifyAgentMailCode) {
+    (async () => {
+      const parsed = await parseBody(req);
+      const { challengeId, code } = parsed;
+      if (!challengeId || !code) return json(res, 400, { error: 'challengeId and code required' });
+      try {
+        const result = await verifyAgentMailCode(challengeId, code);
+        if (result.verified && getChallenge) {
+          const challenge = await getChallenge(challengeId);
+          if (challenge && loadProfile && dbSaveProfileFn) {
+            const profile = loadProfile(challenge.challengeData.profileId, DATA_DIR);
+            if (profile) {
+              profile.verificationData = profile.verificationData || {};
+              profile.verificationData.agentmail = { ...result, method: 'hardened_email_code', verifiedAt: new Date().toISOString() };
+              profile.updatedAt = new Date().toISOString();
+              dbSaveProfileFn(profile);
+            }
+          }
+        }
+        json(res, result.verified ? 200 : 400, result);
+      } catch (e) { json(res, 500, { error: e.message }); }
+    })();
+    return true;
+  }
+
+  // ── Solana Hardened ──
+  if (pathname === '/api/verify/solana/initiate' && method === 'POST' && initiateSolanaVerification) {
+    (async () => {
+      const parsed = await parseBody(req);
+      const { profileId, walletAddress } = parsed;
+      if (!profileId || !walletAddress) return json(res, 400, { error: 'profileId and walletAddress required' });
+      try {
+        const result = await initiateSolanaVerification(profileId, walletAddress);
+        json(res, result.success ? 200 : 400, result);
+      } catch (e) { json(res, 500, { error: e.message }); }
+    })();
+    return true;
+  }
+  if (pathname === '/api/verify/solana/confirm' && method === 'POST' && verifySolanaSignature) {
+    (async () => {
+      const parsed = await parseBody(req);
+      const { challengeId, signature } = parsed;
+      if (!challengeId || !signature) return json(res, 400, { error: 'challengeId and signature required' });
+      try {
+        const result = await verifySolanaSignature(challengeId, signature);
+        if (result.verified && getChallenge) {
+          const challenge = await getChallenge(challengeId);
+          if (challenge && loadProfile && dbSaveProfileFn) {
+            const profile = loadProfile(challenge.challengeData.profileId, DATA_DIR);
+            if (profile) {
+              profile.verificationData = profile.verificationData || {};
+              profile.verificationData.solana = { ...result, method: 'hardened_signature', verifiedAt: new Date().toISOString() };
+              profile.updatedAt = new Date().toISOString();
+              dbSaveProfileFn(profile);
+            }
+          }
+        }
+        json(res, result.verified ? 200 : 400, result);
+      } catch (e) { json(res, 500, { error: e.message }); }
     })();
     return true;
   }
