@@ -5,7 +5,7 @@
 
 const { fetchMoltbookProfile } = require('./moltbook');
 
-const MOLTBOOK_API = 'https://moltbook.com/api';
+const MOLTBOOK_API = 'https://www.moltbook.com/api/v1';
 
 /**
  * Fetch a Moltbook user profile (with fallback to existing moltbook.js)
@@ -13,7 +13,7 @@ const MOLTBOOK_API = 'https://moltbook.com/api';
 async function fetchProfile(username) {
   try {
     // Try direct API first
-    const res = await fetch(`${MOLTBOOK_API}/users/${encodeURIComponent(username)}/profile`, {
+    const res = await fetch(`${MOLTBOOK_API}/agents/profile?name=${encodeURIComponent(username)}`, {
       headers: { 'Accept': 'application/json', 'User-Agent': 'AgentFolio-Verify/1.0' },
       signal: AbortSignal.timeout(10000)
     });
@@ -51,7 +51,8 @@ async function verifyMoltbookAccount(profileId, moltbookUsername) {
     }
 
     const challengeString = getMoltbookChallengeString(profileId);
-    const bio = (moltbookData.bio || moltbookData.description || moltbookData.about || '').toLowerCase();
+    const agent = moltbookData.agent || moltbookData;
+    const bio = (agent.description || agent.bio || agent.about || '').toLowerCase();
     const hasChallengeInBio = bio.includes(challengeString.toLowerCase());
 
     if (!hasChallengeInBio) {
@@ -68,9 +69,9 @@ async function verifyMoltbookAccount(profileId, moltbookUsername) {
       verified: true,
       username: moltbookUsername,
       profileId,
-      karma: moltbookData.karma || 0,
-      followers: moltbookData.followers || 0,
-      posts: moltbookData.posts || 0,
+      karma: (moltbookData.agent || moltbookData).karma || 0,
+      followers: (moltbookData.agent || moltbookData).follower_count || 0,
+      posts: (moltbookData.agent || moltbookData).posts_count || 0,
       message: 'Moltbook account verified via bio check'
     };
   } catch (error) {

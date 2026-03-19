@@ -67,7 +67,7 @@ const VERIFICATION_CATEGORIES = {
 };
 
 // Human-required verifications (for Level 5)
-const HUMAN_VERIFICATIONS = ['github', 'x'];
+const HUMAN_VERIFICATIONS = ['github', 'x', 'telegram', 'discord'];
 
 /**
  * Calculate Verification Level (0-5) - deterministic
