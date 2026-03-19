@@ -64,8 +64,8 @@ export function AgentCard({ agent, rank }: AgentCardProps) {
 
         {/* Info */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-sm truncate" style={{ color: "var(--text-primary)" }}>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-sm" style={{ color: "var(--text-primary)" }}>
               {agent.name}
             </span>
             {(agent as any).unclaimed && (
