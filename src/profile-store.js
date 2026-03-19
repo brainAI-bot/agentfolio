@@ -42,6 +42,15 @@ let v3ScoreService;
 try {
   v3ScoreService = require('./v3-score-service');
   console.log('[V3 Scores] Score service loaded');
+
+// Scoring Engine V2 — 2D scoring (verification level + reputation)
+let scoringEngineV2;
+try {
+  scoringEngineV2 = require('./lib/scoring-engine-v2');
+  console.log('[ProfileStore] Scoring Engine V2 loaded');
+} catch (e) {
+  console.warn('[ProfileStore] Scoring Engine V2 not available:', e.message);
+}
 } catch (e) {
   console.warn('[V3 Scores] Score service not available:', e.message);
 }
@@ -250,38 +259,54 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
         else if (verifCount >= 2) newLevel = 2; // L2 Verified
         else if (verifCount >= 1) newLevel = 1; // L1 Registered
         
-        // Calculate v2 Trust Score (0-800 scale)
-        // Profile completeness (30 max): name + bio + skills + avatar
-        const profile = d.prepare('SELECT name, bio, skills, avatar FROM profiles WHERE id = ?').get(profileId);
-        let profileScore = 0;
-        if (profile?.name) profileScore += 8;
-        if (profile?.bio && profile.bio.length > 20) profileScore += 8;
-        if (profile?.skills) profileScore += 8;
-        if (profile?.avatar) profileScore += 6;
-        profileScore = Math.min(30, profileScore);
-        
-        // Social verifications (200 max): github, x, discord, telegram, etc
-        const socialPlatforms = ['github', 'x', 'twitter', 'discord', 'telegram'];
-        const socialCount = allVerifs.filter(v => socialPlatforms.includes(v.platform)).length;
-        const socialScore = Math.min(200, socialCount * 50);
-        
-        // Marketplace verifications (300 max): polymarket, hyperliquid, mcp, a2a
-        const marketplacePlatforms = ['polymarket', 'hyperliquid', 'mcp', 'a2a'];
-        const marketplaceCount = allVerifs.filter(v => marketplacePlatforms.includes(v.platform)).length;
-        const marketplaceScore = Math.min(300, marketplaceCount * 100);
-        
-        // On-chain verifications (100 max): solana, ethereum, satp
-        const onchainPlatforms = ['solana', 'ethereum', 'satp'];
-        const onchainCount = allVerifs.filter(v => onchainPlatforms.includes(v.platform)).length;
-        const onchainScore = Math.min(100, onchainCount * 50);
-        
-        // Tenure bonus (170 max): based on profile age
-        const profileCreated = new Date(profile?.created_at || Date.now());
-        const ageInDays = Math.floor((Date.now() - profileCreated.getTime()) / (1000 * 60 * 60 * 24));
-        const tenureScore = Math.min(170, Math.floor(ageInDays / 7) * 10); // 10 points per week, max 170
-        
-        const newTrustScore = profileScore + socialScore + marketplaceScore + onchainScore + tenureScore;
-        console.log(`[SATP V3] Calculated trust score for ${profileId}: P=${profileScore} S=${socialScore} M=${marketplaceScore} O=${onchainScore} T=${tenureScore} = ${newTrustScore}`);
+        // Calculate trust score using Scoring Engine V2
+        let newTrustScore = 0;
+        try {
+          // Build profile object for v2 engine from DB data
+          const profileRow = d.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
+          const endorsements = d.prepare('SELECT * FROM endorsements WHERE profile_id = ?').all(profileId);
+          const rfk = module.exports._reviewFk || 'profile_id';
+          const reviews = d.prepare(`SELECT * FROM reviews WHERE ${rfk} = ?`).all(profileId);
+          const jobCount = (() => { try { return d.prepare("SELECT COUNT(*) as c FROM jobs WHERE selected_agent_id = ? AND status = 'completed'").get(profileId)?.c || 0; } catch { return 0; } })();
+          
+          // Build verificationData from DB verifications table
+          const verifData = {};
+          for (const v of allVerifs) {
+            verifData[v.platform] = { verified: true };
+          }
+          
+          const profileObj = {
+            id: profileId,
+            name: profileRow?.name || '',
+            handle: profileRow?.handle || '',
+            bio: profileRow?.bio || profileRow?.description || '',
+            avatar: profileRow?.avatar || '',
+            skills: parseJsonField(profileRow?.skills, []),
+            verificationData: verifData,
+            endorsements: endorsements,
+            stats: {
+              jobsCompleted: jobCount,
+              reviewsReceived: reviews.length,
+              rating: reviews.length > 0 ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : 0,
+            },
+            lastActivity: profileRow?.updated_at || profileRow?.created_at,
+            createdAt: profileRow?.created_at,
+            nftAvatar: parseJsonField(profileRow?.nft_avatar, {}),
+          };
+          
+          if (scoringEngineV2) {
+            const scoreResult = scoringEngineV2.getCompleteScore(profileObj);
+            newTrustScore = scoreResult.reputationScore.score;
+            console.log(`[SATP V3] V2 Score for ${profileId}: L${scoreResult.verificationLevel.level} ${scoreResult.verificationLevel.name}, Rep=${newTrustScore}, Tier=${scoreResult.overall.tier}`);
+          } else {
+            // Fallback: simple verification count * 50
+            newTrustScore = Math.min(800, verifCount * 50);
+            console.log(`[SATP V3] Fallback score for ${profileId}: ${newTrustScore}`);
+          }
+        } catch (scoreErr) {
+          console.error(`[SATP V3] Score calculation error for ${profileId}:`, scoreErr.message);
+          newTrustScore = Math.min(800, verifCount * 50); // fallback
+        }
         
         // Update verification level if changed
         if (newLevel > genesis.verificationLevel) {
