@@ -12,7 +12,9 @@ const https = require('https');
 const { loadProfile, saveProfile } = require('./profile');
 
 const SOLANA_RPC = 'api.mainnet-beta.solana.com';
-const HELIUS_RPC = 'mainnet.helius-rpc.com'; // Better NFT support
+const HELIUS_API_KEY = process.env.SOLANA_RPC_URL ? new URL(process.env.SOLANA_RPC_URL).searchParams.get('api-key') : null;
+const HELIUS_RPC = HELIUS_API_KEY ? 'mainnet.helius-rpc.com' : 'api.mainnet-beta.solana.com';
+const HELIUS_PATH = HELIUS_API_KEY ? ('/?api-key=' + HELIUS_API_KEY) : '/';
 
 // EVM public RPCs (no API key needed)
 const EVM_RPCS = {
@@ -188,7 +190,7 @@ async function getSolanaNFTs(walletAddress) {
       });
       const options = {
         hostname: HELIUS_RPC,
-        port: 443, path: '/', method: 'POST',
+        port: 443, path: HELIUS_PATH, method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) }
       };
       const req = https.request(options, (res) => {
@@ -220,17 +222,26 @@ async function getSolanaNFTs(walletAddress) {
 
   // Fallback: use getTokenAccountsByOwner for NFTs (amount=1, decimals=0)
   try {
-    const accounts = await solanaRpc('getTokenAccountsByOwner', [
-      walletAddress,
-      { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' },
-      { encoding: 'jsonParsed' }
+    // Query both Token v1 and Token-2022 programs
+    const [accounts, accounts2022] = await Promise.all([
+      solanaRpc('getTokenAccountsByOwner', [
+        walletAddress,
+        { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' },
+        { encoding: 'jsonParsed' }
+      ]),
+      solanaRpc('getTokenAccountsByOwner', [
+        walletAddress,
+        { programId: 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb' },
+        { encoding: 'jsonParsed' }
+      ]).catch(() => ({ value: [] }))
     ]);
 
-    if (accounts && accounts.value) {
-      return accounts.value
+    const allAccounts = [...(accounts?.value || []), ...(accounts2022?.value || [])];
+    if (allAccounts.length > 0) {
+      return allAccounts
         .filter(acc => {
           const info = acc.account.data.parsed.info;
-          return info.tokenAmount.decimals === 0 && info.tokenAmount.uiAmount === 1;
+          return info.tokenAmount.decimals === 0 && parseInt(info.tokenAmount.amount) >= 1;
         })
         .map(acc => ({
           mint: acc.account.data.parsed.info.mint,
