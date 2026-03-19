@@ -685,7 +685,7 @@ function checkAchievements(profileId, profileData = null) {
 
   // Endorsements received
   const endorsementsReceived = db.prepare(`
-    SELECT COUNT(*) as cnt FROM endorsements WHERE target_id = ?
+    SELECT COUNT(*) as cnt FROM endorsements WHERE profile_id = ?
   `).get(profileId)?.cnt || 0;
   if (endorsementsReceived >= 1) tryUnlock('first_endorsement');
   if (endorsementsReceived >= 10) tryUnlock('well_connected');

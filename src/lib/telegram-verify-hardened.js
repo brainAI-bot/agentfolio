@@ -1,42 +1,32 @@
 /**
- * Telegram Verification — Hardened (cryptographic challenge code + expiry)
+ * Telegram Verification — Operator Verification (no bot required)
+ * 
+ * Verifies the human operator behind an agent has a Telegram account.
+ * Similar to X verification: put a challenge code in your Telegram bio.
  * 
  * Flow:
  * 1. POST /api/profile/:id/verify/telegram/initiate — returns challenge code
- * 2. User sends code to @AgentFolioBot on Telegram (or adds to bio)
- * 3. POST /api/profile/:id/verify/telegram/complete — server checks code was received
- * 
- * For MVP: uses code-in-bio as fallback if bot integration isn't ready.
- * The important hardening: cryptographic nonce, 30min expiry, rate limiting.
+ * 2. Operator adds "agentfolio:CODE" to their Telegram bio
+ * 3. POST /api/profile/:id/verify/telegram/complete — server checks bio via API
  */
-const crypto = require('crypto');
-
-// Try to import original telegram-verify for bot integration
-let originalTelegram;
-try {
-  originalTelegram = require('./telegram-verify');
-} catch (e) {
-  console.warn('[Telegram-Hardened] Original telegram-verify.js not available');
-}
+const crypto = require("crypto");
+const https = require("https");
 
 const challenges = new Map();
 const CHALLENGE_TTL_MS = 30 * 60 * 1000; // 30 minutes
-const MAX_CHALLENGES_PER_PROFILE = 10;
+const MAX_CHALLENGES_PER_PROFILE = 30;
 
-/**
- * Generate a cryptographic verification code (6 chars hex uppercase)
- */
 function generateCode() {
-  return crypto.randomBytes(3).toString('hex').toUpperCase();
+  return crypto.randomBytes(3).toString("hex").toUpperCase();
 }
 
 /**
- * Initiate hardened Telegram verification — returns challenge code
+ * Initiate Telegram verification — returns challenge code for bio
  */
 function initiateTelegramVerification(profileId, telegramHandle) {
-  const handle = (telegramHandle || '').trim().replace(/^@/, '').toLowerCase();
+  const handle = (telegramHandle || "").trim().replace(/^@/, "").toLowerCase();
   if (!handle || handle.length < 2 || handle.length > 64) {
-    throw new Error('Invalid Telegram handle');
+    throw new Error("Invalid Telegram handle");
   }
 
   // Rate limit
@@ -46,12 +36,12 @@ function initiateTelegramVerification(profileId, telegramHandle) {
     if (ch.profileId === profileId && ch.createdAt > oneHourAgo) count++;
   }
   if (count >= MAX_CHALLENGES_PER_PROFILE) {
-    throw new Error('Too many verification attempts. Try again in 1 hour.');
+    throw new Error("Too many verification attempts. Try again in 1 hour.");
   }
 
   const challengeId = crypto.randomUUID();
   const code = generateCode();
-  const nonce = crypto.randomBytes(8).toString('hex');
+  const nonce = crypto.randomBytes(8).toString("hex");
 
   challenges.set(challengeId, {
     profileId,
@@ -59,17 +49,7 @@ function initiateTelegramVerification(profileId, telegramHandle) {
     code,
     nonce,
     createdAt: Date.now(),
-    botVerified: false, // set to true when bot confirms receipt
   });
-
-  // Also register with the original telegram-verify system (bot integration)
-  if (originalTelegram?.startVerification) {
-    try {
-      originalTelegram.startVerification(profileId, handle);
-    } catch (e) {
-      // Non-fatal — we have our own challenge tracking
-    }
-  }
 
   // Cleanup expired
   for (const [id, ch] of challenges) {
@@ -81,111 +61,124 @@ function initiateTelegramVerification(profileId, telegramHandle) {
     challengeId,
     telegramHandle: handle,
     code,
-    instructions: `Send this code to @AgentFolioBot on Telegram: ${code}\n\nAlternatively, add "agentfolio-verify:${code}" to your Telegram bio temporarily.`,
-    expiresIn: '30 minutes',
+    instructions: "Add this to your Telegram bio temporarily:\n\nagentfolio:" + code + "\n\nThen click Verify below. You can remove it from your bio after verification.",
+    expiresIn: "30 minutes",
   };
 }
 
 /**
- * Mark a challenge as verified via bot (called when bot receives the code)
+ * Unused — kept for backward compat
  */
-function markBotVerified(code, telegramUserId, telegramUsername) {
-  for (const [challengeId, ch] of challenges) {
-    if (ch.code === code && Date.now() - ch.createdAt < CHALLENGE_TTL_MS) {
-      const handle = (telegramUsername || '').replace(/^@/, '').toLowerCase();
-      if (ch.telegramHandle && handle && ch.telegramHandle !== handle) {
-        continue; // username mismatch
-      }
-      ch.botVerified = true;
-      ch.telegramUserId = telegramUserId;
-      ch.verifiedUsername = handle || ch.telegramHandle;
-      return { matched: true, challengeId, profileId: ch.profileId };
-    }
-  }
+function markBotVerified() {
   return { matched: false };
 }
 
 /**
- * Complete hardened Telegram verification
- * Checks bot verification first, falls back to bio check
+ * Complete Telegram verification
+ * Checks Telegram bio for the challenge code via public t.me page
  */
-async function completeTelegramVerification(challengeId, options = {}) {
+async function completeTelegramVerification(challengeId, options) {
+  options = options || {};
   const ch = challenges.get(challengeId);
-  if (!ch) throw new Error('Challenge not found or expired');
+  if (!ch) throw new Error("Challenge not found or expired");
   if (Date.now() - ch.createdAt > CHALLENGE_TTL_MS) {
     challenges.delete(challengeId);
-    throw new Error('Challenge expired (30 minute limit). Please initiate a new verification.');
+    throw new Error("Challenge expired (30 minute limit). Please initiate a new verification.");
   }
 
-  // Method 1: Bot verified (code was sent to bot)
-  if (ch.botVerified) {
+  // Try to fetch Telegram bio via public page
+  let bioVerified = false;
+  try {
+    const bioText = await fetchTelegramBio(ch.telegramHandle);
+    if (bioText && bioText.includes("agentfolio:" + ch.code)) {
+      bioVerified = true;
+    }
+  } catch (e) {
+    console.warn("[Telegram-Verify] Bio fetch failed:", e.message);
+  }
+
+  if (bioVerified) {
     try {
-      const profileStore = require('../profile-store');
-      profileStore.addVerification(ch.profileId, 'telegram', ch.telegramHandle, {
+      const profileStore = require("../profile-store");
+      profileStore.addVerification(ch.profileId, "telegram", ch.telegramHandle, {
         challengeId,
         handle: ch.telegramHandle,
-        telegramUserId: ch.telegramUserId,
-        method: 'hardened_bot_dm',
+        method: "bio_challenge",
         nonce: ch.nonce,
         verifiedAt: new Date().toISOString(),
       });
     } catch (e) {
-      console.error('[Telegram-Hardened] Failed to save verification:', e.message);
+      console.error("[Telegram-Verify] Failed to save:", e.message);
     }
 
     challenges.delete(challengeId);
-
     return {
       verified: true,
-      platform: 'telegram',
-      handle: ch.verifiedUsername || ch.telegramHandle,
-      telegramUserId: ch.telegramUserId,
+      platform: "telegram",
+      handle: ch.telegramHandle,
       profileId: ch.profileId,
-      method: 'hardened_bot_dm',
-      message: 'Telegram verified via bot DM with cryptographic challenge',
+      method: "bio_challenge",
+      message: "Telegram operator verified via bio challenge",
     };
   }
 
-  // Method 2: Check original telegram-verify system
-  if (originalTelegram?.getVerificationStatus) {
-    const status = originalTelegram.getVerificationStatus(ch.profileId);
-    if (status && status.telegram === ch.telegramHandle) {
-      try {
-        const profileStore = require('../profile-store');
-        profileStore.addVerification(ch.profileId, 'telegram', ch.telegramHandle, {
-          challengeId,
-          handle: ch.telegramHandle,
-          telegramUserId: status.telegramId,
-          method: 'hardened_legacy_bot',
-          nonce: ch.nonce,
-          verifiedAt: new Date().toISOString(),
-        });
-      } catch (e) {
-        console.error('[Telegram-Hardened] Failed to save verification:', e.message);
-      }
-
-      challenges.delete(challengeId);
-
-      return {
-        verified: true,
-        platform: 'telegram',
+  // Manual confirmation fallback (admin use)
+  if (options.manualConfirm) {
+    try {
+      const profileStore = require("../profile-store");
+      profileStore.addVerification(ch.profileId, "telegram", ch.telegramHandle, {
+        challengeId,
         handle: ch.telegramHandle,
-        telegramUserId: status.telegramId,
-        profileId: ch.profileId,
-        method: 'hardened_legacy_bot',
-        message: 'Telegram verified via bot with hardened challenge tracking',
-      };
+        method: "manual_confirm",
+        nonce: ch.nonce,
+        verifiedAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.error("[Telegram-Verify] Failed to save:", e.message);
     }
+    challenges.delete(challengeId);
+    return {
+      verified: true,
+      platform: "telegram",
+      handle: ch.telegramHandle,
+      profileId: ch.profileId,
+      method: "manual_confirm",
+      message: "Telegram operator verified (manual confirmation)",
+    };
   }
 
-  // Not yet verified
   return {
     verified: false,
-    error: `Verification code not yet received. Send "${ch.code}" to @AgentFolioBot on Telegram, then try again.`,
+    error: "Code not found in @" + ch.telegramHandle + "'s Telegram bio. Add \"agentfolio:" + ch.code + "\" to your bio, then try again.",
     code: ch.code,
     telegramHandle: ch.telegramHandle,
-    hint: 'Make sure you send the exact code as a DM to @AgentFolioBot',
+    hint: "Add agentfolio:" + ch.code + " to your Telegram bio, wait a moment, then click Verify again.",
   };
+}
+
+/**
+ * Fetch a Telegram user bio via the public t.me page
+ */
+function fetchTelegramBio(username) {
+  return new Promise(function(resolve, reject) {
+    var req = https.get(
+      "https://t.me/" + username,
+      { headers: { "User-Agent": "Mozilla/5.0" }, timeout: 8000 },
+      function(res) {
+        var html = "";
+        res.on("data", function(c) { html += c; });
+        res.on("end", function() {
+          // Extract bio from tgme_page_description or og:description
+          var descMatch = html.match(/class="tgme_page_description[^"]*"[^>]*>([^<]*)</);
+          var ogMatch = html.match(/property="og:description"\s+content="([^"]*)"/);
+          var bio = (descMatch && descMatch[1]) || (ogMatch && ogMatch[1]) || "";
+          resolve(bio.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">"));
+        });
+      }
+    );
+    req.on("error", reject);
+    req.on("timeout", function() { req.destroy(); reject(new Error("timeout")); });
+  });
 }
 
 module.exports = {

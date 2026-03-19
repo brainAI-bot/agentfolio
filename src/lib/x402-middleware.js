@@ -11,7 +11,7 @@ const { x402HTTPResourceServer, HTTPFacilitatorClient } = require('@x402/core/se
 // Treasury wallet
 const PAY_TO_ADDRESS = process.env.X402_PAY_TO || 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
 const FACILITATOR_URL = process.env.X402_FACILITATOR_URL || 'https://x402.org/facilitator';
-const NETWORK = process.env.X402_NETWORK || 'base';
+const NETWORK = process.env.X402_NETWORK || 'solana';
 
 // Paid route configuration
 const PAID_ROUTES = {
@@ -47,9 +47,9 @@ function initX402() {
 
     // Register payment schemes
     try {
-      const { ExactEvmScheme } = require('@x402/evm/exact/server');
-      _resourceServer.registerPaywallProvider(NETWORK, new ExactEvmScheme());
-      console.log(`[x402] EVM scheme registered for ${NETWORK}`);
+      const { ExactSvmScheme } = require("@x402/svm/exact/server");
+      _resourceServer.registerPaywallProvider(NETWORK, new ExactSvmScheme());
+      console.log(`[x402] SVM scheme registered for ${NETWORK}`);
     } catch (e) {
       console.warn(`[x402] EVM scheme not available: ${e.message}`);
     }
