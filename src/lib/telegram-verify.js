@@ -136,8 +136,8 @@ function startVerification(profileId, telegramHandle) {
     code,
     expiresAt,
     expiresIn: '15 minutes',
-    botUsername: 'AgentFolioBot', // TODO: Replace with actual bot username
-    instructions: `Send this code to @AgentFolioBot on Telegram: ${code}`
+    botUsername: 'brainKIDbot', // TODO: Replace with actual bot username
+    instructions: `Send this code to @brainKIDbot on Telegram: ${code}`
   };
 }
 

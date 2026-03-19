@@ -11,7 +11,7 @@ const { x402HTTPResourceServer, HTTPFacilitatorClient } = require('@x402/core/se
 // Treasury wallet
 const PAY_TO_ADDRESS = process.env.X402_PAY_TO || 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
 const FACILITATOR_URL = process.env.X402_FACILITATOR_URL || 'https://x402.org/facilitator';
-const NETWORK = process.env.X402_NETWORK || 'solana';
+const NETWORK = process.env.X402_NETWORK || 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 
 // Paid route configuration
 const PAID_ROUTES = {
@@ -92,11 +92,12 @@ async function x402Gate(method, pathname, req, res) {
     // No payment → return 402 Payment Required
     const config = PAID_ROUTES[routeKey];
     const paymentRequired = {
-      x402Version: 1,
+      x402Version: 2,
       accepts: [{
         scheme: 'exact',
         network: NETWORK,
-        maxAmountRequired: config.price.replace('$', ''),
+        maxAmountRequired: '10000',
+          asset: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
         resource: pathname,
         description: config.description,
         mimeType: 'application/json',
@@ -106,14 +107,18 @@ async function x402Gate(method, pathname, req, res) {
       }],
     };
 
+    // Base64 encode for x402 v2 spec compliance
+    const paymentRequiredB64 = Buffer.from(JSON.stringify(paymentRequired)).toString('base64');
     res.writeHead(402, {
       'Content-Type': 'application/json',
       'X-Payment-Required': JSON.stringify(paymentRequired),
+      'PAYMENT-REQUIRED': paymentRequiredB64,
+      'Access-Control-Expose-Headers': 'PAYMENT-REQUIRED, X-Payment-Required',
     });
     res.end(JSON.stringify({
       error: 'Payment Required',
       protocol: 'x402',
-      version: 1,
+      version: 2,
       price: config.price,
       network: NETWORK,
       payTo: PAY_TO_ADDRESS,
@@ -155,7 +160,7 @@ async function x402Gate(method, pathname, req, res) {
 function getX402Info() {
   return {
     protocol: 'x402',
-    version: 1,
+    version: 2,
     network: NETWORK,
     facilitator: FACILITATOR_URL,
     payTo: PAY_TO_ADDRESS,

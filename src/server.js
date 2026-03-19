@@ -17120,6 +17120,9 @@ ${THEME_SCRIPT}
           createdAt: profile.createdAt,
           trustScore,
           tier,
+          score: trustScore,
+          walletAddress: profile.wallets?.solana || profile.wallets?.ethereum || null,
+          verificationLevel: satpScores ? satpScores.verificationLevel : null,
           unclaimed: profile.unclaimed || false,
           verificationProofs: (() => {
             const proofs = buildVerificationProofs(profile.verificationData);
@@ -17159,6 +17162,9 @@ ${THEME_SCRIPT}
           onChainRegisteredAt: profile.onChainRegisteredAt || null,
           createdAt: profile.createdAt,
           trustScore: rep.score,
+          score: rep.score,
+          walletAddress: profile.wallets?.solana || profile.wallets?.ethereum || null,
+          verificationLevel: null,
           tier: rep.tier,
           unclaimed: profile.unclaimed || false,
           verificationProofs: (() => {
