@@ -125,6 +125,8 @@ async function completeMoltbookVerification(challengeId) {
       challengeId,
       username: ch.moltbookUsername,
       method: 'hardened_bio_nonce',
+    nonce: ch.nonce,
+    challengeString: ch.challengeString,
       nonce: ch.nonce,
       karma,
       followers,
@@ -146,6 +148,8 @@ async function completeMoltbookVerification(challengeId) {
     followers,
     posts,
     method: 'hardened_bio_nonce',
+    nonce: ch.nonce,
+    challengeString: ch.challengeString,
     message: 'Moltbook account verified via hardened bio check with cryptographic nonce',
   };
 }
