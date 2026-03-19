@@ -42,6 +42,7 @@ const { verifyMcpEndpoint } = require('./lib/mcp-verify');
 const { verifyA2aAgentCard } = require('./lib/a2a-verify');
 const { generateWebsiteChallenge, confirmWebsiteVerification } = require('./lib/website-verify');
 const { getV2Scoring } = require('./scoring');
+const { buildVerificationProofs } = require('./lib/build-verification-proofs');
 const posts = require('./lib/posts');
 const { getTradingLeaderboard, getPlatformLeaderboard } = require('./lib/trading-leaderboard');
 const { addEndorsement, removeEndorsement, getEndorsements, calculateEndorsementScore } = require('./lib/endorsements');
@@ -16962,7 +16963,8 @@ ${THEME_SCRIPT}
           createdAt: profile.createdAt,
           trustScore,
           tier,
-          unclaimed: profile.unclaimed || false
+          unclaimed: profile.unclaimed || false,
+          verificationProofs: buildVerificationProofs(profile.verificationData)
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(basic, null, 2));
@@ -16991,7 +16993,8 @@ ${THEME_SCRIPT}
           createdAt: profile.createdAt,
           trustScore: rep.score,
           tier: rep.tier,
-          unclaimed: profile.unclaimed || false
+          unclaimed: profile.unclaimed || false,
+          verificationProofs: buildVerificationProofs(profile.verificationData)
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(basic, null, 2));
