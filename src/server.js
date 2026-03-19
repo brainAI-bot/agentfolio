@@ -43,6 +43,7 @@ const { verifyA2aAgentCard } = require('./lib/a2a-verify');
 const { generateWebsiteChallenge, confirmWebsiteVerification } = require('./lib/website-verify');
 const { getV2Scoring } = require('./scoring');
 const { buildVerificationProofs } = require('./lib/build-verification-proofs');
+const { x402Gate, getX402Info, initX402 } = require('./lib/x402-middleware');
 const posts = require('./lib/posts');
 const { getTradingLeaderboard, getPlatformLeaderboard } = require('./lib/trading-leaderboard');
 const { addEndorsement, removeEndorsement, getEndorsements, calculateEndorsementScore } = require('./lib/endorsements');
@@ -6014,6 +6015,8 @@ function generateDashboardPage(profile, analytics, allProfiles, dataDir, jobReco
       .endorsement-card.verified { border: 1px solid #22c55e33; box-shadow: 0 0 0 1px #22c55e22; }
       .endorsement-from { font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
       .endorsement-from .verified-badge { display: inline-flex; align-items: center; gap: 3px; background: linear-gradient(135deg,#22c55e,#16a34a); padding: 1px 6px; border-radius: 10px; font-size: 10px; color: #fff; font-weight: 600; }
+      .v-onchain-badge { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #9945FF, #14F195); color: white; font-size: 12px; text-decoration: none; margin-left: 6px; transition: transform 0.2s; }
+      .v-onchain-badge:hover { transform: scale(1.2); }
       .endorsement-from .unverified-badge { display: inline-flex; background: #27272a; padding: 1px 6px; border-radius: 10px; font-size: 10px; color: #71717a; }
       .endorsement-skill { font-size: 13px; color: #06b6d4; }
       .endorsement-msg { font-size: 13px; color: #71717a; margin-top: 4px; font-style: italic; }
@@ -8420,43 +8423,50 @@ function generateVerificationReportPage(profile) {
   
   // Build verification items
   const verificationItems = [];
+  // Load on-chain attestation TXs for this profile
+  let _profileAttestations = {};
+  try {
+    const atts = getAttestations(profile.id);
+    for (const a of atts) _profileAttestations[a.platform] = a;
+  } catch (e) {}
+
   
   // Wallet verifications
   if (verifications.ethereum?.verified) {
-    verificationItems.push({ type: 'Ethereum Wallet', icon: '💎', status: 'verified', detail: verifications.ethereum.address?.slice(0, 8) + '...' });
+    verificationItems.push({ platform: 'ethereum', type: 'Ethereum Wallet', icon: '💎', status: 'verified', detail: verifications.ethereum.address?.slice(0, 8) + '...' });
   }
   if (verifications.solana?.verified) {
-    verificationItems.push({ type: 'Solana Wallet', icon: '🟣', status: 'verified', detail: verifications.solana.address?.slice(0, 8) + '...' });
+    verificationItems.push({ platform: 'solana', type: 'Solana Wallet', icon: '🟣', status: 'verified', detail: verifications.solana.address?.slice(0, 8) + '...' });
   }
   if (verifications.base?.verified) {
-    verificationItems.push({ type: 'Base Wallet', icon: '🔵', status: 'verified', detail: verifications.base.address?.slice(0, 8) + '...' });
+    verificationItems.push({ platform: 'base', type: 'Base Wallet', icon: '🔵', status: 'verified', detail: verifications.base.address?.slice(0, 8) + '...' });
   }
   
   // Platform verifications
   if (verifications.github?.verified) {
-    verificationItems.push({ type: 'GitHub', icon: '🐙', status: 'verified', detail: verifications.github.username || 'Connected' });
+    verificationItems.push({ platform: 'github', type: 'GitHub', icon: '🐙', status: 'verified', detail: verifications.github.username || 'Connected' });
   }
   if (verifications.x?.verified) {
-    verificationItems.push({ type: 'X', icon: '𝕏', status: 'verified', detail: verifications.x.username || 'Connected' });
+    verificationItems.push({ platform: 'x', type: 'X', icon: '𝕏', status: 'verified', detail: verifications.x.username || 'Connected' });
   }
   if (verifications.telegram?.verified) {
-    verificationItems.push({ type: 'Telegram', icon: '✈️', status: 'verified', detail: verifications.telegram.username || 'Connected' });
+    verificationItems.push({ platform: 'telegram', type: 'Telegram', icon: '✈️', status: 'verified', detail: verifications.telegram.username || 'Connected' });
   }
   if (verifications.discord?.verified) {
-    verificationItems.push({ type: 'Discord', icon: '💬', status: 'verified', detail: verifications.discord.username || 'Connected' });
+    verificationItems.push({ platform: 'discord', type: 'Discord', icon: '💬', status: 'verified', detail: verifications.discord.username || 'Connected' });
   }
   
   // Trading verifications
   if (verifications.hyperliquid?.verified) {
-    verificationItems.push({ type: 'Hyperliquid', icon: '📈', status: 'verified', detail: 'Trading Verified' });
+    verificationItems.push({ platform: 'hyperliquid', type: 'Hyperliquid', icon: '📈', status: 'verified', detail: 'Trading Verified' });
   }
   if (verifications.polymarket?.verified) {
-    verificationItems.push({ type: 'Polymarket', icon: '🎯', status: 'verified', detail: 'Prediction Markets' });
+    verificationItems.push({ platform: 'polymarket', type: 'Polymarket', icon: '🎯', status: 'verified', detail: 'Prediction Markets' });
   }
   
   // AgentMail
   if (verifications.agentmail?.verified) {
-    verificationItems.push({ type: 'AgentMail', icon: '📧', status: 'verified', detail: verifications.agentmail.email || 'Connected' });
+    verificationItems.push({ platform: 'agentmail', type: 'AgentMail', icon: '📧', status: 'verified', detail: verifications.agentmail.email || 'Connected' });
   }
   
   const verifiedCount = verificationItems.length;
@@ -8483,6 +8493,7 @@ function generateVerificationReportPage(profile) {
             <div class="v-detail">${item.detail}</div>
           </div>
           <div class="v-badge">✓ Verified</div>
+          ${_profileAttestations[item.platform] ? '<a href="' + _profileAttestations[item.platform].solscan_url + '" target="_blank" rel="noopener" class="v-onchain-badge" title="Verified on-chain (Solana Memo TX)">⛓️</a>' : ''}
         </div>
       `;
     });
@@ -15006,6 +15017,152 @@ const server = http.createServer((req, res) => {
     }
   }
 
+
+  // SATP Auto-Identity routes (raw HTTP adapter)
+  if (url.pathname.startsWith("/api/satp-auto/identity/")) {
+    const { buildCreateIdentityTx, hasIdentity, getIdentityPDA, SATP_IDENTITY_PROGRAM } = require("./routes/satp-auto-identity");
+    const sendJsonSatp = (code, data) => {
+      res.writeHead(code, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify(data));
+    };
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type" });
+      res.end();
+      return;
+    }
+    // Parse body for POST
+    if (req.method === "POST" && !req._satpBodyParsed) {
+      let bodyStr = "";
+      req.on("data", chunk => bodyStr += chunk);
+      req.on("end", () => {
+        try { req.body = JSON.parse(bodyStr); } catch { req.body = {}; }
+        req._satpBodyParsed = true;
+        // Re-process this request path inline
+        const satpUrl = new URL(req.url, "http://localhost");
+        if (satpUrl.pathname === "/api/satp-auto/identity/create") {
+          const { buildCreateIdentityTx, SATP_IDENTITY_PROGRAM } = require("./routes/satp-auto-identity");
+          (async () => {
+            try {
+              const { walletAddress, profileId, name, description, category } = req.body || {};
+              if (!walletAddress) { res.writeHead(400, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"}); res.end(JSON.stringify({error:"walletAddress required"})); return; }
+              let agentName = name || "Agent", agentDesc = description || "AgentFolio verified agent", agentCat = category || "ai-agent", caps = [], metaUri = "";
+              if (profileId) { try { const Database = require("better-sqlite3"); const path = require("path"); const db = new Database(path.join(__dirname, "../data/agentfolio.db"), {readonly:true}); const p = db.prepare("SELECT * FROM profiles WHERE id = ?").get(profileId); if (p) { agentName = (p.name||agentName).slice(0,32); agentDesc = (p.bio||agentDesc).slice(0,256); metaUri = "https://agentfolio.bot/api/profile/"+profileId; } db.close(); } catch(e){} }
+              const result = await buildCreateIdentityTx(walletAddress, agentName, agentDesc, agentCat, caps, metaUri);
+              console.log("[SATP AutoID] Built TX for " + walletAddress);
+              res.writeHead(200, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"});
+              res.end(JSON.stringify({ok:true, data:result}));
+            } catch(err) { res.writeHead(500, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"}); res.end(JSON.stringify({error:err.message})); }
+          })();
+        } else if (satpUrl.pathname === "/api/satp-auto/identity/confirm") {
+          const { getIdentityPDA, SATP_IDENTITY_PROGRAM } = require("./routes/satp-auto-identity");
+          (async () => {
+            try {
+              const { walletAddress, profileId, txSignature } = req.body || {};
+              if (!walletAddress || !profileId) { res.writeHead(400, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"}); res.end(JSON.stringify({error:"walletAddress and profileId required"})); return; }
+              const { PublicKey } = require("@solana/web3.js");
+              const [pda] = getIdentityPDA(new PublicKey(walletAddress));
+              try { const Database = require("better-sqlite3"); const path = require("path"); const db = new Database(path.join(__dirname, "../data/agentfolio.db")); const profile = db.prepare("SELECT verification_data FROM profiles WHERE id = ?").get(profileId); if (profile) { let vd = {}; try{vd=JSON.parse(profile.verification_data||"{}")}catch{} vd.satp = {verified:true, identityPDA:pda.toBase58(), txSignature, program:SATP_IDENTITY_PROGRAM.toBase58(), network:"mainnet", verifiedAt:new Date().toISOString()}; db.prepare("UPDATE profiles SET verification_data = ? WHERE id = ?").run(JSON.stringify(vd), profileId); } db.close(); } catch(e){ console.warn("[SATP AutoID] DB err:",e.message); }
+              res.writeHead(200, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"});
+              res.end(JSON.stringify({ok:true, data:{identityPDA:pda.toBase58(), txSignature, walletAddress, profileId}}));
+            } catch(err) { res.writeHead(500, {"Content-Type":"application/json","Access-Control-Allow-Origin":"*"}); res.end(JSON.stringify({error:err.message})); }
+          })();
+        }
+      });
+      return;
+    }
+
+    // POST /api/satp-auto/identity/create
+    if (url.pathname === "/api/satp-auto/identity/create" && req.method === "POST") {
+      (async () => {
+        try {
+          const { walletAddress, profileId, name, description, category } = req.body || {};
+          if (!walletAddress) return sendJsonSatp(400, { error: "walletAddress required" });
+
+          let agentName = name || "Agent";
+          let agentDescription = description || "AgentFolio verified agent";
+          let agentCategory = category || "ai-agent";
+          let capabilities = [];
+          let metadataUri = "";
+
+          if (profileId) {
+            try {
+              const Database = require("better-sqlite3");
+              const path = require("path");
+              const db = new Database(path.join(__dirname, "../data/agentfolio.db"), { readonly: true });
+              const profile = db.prepare("SELECT * FROM profiles WHERE id = ?").get(profileId);
+              if (profile) {
+                agentName = (profile.name || agentName).slice(0, 32);
+                agentDescription = (profile.bio || agentDescription).slice(0, 256);
+                try { capabilities = JSON.parse(profile.capabilities || "[]").slice(0, 10); } catch {}
+                metadataUri = "https://agentfolio.bot/api/profile/" + profileId;
+              }
+              db.close();
+            } catch (e) { console.warn("[SATP AutoID] Profile lookup failed:", e.message); }
+          }
+
+          const result = await buildCreateIdentityTx(walletAddress, agentName, agentDescription, agentCategory, capabilities, metadataUri);
+          if (result.alreadyExists) {
+            return sendJsonSatp(200, { ok: true, data: { ...result, message: "SATP identity already exists for this wallet" } });
+          }
+          console.log("[SATP AutoID] Built create_identity TX for " + walletAddress + " (profile: " + (profileId || "none") + ")");
+          sendJsonSatp(200, { ok: true, data: result });
+        } catch (err) {
+          console.error("[SATP AutoID] create error:", err.message);
+          sendJsonSatp(500, { error: "Failed to build identity TX", detail: err.message });
+        }
+      })();
+      return;
+    }
+
+    // POST /api/satp-auto/identity/confirm
+    if (url.pathname === "/api/satp-auto/identity/confirm" && req.method === "POST") {
+      (async () => {
+        try {
+          const { walletAddress, profileId, txSignature } = req.body || {};
+          if (!walletAddress || !profileId) return sendJsonSatp(400, { error: "walletAddress and profileId required" });
+          const { PublicKey } = require("@solana/web3.js");
+          const [identityPDA] = getIdentityPDA(new PublicKey(walletAddress));
+          try {
+            const Database = require("better-sqlite3");
+            const path = require("path");
+            const db = new Database(path.join(__dirname, "../data/agentfolio.db"));
+            const profile = db.prepare("SELECT verification_data FROM profiles WHERE id = ?").get(profileId);
+            if (profile) {
+              let vd = {};
+              try { vd = JSON.parse(profile.verification_data || "{}"); } catch {}
+              vd.satp = { verified: true, identityPDA: identityPDA.toBase58(), txSignature, program: SATP_IDENTITY_PROGRAM.toBase58(), network: "mainnet", verifiedAt: new Date().toISOString() };
+              db.prepare("UPDATE profiles SET verification_data = ? WHERE id = ?").run(JSON.stringify(vd), profileId);
+            }
+            db.close();
+            console.log("[SATP AutoID] Identity confirmed for " + profileId + ": PDA=" + identityPDA.toBase58());
+          } catch (dbErr) { console.warn("[SATP AutoID] DB update failed:", dbErr.message); }
+          sendJsonSatp(200, { ok: true, data: { identityPDA: identityPDA.toBase58(), txSignature, network: "mainnet", walletAddress, profileId } });
+        } catch (err) {
+          console.error("[SATP AutoID] confirm error:", err.message);
+          sendJsonSatp(500, { error: "Failed to confirm identity", detail: err.message });
+        }
+      })();
+      return;
+    }
+
+    // GET /api/satp-auto/identity/check/:wallet
+    if (url.pathname.startsWith("/api/satp-auto/identity/check/") && req.method === "GET") {
+      (async () => {
+        try {
+          const wallet = url.pathname.split("/").pop();
+          const { PublicKey } = require("@solana/web3.js");
+          const exists = await hasIdentity(wallet);
+          const [pda] = getIdentityPDA(new PublicKey(wallet));
+          sendJsonSatp(200, { ok: true, exists, identityPDA: pda.toBase58(), network: "mainnet" });
+        } catch (err) { sendJsonSatp(500, { error: err.message }); }
+      })();
+      return;
+    }
+
+    sendJsonSatp(404, { error: "Unknown SATP auto-identity endpoint" });
+    return;
+  }
+
   // Hardened verification routes (Sprint 2 — all providers)
   const hardenedHelpers = { loadProfile, dbSaveProfileFn, addActivityAndBroadcast, postVerificationMemo, postVerificationOnchainForProfile };
   if (url.pathname.startsWith('/api/verify/') || url.pathname.match(/^\/api\/profile\/[^/]+\/verify\//)) {
@@ -17037,6 +17194,73 @@ ${THEME_SCRIPT}
       total: attestations.length,
       description: 'On-chain Memo TX attestations for each verified platform. Each TX contains: VERIFY|agent_id|platform|timestamp|proof_hash',
     }, null, 2));
+    return;
+  }
+
+  
+  // GET /api/x402/info — x402 payment protocol info
+  else if (url.pathname === '/api/x402/info' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(getX402Info(), null, 2));
+    return;
+  }
+  // GET /api/profile/:id/trust-score — Paid endpoint via x402
+  else if (url.pathname.match(/^\/api\/profile\/([^/]+)\/trust-score$/) && req.method === 'GET') {
+    const profileId = url.pathname.split('/')[3];
+    
+    // x402 gate: returns 402 for unpaid programmatic requests
+    (async () => {
+      try {
+        const handled = await x402Gate('GET', url.pathname, req, res);
+        if (handled) return; // 402 sent
+        
+        // Serve the trust score
+        const profile = loadProfile(profileId, DATA_DIR);
+        if (!profile) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Profile not found' }));
+          return;
+        }
+        
+        // Get on-chain SATP scores
+        const satpScores = await getOnChainScores(profileId);
+        const rep = calculateReputation(profile);
+        
+        // Build detailed trust score response
+        const scoringV2 = require('./lib/scoring-engine-v2');
+        const v2Score = scoringV2.getCompleteScore(profile);
+        
+        const response = {
+          profileId,
+          trustScore: satpScores ? satpScores.trustScore : rep.score,
+          tier: satpScores ? satpScores.tier : rep.tier,
+          verificationLevel: satpScores ? satpScores.verificationLevel : v2Score.verificationLevel.level,
+          v2Score: {
+            verificationLevel: v2Score.verificationLevel,
+            reputationScore: v2Score.reputationScore,
+            overall: v2Score.overall,
+          },
+          onChain: satpScores ? {
+            source: 'satp_v3',
+            trustScore: satpScores.trustScore,
+            verificationLevel: satpScores.verificationLevel,
+            tier: satpScores.tier,
+          } : null,
+          attestations: getAttestations(profileId).length,
+          verifiedPlatforms: Object.keys(profile.verificationData || {}).filter(k => 
+            profile.verificationData[k]?.verified
+          ),
+          paid: req._x402Paid || false,
+          generatedAt: new Date().toISOString(),
+        };
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(response, null, 2));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    })();
     return;
   }
 
@@ -28899,6 +29123,8 @@ server.listen(PORT, () => {
     ]
   });
   
+  // Initialize x402 payment middleware
+  try { initX402(); } catch (e) { console.warn("[x402] Init failed:", e.message); }
   // Schedule log cleanup daily
   setInterval(() => logger.cleanup(), 24 * 60 * 60 * 1000);
 });
