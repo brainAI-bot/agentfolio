@@ -80,7 +80,7 @@ const { submitRequest: submitFeatureRequest, voteRequest, addComment: addRequest
 const { startVerification: startTelegramVerification, verifyCode: verifyTelegramCode, getVerificationStatus: getTelegramVerificationStatus, getPendingVerification: getPendingTelegramVerification, removeVerification: removeTelegramVerification, cleanupExpired: cleanupExpiredTelegram, getAllVerified: getAllTelegramVerified } = require('./lib/telegram-verify');
 const { initiateTelegramVerification: initiateTelegramVerificationHardened, completeTelegramVerification: completeTelegramVerificationHardened } = require('./lib/telegram-verify-hardened');
 const { startVerification: startDiscordVerification, handleCallback: handleDiscordCallback, getVerificationStatus: getDiscordVerificationStatus, getPendingVerification: getPendingDiscordVerification, removeVerification: removeDiscordVerification, cleanupExpired: cleanupExpiredDiscord, getAllVerified: getAllDiscordVerified, getAvatarUrl: getDiscordAvatarUrl, formatUsername: formatDiscordUsername, isConfigured: isDiscordConfigured } = require('./lib/discord-verify');
-const { JOB_STATUS, APP_STATUS, JOB_CATEGORIES, BUDGET_TYPES, TIMELINES, createJob, loadJob, updateJob, cancelJob, listJobs, startJobWork, submitJobWork, completeJob, incrementJobViews, createApplication, getApplication, loadApplications, updateApplicationStatus, selectWinner, getAgentApplications, createReview, loadReviews, getJobReviews, getMarketplaceStats, confirmJobDeposit, disputeJob, getJobEscrowStatus, getJobDepositInstructions, createBountySubmission, scoreBountySubmission, selectBountyWinner, listBounties, getBountyLeaderboard } = require('./lib/marketplace');
+const { JOB_STATUS, APP_STATUS, JOB_CATEGORIES, BUDGET_TYPES, TIMELINES, createJob, loadJob, updateJob, cancelJob, listJobs, startJobWork, submitJobWork, completeJob, incrementJobViews, createApplication, getApplication, loadApplications, updateApplicationStatus, selectWinner, getAgentApplications, createReview, loadReviews, getJobReviews, getMarketplaceStats, confirmJobDeposit, disputeJob, getJobEscrowStatus, getJobDepositInstructions, createBountySubmission, scoreBountySubmission, selectBountyWinner, listBounties, getBountyLeaderboard, verifyProfileOnChain } = require('./lib/marketplace');
 const { calculateVerificationScore, SCORE_TABLE, MAX_SCORE } = require('./lib/verification-score');
 const { updateProfileWallet, getProfileWallet, isValidSolanaAddress, formatWalletAddress, getWalletConnectScript, getWalletConnectButton, verifyWalletSignature, generateSignMessage, checkOnChainIdentity, getWalletBalance, buildIdentityRegistrationTx, SATP_PROGRAMS } = require('./lib/wallet');
 const { loadProfileByWallet } = require('./lib/database');
@@ -350,7 +350,7 @@ function createProfile(data, dataDir) {
     },
     wallets: {
       hyperliquid: sanitized.wallets?.hyperliquid || data.hyperliquid || null,
-      solana: sanitized.wallets?.solana || data.solana || null,
+      solana: sanitized.wallets?.solana || data.solana || data.walletAddress || null,
       ethereum: sanitized.wallets?.ethereum || data.ethereum || null
     },
     skills: sanitized.skills || (data.skills || []).map(s => ({
@@ -16930,6 +16930,10 @@ ${THEME_SCRIPT}
       const basic = profiles.map(p => ({
         id: p.id, name: p.name, handle: p.handle, bio: p.bio, avatar: p.avatar,
         skills: (p.skills || []).map(s => s.name),
+        wallets: p.wallets || {},
+        walletAddress: p.wallets?.solana || p.wallets?.ethereum || null,
+        verificationData: p.verificationData || {},
+        nftAvatar: p.nftAvatar || null,
         verification: { tier: p.verification?.tier, score: p.verification?.score }, trustScore: (_satpScoresCache.get(p.id)?.trustScore ?? p.verification?.score ?? 0), unclaimed: p.unclaimed || false
       }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -24489,7 +24493,7 @@ ${THEME_SCRIPT}
     const jobId = url.pathname.split('/')[4];
     let body = '';
     req.on('data', chunk => body += chunk);
-    req.on('end', () => {
+    req.on('end', async () => {
       try {
         const data = JSON.parse(body);
         if (!data.agentId) {
@@ -24497,6 +24501,22 @@ ${THEME_SCRIPT}
           res.end(JSON.stringify({ error: 'agentId is required' }));
           return;
         }
+        // On-chain verification gate (async)
+        try {
+          const onChainResult = await verifyProfileOnChain(data.agentId);
+          if (!onChainResult.verified) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ 
+              error: onChainResult.error || 'On-chain SATP identity required to apply. Register and verify your wallet at /register first.',
+              needsVerification: true 
+            }));
+            return;
+          }
+        } catch (onChainErr) {
+          // Fallback: allow if RPC check fails (don't block on infra issues)
+          console.warn('[Apply] On-chain check failed, allowing:', onChainErr.message);
+        }
+
         const result = createApplication(jobId, data);
         if (result?.error) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
