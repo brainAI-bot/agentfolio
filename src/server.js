@@ -16793,6 +16793,59 @@ ${THEME_SCRIPT}
           }).catch(e => logger.warn('[SATP] Auto-check failed for ' + result.id + ': ' + e.message));
         }
         
+        // Auto-verify wallet if txSignature provided (single-TX registration flow)
+        if (data.txSignature && regWallet) {
+          try {
+            // TX signature = proof of wallet ownership (user signed the TX with this wallet)
+            const walletAddress = regWallet;
+            const db = require('./lib/database');
+            const p = db.loadProfile(result.id);
+            if (p) {
+              // Save wallet verification
+              if (!p.verificationData) p.verificationData = {};
+              p.verificationData.solana = {
+                address: walletAddress,
+                verified: true,
+                linked: true,
+                method: 'satp_registration_tx',
+                verifiedAt: new Date().toISOString(),
+                proof: {
+                  type: 'satp_registration_tx',
+                  txSignature: data.txSignature,
+                  walletAddress,
+                  verifiedAt: new Date().toISOString(),
+                },
+              };
+              if (!p.wallets) p.wallets = {};
+              p.wallets.solana = walletAddress;
+              p.registeredOnChain = true;
+              p.onChainRegisteredAt = new Date().toISOString();
+              p.updatedAt = new Date().toISOString();
+              db.saveProfile(p);
+              
+              // Also save to verifications table
+              if (addVerification) {
+                try {
+                  addVerification(result.id, 'solana', walletAddress, {
+                    type: 'satp_registration_tx',
+                    txSignature: data.txSignature,
+                    verifiedAt: new Date().toISOString(),
+                  });
+                } catch (avErr) { console.error('[Register] addVerification error:', avErr.message); }
+              }
+              
+              // Add activity
+              if (addActivityAndBroadcast) {
+                addActivityAndBroadcast(result.id, 'verification_solana', { address: walletAddress.slice(0, 8) + '...' }, DATA_DIR);
+              }
+              
+              logger.info('[Register] Auto-verified wallet ' + walletAddress.slice(0, 8) + '... for ' + result.id + ' via SATP TX');
+            }
+          } catch (txVerifyErr) {
+            console.error('[Register] TX auto-verify failed:', txVerifyErr.message);
+          }
+        }
+        
         // Track referral if referral code provided
         let referralTracked = null;
         if (data.referralCode || data.ref) {
@@ -16886,7 +16939,64 @@ ${THEME_SCRIPT}
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(profiles, null, 2));
   }
-  // Avatar upload: POST /api/profile/:id/avatar
+  // PATCH /api/register — Post-TX wallet verification (single-TX registration flow)
+  else if (url.pathname === '/api/register' && req.method === 'PATCH') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        const { profileId, txSignature, walletAddress } = data;
+        if (!profileId || !txSignature || !walletAddress) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'profileId, txSignature, and walletAddress required' }));
+          return;
+        }
+        
+        const db = require('./lib/database');
+        const profile = db.loadProfile(profileId);
+        if (!profile) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Profile not found' }));
+          return;
+        }
+        
+        // Auto-verify wallet via TX signature
+        if (!profile.verificationData) profile.verificationData = {};
+        profile.verificationData.solana = {
+          address: walletAddress,
+          verified: true,
+          linked: true,
+          method: 'satp_registration_tx',
+          verifiedAt: new Date().toISOString(),
+          proof: { type: 'satp_registration_tx', txSignature, walletAddress, verifiedAt: new Date().toISOString() },
+        };
+        if (!profile.wallets) profile.wallets = {};
+        profile.wallets.solana = walletAddress;
+        profile.registeredOnChain = true;
+        profile.onChainRegisteredAt = new Date().toISOString();
+        profile.updatedAt = new Date().toISOString();
+        db.saveProfile(profile);
+        
+        // Save to verifications table
+        if (addVerification) {
+          try { addVerification(profileId, 'solana', walletAddress, { type: 'satp_registration_tx', txSignature, verifiedAt: new Date().toISOString() }); } catch (e) {}
+        }
+        
+        // Activity
+        if (addActivityAndBroadcast) {
+          addActivityAndBroadcast(profileId, 'verification_solana', { address: walletAddress.slice(0, 8) + '...' }, DATA_DIR);
+        }
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, verified: true, profileId, walletAddress }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+  }
+    // Avatar upload: POST /api/profile/:id/avatar
   else if (url.pathname.match(/^\/api\/profile\/[^/]+\/avatar$/) && req.method === 'POST') {
     const profileId = url.pathname.split('/')[3];
     handleAvatarUpload(req, res, profileId, loadProfile, dbSaveProfileFn).catch(e => {

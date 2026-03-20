@@ -50,104 +50,100 @@ export default function RegisterPage() {
     setChainStatus("idle");
 
     try {
-      // 1. Save to backend DB
+      // Build profile payload
       const skillList = skills.split(",").map(s => s.trim()).filter(Boolean);
-      const payload = {
+      const walletAddress = publicKey.toBase58();
+      const payload: any = {
         customId: customId.trim() || undefined,
         name: name.trim(),
         bio: bio.trim(),
         skills: skillList.map(s => ({ name: s, category: "general", verified: false })),
-        wallets: { solana: publicKey.toBase58() },
+        wallets: { solana: walletAddress },
         links: {
           github: github.trim() || null,
           x: x.trim() || null,
           website: website.trim() || null,
         },
+        userPaidGenesis: true,
       };
 
-      // Sign a message to prove wallet ownership
-      let walletSig = "";
-      let walletMsg = "";
-      if (signMessage && publicKey) {
-        try {
-          walletMsg = `AgentFolio Registration: ${name.trim()} at ${new Date().toISOString().slice(0,10)}`;
-          const msgBytes = new TextEncoder().encode(walletMsg);
-          const sigBytes = await signMessage(msgBytes);
-          walletSig = Buffer.from(sigBytes).toString("base64");
-        } catch (sigErr: any) {
-          console.warn("Wallet signature skipped:", sigErr.message);
-        }
-      }
-
+      // STEP 1: Create profile in DB first (needed for SATP genesis)
+      setChainStatus("genesis");
       const res = await fetch("/api/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload, signature: walletSig, signedMessage: walletMsg, userPaidGenesis: true }),
+        body: JSON.stringify(payload),
       });
-
       const data = await res.json();
-
       if (!res.ok) {
         setError(data.error || "Failed to create profile");
         return;
       }
+      const profileId = data.profile_id || data.id;
 
-      
-      // 1.5 Create SATP Genesis Record (user-paid)
-      try {
-        setChainStatus("genesis");
-        const connection = new Connection(SOLANA_RPC, "confirmed");
-        const profileId = data.profile_id || data.id || data.profile?.id;
-        const genesisRes = await fetch("/api/satp/genesis/prepare", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ agentId: profileId, payer: publicKey.toBase58() }),
-        });
-        const genesisData = await genesisRes.json();
-        if (genesisRes.ok && genesisData.transaction) {
-          const { Transaction } = await import("@solana/web3.js");
-          const tx = Transaction.from(Buffer.from(genesisData.transaction, "base64"));
-          const sig = await sendTransaction(tx, connection);
-          await connection.confirmTransaction(sig, "confirmed");
-          console.log("[Register] Genesis record created:", sig);
-        } else if (genesisRes.status === 409) {
-          console.log("[Register] Genesis record already exists");
-        } else {
-          console.warn("[Register] Genesis prepare failed:", genesisData.error);
-        }
-      } catch (genesisErr: any) {
-        console.warn("[Register] User-paid genesis failed (non-blocking):", genesisErr.message);
-        // Non-blocking — profile still saved, genesis can be retried later
-      }
-
-      // 2. Register on-chain via Identity Registry
+      // STEP 2: ONE TX — SATP identity creation (user signs = wallet verified)
+      let satpTxSig = "";
       try {
         setChainStatus("signing");
         const connection = new Connection(SOLANA_RPC, "confirmed");
-        const tx = await buildRegisterAgentTransaction(
-          connection,
-          publicKey,
-          name.trim().slice(0, 32),
-          bio.trim().slice(0, 256),
-          x.trim().slice(0, 64),
-          website.trim().slice(0, 64)
-        );
 
-        const sig = await sendTransaction(tx, connection);
-        setChainStatus("confirming");
-        await connection.confirmTransaction(sig, "confirmed");
-        setTxSignature(sig);
-        setChainStatus("done");
-      } catch (chainErr: any) {
-        console.warn("On-chain registration failed (profile still saved):", chainErr);
+        // Request unsigned SATP identity TX from backend
+        const satpRes = await fetch("/api/satp-auto/identity/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ walletAddress, profileId }),
+        });
+        const satpData = await satpRes.json();
+
+        if (satpData.data?.alreadyExists) {
+          // SATP already exists — skip TX, still count as verified
+          satpTxSig = "existing";
+          setChainStatus("done");
+        } else if (satpData.data?.transaction) {
+          // Sign and send the single TX
+          const { Transaction } = await import("@solana/web3.js");
+          const tx = Transaction.from(Buffer.from(satpData.data.transaction, "base64"));
+          const sig = await sendTransaction(tx, connection);
+          setChainStatus("confirming");
+          await connection.confirmTransaction(sig, "confirmed");
+          satpTxSig = sig;
+          setTxSignature(sig);
+          setChainStatus("done");
+        } else {
+          // SATP unavailable — skip gracefully
+          setChainStatus("skipped");
+        }
+      } catch (txErr: any) {
+        console.warn("[Register] SATP TX failed (profile still saved):", txErr.message);
         setChainStatus("skipped");
-        // Profile is saved to DB even if on-chain fails
+      }
+
+      // STEP 3: Notify backend of TX signature (auto-verifies wallet)
+      if (satpTxSig) {
+        try {
+          await fetch("/api/register", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ profileId, txSignature: satpTxSig, walletAddress }),
+          });
+        } catch {}
+        // Also confirm SATP identity to backend
+        if (satpTxSig !== "existing") {
+          try {
+            await fetch("/api/satp-auto/identity/confirm", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ walletAddress, profileId, txSignature: satpTxSig }),
+            });
+          } catch {}
+        }
       }
 
       setSuccess(true);
+      // Redirect to profile page (NOT verify page)
       setTimeout(() => {
-        router.push(`/profile/${data.profile_id || data.id || data.profile?.id || name.toLowerCase().replace(/\s+/g, "-")}`);
-      }, 2500);
+        router.push(`/profile/${profileId}`);
+      }, 2000);
     } catch (err: any) {
       setError(err.message || "Network error");
     } finally {
