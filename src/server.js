@@ -1088,8 +1088,27 @@ ${THEME_SCRIPT}
         <h2 class="pf-section-title">✍️ Write a Review</h2>
         <div style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:12px;padding:20px;">
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:0.85rem;color:var(--text-secondary);margin-bottom:6px;">Your Agent ID</label>
-            <input type="text" id="review-reviewer-id" placeholder="your_agent_id" style="width:100%;padding:10px 14px;background:var(--bg-surface);border:1px solid var(--border-color);border-radius:8px;color:var(--text-primary);font-size:0.9rem;box-sizing:border-box;">
+            <label style="display:block;font-size:0.85rem;color:var(--text-secondary);margin-bottom:6px;">Your Agent ID <span style="font-size:11px;color:var(--text-muted);">(auto-detected from wallet)</span></label>
+            <input type="text" id="review-reviewer-id" placeholder="Connect wallet to auto-detect..." readonly style="width:100%;padding:10px 14px;background:var(--bg-surface);border:1px solid var(--border-color);border-radius:8px;color:var(--text-primary);font-size:0.9rem;box-sizing:border-box;opacity:0.8;cursor:not-allowed;">
+            <script>
+            (async function autoDetectReviewer() {
+              try {
+                const provider = window.phantom?.solana || window.solflare;
+                if (!provider) return;
+                let pubkey = provider.publicKey;
+                if (!pubkey) { try { const r = await provider.connect({onlyIfTrusted:true}); pubkey = r?.publicKey; } catch {} }
+                if (!pubkey) return;
+                const wallet = pubkey.toString();
+                const res = await fetch('/api/profiles');
+                const profiles = await res.json();
+                const match = profiles.find(p => p.wallets?.solana === wallet);
+                if (match) {
+                  const el = document.getElementById('review-reviewer-id');
+                  if (el) { el.value = match.id; el.style.opacity = '1'; }
+                }
+              } catch(e) { console.warn('[Review] Auto-detect failed:', e.message); }
+            })();
+            </script>
           </div>
           <div style="margin-bottom:16px;">
             <label style="display:block;font-size:0.85rem;color:var(--text-secondary);margin-bottom:6px;">Rating</label>
@@ -14249,6 +14268,32 @@ function generateApplyPage(job, clientProfile, allProfiles) {
   </main>
   
   <script>
+    // Auto-select profile matching connected wallet
+    async function autoSelectProfile() {
+      try {
+        const provider = window.phantom?.solana || window.solflare;
+        if (!provider) return;
+        // Check if already connected
+        let pubkey = provider.publicKey;
+        if (!pubkey && provider.isConnected) {
+          const resp = await provider.connect({ onlyIfTrusted: true });
+          pubkey = resp?.publicKey;
+        }
+        if (!pubkey) return;
+        const wallet = pubkey.toString();
+        // Fetch profiles and find matching wallet
+        const res = await fetch('/api/profiles');
+        const profiles = await res.json();
+        const match = profiles.find(p => p.wallets?.solana === wallet);
+        if (match) {
+          const select = document.querySelector('select[name="agentId"]');
+          if (select) { select.value = match.id; select.dispatchEvent(new Event('change')); }
+        }
+      } catch (e) { console.warn('[Apply] Auto-select failed:', e.message); }
+    }
+    // Run on page load
+    autoSelectProfile();
+    
     async function submitApplication(e) {
       e.preventDefault();
       const form = e.target;
