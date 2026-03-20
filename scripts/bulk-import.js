@@ -1,50 +1,50 @@
 #!/usr/bin/env node
 /**
- * AgentFolio Bulk Import Script
+ * Bulk Import Script for AgentFolio
  * 
- * Import agent profiles from JSON or CSV files via the registration API.
+ * Import agent profiles from JSON or CSV files.
  * 
  * Usage:
- *   node bulk-import.js <input-file> [options]
+ *   node bulk-import.js <input-file> [--dry-run] [--skip-existing] [--batch-size 10]
  * 
- * Input formats:
- *   JSON: Array of objects [{ name, handle?, bio?, skills?, wallets?, links? }, ...]
- *   CSV:  Header row: name,handle,bio,skills,solana_wallet,github,website
+ * Input JSON format (array of objects):
+ *   [
+ *     {
+ *       "name": "Agent Name",          // REQUIRED
+ *       "handle": "@agent_handle",     // optional (auto-generated from name if missing)
+ *       "bio": "Agent description",    // optional
+ *       "skills": ["solana", "defi"],  // optional
+ *       "wallets": { "solana": "..." },// optional
+ *       "links": { "github": "...", "website": "...", "x": "@handle" }  // optional
+ *     }
+ *   ]
  * 
- * Options:
- *   --dry-run        Validate only, don't actually import
- *   --delay <ms>     Delay between API calls (default: 200ms)
- *   --api-url <url>  Base URL (default: https://agentfolio.bot)
- *   --output <file>  Save results to JSON file
- *   --skip-existing  Skip profiles that already exist (409) instead of failing
+ * Input CSV format (first row = headers):
+ *   name,handle,bio,skills,wallets.solana,links.github,links.website
+ *   "Agent 1","@agent1","Bio text","skill1;skill2","SolAddr","https://github.com/x","https://x.com"
  * 
  * Examples:
- *   node bulk-import.js agents.json --dry-run
- *   node bulk-import.js agents.csv --delay 500 --output results.json
- *   node bulk-import.js hackathon-agents.json --skip-existing
+ *   node bulk-import.js agents.json --dry-run          # Preview without creating
+ *   node bulk-import.js agents.json --skip-existing     # Skip if name already exists
+ *   node bulk-import.js agents.csv --batch-size 5       # Process 5 at a time
  */
 
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 
-// Parse CLI args
+const API_BASE = process.env.API_BASE || 'http://localhost:3000';
+
+// ─── CLI Args ────────────────────────────────────────
 const args = process.argv.slice(2);
 const inputFile = args.find(a => !a.startsWith('--'));
 const dryRun = args.includes('--dry-run');
 const skipExisting = args.includes('--skip-existing');
-const delayIdx = args.indexOf('--delay');
-const delayMs = delayIdx >= 0 ? parseInt(args[delayIdx + 1]) || 200 : 200;
-const apiIdx = args.indexOf('--api-url');
-const apiUrl = apiIdx >= 0 ? args[apiIdx + 1] : 'https://agentfolio.bot';
-const outIdx = args.indexOf('--output');
-const outputFile = outIdx >= 0 ? args[outIdx + 1] : null;
+const batchSizeIdx = args.indexOf('--batch-size');
+const batchSize = batchSizeIdx >= 0 ? parseInt(args[batchSizeIdx + 1]) || 10 : 10;
 
 if (!inputFile) {
-  console.error('Usage: node bulk-import.js <input-file> [--dry-run] [--delay ms] [--api-url url] [--output file] [--skip-existing]');
-  console.error('\nInput format (JSON):');
-  console.error('  [{ "name": "AgentX", "bio": "...", "skills": ["solana"], "wallets": { "solana": "..." } }]');
-  console.error('\nInput format (CSV):');
-  console.error('  name,handle,bio,skills,solana_wallet,github,website');
+  console.error('Usage: node bulk-import.js <input-file.json|csv> [--dry-run] [--skip-existing] [--batch-size N]');
   process.exit(1);
 }
 
@@ -53,39 +53,46 @@ if (!fs.existsSync(inputFile)) {
   process.exit(1);
 }
 
-// Parse input file
+// ─── Parse Input ─────────────────────────────────────
 function parseCSV(content) {
   const lines = content.trim().split('\n');
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-  return lines.slice(1).map(line => {
+  if (lines.length < 2) return [];
+  
+  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+  const agents = [];
+  
+  for (let i = 1; i < lines.length; i++) {
     const values = [];
     let current = '';
     let inQuotes = false;
-    for (const ch of line) {
-      if (ch === '"') { inQuotes = !inQuotes; continue; }
-      if (ch === ',' && !inQuotes) { values.push(current.trim()); current = ''; continue; }
-      current += ch;
+    
+    for (const char of lines[i]) {
+      if (char === '"') { inQuotes = !inQuotes; continue; }
+      if (char === ',' && !inQuotes) { values.push(current.trim()); current = ''; continue; }
+      current += char;
     }
     values.push(current.trim());
-
-    const row = {};
-    headers.forEach((h, i) => { row[h] = values[i] || ''; });
-
-    // Map CSV columns to API format
-    const agent = { name: row.name };
-    if (row.handle) agent.handle = row.handle.startsWith('@') ? row.handle : '@' + row.handle;
-    if (row.bio) agent.bio = row.bio;
-    if (row.skills) agent.skills = row.skills.split(';').map(s => s.trim()).filter(Boolean);
-    if (row.solana_wallet || row.wallet) {
-      agent.wallets = { solana: row.solana_wallet || row.wallet };
-    }
-    const links = {};
-    if (row.github) links.github = row.github;
-    if (row.website) links.website = row.website;
-    if (row.twitter || row.x) links.x = row.twitter || row.x;
-    if (Object.keys(links).length > 0) agent.links = links;
-    return agent;
-  });
+    
+    const agent = {};
+    headers.forEach((h, idx) => {
+      const val = values[idx] || '';
+      if (!val) return;
+      
+      if (h.includes('.')) {
+        const [parent, child] = h.split('.');
+        if (!agent[parent]) agent[parent] = {};
+        agent[parent][child] = val;
+      } else if (h === 'skills') {
+        agent.skills = val.split(';').map(s => s.trim()).filter(Boolean);
+      } else {
+        agent[h] = val;
+      }
+    });
+    
+    if (agent.name) agents.push(agent);
+  }
+  
+  return agents;
 }
 
 function parseJSON(content) {
@@ -93,123 +100,164 @@ function parseJSON(content) {
   return Array.isArray(data) ? data : [data];
 }
 
-function loadAgents(filePath) {
+function parseInput(filePath) {
   const content = fs.readFileSync(filePath, 'utf-8');
   const ext = path.extname(filePath).toLowerCase();
+  
   if (ext === '.csv') return parseCSV(content);
   return parseJSON(content);
 }
 
-// Validate agent data
-function validateAgent(agent, index) {
-  const errors = [];
-  if (!agent.name || typeof agent.name !== 'string' || agent.name.length < 1) {
-    errors.push(`[${index}] name is required`);
-  }
-  if (agent.name && agent.name.length > 64) {
-    errors.push(`[${index}] name too long (max 64 chars)`);
-  }
-  if (agent.bio && agent.bio.length > 500) {
-    errors.push(`[${index}] bio too long (max 500 chars)`);
-  }
-  if (agent.wallets?.solana && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(agent.wallets.solana)) {
-    errors.push(`[${index}] invalid Solana wallet address`);
-  }
-  return errors;
-}
-
-// Import a single agent via API
-async function importAgent(agent) {
-  const res = await fetch(`${apiUrl}/api/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(agent),
+// ─── API Call ────────────────────────────────────────
+function registerAgent(agentData) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify(agentData);
+    const url = new URL(`${API_BASE}/api/register`);
+    
+    const options = {
+      hostname: url.hostname,
+      port: url.port || 3000,
+      path: url.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+      },
+    };
+    
+    const req = http.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          resolve({ status: res.statusCode, body: JSON.parse(data) });
+        } catch {
+          resolve({ status: res.statusCode, body: { error: data } });
+        }
+      });
+    });
+    
+    req.on('error', reject);
+    req.write(body);
+    req.end();
   });
-  const data = await res.json();
-  return { status: res.status, data };
 }
 
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
-
-async function main() {
-  console.log(`\n📦 AgentFolio Bulk Import`);
-  console.log(`   File: ${inputFile}`);
-  console.log(`   API:  ${apiUrl}`);
-  console.log(`   Mode: ${dryRun ? '🔍 DRY RUN (validation only)' : '🚀 LIVE IMPORT'}`);
-  console.log(`   Delay: ${delayMs}ms between calls`);
-  console.log('');
-
-  const agents = loadAgents(inputFile);
-  console.log(`Found ${agents.length} agent(s) to import\n`);
-
-  // Validate all first
-  let validationErrors = [];
-  for (let i = 0; i < agents.length; i++) {
-    const errs = validateAgent(agents[i], i);
-    validationErrors = validationErrors.concat(errs);
-  }
-
-  if (validationErrors.length > 0) {
-    console.error('❌ Validation errors:');
-    validationErrors.forEach(e => console.error('  ' + e));
-    process.exit(1);
-  }
-  console.log(`✅ All ${agents.length} agents pass validation\n`);
-
-  if (dryRun) {
-    console.log('🔍 Dry run — no changes made.');
-    agents.forEach((a, i) => console.log(`  [${i}] ${a.name} (${a.handle || 'auto'})`));
-    process.exit(0);
-  }
-
-  // Import
+// ─── Batch Processing ────────────────────────────────
+async function processBatch(agents, startIdx) {
+  const batch = agents.slice(startIdx, startIdx + batchSize);
   const results = [];
-  let success = 0, skipped = 0, failed = 0;
-
-  for (let i = 0; i < agents.length; i++) {
-    const agent = agents[i];
-    process.stdout.write(`  [${i + 1}/${agents.length}] ${agent.name}... `);
-
+  
+  for (const agent of batch) {
+    if (!agent.name) {
+      results.push({ name: '(unnamed)', status: 'SKIP', reason: 'No name' });
+      continue;
+    }
+    
+    if (dryRun) {
+      results.push({
+        name: agent.name,
+        handle: agent.handle || `@${agent.name.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
+        status: 'DRY_RUN',
+        skills: agent.skills || [],
+        wallets: agent.wallets || {},
+      });
+      continue;
+    }
+    
     try {
-      const result = await importAgent(agent);
-
-      if (result.status === 201) {
-        console.log(`✅ ${result.data.profile_id}`);
-        results.push({ agent: agent.name, status: 'created', profile_id: result.data.profile_id, api_key: result.data.api_key });
-        success++;
-      } else if (result.status === 409 && skipExisting) {
-        console.log(`⏭️  already exists`);
-        results.push({ agent: agent.name, status: 'skipped', reason: 'already exists' });
-        skipped++;
+      const res = await registerAgent(agent);
+      
+      if (res.body.success) {
+        results.push({
+          name: agent.name,
+          status: 'CREATED',
+          profileId: res.body.profile_id,
+          url: res.body.profile_url,
+        });
+      } else if (res.body.error && res.body.error.includes('already exists') && skipExisting) {
+        results.push({ name: agent.name, status: 'SKIPPED', reason: 'Already exists' });
       } else {
-        console.log(`❌ ${result.data.error || 'Unknown error'}`);
-        results.push({ agent: agent.name, status: 'failed', error: result.data.error });
-        failed++;
+        results.push({ name: agent.name, status: 'ERROR', error: res.body.error });
       }
     } catch (err) {
-      console.log(`❌ ${err.message}`);
-      results.push({ agent: agent.name, status: 'failed', error: err.message });
-      failed++;
+      results.push({ name: agent.name, status: 'ERROR', error: err.message });
     }
-
-    if (i < agents.length - 1) await sleep(delayMs);
+    
+    // Small delay between registrations to avoid rate limiting
+    await new Promise(r => setTimeout(r, 200));
   }
+  
+  return results;
+}
 
-  console.log(`\n📊 Results: ${success} created, ${skipped} skipped, ${failed} failed (${agents.length} total)\n`);
-
-  if (outputFile) {
-    fs.writeFileSync(outputFile, JSON.stringify(results, null, 2));
-    console.log(`📁 Results saved to ${outputFile}\n`);
+// ─── Main ────────────────────────────────────────────
+async function main() {
+  console.log(`\n🤖 AgentFolio Bulk Import`);
+  console.log(`   File: ${inputFile}`);
+  console.log(`   Mode: ${dryRun ? 'DRY RUN (preview only)' : 'LIVE'}`);
+  console.log(`   Skip existing: ${skipExisting}`);
+  console.log(`   Batch size: ${batchSize}`);
+  console.log('');
+  
+  const agents = parseInput(inputFile);
+  console.log(`📋 Found ${agents.length} agent(s) to import\n`);
+  
+  if (agents.length === 0) {
+    console.log('Nothing to import.');
+    return;
   }
-
-  // Print summary table of created profiles
-  const created = results.filter(r => r.status === 'created');
-  if (created.length > 0) {
-    console.log('Created profiles:');
-    created.forEach(r => console.log(`  ${r.profile_id} → ${apiUrl}/profile/${r.profile_id}`));
+  
+  // Show preview of first 3
+  console.log('Preview (first 3):');
+  for (const a of agents.slice(0, 3)) {
+    console.log(`  - ${a.name} (${a.handle || 'auto-handle'}) skills: ${(a.skills || []).join(', ') || 'none'}`);
   }
+  if (agents.length > 3) console.log(`  ... and ${agents.length - 3} more`);
+  console.log('');
+  
+  const allResults = [];
+  let processed = 0;
+  
+  while (processed < agents.length) {
+    const results = await processBatch(agents, processed);
+    allResults.push(...results);
+    processed += results.length;
+    
+    const created = results.filter(r => r.status === 'CREATED').length;
+    const skipped = results.filter(r => r.status === 'SKIPPED' || r.status === 'SKIP').length;
+    const errors = results.filter(r => r.status === 'ERROR').length;
+    const dryRuns = results.filter(r => r.status === 'DRY_RUN').length;
+    
+    console.log(`Batch ${Math.ceil(processed / batchSize)}: ${created} created, ${skipped} skipped, ${errors} errors${dryRuns ? `, ${dryRuns} previewed` : ''}`);
+    
+    for (const r of results) {
+      if (r.status === 'CREATED') console.log(`  ✅ ${r.name} → ${r.profileId}`);
+      else if (r.status === 'ERROR') console.log(`  ❌ ${r.name}: ${r.error}`);
+      else if (r.status === 'SKIPPED') console.log(`  ⏭️  ${r.name}: ${r.reason}`);
+      else if (r.status === 'DRY_RUN') console.log(`  📋 ${r.name} (${r.handle}) — would create`);
+    }
+  }
+  
+  // Summary
+  console.log('\n════════════════════════════════');
+  console.log('Summary:');
+  const totalCreated = allResults.filter(r => r.status === 'CREATED').length;
+  const totalSkipped = allResults.filter(r => r.status === 'SKIPPED' || r.status === 'SKIP').length;
+  const totalErrors = allResults.filter(r => r.status === 'ERROR').length;
+  const totalDryRun = allResults.filter(r => r.status === 'DRY_RUN').length;
+  
+  console.log(`  Total: ${agents.length}`);
+  if (totalCreated) console.log(`  Created: ${totalCreated}`);
+  if (totalSkipped) console.log(`  Skipped: ${totalSkipped}`);
+  if (totalErrors) console.log(`  Errors: ${totalErrors}`);
+  if (totalDryRun) console.log(`  Previewed: ${totalDryRun}`);
+  console.log('');
+  
+  // Save results
+  const resultsFile = inputFile.replace(/\.\w+$/, '-import-results.json');
+  fs.writeFileSync(resultsFile, JSON.stringify(allResults, null, 2));
+  console.log(`📄 Results saved to: ${resultsFile}`);
 }
 
 main().catch(err => {
