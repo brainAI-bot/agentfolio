@@ -36,11 +36,14 @@ const { verifySolanaWallet, getSolanaTokenAccounts } = require('./lib/solana-ver
 const { isValidEthereumAddress, initiateEthereumVerification, verifyEthereumSignature, getEthereumStats } = require('./lib/ethereum-verify');
 const { verifyGitHubProfile, getGitHubStats } = require('./lib/github-verify');
 const { getPolymarketStats, generateVerificationMessage, verifyPolymarketTrading } = require('./lib/polymarket-verify');
+const { initiatePMVerification, completePMVerification } = require('./lib/polymarket-verify-hardened');
 const { verifyKalshiTrading } = require('./lib/kalshi-verify');
 const { verifyMoltbookAccount, getMoltbookChallengeString } = require('./lib/moltbook-verify');
+const { initiateMoltbookVerification: initiateMoltbookVerificationHardened, completeMoltbookVerification } = require('./lib/moltbook-verify-hardened');
 const { verifyMcpEndpoint } = require('./lib/mcp-verify');
 const { verifyA2aAgentCard } = require('./lib/a2a-verify');
 const { generateWebsiteChallenge, confirmWebsiteVerification } = require('./lib/website-verify');
+const { initiateWebsiteVerification: initiateWebsiteVerificationHardened, completeWebsiteVerification } = require('./lib/website-verify-hardened');
 const { getV2Scoring } = require('./scoring');
 const { buildVerificationProofs } = require('./lib/build-verification-proofs');
 const { x402Gate, getX402Info, initX402 } = require('./lib/x402-middleware');
@@ -74,6 +77,7 @@ const { initWebSocket, broadcastActivity, broadcastToProfile, broadcastSystem, g
 const { followProfile, unfollowProfile, isFollowing, getFollowing, getFollowers, getFollowerCount, getMostFollowed } = require('./lib/follows');
 const { submitRequest: submitFeatureRequest, voteRequest, addComment: addRequestComment, updateStatus: updateRequestStatus, getRequests: getFeatureRequests, getRequest: getFeatureRequest, getStats: getFeedbackStats } = require('./lib/feedback');
 const { startVerification: startTelegramVerification, verifyCode: verifyTelegramCode, getVerificationStatus: getTelegramVerificationStatus, getPendingVerification: getPendingTelegramVerification, removeVerification: removeTelegramVerification, cleanupExpired: cleanupExpiredTelegram, getAllVerified: getAllTelegramVerified } = require('./lib/telegram-verify');
+const { initiateTelegramVerification: initiateTelegramVerificationHardened, completeTelegramVerification: completeTelegramVerificationHardened } = require('./lib/telegram-verify-hardened');
 const { startVerification: startDiscordVerification, handleCallback: handleDiscordCallback, getVerificationStatus: getDiscordVerificationStatus, getPendingVerification: getPendingDiscordVerification, removeVerification: removeDiscordVerification, cleanupExpired: cleanupExpiredDiscord, getAllVerified: getAllDiscordVerified, getAvatarUrl: getDiscordAvatarUrl, formatUsername: formatDiscordUsername, isConfigured: isDiscordConfigured } = require('./lib/discord-verify');
 const { JOB_STATUS, APP_STATUS, JOB_CATEGORIES, BUDGET_TYPES, TIMELINES, createJob, loadJob, updateJob, cancelJob, listJobs, startJobWork, submitJobWork, completeJob, incrementJobViews, createApplication, getApplication, loadApplications, updateApplicationStatus, selectWinner, getAgentApplications, createReview, loadReviews, getJobReviews, getMarketplaceStats, confirmJobDeposit, disputeJob, getJobEscrowStatus, getJobDepositInstructions, createBountySubmission, scoreBountySubmission, selectBountyWinner, listBounties, getBountyLeaderboard } = require('./lib/marketplace');
 const { calculateVerificationScore, SCORE_TABLE, MAX_SCORE } = require('./lib/verification-score');
@@ -191,6 +195,7 @@ const { AUDIT_EVENTS, logAuditEvent, queryAuditTrail, getProfileAuditTrail, getR
 const { getIntegrationCode, getSupportedFrameworks } = require('./lib/framework-integrations');
 const crossChain = require('./lib/cross-chain-identity');
 const { createPeerReview, getProfileReviews, getGivenReviews, getReviewScore, getReviewBetween, deleteReview: deletePeerReview, getReviewStats: getPeerReviewStats, getTopRated, REVIEW_CONTEXTS } = require('./lib/peer-reviews');
+const { generateReviewChallenge, submitSignedReview, getRecentReviews, setReviewMemoTx } = require('./lib/reviews-v2');
 const staking = require('./lib/staking');
 const capitalDelegation = require('./lib/capital-delegation');
 const performanceFees = require('./lib/performance-fees');
@@ -18677,6 +18682,78 @@ const { handleVerificationRoutes } = require('./lib/hardened-verification-routes
     }));
     return;
   }
+  // ── Telegram HARDENED Verification (bio-based with crypto nonce) ──
+  else if (url.pathname === '/api/verify/telegram/hardened/initiate' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        const { profileId, telegramHandle } = data;
+        if (!profileId || !telegramHandle) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'profileId and telegramHandle required' }));
+          return;
+        }
+        const profile = loadProfile(profileId, DATA_DIR);
+        if (!profile) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Profile not found' }));
+          return;
+        }
+        const result = initiateTelegramVerificationHardened(profileId, telegramHandle);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+  else if (url.pathname === '/api/verify/telegram/hardened/complete' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { challengeId, manualConfirm } = data;
+        if (!challengeId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'challengeId required' }));
+          return;
+        }
+        const result = await completeTelegramVerificationHardened(challengeId, { manualConfirm });
+        if (result.verified) {
+          const profile = loadProfile(result.profileId, DATA_DIR);
+          if (profile) {
+            profile.verificationData = profile.verificationData || {};
+            profile.verificationData.telegram = {
+              handle: result.handle,
+              verified: true,
+              method: result.method || 'hardened_bio_challenge',
+              verifiedAt: new Date().toISOString()
+            };
+            profile.links = profile.links || {};
+            profile.links.telegram = result.handle;
+            profile.updatedAt = new Date().toISOString();
+            dbSaveProfileFn(profile);
+            addActivityAndBroadcast(result.profileId, 'verification_telegram', {
+              handle: result.handle, method: 'hardened'
+            }, DATA_DIR);
+            postVerificationMemo(result.profileId, 'telegram', { handle: result.handle }).catch(() => {});
+            postVerificationOnchainForProfile(profile, 'telegram', { handle: result.handle });
+          }
+        }
+        res.writeHead(result.verified ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result, null, 2));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
   
   // ============================================
   // END TELEGRAM VERIFICATION ENDPOINTS
@@ -18752,6 +18829,92 @@ const { handleVerificationRoutes } = require('./lib/hardened-verification-routes
   // PEER REVIEWS (Agent-to-Agent)
   // ============================================
 
+
+  // ── Reviews V2: Wallet-signed reviews with on-chain attestation ──
+  // POST /api/reviews/challenge — get challenge message to sign
+  else if (url.pathname === '/api/reviews/challenge' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        const { reviewerId, revieweeId, rating, chain } = data;
+        const result = generateReviewChallenge(reviewerId, revieweeId, rating, chain || 'solana');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+  // POST /api/reviews/submit — submit signed review
+  else if (url.pathname === '/api/reviews/submit' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { challengeId, signature, walletAddress, comment } = data;
+        const result = submitSignedReview({ challengeId, signature, walletAddress, comment });
+        if (result.verified && result.review) {
+          // Post on-chain memo attestation
+          try {
+            const memoResult = await postVerificationMemo(result.review.revieweeId, 'review', {
+              reviewer: result.review.reviewerId,
+              rating: result.review.rating,
+              wallet: walletAddress,
+              chain: result.review.chain,
+            });
+            if (memoResult && memoResult.signature) {
+              result.review.memoTx = memoResult.signature;
+              result.review.explorerUrl = memoResult.explorerUrl;
+              setReviewMemoTx(result.review.id, memoResult.signature);
+            }
+          } catch (e) {
+            console.error('[ReviewsV2] Memo attestation failed:', e.message);
+          }
+          // Update scoring
+          try {
+            const profile = loadProfile(result.review.revieweeId, DATA_DIR);
+            if (profile) {
+              addActivityAndBroadcast(result.review.revieweeId, 'review_received', {
+                reviewer: result.review.reviewerId,
+                rating: result.review.rating,
+                signatureVerified: true
+              }, DATA_DIR);
+            }
+          } catch (e) {
+            console.error('[ReviewsV2] Activity broadcast failed:', e.message);
+          }
+        }
+        res.writeHead(result.verified ? 201 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result, null, 2));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+  // GET /api/reviews/recent — latest reviews across all profiles
+  else if (url.pathname === '/api/reviews/recent' && req.method === 'GET') {
+    const limit = parseInt(url.searchParams.get('limit') || '20');
+    const reviews = getRecentReviews(limit);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ count: reviews.length, reviews }));
+    return;
+  }
+  // GET /api/profile/:id/reviews — alias for reviews (P0 requirement)
+  else if (url.pathname.match(/^\/api\/profile\/([^/]+)\/reviews$/) && req.method === 'GET') {
+    const profileId = url.pathname.match(/^\/api\/profile\/([^/]+)\/reviews$/)[1];
+    const peerRevs = getProfileReviews(profileId);
+    const score = getReviewScore(profileId);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ profileId, score, reviews: peerRevs }));
+    return;
+  }
   // POST /api/reviews - Create a peer review
   else if (url.pathname === '/api/reviews' && req.method === 'POST') {
     let body = '';
@@ -19152,7 +19315,83 @@ const { handleVerificationRoutes } = require('./lib/hardened-verification-routes
     });
     return;
   }
-  // Kalshi verification - verify with credentials (credentials not stored)
+
+  // ── Polymarket HARDENED Verification (initiate/complete with wallet signature) ──
+  else if (url.pathname === '/api/verify/polymarket/hardened/initiate' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        const { profileId, walletAddress } = data;
+        if (!profileId || !walletAddress) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'profileId and walletAddress required' }));
+          return;
+        }
+        const profile = loadProfile(profileId, DATA_DIR);
+        if (!profile) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Profile not found' }));
+          return;
+        }
+        const result = initiatePMVerification(profileId, walletAddress);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+  else if (url.pathname === '/api/verify/polymarket/hardened/complete' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { challengeId, signature } = data;
+        if (!challengeId || !signature) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'challengeId and signature required' }));
+          return;
+        }
+        const result = await completePMVerification(challengeId, signature);
+        if (result.verified) {
+          const profile = loadProfile(result.profileId, DATA_DIR);
+          if (profile) {
+            profile.verificationData = profile.verificationData || {};
+            profile.verificationData.polymarket = {
+              verified: true,
+              address: result.identifier,
+              stats: result.stats,
+              method: 'hardened_signature',
+              signatureVerified: true,
+              verifiedAt: new Date().toISOString()
+            };
+            profile.links = profile.links || {};
+            profile.links.polymarket = result.identifier;
+            profile.updatedAt = new Date().toISOString();
+            dbSaveProfileFn(profile);
+            addActivityAndBroadcast(result.profileId, 'verification_polymarket', {
+              address: result.identifier.slice(0, 6) + '...' + result.identifier.slice(-4),
+              method: 'hardened_signature'
+            }, DATA_DIR);
+            postVerificationMemo(result.profileId, 'polymarket', { address: result.identifier }).catch(() => {});
+            postVerificationOnchainForProfile(profile, 'polymarket', { address: result.identifier });
+          }
+        }
+        res.writeHead(result.verified ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result, null, 2));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+    // Kalshi verification - verify with credentials (credentials not stored)
   else if (url.pathname === '/api/verify/kalshi' && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => body += chunk);
@@ -19267,6 +19506,81 @@ const { handleVerificationRoutes } = require('./lib/hardened-verification-routes
           }, DATA_DIR);
           postVerificationMemo(profileId, 'moltbook', { username: moltbookUsername, karma: result.karma }).catch(() => {});
           postVerificationOnchainForProfile(profile, 'moltbook', { username: moltbookUsername });
+        }
+        res.writeHead(result.verified ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result, null, 2));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // ── Moltbook HARDENED Verification (bio-based with crypto nonce) ──
+  else if (url.pathname === '/api/verify/moltbook/hardened/initiate' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        const { profileId, moltbookUsername } = data;
+        if (!profileId || !moltbookUsername) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'profileId and moltbookUsername required' }));
+          return;
+        }
+        const profile = loadProfile(profileId, DATA_DIR);
+        if (!profile) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Profile not found' }));
+          return;
+        }
+        const result = initiateMoltbookVerificationHardened(profileId, moltbookUsername);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+  else if (url.pathname === '/api/verify/moltbook/hardened/complete' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { challengeId } = data;
+        if (!challengeId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'challengeId required' }));
+          return;
+        }
+        const result = await completeMoltbookVerification(challengeId);
+        if (result.verified) {
+          const profile = loadProfile(result.profileId, DATA_DIR);
+          if (profile) {
+            profile.verificationData = profile.verificationData || {};
+            profile.verificationData.moltbook = {
+              verified: true,
+              username: result.username,
+              karma: result.karma || 0,
+              method: 'hardened_bio_nonce',
+              nonce: result.nonce,
+              verifiedAt: new Date().toISOString()
+            };
+            profile.links = profile.links || {};
+            profile.links.moltbook = result.username;
+            profile.updatedAt = new Date().toISOString();
+            dbSaveProfileFn(profile);
+            addActivityAndBroadcast(result.profileId, 'verification_moltbook', {
+              username: result.username, karma: result.karma || 0, method: 'hardened'
+            }, DATA_DIR);
+            postVerificationMemo(result.profileId, 'moltbook', { username: result.username, karma: result.karma }).catch(() => {});
+            postVerificationOnchainForProfile(profile, 'moltbook', { username: result.username });
+          }
         }
         res.writeHead(result.verified ? 200 : 400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result, null, 2));
@@ -19425,6 +19739,78 @@ const { handleVerificationRoutes } = require('./lib/hardened-verification-routes
             dbSaveProfileFn(profile);
             addActivityAndBroadcast(result.profileId, 'verification_website', {
               url: result.websiteUrl
+            }, DATA_DIR);
+            postVerificationMemo(result.profileId, 'website', { url: result.websiteUrl }).catch(() => {});
+            postVerificationOnchainForProfile(profile, 'website', { url: result.websiteUrl });
+          }
+        }
+        res.writeHead(result.verified ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result, null, 2));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+  // ── Website HARDENED Verification (.well-known with crypto token) ──
+  else if (url.pathname === '/api/verify/website/hardened/initiate' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        const { profileId, websiteUrl } = data;
+        if (!profileId || !websiteUrl) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'profileId and websiteUrl required' }));
+          return;
+        }
+        const profile = loadProfile(profileId, DATA_DIR);
+        if (!profile) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Profile not found' }));
+          return;
+        }
+        const result = initiateWebsiteVerificationHardened(profileId, websiteUrl);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+  else if (url.pathname === '/api/verify/website/hardened/complete' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        const { challengeId } = data;
+        if (!challengeId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'challengeId required' }));
+          return;
+        }
+        const result = await completeWebsiteVerification(challengeId);
+        if (result.verified) {
+          const profile = loadProfile(result.profileId, DATA_DIR);
+          if (profile) {
+            profile.verificationData = profile.verificationData || {};
+            profile.verificationData.website = {
+              verified: true,
+              url: result.websiteUrl,
+              method: 'hardened_well_known',
+              verifiedAt: new Date().toISOString()
+            };
+            profile.links = profile.links || {};
+            profile.links.website = result.websiteUrl;
+            profile.updatedAt = new Date().toISOString();
+            dbSaveProfileFn(profile);
+            addActivityAndBroadcast(result.profileId, 'verification_website', {
+              url: result.websiteUrl, method: 'hardened'
             }, DATA_DIR);
             postVerificationMemo(result.profileId, 'website', { url: result.websiteUrl }).catch(() => {});
             postVerificationOnchainForProfile(profile, 'website', { url: result.websiteUrl });
