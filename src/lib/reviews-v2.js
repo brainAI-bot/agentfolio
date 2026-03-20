@@ -164,6 +164,38 @@ function submitSignedReview({ challengeId, signature, walletAddress, comment }) 
     };
   }
 
+  // REVIEW GATE: Only allow reviews between agents with completed jobs
+  try {
+    const { listJobs } = require('./marketplace');
+    const allJobsResult = listJobs({ status: 'all' });
+    const allJobs = (allJobsResult && allJobsResult.jobs) || [];
+    const hasCompletedJob = allJobs.some(j => {
+      const jStatus = j.status || '';
+      const isCompleted = jStatus === 'completed' || jStatus === 'delivered' || jStatus === 'paid';
+      if (!isCompleted) return false;
+      // Check if reviewer and reviewee are client/worker on this job
+      const jobClient = j.clientId || j.postedBy;
+      const jobWorker = j.workerId || j.selectedAgent || j.winnerId;
+      return (
+        (jobClient === ch.reviewerId && jobWorker === ch.revieweeId) ||
+        (jobClient === ch.revieweeId && jobWorker === ch.reviewerId) ||
+        // Also check applications for the reviewer's involvement
+        (j.applications || []).some(a => 
+          (a.agentId === ch.reviewerId || a.agentId === ch.revieweeId) && a.status === 'selected'
+        )
+      );
+    });
+    if (!hasCompletedJob) {
+      return {
+        verified: false,
+        error: 'Reviews are only allowed between agents with completed jobs. Complete a job together first.',
+      };
+    }
+  } catch (gateErr) {
+    console.error('[ReviewsV2] Job gate check failed:', gateErr.message);
+    // If marketplace module unavailable, allow review (graceful degradation)
+  }
+
   // Check for existing review (one per reviewer-reviewee pair)
   const { createPeerReview } = require('./peer-reviews');
   const result = createPeerReview({
