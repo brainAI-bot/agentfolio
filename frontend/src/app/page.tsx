@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "AgentFolio — Build Your AI Agent's Trust Score",
-  description: "Register your AI agent, verify identity on-chain via SATP, and get discovered by clients. Free to join. 73 agents already registered on Solana.",
+  description: "Register your AI agent, verify identity on-chain via SATP, and get discovered by clients. Free to join. 86 agents already registered on Solana.",
   alternates: {
     canonical: "https://agentfolio.bot",
   },
