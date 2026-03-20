@@ -66,6 +66,7 @@ const { STATUS: COLLAB_STATUS, createCollaboration, confirmCollaboration: confir
 const { importFromJSON, importFromCSV, generateCSVTemplate, generateJSONTemplate } = require('./lib/batch-import');
 const { PERMISSIONS, TIERS, createApiKey, validateApiKey, hasPermission, revokeApiKey, listApiKeys, extractApiKey, requireAuth, requireTieredApiKey, checkTierRateLimit, getKeyStats } = require('./lib/api-keys');
 const { STATUS: CLAIM_STATUS, canClaim, createClaim, verifyClaim, getClaim, getClaimsForProfile, getPendingClaims, rejectClaim, cleanupExpiredClaims } = require('./lib/claims');
+const claimFlow = require('./lib/claim-flow');
 const { initWebSocket, broadcastActivity, broadcastToProfile, broadcastSystem, getStats: getWsStats } = require('./lib/websocket');
 const { followProfile, unfollowProfile, isFollowing, getFollowing, getFollowers, getFollowerCount, getMostFollowed } = require('./lib/follows');
 const { submitRequest: submitFeatureRequest, voteRequest, addComment: addRequestComment, updateStatus: updateRequestStatus, getRequests: getFeatureRequests, getRequest: getFeatureRequest, getStats: getFeedbackStats } = require('./lib/feedback');
@@ -87,6 +88,43 @@ const { postVerificationOnchain, postReputationOnchain } = require('./lib/verifi
 const { handleVerificationRoutes } = require('./lib/hardened-verification-routes');
 
 // Helper: post verification on-chain (non-blocking, needs solana wallet)
+
+// ============ SATP ON-CHAIN SCORES CACHE ============
+// In-memory cache for SATP on-chain trust scores (TTL: 5 minutes)
+const _satpScoresCache = new Map();
+const SATP_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+async function getOnChainScores(profileId) {
+  // Check in-memory cache first
+  const cached = _satpScoresCache.get(profileId);
+  if (cached && (Date.now() - cached.timestamp < SATP_CACHE_TTL)) {
+    return cached;
+  }
+  
+  try {
+    const { createSATPClient } = require('./satp-client/src');
+    const client = createSATPClient({ 
+      rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb' 
+    });
+    const genesis = await client.getGenesisRecord(profileId);
+    if (genesis && genesis.reputationScore !== undefined) {
+      const tiers = ["unverified", "registered", "verified", "established", "trusted", "sovereign"];
+      const result = {
+        trustScore: genesis.reputationScore,
+        verificationLevel: genesis.verificationLevel,
+        tier: tiers[genesis.verificationLevel] || "unverified",
+        timestamp: Date.now(),
+        fromSATP: true
+      };
+      _satpScoresCache.set(profileId, result);
+      return result;
+    }
+  } catch (e) {
+    // Silently fail — fall back to old calculation
+  }
+  return null;
+}
+// ============ END SATP CACHE ============
 function postVerificationOnchainForProfile(profile, platform, proofData) {
   const wallet = profile?.wallets?.solana;
   if (!wallet) return;
@@ -14685,6 +14723,7 @@ function generateUnsubscribePage(result) {
 function computeTrustData(agentId) {
   const profile = loadProfile(agentId);
   if (!profile) {
+
     return {
       agentId,
       trustScore: 0,
@@ -14908,6 +14947,23 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const requestStart = Date.now();
   
+  // ── Route Aliases: fix frontend/backend path mismatches ──
+  const ROUTE_ALIASES = {
+    '/api/verify/agentmail/challenge': '/api/verify/agentmail/initiate',
+    '/api/verify/x/challenge': '/api/verify/x/initiate',
+    '/api/verify/solana/challenge': '/api/verify/solana/initiate',
+    '/api/verification/eth/initiate': '/api/verify/eth/initiate',
+    '/api/verification/eth/verify': '/api/verify/eth/verify',
+    '/api/verification/domain/initiate': '/api/verify/domain/initiate',
+    '/api/verification/domain/verify': '/api/verify/domain/verify',
+    '/api/verification/discord/initiate': '/api/verify/discord/initiate',
+    '/api/verification/telegram/initiate': '/api/verify/telegram/initiate',
+    '/api/verification/telegram/verify': '/api/verify/telegram/verify',
+  };
+  if (ROUTE_ALIASES[url.pathname]) {
+    url.pathname = ROUTE_ALIASES[url.pathname];
+  }
+  
   // Record request for health monitoring
   recordRequest();
   
@@ -14950,7 +15006,7 @@ const server = http.createServer((req, res) => {
 
   // Hardened verification routes (P0 Sprint)
   if (url.pathname.startsWith('/api/verify/')) {
-    const hardenedProviders = ['github', 'x', 'agentmail', 'solana', 'discord'];
+    const hardenedProviders = ['github', 'x', 'agentmail', 'solana', 'discord', 'eth', 'domain', 'telegram'];
     const isHardenedRoute = hardenedProviders.some(provider => url.pathname.includes(provider));
     
     if (isHardenedRoute) {
@@ -15767,6 +15823,31 @@ ${THEME_SCRIPT}
   // ===== DID (Decentralized Identity) ROUTES =====
   
   // DID Configuration (domain linkage)
+  // Serve .well-known verification files for agentfolio.bot domain
+  else if (url.pathname === "/.well-known/agentfolio.json") {
+    const fs = require("fs");
+    const wellKnownPath = require("path").join(__dirname, "..", "public", ".well-known", "agentfolio.json");
+    if (fs.existsSync(wellKnownPath)) {
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(fs.readFileSync(wellKnownPath, "utf8"));
+    } else {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Not found" }));
+    }
+    return;
+  }
+  else if (url.pathname === "/.well-known/agentfolio-verification.txt") {
+    const fs = require("fs");
+    const wellKnownPath = require("path").join(__dirname, "..", "public", ".well-known", "agentfolio-verification.txt");
+    if (fs.existsSync(wellKnownPath)) {
+      res.writeHead(200, { "Content-Type": "text/plain", "Access-Control-Allow-Origin": "*" });
+      res.end(fs.readFileSync(wellKnownPath, "utf8"));
+    } else {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("Not found");
+    }
+    return;
+  }
   else if (url.pathname === '/.well-known/did-configuration.json') {
     const baseUrl = `https://${req.headers.host || 'agentfolio.bot'}`;
     const config = generateDIDConfiguration(baseUrl);
@@ -16390,7 +16471,7 @@ ${THEME_SCRIPT}
       const basic = profiles.map(p => ({
         id: p.id, name: p.name, handle: p.handle, bio: p.bio, avatar: p.avatar,
         skills: (p.skills || []).map(s => s.name),
-        verification: { tier: p.verification?.tier, score: p.verification?.score }
+        verification: { tier: p.verification?.tier, score: p.verification?.score }, trustScore: (_satpScoresCache.get(p.id)?.trustScore ?? p.verification?.score ?? 0), unclaimed: p.unclaimed || false
       }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(basic, null, 2));
@@ -16845,17 +16926,18 @@ ${THEME_SCRIPT}
     });
     return;
   }
-  else if (url.pathname.match(/^\/api\/profile\/([^/]+)$/)) {
-    // Public read access
-    const keyInfo = { tier: "free" }; // Public access
-    // Auth removed for public read
-    
+  else if (url.pathname.match(/^\/api\/profile\/([^\/]+)$/)) {
+    // Public read access — SATP on-chain is source of truth for scores
     const profileId = url.pathname.replace('/api/profile/', '');
     const profile = loadProfile(profileId, DATA_DIR);
     
     if (profile) {
-      // Free tier: basic data only
-      if (keyInfo.tier === 'free') {
+      // Fetch SATP on-chain scores (async)
+      getOnChainScores(profile.id).then(satpScores => {
+        const rep = calculateReputation(profile);
+        const trustScore = satpScores ? satpScores.trustScore : rep.score;
+        const tier = satpScores ? satpScores.tier : rep.tier;
+        
         const basic = {
           id: profile.id, name: profile.name, handle: profile.handle, bio: profile.bio,
           avatar: profile.avatar, links: profile.links,
@@ -16864,24 +16946,45 @@ ${THEME_SCRIPT}
           verification: profile.verification,
           verificationData: {
             satp: profile.verificationData?.satp || null,
-            github: profile.verificationData?.github ? { verified: profile.verificationData.github.verified } : null,
-            x: profile.verificationData?.x ? { verified: profile.verificationData.x.verified } : null,
-            solana: profile.verificationData?.solana ? { verified: profile.verificationData.solana.verified } : null,
+            github: profile.verificationData?.github ? { verified: profile.verificationData.github.verified, username: profile.verificationData.github.username || profile.verificationData.github.address || profile.links?.github, repos: profile.verificationData.github.repos || 0, stars: profile.verificationData.github.stars || 0 } : null,
+            x: profile.verificationData?.x ? { verified: profile.verificationData.x.verified, handle: profile.verificationData.x.handle, followers: profile.verificationData.x.followers } : null,
+            solana: profile.verificationData?.solana ? { verified: profile.verificationData.solana.verified, address: profile.verificationData.solana.address } : null,
           },
           registeredOnChain: profile.registeredOnChain || false,
           onChainRegisteredAt: profile.onChainRegisteredAt || null,
           createdAt: profile.createdAt,
-          trustScore: calculateReputation(profile).score, tier: calculateReputation(profile).tier
+          trustScore,
+          tier,
+          unclaimed: profile.unclaimed || false
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(basic, null, 2));
-      } else {
-        // Enrich with premium data + computed trust score
-        const trust = computeTrustData(profile.id);
-        const enriched = { ...profile, trustScore: trust.trustScore, tier: trust.tier, premiumTier: getProfileTier(profile.id), customBadges: getCustomBadges(profile.id) };
+      }).catch(err => {
+        // Fallback: serve with old scores if SATP fetch fails entirely
+        const rep = calculateReputation(profile);
+        const basic = {
+          id: profile.id, name: profile.name, handle: profile.handle, bio: profile.bio,
+          avatar: profile.avatar, links: profile.links,
+          wallets: profile.wallets || {},
+          skills: (profile.skills || []).map(s => ({ name: s.name, category: s.category })),
+          verification: profile.verification,
+          verificationData: {
+            satp: profile.verificationData?.satp || null,
+            github: profile.verificationData?.github ? { verified: profile.verificationData.github.verified, username: profile.verificationData.github.username || profile.verificationData.github.address || profile.links?.github, repos: profile.verificationData.github.repos || 0, stars: profile.verificationData.github.stars || 0 } : null,
+            x: profile.verificationData?.x ? { verified: profile.verificationData.x.verified, handle: profile.verificationData.x.handle, followers: profile.verificationData.x.followers } : null,
+            solana: profile.verificationData?.solana ? { verified: profile.verificationData.solana.verified, address: profile.verificationData.solana.address } : null,
+          },
+          registeredOnChain: profile.registeredOnChain || false,
+          onChainRegisteredAt: profile.onChainRegisteredAt || null,
+          createdAt: profile.createdAt,
+          trustScore: rep.score,
+          tier: rep.tier,
+          unclaimed: profile.unclaimed || false
+        };
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(enriched, null, 2));
-      }
+        res.end(JSON.stringify(basic, null, 2));
+      });
+      return; // Important: prevent falling through to next handler
     } else {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Profile not found' }));
@@ -17471,7 +17574,7 @@ ${THEME_SCRIPT}
     req.on('data', c => body += c);
     req.on('end', async () => {
       try {
-        const { profileId, twitterHandle } = JSON.parse(body);
+        const _xbody = JSON.parse(body); const profileId = _xbody.profileId; const twitterHandle = _xbody.twitterHandle || _xbody.handle;
         if (!profileId || !twitterHandle) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'profileId and twitterHandle required' })); return; }
         const profile = loadProfile(profileId, DATA_DIR);
         if (!profile) { res.writeHead(404, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Profile not found' })); return; }
@@ -17890,6 +17993,28 @@ const { handleVerificationRoutes } = require('./lib/hardened-verification-routes
     const status = getAgentMailPendingStatus(profileId, email);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(status));
+    return;
+  }
+  // === ETH VERIFICATION STUBS (routes frontend calls but dont exist yet) ===
+  else if (url.pathname === "/api/verification/eth/initiate" && req.method === "POST") {
+    res.writeHead(501, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "ETH wallet verification coming soon. Use Solana wallet verification for now." }));
+    return;
+  }
+  else if (url.pathname === "/api/verification/eth/verify" && req.method === "POST") {
+    res.writeHead(501, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "ETH wallet verification coming soon." }));
+    return;
+  }
+  // === DOMAIN VERIFICATION STUBS ===
+  else if (url.pathname === "/api/verification/domain/initiate" && req.method === "POST") {
+    res.writeHead(501, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Domain verification coming soon. Use GitHub or X verification for now." }));
+    return;
+  }
+  else if (url.pathname === "/api/verification/domain/verify" && req.method === "POST") {
+    res.writeHead(501, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Domain verification coming soon." }));
     return;
   }
   // Profile-specific AgentMail verification
@@ -21562,6 +21687,65 @@ ${THEME_SCRIPT}
   // ============ PROFILE CLAIMS ============
   
   // Check if a profile can be claimed
+  // Self-Service Claim: Check eligibility + available methods
+  else if (url.pathname === '/api/claims/eligible' && req.method === 'GET') {
+    const profileId = url.searchParams.get('profileId');
+    if (!profileId) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'profileId required' }));
+      return;
+    }
+    const result = claimFlow.canClaim(profileId, DATA_DIR);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result, null, 2));
+  }
+
+  // Self-Service Claim: Initiate challenge
+  else if (url.pathname === '/api/claims/initiate' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body || '{}');
+        const { profileId, method, wallet } = data;
+        if (!profileId || !method || !wallet) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'profileId, method, and wallet required' }));
+          return;
+        }
+        const result = claimFlow.initiateClaim(profileId, method, wallet, DATA_DIR);
+        res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result, null, 2));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+  }
+
+  // Self-Service Claim: Verify proof and transfer ownership
+  else if (url.pathname === '/api/claims/self-verify' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body || '{}');
+        const { challengeId, proof } = data;
+        if (!challengeId || !proof) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'challengeId and proof required' }));
+          return;
+        }
+        const result = await claimFlow.verifyClaim(challengeId, proof, DATA_DIR);
+        res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result, null, 2));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+  }
+
   else if (url.pathname === '/api/claims/check' && req.method === 'GET') {
     const profileId = url.searchParams.get('profileId');
     if (!profileId) {

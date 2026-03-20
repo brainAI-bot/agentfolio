@@ -647,20 +647,6 @@ function deserializeProfile(row) {
       profile[key] = value;
     }
   }
-  // Join verifications from verifications table (hardened verification data)
-  try {
-    const verRows = db.prepare('SELECT * FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
-    profile.verifications = verRows.map(v => ({
-      platform: v.platform,
-      identifier: v.identifier,
-      proof: v.proof ? JSON.parse(v.proof) : {},
-      verifiedAt: v.verified_at,
-      status: 'verified',
-    }));
-  } catch (e) {
-    profile.verifications = [];
-  }
-
   return profile;
 }
 

@@ -1,13 +1,13 @@
 {
   "cluster": "mainnet",
   "nftNumber": 5,
-  "mint": "6qM7sKXoqbuHY1yjUiLVUW6HQbF99yrnjeqJ9PDS4Qbu",
+  "mint": "61FfpNCo1QvXvA1WgLKNDT1yFH8UcjMxsLjZtZwKE4bE",
   "collection": "CCw8NjAS3QpfDU4fBYkJ2kD4znNy468e3wqAJQKoJCFk",
-  "metadataUri": "https://uploader.irys.xyz/A1SYEC7kkXEEbmCQHvc2zmydrKSfBeJCXDdDqCgUArNa",
-  "imageUri": "https://uploader.irys.xyz/4ibh86DutpCK74ZDmgXRf1tMZSF8Er3HUmDBx1msaGXD",
-  "recipient": "HnnYsWiVL4g7fRDAoh7aXYSJ3VYYJD5hEigqpq6nmfHc",
-  "createdAt": "2026-03-15T23:00:15.835Z",
+  "metadataUri": "https://gateway.irys.xyz/J6NaNc9VTAC2tmKk2HvN1LPna4BHSzU1AwuXRHoiZodz",
+  "imageUri": "https://gateway.irys.xyz/HGnAqJyPn6NPBof9BhJ78A9zabFUfN9mJMKSxEK9o8GW",
+  "recipient": "Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc",
+  "createdAt": "2026-03-20T05:16:29.001Z",
   "source": "core-candy-machine",
-  "candyMachine": "2BmStMMfG8uH1crHwEopbrcPPevQ3qj9SN7Y67M8DYPV",
+  "candyMachine": "BVso8ZjrV2G16eKZnVVhrfk8hPBgD7wgLKyxVbu489Gz",
   "cmIndex": 4
 }
