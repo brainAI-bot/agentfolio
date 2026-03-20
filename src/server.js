@@ -12,6 +12,7 @@ const logger = require('./logger');
 const fs = require('fs');
 const path = require('path');
 const { loadProfile, listProfiles, saveProfile: _dbSaveProfileRaw, SKILLS_TAXONOMY } = require('./lib/profile');
+const { addVerification } = require('./profile-store');
 
 // Wrap saveProfile to also write JSON file for frontend sync
 function dbSaveProfileFn(profile) {

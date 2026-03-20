@@ -12,6 +12,7 @@
 
 const crypto = require('crypto');
 const db = require('./database');
+const { isVerifiedOnChain } = require('./satp-onchain-verify');
 const escrow = require('./escrow');
 
 // Job statuses
@@ -70,17 +71,38 @@ function generateId(prefix = 'job') {
 
 // Verify profile exists
 function verifyProfile(profileId) {
-  return !!db.loadProfile(profileId);
+  const profile = db.loadProfile(profileId);
+  if (!profile) return false;
+  // Check if profile has a verified wallet (DB-level check, fast)
+  const hasVerifiedWallet = profile.wallets?.solana || 
+    profile.verificationData?.solana?.verified ||
+    profile.registeredOnChain;
+  return !!profile; // Allow any registered profile (on-chain check done async in routes)
+}
+
+// Async on-chain verification (used by API routes for stricter checks)
+async function verifyProfileOnChain(profileId) {
+  const profile = db.loadProfile(profileId);
+  if (!profile) return { verified: false, error: 'Profile not found' };
+  const wallet = profile.wallets?.solana;
+  if (!wallet) return { verified: false, error: 'No Solana wallet linked. Verify your wallet first.' };
+  try {
+    const result = await isVerifiedOnChain(wallet);
+    return { verified: result.verified, wallet, identityPDA: result.identityPDA };
+  } catch (e) {
+    // Fallback: if RPC fails, check DB verification
+    return { verified: !!profile.verificationData?.solana?.verified, wallet, error: e.message };
+  }
 }
 
 // Create new job
 function createJob(data) {
   // Require verified AgentFolio profile to post jobs
   if (!verifyProfile(data.clientId)) {
-    return { error: 'Must have a verified AgentFolio profile to post jobs. Register at /submit first.' };
+    return { error: 'Must have a verified AgentFolio profile to post jobs. Register at /register first.' };
   }
   
-  const budgetAmount = data.budgetAmount || 0;
+  const budgetAmount = data.budgetAmount || data.budget || 0;
   const requiresEscrow = budgetAmount > 0;
   
   const job = {
@@ -399,7 +421,7 @@ function createApplication(jobId, data) {
   
   // Require verified AgentFolio profile to apply
   if (!verifyProfile(data.agentId)) {
-    return { error: 'Must have a verified AgentFolio profile to apply. Register at /submit first.' };
+    return { error: 'Must have a verified AgentFolio profile to apply. Register at /register first.' };
   }
   
   // Check if agent already applied
@@ -659,7 +681,7 @@ function createBountySubmission(jobId, data) {
   if (job.status !== JOB_STATUS.OPEN) return { error: 'Bounty is not accepting submissions' };
   
   if (!verifyProfile(data.agentId)) {
-    return { error: 'Must have a verified AgentFolio profile to submit. Register at /submit first.' };
+    return { error: 'Must have a verified AgentFolio profile to submit. Register at /register first.' };
   }
   
   // Check if already submitted
@@ -856,6 +878,7 @@ function getBountyLeaderboard(limit = 20) {
 }
 
 module.exports = {
+  verifyProfileOnChain,
   // Constants
   JOB_STATUS,
   APP_STATUS,
