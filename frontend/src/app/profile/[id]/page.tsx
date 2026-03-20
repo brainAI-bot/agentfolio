@@ -12,6 +12,7 @@ import { GenesisRecordCard } from "@/components/GenesisRecordCard";
 import { OnChainAvatar } from "@/components/OnChainAvatar";
 import Link from "next/link";
 import { ClaimButton } from "@/components/ClaimButton";
+import { WriteReviewForm } from "./WriteReviewForm";
 
 export async function generateStaticParams() {
   return (await getAllAgents()).map((a) => ({ id: a.id }));
@@ -410,6 +411,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
             </div>
           </div>}
 
+          <WriteReviewForm targetProfileId={agent.id} />
           {/* SATP On-Chain Data (live from Solana) */}
           <SATPOnChainSection walletAddress={agent.verifications?.solana?.address} />
           {/* On-Chain */}
