@@ -97,7 +97,7 @@ function parseCSV(content) {
 
 function parseJSON(content) {
   const data = JSON.parse(content);
-  return Array.isArray(data) ? data : [data];
+  if (Array.isArray(data)) return data; if (data.agents && Array.isArray(data.agents)) return data.agents; return [data];
 }
 
 function parseInput(filePath) {
@@ -143,6 +143,52 @@ function registerAgent(agentData) {
   });
 }
 
+// ─── Field Normalization ──────────────────────────────
+function normalizeAgent(agent) {
+  const normalized = { ...agent };
+  
+  // Map description → bio
+  if (!normalized.bio && normalized.description) {
+    normalized.bio = normalized.description;
+    delete normalized.description;
+  }
+  
+  // Build links from flat fields
+  if (!normalized.links) normalized.links = {};
+  if (normalized.github && !normalized.links.github) {
+    normalized.links.github = normalized.github.startsWith('http') ? normalized.github : 'https://github.com/' + normalized.github;
+    delete normalized.github;
+  }
+  if (normalized.twitter && !normalized.links.x) {
+    normalized.links.x = normalized.twitter;
+    delete normalized.twitter;
+  }
+  if (normalized.website && !normalized.links.website) {
+    normalized.links.website = normalized.website;
+    delete normalized.website;
+  }
+  
+  // Auto-generate handle if missing
+  if (!normalized.handle) {
+    normalized.handle = '@' + normalized.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+  
+  // Map category to skills if no skills
+  if (!normalized.skills && normalized.category) {
+    normalized.skills = [normalized.category];
+  }
+  
+  // Mark as unclaimed (imported, not self-registered)
+  normalized.unclaimed = true;
+  
+  // Remove non-API fields
+  delete normalized.chain;
+  delete normalized.status;
+  delete normalized.category;
+  
+  return normalized;
+}
+
 // ─── Batch Processing ────────────────────────────────
 async function processBatch(agents, startIdx) {
   const batch = agents.slice(startIdx, startIdx + batchSize);
@@ -166,7 +212,8 @@ async function processBatch(agents, startIdx) {
     }
     
     try {
-      const res = await registerAgent(agent);
+      const normalizedAgent = normalizeAgent(agent);
+      const res = await registerAgent(normalizedAgent);
       
       if (res.body.success) {
         results.push({
