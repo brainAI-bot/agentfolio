@@ -16482,6 +16482,17 @@ ${THEME_SCRIPT}
         tokens: {
           'POST /api/tokens/launch': 'Launch token (Virtuals/pump.fun/link existing)'
         },
+        satp_wallet_lookup: {
+          'GET /api/satp/identity/:wallet': 'Look up SATP identity by Solana wallet (returns 200 with defaults if not found)',
+          'GET /api/satp/scores/:wallet': 'Get trust scores by wallet',
+          'GET /api/satp/reputation/:wallet': 'Get reputation breakdown by wallet',
+          'GET /api/satp/reviews/:wallet': 'Get reviews by wallet'
+        },
+        analytics: {
+          'GET /api/profile/:id/heatmap': 'Get activity heatmap (daily counts)',
+          'GET /api/profile/:id/analytics': 'Get profile analytics (views, endorsements)',
+          'GET /api/profile/:id/activity': 'Get agent activity feed'
+        },
         stats: {
           'GET /api/stats': 'Platform stats',
           'GET /api/leaderboard': 'Reputation leaderboard'
