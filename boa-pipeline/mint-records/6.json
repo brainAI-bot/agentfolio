@@ -1,10 +1,13 @@
 {
-  "cluster": "devnet",
+  "cluster": "mainnet",
   "nftNumber": 6,
-  "mint": "6NeMLKadhjCZNpjCmyRhMcTBPjuLZnmALDXdQPfaqCDE",
-  "collection": "BM5fX3SEgv9Lj3CvGvyQeB1WZi4tvSibVziqXTctt9aa",
-  "metadataUri": "https://gateway.irys.xyz/9WBAdAKutfTrP9rPvqRKPqyoeGLGUQTztCmSSf4KJuaS",
-  "imageUri": "https://gateway.irys.xyz/HyySSvodHJyCtgkAnEHrizqXcdCoHNQPvqxYtuRXqbL9",
+  "mint": "7vVCGymtAxSYSNdRZ2cWjWvd1Pvn25nyxE1FF1YZLcme",
+  "collection": "CCw8NjAS3QpfDU4fBYkJ2kD4znNy468e3wqAJQKoJCFk",
+  "metadataUri": "https://gateway.irys.xyz/2DEe11nJLeadVstdHU9wHNhKW85SAbfiMyW4VZbt7Rff",
+  "imageUri": "https://gateway.irys.xyz/AMjWb7CYxAg1dUWb4UkKqz6binzu2rRcJxq9fWFZnmTL",
   "recipient": "Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc",
-  "createdAt": "2026-03-09T23:08:54.210Z"
+  "createdAt": "2026-03-20T05:21:59.676Z",
+  "source": "core-candy-machine",
+  "candyMachine": "BVso8ZjrV2G16eKZnVVhrfk8hPBgD7wgLKyxVbu489Gz",
+  "cmIndex": 5
 }
