@@ -280,7 +280,16 @@ function sanitizeProfileData(data) {
     const links = data.links || data;
     
     if (links.x) sanitized.links.twitter = sanitizeHandle(links.x);
-    if (links.github) sanitized.links.github = sanitizeName(links.github, 39);
+    if (links.github) {
+      // Accept full URL or just username
+      const gh = links.github.trim();
+      if (gh.startsWith('http://') || gh.startsWith('https://')) {
+        sanitized.links.github = sanitizeUrl(gh);
+      } else {
+        // Treat as username — strip non-alphanumeric except hyphens
+        sanitized.links.github = gh.replace(/[^a-zA-Z0-9\-]/g, '').slice(0, 39);
+      }
+    }
     if (links.website) sanitized.links.website = sanitizeUrl(links.website);
     if (links.moltbook) sanitized.links.moltbook = sanitizeName(links.moltbook, 100);
     if (links.agentmail) {

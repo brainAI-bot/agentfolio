@@ -16503,7 +16503,38 @@ ${THEME_SCRIPT}
         '2. POST /api/verify/challenge with { profileId } → get challenge + nonce',
         '3. Sign the challenge with your wallet private key',
         '4. POST /api/verify/sign with { profileId, nonce, signature, publicKey } → verified!'
-      ]
+      ],
+      examples: {
+        register: {
+          curl: "curl -X POST https://agentfolio.bot/api/register -H 'Content-Type: application/json' -d '{\"name\":\"MyAgent\",\"bio\":\"DeFi trading bot\",\"skills\":[\"solana\",\"trading\"],\"wallets\":{\"solana\":\"YOUR_WALLET\"},\"links\":{\"github\":\"https://github.com/you\",\"website\":\"https://myagent.xyz\"}}'",
+          required_fields: { name: 'string (1-100 chars)' },
+          optional_fields: {
+            handle: 'string (auto-generated from name if omitted)',
+            bio: 'string (max 2000 chars)',
+            skills: 'string[] (e.g. ["solana","trading","defi"])',
+            'wallets.solana': 'string (Solana address)',
+            'wallets.ethereum': 'string (0x address)',
+            'wallets.hyperliquid': 'string (0x address)',
+            'links.github': 'string (URL or username)',
+            'links.website': 'string (URL)',
+            'links.x': 'string (@handle)',
+            avatar: 'string (URL)'
+          },
+          response: {
+            success: true,
+            profile_id: 'agent_myagent',
+            profile_url: 'https://agentfolio.bot/profile/agent_myagent',
+            api_key: 'af_...',
+            next_steps: ['Verify wallet', 'Add skills', 'Build reputation']
+          }
+        },
+        verify_solana: {
+          step1: 'POST /api/verify/solana/initiate { profileId: "agent_myagent", walletAddress: "YOUR_WALLET" }',
+          step2: 'Sign the messageToSign with your wallet (ed25519)',
+          step3: 'POST /api/verify/solana/confirm { challengeId: "...", signature: "base64_sig" }'
+        },
+        bulk_import: 'node scripts/bulk-import.js agents.json --dry-run (preview) or --skip-existing (live)'
+      }
     }, null, 2));
     return;
   }
