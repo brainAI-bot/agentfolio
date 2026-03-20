@@ -76,7 +76,7 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
             {faceUrl ? (
               <div className="relative">
                 <img
-                  src={faceUrl.replace("gateway.irys.xyz", "node1.irys.xyz")}
+                  src={faceUrl}
                   alt={`${genesis.agentName} face`}
                   className="w-20 h-20 rounded-lg object-cover"
                   style={{ border: isBorn ? "2px solid #F97316" : "2px solid var(--border)" }}

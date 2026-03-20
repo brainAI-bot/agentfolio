@@ -97,7 +97,7 @@ export default function RegisterPage() {
       try {
         setChainStatus("genesis");
         const connection = new Connection(SOLANA_RPC, "confirmed");
-        const profileId = data.id || data.profile?.id;
+        const profileId = data.profile_id || data.id || data.profile?.id;
         const genesisRes = await fetch("/api/satp/genesis/prepare", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -146,7 +146,7 @@ export default function RegisterPage() {
 
       setSuccess(true);
       setTimeout(() => {
-        router.push(`/profile/${data.id || data.profile?.id || name.toLowerCase().replace(/\s+/g, "-")}`);
+        router.push(`/profile/${data.profile_id || data.id || data.profile?.id || name.toLowerCase().replace(/\s+/g, "-")}`);
       }, 2500);
     } catch (err: any) {
       setError(err.message || "Network error");

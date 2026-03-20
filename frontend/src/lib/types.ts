@@ -20,7 +20,15 @@ export interface Agent {
     x?: { handle: string; verified: boolean };
     satp?: { did: string; verified: boolean };
     ethereum?: { address: string; verified: boolean };
-    agentmail?: { address: string; verified: boolean };
+    agentmail?: { email: string; verified: boolean };
+    moltbook?: { username: string; verified: boolean };
+    website?: { url: string; verified: boolean };
+    domain?: { domain: string; verified: boolean };
+    polymarket?: { address: string; verified: boolean };
+    discord?: { username: string; verified: boolean };
+    telegram?: { username: string; verified: boolean };
+    twitter?: { handle: string; verified: boolean };
+    [key: string]: any;
   };
   unclaimed?: boolean;
   status: "online" | "offline" | "busy" | "unclaimed";
