@@ -13,7 +13,7 @@ const PROFILES_DIR = path.join(__dirname, '../../data/profiles');
 
 // SATP Program IDs (mainnet)
 const SATP_PROGRAMS = {
-  identity: 'BY4jzmnrui1K5gZ5z5xRQkVfEEMXYHYugtH1Ua867eyr',
+  identity: '97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq',
   reputation: 'TQ4P9R2Y5FRyw1TZfwoWQ2Mf6XeohbGdhYNcDxh6YYh',
   validation: 'AdDWFa9oEmZdrTrhu8YTWu4ozbTP7e6qa9rvyqfAvM7N',
   escrow: 'STyY8w4ZHws3X1AMoocWuDYBoogVDwvymPy8Wifx5TH'
@@ -145,18 +145,62 @@ async function getWalletBalance(walletAddress) {
  */
 async function buildIdentityRegistrationTx(walletAddress, profileId, { name, description, twitter, website } = {}) {
   try {
-    const { SATPSDK } = require('../../satp-client/src');
-    const sdk = new SATPSDK({ rpcUrl: RPC_ENDPOINT });
+    const { Connection, PublicKey, SystemProgram, Transaction, TransactionInstruction, ComputeBudgetProgram } = require('@solana/web3.js');
+    const crypto = require('crypto');
     
-    const agentName = name || profileId || 'agent';
-    const metadata = JSON.stringify({ description, twitter, website, profileId, platform: 'agentfolio' });
+    // SATP V2 Identity Registry (WORKING program)
+    const SATP_V2_PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq');
+    const conn = new Connection(RPC_ENDPOINT, 'confirmed');
+    const wallet = new PublicKey(walletAddress);
     
-    const { transaction, identityPDA } = await sdk.buildRegisterIdentity(walletAddress, agentName, metadata);
+    // Derive PDA: ["identity", wallet_pubkey]
+    const [identityPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('identity'), wallet.toBuffer()],
+      SATP_V2_PROGRAM
+    );
     
-    // Serialize to base64 for frontend
+    // Check if already exists
+    const existing = await conn.getAccountInfo(identityPDA);
+    if (existing && existing.data.length > 0) {
+      return { success: true, alreadyExists: true, agentPDA: identityPDA.toBase58() };
+    }
+    
+    // Anchor discriminator for create_identity
+    const disc = crypto.createHash('sha256').update('global:create_identity').digest().slice(0, 8);
+    
+    // Borsh encode helpers
+    const encStr = (s) => { const b = Buffer.from(s, 'utf8'); const l = Buffer.alloc(4); l.writeUInt32LE(b.length); return Buffer.concat([l, b]); };
+    const encVec = (arr) => { const c = Buffer.alloc(4); c.writeUInt32LE(arr.length); return Buffer.concat([c, ...arr.map(encStr)]); };
+    
+    const agentName = (name || profileId || 'agent').slice(0, 32);
+    const agentDesc = (description || 'AgentFolio verified agent').slice(0, 256);
+    const category = 'general';
+    const capabilities = [];
+    const metadataUri = ('https://agentfolio.bot/profile/' + (profileId || '')).slice(0, 200);
+    
+    const data = Buffer.concat([disc, encStr(agentName), encStr(agentDesc), encStr(category), encVec(capabilities), encStr(metadataUri)]);
+    
+    const ix = new TransactionInstruction({
+      programId: SATP_V2_PROGRAM,
+      keys: [
+        { pubkey: identityPDA, isSigner: false, isWritable: true },
+        { pubkey: wallet, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data,
+    });
+    
+    const tx = new Transaction();
+    tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50000 }));
+    tx.add(ix);
+    tx.feePayer = wallet;
+    const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
+    tx.recentBlockhash = blockhash;
+    tx.lastValidBlockHeight = lastValidBlockHeight;
+    
     return {
       success: true,
-      transaction: Buffer.from(transaction.serialize({ requireAllSignatures: false })).toString('base64'),
+      transaction: Buffer.from(tx.serialize({ requireAllSignatures: false })).toString('base64'),
       agentPDA: identityPDA.toBase58()
     };
   } catch (e) {
