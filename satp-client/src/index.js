@@ -37,33 +37,46 @@ class SATPSDK {
   async buildRegisterIdentity(wallet, agentName, metadata) {
     const walletKey = new PublicKey(wallet);
     const [identityPDA, bump] = getIdentityPDA(walletKey);
-    const metaStr = typeof metadata === 'object' ? JSON.stringify(metadata) : metadata;
+    const metaObj = typeof metadata === 'string' ? (() => { try { return JSON.parse(metadata); } catch { return {}; } })() : (metadata || {});
 
-    // Anchor discriminator for "register_identity" (first 8 bytes of SHA256("global:register_identity"))
-    const crypto = require('crypto');
-    const disc = crypto.createHash('sha256')
-      .update('global:register_identity')
-      .digest()
-      .slice(0, 8);
+    // IDL discriminator for "create_identity" (from identity_registry IDL)
+    const disc = Buffer.from([12, 253, 209, 41, 176, 51, 195, 179]);
 
-    // Encode instruction data: discriminator + agentName (borsh string) + metadata (borsh string)
-    const nameBytes = Buffer.from(agentName, 'utf8');
-    const metaBytes = Buffer.from(metaStr, 'utf8');
+    // Args: name (string), description (string), category (string), capabilities (vec<string>), metadata_uri (string)
+    const name = agentName || 'agent';
+    const description = metaObj.description || '';
+    const category = metaObj.category || 'general';
+    const capabilities = metaObj.capabilities || [];
+    const metadataUri = metaObj.metadataUri || metaObj.profileUrl || '';
+
+    // Borsh-encode: string = u32 len + utf8 bytes, vec<string> = u32 count + string*
+    function encodeString(s) {
+      const bytes = Buffer.from(s, 'utf8');
+      const len = Buffer.alloc(4);
+      len.writeUInt32LE(bytes.length);
+      return Buffer.concat([len, bytes]);
+    }
+    function encodeVecString(arr) {
+      const count = Buffer.alloc(4);
+      count.writeUInt32LE(arr.length);
+      return Buffer.concat([count, ...arr.map(encodeString)]);
+    }
 
     const data = Buffer.concat([
       disc,
-      // borsh string = u32 len + bytes
-      Buffer.from(new Uint32Array([nameBytes.length]).buffer),
-      nameBytes,
-      Buffer.from(new Uint32Array([metaBytes.length]).buffer),
-      metaBytes,
+      encodeString(name),
+      encodeString(description),
+      encodeString(category),
+      encodeVecString(capabilities),
+      encodeString(metadataUri),
     ]);
 
+    // Account order per IDL: identity (PDA, writable), authority (signer, writable), system_program
     const ix = new TransactionInstruction({
       programId: PROGRAM_IDS.IDENTITY,
       keys: [
-        { pubkey: walletKey, isSigner: true, isWritable: true },
         { pubkey: identityPDA, isSigner: false, isWritable: true },
+        { pubkey: walletKey, isSigner: true, isWritable: true },
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
       ],
       data,
