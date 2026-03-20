@@ -185,7 +185,7 @@ const RATE_LIMITS = {
   // Write operations: 10/min
   write: { limit: 10, windowMs: 60000, tier: 'write' },
   // Verification triggers: 5/min
-  verify: { limit: 5, windowMs: 60000, tier: 'verify' }
+  verify: { limit: 15, windowMs: 60000, tier: 'verify' }
 };
 
 module.exports = {

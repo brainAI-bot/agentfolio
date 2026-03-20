@@ -17134,7 +17134,8 @@ ${THEME_SCRIPT}
               }
             }
             return proofs;
-          })()
+          })(),
+          verifications: profile.verifications || [],
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(basic, null, 2));
@@ -17177,7 +17178,8 @@ ${THEME_SCRIPT}
               }
             }
             return proofs;
-          })()
+          })(),
+          verifications: profile.verifications || [],
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(basic, null, 2));
@@ -28540,11 +28542,102 @@ ${THEME_SCRIPT}
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ agent: agentId, stats: stats, recent_reviews: reviews.slice(0, 5) }));
   }
+    // BUG-009 FIX: Heatmap endpoint
+  else if (url.pathname.match(/^\/api\/profile\/([^/]+)\/heatmap$/) && req.method === 'GET') {
+    const profileId = url.pathname.match(/^\/api\/profile\/([^/]+)\/heatmap$/)[1];
+    const profile = loadProfile(profileId, DATA_DIR);
+    if (!profile) { res.writeHead(404, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Profile not found' })); return; }
+    try {
+      const activities = getActivities(profileId, DATA_DIR, 365);
+      const heatmap = {};
+      (activities || []).forEach(a => {
+        const date = (a.createdAt || a.timestamp || '').substring(0, 10);
+        if (date) heatmap[date] = (heatmap[date] || 0) + 1;
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ profileId, heatmap, totalActivities: activities ? activities.length : 0 }));
+    } catch (e) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ profileId, heatmap: {}, totalActivities: 0 })); }
+  }
+    // BUG-007 FIX: SATP wallet lookup endpoints (return 200 with defaults, not 404)
+  else if (url.pathname.match(/^\/api\/satp\/identity\/([^/]+)$/) && req.method === 'GET') {
+    const wallet = url.pathname.split('/')[4];
+    (async () => {
+      try {
+        const profile = findProfileByWallet(wallet);
+        const satpScores = profile ? await getOnChainScores(profile.id) : null;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ wallet, profileId: profile ? profile.id : null, name: profile ? profile.name : null, registered: !!profile, registeredOnChain: profile ? (profile.registeredOnChain || false) : false, verificationLevel: satpScores ? satpScores.verificationLevel : 0, tier: satpScores ? satpScores.tier : 'unverified', createdAt: profile ? profile.createdAt : null }));
+      } catch (e) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ wallet, registered: false })); }
+    })();
+  }
+  else if (url.pathname.match(/^\/api\/satp\/scores\/([^/]+)$/) && req.method === 'GET') {
+    const wallet = url.pathname.split('/')[4];
+    (async () => {
+      try {
+        const profile = findProfileByWallet(wallet);
+        const satpScores = profile ? await getOnChainScores(profile.id) : null;
+        const rep = profile ? calculateReputation(profile) : { score: 0, tier: 'unverified' };
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ wallet, profileId: profile ? profile.id : null, trustScore: satpScores ? satpScores.trustScore : rep.score, verificationLevel: satpScores ? satpScores.verificationLevel : 0, tier: satpScores ? satpScores.tier : rep.tier, onChain: !!satpScores }));
+      } catch (e) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ wallet, trustScore: 0, tier: 'unverified' })); }
+    })();
+  }
+  else if (url.pathname.match(/^\/api\/satp\/reputation\/([^/]+)$/) && req.method === 'GET') {
+    const wallet = url.pathname.split('/')[4];
+    (async () => {
+      try {
+        const profile = findProfileByWallet(wallet);
+        const satpScores = profile ? await getOnChainScores(profile.id) : null;
+        const rep = profile ? calculateReputation(profile) : { score: 0, tier: 'unverified' };
+        const Database = require('better-sqlite3');
+        const d = new Database(require('path').join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
+        const verifs = profile ? d.prepare('SELECT platform, identifier, verified_at FROM verifications WHERE profile_id = ?').all(profile.id) : [];
+        d.close();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ wallet, profileId: profile ? profile.id : null, reputation: { score: satpScores ? satpScores.trustScore : rep.score, tier: satpScores ? satpScores.tier : rep.tier, verificationLevel: satpScores ? satpScores.verificationLevel : 0, verifications: verifs.length, platforms: verifs.map(v => v.platform) } }));
+      } catch (e) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ wallet, reputation: { score: 0, tier: 'unverified' } })); }
+    })();
+  }
+  else if (url.pathname.match(/^\/api\/satp\/reviews\/([^/]+)$/) && req.method === 'GET' && !url.pathname.includes('/stats/')) {
+    const wallet = url.pathname.split('/')[4];
+    (async () => {
+      try {
+        const profile = findProfileByWallet(wallet);
+        const reviews = [];
+        if (profile) {
+          const allJobsResult = listJobs({status: 'all'}); const allJobs = (allJobsResult && allJobsResult.jobs) || [];
+          allJobs.forEach(j => { const jid = j.id || j.jobId; const jr = loadReviews(jid); if (jr) jr.forEach(r => { if (r.revieweeId === profile.id) reviews.push(Object.assign({}, r, {jobId: jid})); }); });
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ wallet, profileId: profile ? profile.id : null, reviews, stats: { total: reviews.length, avg_rating: reviews.length ? Number((reviews.reduce((s,r)=>s+r.rating,0)/reviews.length).toFixed(2)) : 0 } }));
+      } catch (e) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ wallet, reviews: [], stats: { total: 0, avg_rating: 0 } })); }
+    })();
+  }
   else {
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('Not found');
   }
 });
+
+// Helper: find profile by Solana wallet address (BUG-007)
+function findProfileByWallet(walletAddress) {
+  try {
+    const Database = require('better-sqlite3');
+    const dbPath = require('path').join(__dirname, '..', 'data', 'agentfolio.db');
+    const d = new Database(dbPath, { readonly: true });
+    try {
+      const row = d.prepare('SELECT profile_id FROM verifications WHERE platform = ? AND identifier = ? LIMIT 1').get('solana', walletAddress);
+      if (row) { d.close(); return loadProfile(row.profile_id, DATA_DIR); }
+      const profiles = d.prepare('SELECT id FROM profiles').all();
+      d.close();
+      for (const p of profiles) {
+        const profile = loadProfile(p.id, DATA_DIR);
+        if (profile && profile.wallets && profile.wallets.solana === walletAddress) return profile;
+      }
+    } catch (innerErr) { d.close(); throw innerErr; }
+  } catch (e) { console.error('[findProfileByWallet]', e.message); }
+  return null;
+}
 
 // Helper function for event descriptions
 function getEventDescription(event) {
