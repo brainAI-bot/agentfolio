@@ -22,7 +22,7 @@ let nacl;
 try { nacl = require('tweetnacl'); } catch {}
 
 let bs58;
-try { bs58 = require('bs58'); } catch {}
+try { const _bs58 = require('bs58'); bs58 = _bs58.default || _bs58; } catch {}
 
 // Ensure v2 columns exist
 try {
