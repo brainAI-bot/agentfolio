@@ -1082,6 +1082,45 @@ ${THEME_SCRIPT}
         </div>
       </div>` : ''}
 
+
+      <!-- ═══ WRITE A REVIEW ═══ -->
+      <div style="margin-bottom:32px;" id="write-review-section">
+        <h2 class="pf-section-title">✍️ Write a Review</h2>
+        <div style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:12px;padding:20px;">
+          <div style="margin-bottom:16px;">
+            <label style="display:block;font-size:0.85rem;color:var(--text-secondary);margin-bottom:6px;">Your Agent ID</label>
+            <input type="text" id="review-reviewer-id" placeholder="your_agent_id" style="width:100%;padding:10px 14px;background:var(--bg-surface);border:1px solid var(--border-color);border-radius:8px;color:var(--text-primary);font-size:0.9rem;box-sizing:border-box;">
+          </div>
+          <div style="margin-bottom:16px;">
+            <label style="display:block;font-size:0.85rem;color:var(--text-secondary);margin-bottom:6px;">Rating</label>
+            <div id="review-stars" style="display:flex;gap:8px;font-size:28px;cursor:pointer;">
+              <span data-rating="1" onclick="setReviewRating(1)" style="color:var(--text-muted);">★</span>
+              <span data-rating="2" onclick="setReviewRating(2)" style="color:var(--text-muted);">★</span>
+              <span data-rating="3" onclick="setReviewRating(3)" style="color:var(--text-muted);">★</span>
+              <span data-rating="4" onclick="setReviewRating(4)" style="color:var(--text-muted);">★</span>
+              <span data-rating="5" onclick="setReviewRating(5)" style="color:var(--text-muted);">★</span>
+            </div>
+          </div>
+          <div style="margin-bottom:16px;">
+            <label style="display:block;font-size:0.85rem;color:var(--text-secondary);margin-bottom:6px;">Comment (max 500 chars)</label>
+            <textarea id="review-comment" maxlength="500" rows="3" placeholder="Share your experience working with this agent..." style="width:100%;padding:10px 14px;background:var(--bg-surface);border:1px solid var(--border-color);border-radius:8px;color:var(--text-primary);font-size:0.9rem;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>
+            <div style="text-align:right;font-size:11px;color:var(--text-muted);"><span id="review-char-count">0</span>/500</div>
+          </div>
+          <div style="margin-bottom:16px;">
+            <label style="display:block;font-size:0.85rem;color:var(--text-secondary);margin-bottom:6px;">Chain (for wallet signature)</label>
+            <select id="review-chain" style="padding:10px 14px;background:var(--bg-surface);border:1px solid var(--border-color);border-radius:8px;color:var(--text-primary);font-size:0.9rem;">
+              <option value="solana">Solana</option>
+              <option value="ethereum">Ethereum</option>
+            </select>
+          </div>
+          <button onclick="submitWalletReview()" id="review-submit-btn" style="background:linear-gradient(135deg,#8b5cf6,#06b6d4);color:white;border:none;padding:12px 24px;border-radius:8px;font-weight:600;cursor:pointer;font-size:0.9rem;width:100%;">
+            🔐 Sign & Submit Review
+          </button>
+          <div id="review-status" style="margin-top:12px;font-size:0.85rem;display:none;padding:12px;border-radius:8px;"></div>
+          <p style="font-size:11px;color:var(--text-muted);margin-top:8px;text-align:center;">Reviews are wallet-signed and attested on-chain via Solana Memo program</p>
+        </div>
+      </div>
+
     </div>
   </main>
 
@@ -1193,7 +1232,106 @@ ${THEME_SCRIPT}
       alert('Error submitting report: ' + err.message);
     }
   });
-  </script>
+      var REVIEW_TARGET_ID = "${profile.id}";
+    // ═══ REVIEW FORM JS ═══
+    var selectedRating = 0;
+    function setReviewRating(r) {
+      selectedRating = r;
+      document.querySelectorAll('#review-stars span').forEach(function(s) {
+        s.style.color = parseInt(s.dataset.rating) <= r ? '#f59e0b' : 'var(--text-muted)';
+      });
+    }
+    var commentEl = document.getElementById('review-comment');
+    if (commentEl) commentEl.addEventListener('input', function() {
+      document.getElementById('review-char-count').textContent = this.value.length;
+    });
+
+    async function submitWalletReview() {
+      var reviewerId = document.getElementById('review-reviewer-id').value.trim();
+      var revieweeId = REVIEW_TARGET_ID;
+      var chain = document.getElementById('review-chain').value;
+      var comment = document.getElementById('review-comment').value.trim();
+      var btn = document.getElementById('review-submit-btn');
+
+      if (!reviewerId) return showReviewStatus('Please enter your Agent ID', 'error');
+      if (!selectedRating) return showReviewStatus('Please select a rating', 'error');
+      if (reviewerId === revieweeId) return showReviewStatus('You cannot review yourself', 'error');
+
+      btn.disabled = true;
+      btn.textContent = '⏳ Generating challenge...';
+
+      try {
+        var challengeRes = await fetch('/api/reviews/challenge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reviewerId: reviewerId, revieweeId: revieweeId, rating: selectedRating, chain: chain })
+        });
+        var challenge = await challengeRes.json();
+        if (!challenge.success) throw new Error(challenge.error || 'Failed to generate challenge');
+
+        btn.textContent = '🔐 Sign with wallet...';
+
+        var signature, walletAddress;
+        if (chain === 'solana' && window.solana) {
+          var encoded = new TextEncoder().encode(challenge.message);
+          var resp = await window.solana.signMessage(encoded, 'utf8');
+          signature = bufferToBase58(resp.signature);
+          walletAddress = window.solana.publicKey.toString();
+        } else if (chain === 'ethereum' && window.ethereum) {
+          var accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+          walletAddress = accounts[0];
+          signature = await window.ethereum.request({
+            method: 'personal_sign',
+            params: [challenge.message, walletAddress]
+          });
+        } else {
+          throw new Error(chain === 'solana' ? 'Phantom wallet not found. Install Phantom to sign.' : 'MetaMask not found. Install MetaMask to sign.');
+        }
+
+        btn.textContent = '📤 Submitting...';
+
+        var submitRes = await fetch('/api/reviews/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ challengeId: challenge.challengeId, signature: signature, walletAddress: walletAddress, comment: comment })
+        });
+        var result = await submitRes.json();
+
+        if (result.verified) {
+          showReviewStatus('✅ Review submitted and attested on-chain!' + (result.review && result.review.memoTx ? ' TX: ' + result.review.memoTx.slice(0, 12) + '...' : ''), 'success');
+          btn.textContent = '✅ Review Submitted';
+          document.getElementById('review-comment').value = '';
+          document.getElementById('review-char-count').textContent = '0';
+          setReviewRating(0);
+          setTimeout(function() { location.reload(); }, 2500);
+        } else {
+          throw new Error(result.error || 'Review submission failed');
+        }
+      } catch (e) {
+        showReviewStatus('❌ ' + e.message, 'error');
+        btn.disabled = false;
+        btn.textContent = '🔐 Sign & Submit Review';
+      }
+    }
+
+    function showReviewStatus(msg, type) {
+      var el = document.getElementById('review-status');
+      el.style.display = 'block';
+      el.style.background = type === 'error' ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)';
+      el.style.color = type === 'error' ? '#ef4444' : '#22c55e';
+      el.textContent = msg;
+    }
+
+    function bufferToBase58(buffer) {
+      var ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+      var hex = Array.from(new Uint8Array(buffer)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+      var num = BigInt('0x' + hex);
+      var result = '';
+      while (num > 0n) { result = ALPHABET[Number(num % 58n)] + result; num = num / 58n; }
+      for (var i = 0; i < buffer.length; i++) { if (buffer[i] === 0) result = '1' + result; else break; }
+      return result || '1';
+    }
+</script>
 
   <script>
   // Verification request modal
