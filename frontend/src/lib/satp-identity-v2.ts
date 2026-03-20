@@ -107,7 +107,25 @@ export async function autoCreateSatpIdentity(
   // 2. Deserialize and send via wallet adapter
   const tx = Transaction.from(Buffer.from(result.transaction, "base64"));
   const sig = await sendTransaction(tx, connection);
-  await connection.confirmTransaction(sig, "confirmed");
+  
+  // Use blockhash-based confirmation with 60s timeout (handles Solana congestion)
+  try {
+    const latestBlockhash = await connection.getLatestBlockhash("confirmed");
+    await connection.confirmTransaction({
+      signature: sig,
+      blockhash: latestBlockhash.blockhash,
+      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+    }, "confirmed");
+  } catch (confirmErr: any) {
+    // If timeout but TX was sent, still try to confirm it
+    console.warn("[SATP] Confirmation slow, checking TX status...", confirmErr.message);
+    const status = await connection.getSignatureStatus(sig);
+    if (status?.value?.confirmationStatus === "confirmed" || status?.value?.confirmationStatus === "finalized") {
+      console.log("[SATP] TX confirmed despite timeout");
+    } else {
+      throw new Error("Transaction sent but not confirmed. Signature: " + sig + ". Check Solscan and retry if needed.");
+    }
+  }
 
   // 3. Confirm to backend
   await confirmSatpIdentity(walletAddress, profileId, sig);

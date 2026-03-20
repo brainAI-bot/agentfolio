@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 import { getAllAgents, getAgent } from "@/lib/data";
 import { notFound } from "next/navigation";
 import { TrustBadge } from "@/components/TrustBadge";
-import { VerificationBadge } from "@/components/VerificationBadge";
+import { VerificationBadge, VERIFICATION_PRIORITY } from "@/components/VerificationBadge";
 import { Github, Wallet, Globe, Shield, ExternalLink, Star } from "lucide-react";
 import { ActivityHeatmap } from "@/components/ActivityHeatmap";
 import BurnToBecomeSection from "@/components/BurnToBecomeSection";
@@ -155,18 +155,13 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
               </div>
             )}
 
-            {/* Verification badges — only show verified platforms */}
+            {/* Verification badges — show all verified, priority-ordered */}
             <div className="flex flex-wrap gap-2 mb-4">
-              {v?.github?.verified && <VerificationBadge type="github" verified />}
-              {v?.solana?.verified && <VerificationBadge type="solana" verified />}
-              {v?.hyperliquid?.verified && <VerificationBadge type="hyperliquid" verified />}
-              {v?.x?.verified && <VerificationBadge type="x" verified />}
-              {v?.satp?.verified && <VerificationBadge type="satp" verified />}
-              {v?.ethereum?.verified && <VerificationBadge type="ethereum" verified />}
-              {v?.agentmail?.verified && <VerificationBadge type="agentmail" verified />}
-              {!v?.github?.verified && !v?.solana?.verified && !v?.hyperliquid?.verified && !v?.x?.verified && !v?.satp?.verified && (
-                <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>No verifications yet</span>
-              )}
+              {(() => {
+                const verified = VERIFICATION_PRIORITY.filter(t => (v as any)?.[t]?.verified || (t === "x" && (v as any)?.twitter?.verified));
+                if (verified.length === 0) return <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>No verifications yet</span>;
+                return verified.map(t => <VerificationBadge key={t} type={t} verified />);
+              })()}
             {genesis?.isBorn && (
               <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: "var(--success)", color: "#000" }}>
                 🔥 BORN
@@ -237,51 +232,75 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Verification details */}
         <div className="lg:col-span-2 space-y-4">
-          {/* Verification Status */}
+          {/* Verification Status — dynamic, priority-ordered */}
           <div className="rounded-lg p-5" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
             <h2 className="text-sm font-semibold uppercase tracking-wider mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
               Verification Status
             </h2>
             <div className="space-y-3">
-              {v.github?.verified && (
-                <VerificationRow
-                  icon={<Github size={16} />}
-                  label="GitHub"
-                  detail={`@${githubStats?.username || v.github?.username || "?"} — ${githubStats?.repos ?? v.github?.repos ?? 0} repos, ${(githubStats?.stars ?? v.github?.stars ?? 0).toLocaleString()}⭐`}
-                  verified
-                />
-              )}
-              {v.solana?.verified && (
-                <VerificationRow
-                  icon={<Wallet size={16} />}
-                  label="Solana"
-                  detail={`${v.solana.address.slice(0, 8)}...${v.solana.address.slice(-4)}`}
-                  verified
-                  color="var(--solana)"
-                />
-              )}
-              {v.hyperliquid?.verified && (
-                <VerificationRow
-                  icon={<Globe size={16} />}
-                  label="Hyperliquid"
-                  detail={v.hyperliquid.volume && v.hyperliquid.volume !== "$0" && v.hyperliquid.volume !== "0" ? `${v.hyperliquid.address.slice(0, 8)}...${v.hyperliquid.address.slice(-4)} · ${v.hyperliquid.volume} vol` : `${v.hyperliquid.address.slice(0, 8)}...${v.hyperliquid.address.slice(-4)} · Verified ✅`}
-                  verified
-                  color="var(--info)"
-                />
-              )}
-              {v.x && !v.x.verified && (
-                <VerificationRow icon={<Globe size={16} />} label="X" detail="Not verified" verified={false} />
-              )}
-              {v.satp?.verified && (
-                <VerificationRow
-                  icon={<Shield size={16} />}
-                  label="SATP"
-                  detail={v.satp.did ? `${v.satp.did.slice(0, 24)}...` : "Verified"}
-                  verified
-                  color="var(--success)"
-                  href={v.solana?.address ? `https://explorer.solana.com/address/${v.solana.address}` : undefined}
-                />
-              )}
+              {(() => {
+                const rows: React.ReactNode[] = [];
+                const iconMap: Record<string, React.ReactNode> = {
+                  satp: <Shield size={16} />, github: <Github size={16} />, x: <Globe size={16} />,
+                  solana: <Wallet size={16} />, ethereum: <Wallet size={16} />, agentmail: <Globe size={16} />,
+                  moltbook: <Globe size={16} />, hyperliquid: <Globe size={16} />, polymarket: <Globe size={16} />,
+                  discord: <Globe size={16} />, telegram: <Globe size={16} />, website: <Globe size={16} />,
+                  domain: <Globe size={16} />,
+                };
+                const colorMap: Record<string, string> = {
+                  satp: "var(--success)", solana: "var(--solana)", ethereum: "#627EEA",
+                  hyperliquid: "var(--info)", polymarket: "#F59E0B", discord: "#5865F2",
+                  telegram: "#26A5E4", moltbook: "#EC4899", website: "#06B6D4", domain: "#06B6D4",
+                };
+                const labelMap: Record<string, string> = {
+                  satp: "SATP", github: "GitHub", x: "X", solana: "Solana", ethereum: "Ethereum",
+                  agentmail: "AgentMail", moltbook: "Moltbook", hyperliquid: "Hyperliquid",
+                  polymarket: "Polymarket", discord: "Discord", telegram: "Telegram",
+                  website: "Website", domain: "Domain",
+                };
+                const priority = ["satp","github","x","solana","ethereum","agentmail","moltbook","hyperliquid","polymarket","discord","telegram","website","domain"];
+                for (const t of priority) {
+                  const vEntry = (v as any)?.[t] || (t === "x" ? (v as any)?.twitter : null);
+                  if (!vEntry?.verified) continue;
+                  let detail = "Verified ✅";
+                  if (t === "github") detail = `@${githubStats?.username || vEntry.username || "?"} — ${githubStats?.repos ?? vEntry.repos ?? 0} repos, ${(githubStats?.stars ?? vEntry.stars ?? 0).toLocaleString()}⭐`;
+                  else if (t === "solana" && vEntry.address) detail = `${vEntry.address.slice(0, 8)}...${vEntry.address.slice(-4)}`;
+                  else if (t === "ethereum" && vEntry.address) detail = `${vEntry.address.slice(0, 8)}...${vEntry.address.slice(-4)}`;
+                  else if (t === "hyperliquid" && vEntry.address) detail = vEntry.volume && vEntry.volume !== "$0" ? `${vEntry.address.slice(0, 8)}...${vEntry.address.slice(-4)} · ${vEntry.volume} vol` : `${vEntry.address.slice(0, 8)}...${vEntry.address.slice(-4)} · Verified ✅`;
+                  else if (t === "satp" && vEntry.did) detail = `${vEntry.did.slice(0, 24)}...`;
+                  else if (t === "x" && vEntry.handle) detail = `@${vEntry.handle.replace("@","")}`;
+                  else if (t === "agentmail" && vEntry.email) detail = vEntry.email;
+                  else if (t === "moltbook" && vEntry.username) detail = `@${vEntry.username}`;
+                  else if (t === "polymarket" && vEntry.address) detail = `${vEntry.address.slice(0, 8)}...${vEntry.address.slice(-4)}`;
+                  else if (t === "discord" && vEntry.username) detail = `@${vEntry.username}`;
+                  else if (t === "telegram" && vEntry.username) detail = `@${vEntry.username}`;
+                  else if (t === "website" && vEntry.url) detail = vEntry.url;
+                  else if (t === "domain" && vEntry.domain) detail = vEntry.domain;
+                  rows.push(
+                    <VerificationRow
+                      key={t}
+                      icon={iconMap[t] || <Globe size={16} />}
+                      label={labelMap[t] || t}
+                      detail={detail}
+                      verified
+                      color={colorMap[t]}
+                      href={
+                        t === "satp" && (v as any)?.solana?.address ? `https://explorer.solana.com/address/${(v as any).solana.address}` :
+                        t === "x" && vEntry.handle ? `https://x.com/${vEntry.handle.replace("@","")}` :
+                        t === "moltbook" && vEntry.username ? `https://moltbook.com/u/${vEntry.username}` :
+                        t === "website" && vEntry.url ? vEntry.url :
+                        t === "github" && vEntry.username ? `https://github.com/${vEntry.username}` :
+                        t === "solana" && vEntry.address ? `https://explorer.solana.com/address/${vEntry.address}` :
+                        t === "ethereum" && vEntry.address ? `https://etherscan.io/address/${vEntry.address}` :
+                        t === "domain" && vEntry.domain ? `https://${vEntry.domain}` :
+                        undefined
+                      }
+                    />
+                  );
+                }
+                if (rows.length === 0) return <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>No verifications yet</span>;
+                return rows;
+              })()}
             </div>
           </div>
 
@@ -305,7 +324,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
             </div>
           </div>
 
-          {/* Activity heatmap — real data */}
+          {/* Activity heatmap */}
           <div className="rounded-lg p-5" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
             <h2 className="text-sm font-semibold uppercase tracking-wider mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
               Activity

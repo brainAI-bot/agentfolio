@@ -82,7 +82,6 @@ interface RawProfile {
   updatedAt?: string;
   nftAvatar?: { chain: string; identifier: string; name: string | null; image: string | null; verifiedOnChain: boolean; verifiedAt: string } | null;
   activity?: any[];
-  unclaimed?: boolean;
 }
 
 interface RawJob {
@@ -169,7 +168,7 @@ function mapProfile(p: RawProfile): Agent {
   const v3 = (globalThis as any).__v3ScoresCache?.get(p.id);
   // Trust Score: SATP on-chain is source of truth (synced by backend score engine)
   // V3 reputationPct is 0-100 scale, multiply by 8 to get 0-800 v2 trust score
-  const trustScore = v3 ? v3.reputationScore : (p.verification?.score || calcTrustScore(p));
+  const trustScore = v3 ? Math.round(v3.reputationPct * 8) : (p.verification?.score || calcTrustScore(p));
   const vd = p.verificationData || {};
   // Count local verifications for level fallback
   const localVerifCount = Object.values(vd).filter((v: any) => v && v.verified).length;
@@ -195,10 +194,10 @@ function mapProfile(p: RawProfile): Agent {
     nftAvatar: p.nftAvatar || null,
     trustScore,
     tier,
-    skills: [...new Set((p.skills || []).map(s => typeof s === 'string' ? s : (s.name || '')).filter(Boolean))],
+    skills: (p.skills || []).map(s => typeof s === 'string' ? s : (s.name || '')),
     verifications: {
       github: vd.github ? {
-        username: vd.github.handle || vd.github.username || vd.github.address || "",
+        username: vd.github.handle || vd.github.username || "",
         repos: vd.github.repos || 0,
         stars: vd.github.stars || 0,
         verified: !!vd.github.verified,
@@ -215,7 +214,7 @@ function mapProfile(p: RawProfile): Agent {
         verified: !!vd.hyperliquid?.verified,
       } : undefined,
       x: (vd.x || vd.twitter) ? {
-        handle: vd.x?.handle || vd.twitter?.handle || vd.twitter?.address || p.handle || "",
+        handle: vd.x?.handle || vd.twitter?.handle || p.handle || "",
         verified: !!(vd.x?.verified || vd.twitter?.verified),
       } : (p.links?.x ? {
         handle: p.handle || "",
@@ -225,15 +224,6 @@ function mapProfile(p: RawProfile): Agent {
         did: vd.satp?.did || `did:satp:sol:${p.wallets?.solana || p.id}`,
         verified: true,
       } : undefined,
-      ethereum: vd.ethereum?.verified ? { address: vd.ethereum.address || p.wallets?.ethereum || "", verified: true } : undefined,
-      agentmail: vd.agentmail?.verified ? { email: vd.agentmail.email || "", verified: true } : undefined,
-      moltbook: vd.moltbook?.verified ? { username: vd.moltbook.username || "", verified: true } : undefined,
-      website: vd.website?.verified ? { url: vd.website.url || "", verified: true } : undefined,
-      domain: vd.domain?.verified ? { domain: vd.domain.domain || "", verified: true } : undefined,
-      polymarket: vd.polymarket?.verified ? { address: vd.polymarket.address || "", verified: true } : undefined,
-      discord: vd.discord?.verified ? { username: vd.discord.username || "", verified: true } : undefined,
-      telegram: vd.telegram?.verified ? { username: vd.telegram.username || "", verified: true } : undefined,
-      twitter: vd.twitter?.verified ? { handle: vd.twitter.handle || vd.twitter.address || "", verified: true } : undefined,
     },
     status: "online", // Default — no live status tracking yet
     jobsCompleted: p.stats?.jobsCompleted || 0,
@@ -247,7 +237,6 @@ function mapProfile(p: RawProfile): Agent {
     verificationLevelName: ["Unclaimed","Registered","Verified","Established","Trusted","Sovereign"][v3 ? v3.verificationLevel : Math.min(tier, 5)] || "Unclaimed",
     reputationScore: trustScore, // From SATP on-chain (v2 trust score) when available
     reputationRank: ["Newcomer","Recognized","Competent","Expert","Master"][Math.min(Math.floor(trustScore / 250), 4)] || "Newcomer",
-    unclaimed: p.unclaimed || false,
   };
 }
 
@@ -272,9 +261,9 @@ function loadAllProfiles(): Agent[] {
       }
     }
     // Sort by trust score desc
-    agents.sort((a, b) => (b.verificationLevel ?? b.tier) - (a.verificationLevel ?? a.tier) || b.trustScore - a.trustScore);
+    agents.sort((a, b) => b.trustScore - a.trustScore);
     // Filter out test profiles from public views
-    const TEST_NAMES = ["SmokeTest", "test_satp", "TestCLI", "test-no-sig", "test-check-id", "CEOTestAgent", "test"];
+    const TEST_NAMES = ["SmokeTest", "brainTEST", "test_satp", "TestCLI", "test-no-sig", "test-check-id", "CEOTestAgent", "test"];
     agents = agents.filter(a => !TEST_NAMES.some(t => a.name === t || a.name?.includes(t) || a.id?.includes("test_satp") || a.id?.includes("test-no-sig") || a.id?.includes("test-check-id")));
     _agentsCache = agents;
     _agentsCacheTime = Date.now();
@@ -376,7 +365,7 @@ export function searchAgents(query: string): Agent[] {
 export function getStats() {
   const agents = loadAllProfiles();
   const totalSkills = new Set(agents.flatMap(a => a.skills)).size;
-  const verified = agents.filter(a => (a.verificationLevel ?? a.tier ?? 0) >= 1).length;
+  const verified = agents.filter(a => a.trustScore >= 100).length;
   const onChain = agents.filter(a => a.verifications.satp?.verified || a.verifications.solana?.verified).length;
   return {
     totalAgents: agents.length,
