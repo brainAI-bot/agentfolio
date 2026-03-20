@@ -20,7 +20,7 @@ const SATP_IDENTITY_PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6n
 const NETWORK = process.env.SATP_NETWORK || 'mainnet';
 const RPC_URL = NETWORK === 'devnet' 
   ? 'https://api.devnet.solana.com' 
-  : (process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+  : (process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY');
 
 const connection = new Connection(RPC_URL, 'confirmed');
 

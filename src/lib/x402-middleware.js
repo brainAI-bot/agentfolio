@@ -86,7 +86,7 @@ async function x402Gate(method, pathname, req, res) {
   // API key holders get free access
   if (req.headers['x-api-key']) return false;
 
-  const paymentHeader = req.headers['x-payment'] || req.headers['payment'] || req.headers['x-402-payment'];
+  const paymentHeader = req.headers['payment-signature'] || req.headers['x-payment'] || req.headers['payment'] || req.headers['x-402-payment'];
 
   if (!paymentHeader) {
     // No payment → return 402 Payment Required
@@ -97,6 +97,7 @@ async function x402Gate(method, pathname, req, res) {
         scheme: 'exact',
         network: NETWORK,
         maxAmountRequired: '10000',
+          amount: '10000',
           asset: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
         resource: pathname,
         description: config.description,

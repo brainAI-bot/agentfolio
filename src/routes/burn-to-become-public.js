@@ -118,70 +118,82 @@ async function getSatpScore(walletAddress) {
 async function getWalletNFTs(walletAddress) {
   const nfts = [];
   try {
-    const walletPubkey = new PublicKey(walletAddress);
-    // Get all token accounts with amount > 0 and decimals 0 (NFTs)
-    // Bug 4 fix: Check both TOKEN_PROGRAM_ID and TOKEN_2022_PROGRAM_ID
-    const programIds = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID];
-    for (const programId of programIds) {
-      const tokenAccounts = await connection.getParsedTokenAccountsByOwner(walletPubkey, {
-        programId,
+    // Use Helius DAS API — returns ALL asset types (Core, Token, Token-2022) with images pre-resolved
+    const dasResponse = await new Promise((resolve, reject) => {
+      const postData = JSON.stringify({
+        jsonrpc: '2.0', id: 'wallet-nfts', method: 'getAssetsByOwner',
+        params: { ownerAddress: walletAddress, page: 1, limit: 100,
+          displayOptions: { showFungible: false, showNativeBalance: false } },
       });
-      
-      for (const { account } of tokenAccounts.value) {
-        const info = account.data.parsed.info;
-        if (info.tokenAmount.uiAmount === 1 && info.tokenAmount.decimals === 0) {
-          const mint = info.mint;
-          // For Token-2022, check for native metadata first (no Metaplex PDA needed)
-          const isToken2022 = programId.equals(TOKEN_2022_PROGRAM_ID);
-          
-          // Fetch Metaplex metadata (works for both standard and some Token-2022 NFTs)
-          const [metadataPda] = PublicKey.findProgramAddressSync(
-            [Buffer.from('metadata'), TOKEN_METADATA_PROGRAM.toBuffer(), new PublicKey(mint).toBuffer()],
-            TOKEN_METADATA_PROGRAM
-          );
-          try {
-            const metadataAccount = await connection.getAccountInfo(metadataPda);
-            if (metadataAccount) {
-              const metadata = parseMetaplexMetadata(metadataAccount.data);
-              if (metadata) {
-                let image = '';
-                let name = metadata.name || `NFT ${mint.slice(0, 8)}`;
-                try {
-                  const jsonData = await fetchJson(metadata.uri);
-                  image = jsonData.image || '';
-                  name = jsonData.name || name;
-                } catch {}
-                const genesisInfo = GENESIS_REGISTRY[walletAddress];
-                if (genesisInfo) {
-                  image = image || genesisInfo.image;
-                }
-                nfts.push({ mint, name, image, uri: metadata.uri, isGenesis: !!genesisInfo, isToken2022 });
-                continue; // Found metadata, skip Token-2022 native check
-              }
-            }
-          } catch (e) {
-            // Skip NFTs we can't read metadata for
-          }
-          
-          // Token-2022: try reading native metadata from mint account
-          if (isToken2022) {
-            try {
-              const mintAcct = await connection.getAccountInfo(new PublicKey(mint));
-              if (mintAcct && mintAcct.data.length > 234) {
-                // Token-2022 extensions contain metadata after base mint (layout varies)
-                // Add with basic info even if we can't parse full metadata
-                nfts.push({ mint, name: `Token-2022 NFT ${mint.slice(0, 8)}`, image: '', uri: '', isGenesis: false, isToken2022: true });
-              }
-            } catch {}
+      const req = https.request(HELIUS_RPC, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
+        timeout: 15000,
+      }, (res) => {
+        let d = '';
+        res.on('data', c => d += c);
+        res.on('end', () => { try { resolve(JSON.parse(d)); } catch (e) { reject(e); } });
+      });
+      req.on('error', reject);
+      req.write(postData);
+      req.end();
+    });
+
+    const items = dasResponse?.result?.items || [];
+    const genesisInfo = GENESIS_REGISTRY[walletAddress];
+
+    for (const item of items) {
+      // Skip fungible tokens and compressed NFTs without images
+      const iface = item.interface || '';
+      if (iface === 'FungibleToken' || iface === 'FungibleAsset') continue;
+
+      const mint = item.id;
+      const name = item.content?.metadata?.name || `NFT ${mint.slice(0, 8)}`;
+      let image = '';
+
+      // DAS returns images in content.links or content.files
+      if (item.content?.links?.image) {
+        image = item.content.links.image;
+      } else if (item.content?.files?.[0]?.uri) {
+        image = item.content.files[0].uri;
+      }
+
+      // Genesis override
+      if (genesisInfo) {
+        image = image || genesisInfo.image;
+      }
+
+      const uri = item.content?.json_uri || '';
+      const isGenesis = !!genesisInfo;
+      const isToken2022 = item.token_standard === 'NonFungible' && item.interface === 'ProgrammableNFT';
+      const isCoreAsset = iface === 'V1_NFT' || iface === 'MplCoreAsset' || item.compression?.compressed === false;
+
+      // Filter: only include non-fungibles with supply 1 (or Core assets)
+      // DAS already filters by owner, so most items here are valid NFTs
+      nfts.push({ mint, name, image, uri, isGenesis, isToken2022: false, isCoreAsset: iface === 'MplCoreAsset' });
+    }
+
+    console.log('[BurnPublic] DAS returned', items.length, 'assets,', nfts.length, 'NFTs for', walletAddress);
+  } catch (e) {
+    console.error('[BurnPublic] getWalletNFTs DAS error:', e.message, '- falling back to RPC scan');
+    // Fallback: basic RPC scan for standard SPL NFTs
+    try {
+      const walletPubkey = new PublicKey(walletAddress);
+      for (const programId of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
+        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(walletPubkey, { programId });
+        for (const { account } of tokenAccounts.value) {
+          const info = account.data.parsed.info;
+          if (info.tokenAmount.uiAmount === 1 && info.tokenAmount.decimals === 0) {
+            nfts.push({ mint: info.mint, name: `NFT ${info.mint.slice(0, 8)}`, image: '', uri: '', isGenesis: false });
           }
         }
       }
+    } catch (fallbackErr) {
+      console.error('[BurnPublic] Fallback RPC scan also failed:', fallbackErr.message);
     }
-  } catch (e) {
-    console.error('[BurnPublic] getWalletNFTs error:', e.message);
   }
   return nfts;
 }
+
 
 /**
  * Parse Metaplex metadata from account data (simplified)
@@ -508,7 +520,18 @@ function handleBurnToBecome(req, res, url) {
     res.writeHead(code, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
     res.end(JSON.stringify(data));
   };
-  
+
+  // Parse JSON body for POST requests (raw HTTP server — no middleware)
+  if (req.method === 'POST' && !req.body) {
+    let bodyStr = '';
+    req.on('data', chunk => bodyStr += chunk);
+    req.on('end', () => {
+      try { req.body = JSON.parse(bodyStr); } catch { req.body = {}; }
+      handleBurnToBecome(req, res, url);
+    });
+    return true; // signal handled (async)
+  }
+
   // CORS preflight
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
@@ -601,7 +624,7 @@ function handleBurnToBecome(req, res, url) {
           const v3 = await getV3Score(matchedProfile.id);
           if (v3) {
             level = v3.verificationLevel;
-            reputation = Math.round(parseFloat(v3.reputationPct));
+            reputation = v3.reputationScore || 0;
           }
         } catch {}
         if (level === undefined) {

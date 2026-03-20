@@ -39,7 +39,7 @@ async function initiateTelegramVerification(profileId, telegramUsername) {
     challengeId,
     code,
     telegramUsername: clean,
-    instructions: `Send this code to our verification bot @AgentFolioBot on Telegram: ${code}\n\nOr post it in your Telegram bio temporarily.`,
+    instructions: `Send this code to our verification bot @brainKIDbot on Telegram: ${code}\n\nOr post it in your Telegram bio temporarily.`,
     expiresIn: '15 minutes',
   };
 }
