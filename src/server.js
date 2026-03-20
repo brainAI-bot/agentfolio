@@ -1904,7 +1904,22 @@ function generateConnectPage() {
       document.getElementById('step-success').style.display = 'block';
       
     } catch (err) {
-      box.innerHTML = '<span style="color:#ef4444;">❌ ' + err.message + '</span>';
+      // BUG-004 FIX: Show user-friendly error, not raw Solana dumps
+      let userMsg = 'Transaction failed. Please try again.';
+      const msg = (err.message || '').toLowerCase();
+      if (msg.includes('user rejected') || msg.includes('cancelled') || msg.includes('denied')) {
+        userMsg = 'Transaction cancelled by user.';
+      } else if (msg.includes('insufficient') || msg.includes('not enough')) {
+        userMsg = 'Insufficient SOL balance. You need ~0.012 SOL for rent + fees.';
+      } else if (msg.includes('memory') || msg.includes('panicked')) {
+        userMsg = 'On-chain program error. The team has been notified.';
+      } else if (msg.includes('blockhash') || msg.includes('expired')) {
+        userMsg = 'Transaction expired. Please try again.';
+      } else if (msg.includes('already in use') || msg.includes('already exists')) {
+        userMsg = 'Identity already registered on-chain!';
+      }
+      console.error('[SATP Register]', err);
+      box.innerHTML = '<span style="color:#ef4444;">❌ ' + userMsg + '</span>';
       btn.textContent = '🔗 Register Identity On-Chain';
       btn.disabled = false;
     }
