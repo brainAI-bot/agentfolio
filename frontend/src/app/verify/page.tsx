@@ -1048,7 +1048,7 @@ export default function VerifyPage() {
         {/* SATP card — live registration (now uses SATP V3) */}
         <div
           className="rounded-lg p-5 border-l-[3px] transition-all"
-          style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderLeftColor: satpState.success ? "var(--success)" : "var(--success)" }}
+          style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderLeftColor: (satpState.success || existingVerifications?.satp?.verified) ? "var(--success)" : "var(--border)" }}
         >
           <div className="flex items-start gap-4">
             <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: "rgba(16,185,129,0.15)" }}>
@@ -1058,7 +1058,7 @@ export default function VerifyPage() {
               <div className="flex items-center justify-between mb-1">
                 <h3 className="text-base font-semibold" style={{ color: "var(--text-primary)" }}>SATP On-Chain Identity</h3>
                 <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded" style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.15)", color: "var(--success)" }}>
-                  {satpState.success ? "✅ Registered" : "Auto-created on registration ✅"}
+                  {satpState.success ? "✅ Registered" : existingVerifications?.satp?.verified ? "✅ On-Chain" : "Pending"}
                 </span>
               </div>
               <p className="text-xs mb-3" style={{ color: "var(--text-tertiary)" }}>
