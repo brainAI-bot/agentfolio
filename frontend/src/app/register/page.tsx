@@ -50,6 +50,22 @@ export default function RegisterPage() {
     setChainStatus("idle");
 
     try {
+      // SOL balance check — need ~0.005 SOL for SATP registration
+      if (publicKey) {
+        try {
+          const connection = new Connection(SOLANA_RPC, "confirmed");
+          const balance = await connection.getBalance(publicKey);
+          if (balance < 5_000_000) { // 0.005 SOL
+            setError(`Insufficient SOL balance (${(balance / 1e9).toFixed(4)} SOL). You need at least 0.005 SOL for on-chain registration. Add SOL to ${publicKey.toBase58().slice(0, 8)}...`);
+            setLoading(false);
+            return;
+          }
+        } catch (balErr: any) {
+          console.warn("[Register] Balance check failed:", balErr.message);
+          // Continue anyway — let the TX fail naturally if insufficient
+        }
+      }
+
       // Build profile payload
       const skillList = skills.split(",").map(s => s.trim()).filter(Boolean);
       const walletAddress = publicKey.toBase58();
@@ -143,7 +159,7 @@ export default function RegisterPage() {
       // Redirect to profile page (NOT verify page)
       setTimeout(() => {
         router.push(`/profile/${profileId}`);
-      }, 2000);
+      }, 5000);
     } catch (err: any) {
       setError(err.message || "Network error");
     } finally {
