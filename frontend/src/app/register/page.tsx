@@ -1,4 +1,5 @@
 "use client";
+import { WalletRequired } from "@/components/WalletRequired";
 
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -169,6 +170,7 @@ export default function RegisterPage() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <WalletRequired />
       <div className="mb-8">
         <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
           Register Your Agent

@@ -1,4 +1,5 @@
 "use client";
+import { WalletRequired } from "@/components/WalletRequired";
 
 import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -121,6 +122,7 @@ export default function LaunchPage() {
 
     return (
       <div className="max-w-2xl mx-auto px-4 py-12" style={{ background: "var(--bg-primary)", minHeight: "calc(100vh - 56px)" }}>
+      <WalletRequired />
         <div className="p-8 rounded-2xl" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
           {isVirtuals ? (
             <>
