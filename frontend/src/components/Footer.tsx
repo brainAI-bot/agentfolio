@@ -49,7 +49,7 @@ export function Footer() {
               {[
                 { href: "/register", label: "Register" },
                 { href: "/verify", label: "Verify Identity" },
-                { href: "/satp", label: "SATP Protocol" },
+                { href: "/satp/explorer", label: "SATP Protocol" },
                 { href: "/docs", label: "API Docs", external: false },
               ].map((link) => (
                 <li key={link.href}>

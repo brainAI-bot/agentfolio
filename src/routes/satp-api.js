@@ -372,7 +372,34 @@ function registerSATPRoutes(app) {
     res.json({ ok: true, agentId: req.params.agentId, pda });
   });
 
-  console.log('[SATP API] Routes registered: /api/satp/{identity,scores,attestations,registry,profile,programs,reviews,reputation} + /api/satp/v3/{agent,scores,resolve}');
+  // ═══ V3 NAME REGISTRY + LINKED WALLETS (added 2026-03-22) ═══
+
+  app.get('/api/satp/v3/name/:name', async (req, res) => {
+    if (!satpV3Client) return res.status(503).json({ error: 'V3 SDK not available' });
+    try {
+      const reg = await satpV3Client.getNameRegistry(req.params.name);
+      if (!reg) return res.status(404).json({ error: 'Name not registered', name: req.params.name });
+      res.json({ ok: true, data: reg });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/satp/v3/name/:name/available', async (req, res) => {
+    if (!satpV3Client) return res.status(503).json({ error: 'V3 SDK not available' });
+    try {
+      const taken = await satpV3Client.isNameTaken(req.params.name);
+      res.json({ ok: true, name: req.params.name, available: !taken });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/satp/v3/agent/:agentId/wallets', async (req, res) => {
+    if (!satpV3Client) return res.status(503).json({ error: 'V3 SDK not available' });
+    try {
+      const wallets = await satpV3Client.getLinkedWallets(req.params.agentId);
+      res.json({ ok: true, agentId: req.params.agentId, count: wallets.length, wallets });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  console.log('[SATP API] Routes registered: /api/satp/{identity,scores,attestations,registry,profile,programs,reviews,reputation} + /api/satp/v3/{agent,scores,resolve,name,wallets}');
 }
 
 module.exports = { registerSATPRoutes };

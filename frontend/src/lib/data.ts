@@ -124,36 +124,11 @@ let _agentsCache: Agent[] | null = null;
 let _agentsCacheTime = 0;
 let _jobsCache: Job[] | null = null;
 let _jobsCacheTime = 0;
-const CACHE_TTL_MS = 60_000; // 60 seconds
+const CACHE_TTL_MS = 5_000; // Reduced from 60s for faster profile availability // 60 seconds
 
 function calcTrustScore(p: RawProfile): number {
-  let score = p.verification?.score || 0;
-  // Boost for endorsements
-  score += (p.endorsements?.length || 0) * 10;
-  // Boost for verified skills
-  score += p.skills.filter(s => s.verified).length * 15;
-  // Boost for linked verifications
-  const vd = p.verificationData || {};
-  if (vd.x?.linked) score += 10;
-  if (vd.x?.verified) score += 20;
-  if (vd.github?.verified) score += 50;
-  if (vd.solana?.verified) score += 40;
-  if (vd.hyperliquid?.verified) score += 30;
-  // Boost for wallets
-  if (p.wallets?.solana) score += 15;
-  if (p.wallets?.hyperliquid) score += 15;
-  if (p.wallets?.ethereum) score += 10;
-  // Boost for jobs/rating
-  score += (p.stats?.jobsCompleted || 0) * 5;
-  score += (p.stats?.rating || 0) * 10;
-  // Boost for bio length (content richness)
-  if (p.bio && p.bio.length > 50) score += 10;
-  // Boost for links
-  const links = p.links || {};
-  if (links?.twitter) score += 5;
-  if (links.github) score += 5;
-  if (links.website) score += 5;
-  return Math.min(score, 800);
+  // CEO directive: V3 Genesis Records only. No Genesis = 0.
+  return 0;
 }
 
 function calcTierFromScore(dbTier: string | undefined, score: number): number {  if (dbTier) {    const tierMap: Record<string, number> = { unverified: 0, bronze: 1, silver: 2, gold: 3, elite: 4 };    return tierMap[dbTier.toLowerCase()] || 0;  }  return calcTier(score);}
@@ -235,12 +210,13 @@ function mapProfile(p: RawProfile): Agent {
       telegram: vd.telegram?.verified ? { username: vd.telegram.username || "", verified: true } : undefined,
       twitter: vd.twitter?.verified ? { handle: vd.twitter.handle || vd.twitter.address || "", verified: true } : undefined,
     },
-    status: "online", // Default — no live status tracking yet
+    status: p.unclaimed ? "unclaimed" : "online", // Unclaimed profiles show unclaimed status
     jobsCompleted: p.stats?.jobsCompleted || 0,
     rating: p.stats?.rating || 0,
     registeredAt: p.createdAt || "",
     createdAt: p.createdAt || "",
     activity: (p.activity || []).map((a: any) => ({ type: a.type || "", createdAt: a.createdAt || "" })),
+    walletAddress: p.wallets?.solana || undefined,
     // V3 on-chain scoring
     verificationLevel: v3 ? v3.verificationLevel : Math.min(tier, 5),
     verificationBadge: v3 ? ["⚪","🟡","🔵","🟢","🟠","🟣"][v3.verificationLevel] || "⚪" : ["⚪","🟡","🔵","🟢","🟠","🟣"][Math.min(tier, 5)] || "⚪",
@@ -274,8 +250,12 @@ function loadAllProfiles(): Agent[] {
     // Sort by trust score desc
     agents.sort((a, b) => (b.verificationLevel ?? b.tier) - (a.verificationLevel ?? a.tier) || b.trustScore - a.trustScore);
     // Filter out test profiles from public views
-    const TEST_NAMES = ["SmokeTest", "test_satp", "TestCLI", "test-no-sig", "test-check-id", "CEOTestAgent", "test"];
-    agents = agents.filter(a => !TEST_NAMES.some(t => a.name === t || a.name?.includes(t) || a.id?.includes("test_satp") || a.id?.includes("test-no-sig") || a.id?.includes("test-check-id")));
+    const TEST_IDS = ["test_satp", "test-no-sig", "test-check-id"];
+    const TEST_EXACT_NAMES = ["SmokeTest", "TestCLI", "CEOTestAgent", "test", "E2E-Test-Agent"];
+    agents = agents.filter(a => !TEST_EXACT_NAMES.includes(a.name) && !TEST_IDS.some(t => a.id?.includes(t)));
+    // Filter ghost profiles: unclaimed with no trust score
+    // Show all profiles including unclaimed (CEO Mar 23)
+    // agents = agents.filter(a => !a.unclaimed || a.trustScore > 0);
     _agentsCache = agents;
     _agentsCacheTime = Date.now();
     

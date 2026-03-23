@@ -1694,7 +1694,8 @@ function migrateApiKeysFromJSON(jsonPath) {
           keyData.permissions || 'write_own',
           keyData.createdAt || new Date().toISOString(),
           null,
-          100
+          100,
+          keyData.tier || 'free'
         );
         
         // Update usage stats if available

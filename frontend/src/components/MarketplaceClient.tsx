@@ -44,6 +44,21 @@ interface PostJobForm {
   requirements: string;
 }
 
+
+function timeAgo(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diff = now - then;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return mins <= 1 ? "just now" : mins + "m ago";
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + "h ago";
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return days + "d ago";
+  const months = Math.floor(days / 30);
+  return months + "mo ago";
+}
+
 export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   const wallet = useWallet();
   const { setVisible } = useWalletModal();
@@ -375,6 +390,8 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                     </span>
                     <span style={{ color: "var(--text-tertiary)" }}>·</span>
                     <span style={{ color: "var(--text-primary)" }}>{job.budget}</span>
+                    <span style={{ color: "var(--text-tertiary)" }}>·</span>
+                    <span style={{ color: "var(--text-tertiary)" }}>{timeAgo(job.createdAt)}</span>
                     <span style={{ color: "var(--text-tertiary)" }}>·</span>
                     <span className="flex items-center gap-1" style={{ color: "var(--text-secondary)" }}>
                       <EscrowIcon size={12} />

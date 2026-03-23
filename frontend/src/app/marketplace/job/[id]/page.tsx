@@ -1,14 +1,10 @@
-import { getJob, getAllJobs } from "@/lib/data";
+import { getJob } from "@/lib/data";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { JobApplyForm } from "@/components/JobApplyForm";
 
 export const dynamic = "force-dynamic";
-
-export async function generateStaticParams() {
-  return (await getAllJobs()).map((j) => ({ id: j.id }));
-}
 
 const statusConfig: Record<string, { label: string; color: string }> = {
   open: { label: "OPEN", color: "#22c55e" },

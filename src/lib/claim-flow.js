@@ -245,15 +245,44 @@ async function verifyTweetClaim(claim, tweetUrl) {
   // Extract tweet ID from URL
   const match = tweetUrl.match(/status\/(\d+)/);
   if (!match) throw new Error('Invalid tweet URL');
+  const tweetId = match[1];
   
-  // For MVP: Accept tweet URL if it matches the expected user pattern
-  // In production, use Twitter API to fetch tweet content
-  const urlLower = tweetUrl.toLowerCase();
+  // Extract username from URL
+  const userMatch = tweetUrl.match(/(?:twitter|x)\.com\/([^/]+)\/status/);
+  const urlUser = userMatch ? userMatch[1].toLowerCase() : '';
   const expectedUser = claim.identifier.toLowerCase();
   
-  if (urlLower.includes(expectedUser) || urlLower.includes(`/${expectedUser}/`)) {
-    // Basic URL validation — the tweet is from the expected user
-    // TODO: Use Twitter API to verify tweet content contains challengeCode
+  // Verify tweet is from the expected user
+  if (urlUser && urlUser !== expectedUser) {
+    throw new Error(`Tweet must be from @${claim.identifier}, got @${urlUser}`);
+  }
+  
+  // Fetch tweet content via fxtwitter API
+  try {
+    const res = await fetch(`https://api.fxtwitter.com/${claim.identifier}/status/${tweetId}`);
+    if (res.ok) {
+      const data = await res.json();
+      const tweetText = data.tweet?.text || '';
+      const tweetAuthor = (data.tweet?.author?.screen_name || '').toLowerCase();
+      
+      // Verify author matches
+      if (tweetAuthor && tweetAuthor !== expectedUser) {
+        throw new Error(`Tweet is from @${tweetAuthor}, expected @${claim.identifier}`);
+      }
+      
+      // Verify tweet contains the challenge code
+      if (tweetText.includes(claim.challengeCode)) {
+        return true;
+      }
+      throw new Error('Tweet does not contain the challenge code. Make sure you copied it exactly.');
+    }
+  } catch (e) {
+    if (e.message.includes('challenge code') || e.message.includes('expected @')) throw e;
+    // fxtwitter API failed — fall back to URL-only validation
+  }
+  
+  // Fallback: accept if URL pattern matches (fxtwitter might be down)
+  if (urlUser === expectedUser) {
     return true;
   }
   

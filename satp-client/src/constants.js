@@ -1,7 +1,7 @@
 const { PublicKey } = require('@solana/web3.js');
 
 const PROGRAM_IDS = {
-  IDENTITY: new PublicKey('BY4jzmnrui1K5gZ5z5xRQkVfEEMXYHYugtH1Ua867eyr'),
+  IDENTITY: new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq'),
   REPUTATION: new PublicKey('TQ4P9R2Y5FRyw1TZfwoWQ2Mf6XeohbGdhYNcDxh6YYh'),
   VALIDATION: new PublicKey('AdDWFa9oEmZdrTrhu8YTWu4ozbTP7e6qa9rvyqfAvM7N'),
   ESCROW: new PublicKey('STyY8w4ZHws3X1AMoocWuDYBoogVDwvymPy8Wifx5TH'),
