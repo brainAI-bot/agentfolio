@@ -42,12 +42,18 @@ let v3ScoreService;
 try {
   v3ScoreService = require('./v3-score-service');
   console.log('[V3 Scores] Score service loaded');
+} catch (e) {
+  console.warn('[V3 Scores] Score service not available:', e.message);
+}
 
 // Scoring Engine V2 — 2D scoring (verification level + reputation)
 let scoringEngineV2;
 try {
   scoringEngineV2 = require('./lib/scoring-engine-v2');
   console.log('[ProfileStore] Scoring Engine V2 loaded');
+} catch (e) {
+  console.warn('[ProfileStore] Scoring Engine V2 not available:', e.message);
+}
 
 // Memo attestation for on-chain verification records
 let postMemoAttestation;
@@ -56,12 +62,6 @@ try {
   console.log('[ProfileStore] Memo attestation loaded');
 } catch (e) {
   console.warn('[ProfileStore] Memo attestation not available:', e.message);
-}
-} catch (e) {
-  console.warn('[ProfileStore] Scoring Engine V2 not available:', e.message);
-}
-} catch (e) {
-  console.warn('[V3 Scores] Score service not available:', e.message);
 }
 
 const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR ||

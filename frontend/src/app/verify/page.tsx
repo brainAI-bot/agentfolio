@@ -48,6 +48,7 @@ export default function VerifyPage() {
   
   // New platform states
   const [xHandle, setXHandle] = useState("");
+  const [xTweetUrl, setXTweetUrl] = useState("");
   const [xState, setXState] = useState<VerificationState>(initialState);
   const [xChallenge, setXChallenge] = useState<{code: string; challengeId: string} | null>(null);
   const [agentmailState, setAgentmailState] = useState<VerificationState>(initialState);
@@ -144,7 +145,7 @@ export default function VerifyPage() {
     if (!profileId || !discordUsername) return;
     setDiscordState({ loading: true, success: false, error: "", result: null });
     try {
-      const res = await fetch("/api/verification/discord/initiate", {
+      const res = await fetch("/api/verify/discord/initiate", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profileId, discordUsername }),
       });
@@ -164,7 +165,7 @@ export default function VerifyPage() {
     try {
       if (!telegramChallenge) {
         // Step 1: Initiate — get challenge code
-        const res = await fetch("/api/verification/telegram/initiate", {
+        const res = await fetch("/api/verify/telegram/initiate", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ profileId, telegramUsername }),
         });
@@ -174,7 +175,7 @@ export default function VerifyPage() {
         setTelegramState({ loading: false, success: false, error: "", result: { challenge: data } });
       } else {
         // Step 2: Verify — confirm the challenge
-        const res = await fetch("/api/verification/telegram/verify", {
+        const res = await fetch("/api/verify/telegram/verify", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ challengeId: telegramChallenge.challengeId, messageUrl: "self-attested" }),
         });
@@ -191,27 +192,52 @@ export default function VerifyPage() {
   // ETH Wallet verification (2-step: initiate → sign → verify)
   const [ethChallenge, setEthChallenge] = useState<any>(null);
   const verifyEth = async () => {
-    if (!profileId || !ethAddress) return;
+    if (!profileId) return;
     setEthState({ loading: true, success: false, error: "", result: null });
     try {
-      // Step 1: Get challenge
-      const initRes = await fetch("/api/verification/eth/initiate", {
+      // Step 1: Connect wallet
+      if (typeof window === "undefined" || !(window as any).ethereum) {
+        throw new Error("MetaMask or an EVM wallet extension is required");
+      }
+      const accounts = await (window as any).ethereum.request({ method: "eth_requestAccounts" });
+      const walletAddress = accounts[0];
+      setEthAddress(walletAddress);
+      
+      // Step 2: Get challenge from server
+      const initRes = await fetch("/api/verify/eth/initiate", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profileId, walletAddress: ethAddress }),
+        body: JSON.stringify({ profileId, walletAddress }),
       });
       const initData = await initRes.json();
       if (!initRes.ok) throw new Error(initData.error || "Failed to initiate ETH verification");
       setEthChallenge(initData);
-      setEthState({ loading: false, success: false, error: "", result: { challenge: initData } });
+      
+      // Step 3: Sign the challenge message
+      const signature = await (window as any).ethereum.request({
+        method: "personal_sign",
+        params: [initData.message || initData.challengeString, walletAddress],
+      });
+      
+      // Step 4: Submit signature to verify
+      const res = await fetch("/api/verify/eth/verify", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ challengeId: initData.challengeId, signature }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "ETH signature verification failed");
+      setEthState({ loading: false, success: true, error: "", result: data });
+      setExistingVerifications((prev: any) => ({ ...prev, ethereum: { verified: true, address: walletAddress } }));
+      sendOnChainAttestation();
     } catch (err: any) {
       setEthState({ loading: false, success: false, error: err.message, result: null });
     }
   };
   const verifyEthSignature = async (signature: string) => {
+    // Legacy function kept for compatibility
     if (!ethChallenge?.challengeId) return;
     setEthState({ loading: true, success: false, error: "", result: null });
     try {
-      const res = await fetch("/api/verification/eth/verify", {
+      const res = await fetch("/api/verify/eth/verify", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ challengeId: ethChallenge.challengeId, signature }),
       });
@@ -230,7 +256,7 @@ export default function VerifyPage() {
     setDomainState({ loading: true, success: false, error: "", result: null });
     try {
       // Step 1: Get challenge (DNS TXT record or meta tag)
-      const initRes = await fetch("/api/verification/domain/initiate", {
+      const initRes = await fetch("/api/verify/domain/initiate", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profileId, domain: domainName }),
       });
@@ -246,7 +272,7 @@ export default function VerifyPage() {
     if (!domainChallenge?.challengeId) return;
     setDomainState({ loading: true, success: false, error: "", result: null });
     try {
-      const res = await fetch("/api/verification/domain/verify", {
+      const res = await fetch("/api/verify/domain/verify", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ challengeId: domainChallenge.challengeId }),
       });
@@ -263,14 +289,14 @@ export default function VerifyPage() {
     if (!profileId || !xHandle) return;
     setXState({ loading: true, success: false, error: "", result: null });
     try {
-      const res = await fetch("/api/verify/x", {
+      const res = await fetch("/api/verify/x/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profileId, handle: xHandle }),
+        body: JSON.stringify({ profileId, xHandle: xHandle.replace("@", "") }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Challenge failed");
-      setXChallenge({ code: data.code, challengeId: data.challengeId });
+      setXChallenge({ code: data.tweetContent || data.code || data.challenge || data.fullChallenge, challengeId: data.challengeId });
       setXState({ loading: false, success: false, error: "", result: null });
     } catch (err: any) {
       setXState({ loading: false, success: false, error: err.message, result: null });
@@ -281,10 +307,10 @@ export default function VerifyPage() {
     if (!xChallenge) return;
     setXState({ loading: true, success: false, error: "", result: null });
     try {
-      const res = await fetch("/api/verify/x", {
+      const res = await fetch("/api/verify/x/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profileId, challengeId: xChallenge.challengeId, handle: xHandle }),
+        body: JSON.stringify({ challengeId: xChallenge.challengeId, tweetUrl: xTweetUrl }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Verification failed");
@@ -332,18 +358,38 @@ export default function VerifyPage() {
     }
   };
 
-    const verifyGithub = async () => {
+    const [githubChallenge, setGithubChallenge] = useState<any>(null);
+  const verifyGithub = async () => {
     if (!profileId || !githubUsername) return;
     setGithubState({ loading: true, success: false, error: "", result: null });
     try {
-      const res = await fetch(`/api/verify/github?profileId=${encodeURIComponent(profileId)}&username=${encodeURIComponent(githubUsername)}`);
+      // Step 1: Initiate challenge (get gist content to post)
+      const initRes = await fetch("/api/verify/github/initiate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profileId, username: githubUsername }),
+      });
+      const initData = await initRes.json();
+      if (!initRes.ok) throw new Error(initData.error || "Failed to initiate GitHub verification");
+      setGithubChallenge(initData);
+      setGithubState({ loading: false, success: false, error: "", result: { challenge: initData, step: "gist" } });
+    } catch (err: any) {
+      setGithubState({ loading: false, success: false, error: err.message, result: null });
+    }
+  };
+  const [gistUrl, setGistUrl] = useState("");
+  const confirmGithub = async () => {
+    if (!githubChallenge?.challengeId || !gistUrl) return;
+    setGithubState({ loading: true, success: false, error: "", result: null });
+    try {
+      const res = await fetch("/api/verify/github/confirm", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ challengeId: githubChallenge.challengeId, gistUrl }),
+      });
       const data = await res.json();
-      if (!res.ok || data.error) {
-        setGithubState({ loading: false, success: false, error: data.error || "Verification failed", result: null });
-      } else {
-        setGithubState({ loading: false, success: true, error: "", result: data });
-        sendOnChainAttestation(); // fire-and-forget on-chain attestation
-      }
+      if (!res.ok) throw new Error(data.error || "GitHub verification failed");
+      setGithubState({ loading: false, success: true, error: "", result: data });
+      setExistingVerifications(prev => ({ ...prev, github: { verified: true, username: githubUsername } }));
+      sendOnChainAttestation();
     } catch (err: any) {
       setGithubState({ loading: false, success: false, error: err.message, result: null });
     }
@@ -455,17 +501,42 @@ export default function VerifyPage() {
     }
   };
 
+  const [hlChallenge, setHlChallenge] = useState<any>(null);
   const verifyHyperliquid = async () => {
     if (!profileId || !hlAddress) return;
     setHlState({ loading: true, success: false, error: "", result: null });
     try {
-      const res = await fetch(`/api/verify/hyperliquid?profileId=${encodeURIComponent(profileId)}&address=${encodeURIComponent(hlAddress)}`);
-      const data = await res.json();
-      if (!res.ok || data.error) {
-        setHlState({ loading: false, success: false, error: data.error || "Verification failed", result: null });
+      // Step 1: Initiate challenge
+      const initRes = await fetch(`/api/profile/${encodeURIComponent(profileId)}/verify/hyperliquid/initiate`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: hlAddress }),
+      });
+      const initData = await initRes.json();
+      if (!initRes.ok) throw new Error(initData.error || "Failed to initiate HL verification");
+      setHlChallenge(initData);
+      // Step 2: Sign the challenge message with EVM wallet
+      if (typeof window !== "undefined" && (window as any).ethereum) {
+        try {
+          const accounts = await (window as any).ethereum.request({ method: "eth_requestAccounts" });
+          const signature = await (window as any).ethereum.request({
+            method: "personal_sign",
+            params: [initData.message || initData.challengeString || "AgentFolio HL Verify", accounts[0]],
+          });
+          // Step 3: Complete verification
+          const verifyRes = await fetch(`/api/profile/${encodeURIComponent(profileId)}/verify/hyperliquid/complete`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ challengeId: initData.challengeId, signature }),
+          });
+          const verifyData = await verifyRes.json();
+          if (!verifyRes.ok) throw new Error(verifyData.error || "HL verification failed");
+          setHlState({ loading: false, success: true, error: "", result: verifyData });
+          setExistingVerifications(prev => ({ ...prev, hyperliquid: { verified: true, address: hlAddress } }));
+          sendOnChainAttestation();
+        } catch (signErr: any) {
+          setHlState({ loading: false, success: false, error: "Wallet signing failed: " + (signErr.message || signErr), result: null });
+        }
       } else {
-        setHlState({ loading: false, success: true, error: "", result: data });
-        sendOnChainAttestation();
+        setHlState({ loading: false, success: false, error: "", result: { challenge: initData, step: "sign" } });
       }
     } catch (err: any) {
       setHlState({ loading: false, success: false, error: err.message, result: null });
@@ -761,17 +832,42 @@ export default function VerifyPage() {
       bg: "#1E293B",
       state: githubState,
       input: (
-        <input
-          type="text"
-          value={githubUsername}
-          onChange={e => setGithubUsername(e.target.value)}
-          placeholder="GitHub username"
-          className="w-full px-3 py-2 rounded-lg text-xs outline-none mt-3"
-          style={{ fontFamily: "var(--font-mono)", background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-        />
+        <div>
+          <input
+            type="text"
+            value={githubUsername}
+            onChange={e => setGithubUsername(e.target.value)}
+            placeholder="GitHub username"
+            className="w-full px-3 py-2 rounded-lg text-xs outline-none mt-3"
+            style={{ fontFamily: "var(--font-mono)", background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+          />
+          {githubState.result?.step === "gist" && githubChallenge && (
+            <div className="mt-3 p-3 rounded-lg text-xs" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
+              <p className="font-semibold mb-2" style={{ color: "var(--text-primary)" }}>Step 2: Create a public GitHub Gist</p>
+              <p className="mb-2" style={{ color: "var(--text-tertiary)" }}>Create a public gist at <a href="https://gist.github.com" target="_blank" rel="noopener" className="underline" style={{ color: "var(--accent)" }}>gist.github.com</a> with this content:</p>
+              <pre className="p-2 rounded text-[10px] overflow-x-auto mb-2" style={{ background: "rgba(0,0,0,0.3)", color: "var(--text-secondary)" }}>{githubChallenge.gistContent || githubChallenge.instructions || `AgentFolio Verification\nProfile: ${profileId}\nChallenge: ${githubChallenge.challengeId}`}</pre>
+              <input
+                type="text"
+                value={gistUrl}
+                onChange={e => setGistUrl(e.target.value)}
+                placeholder="Paste your gist URL here"
+                className="w-full px-3 py-2 rounded-lg text-xs outline-none mt-2"
+                style={{ fontFamily: "var(--font-mono)", background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+              />
+              <button
+                onClick={confirmGithub}
+                disabled={!gistUrl || githubState.loading}
+                className="mt-2 px-4 py-2 rounded-lg text-[11px] font-semibold uppercase tracking-wider transition-all disabled:opacity-40"
+                style={{ fontFamily: "var(--font-mono)", background: "var(--success)", color: "#fff" }}
+              >
+                Confirm Gist
+              </button>
+            </div>
+          )}
+        </div>
       ),
       onVerify: verifyGithub,
-      canVerify: !!profileId && !!githubUsername,
+      canVerify: !!profileId && !!githubUsername && !githubChallenge,
     },
     {
       category: "wallets",
@@ -847,12 +943,29 @@ export default function VerifyPage() {
       type: "x",
       icon: Globe,
       title: "X (Twitter)",
-      desc: "Verify your X account by posting a verification tweet",
+      desc: xChallenge ? "Tweet the code below, then paste the tweet URL to confirm" : "Verify your X account by posting a verification tweet",
       reward: "+1 Verification · Counts toward Level",
       color: "#1DA1F2",
       bg: "rgba(29, 161, 242, 0.15)",
       state: xState,
-      input: (
+      input: xChallenge ? (
+        <div className="mt-3 space-y-3">
+          <div className="px-3 py-2 rounded-lg text-xs" style={{ fontFamily: "var(--font-mono)", background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--accent)" }}>
+            Tweet this: <strong>{xChallenge.code}</strong>
+          </div>
+          <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(xChallenge.code)}`} target="_blank" rel="noopener noreferrer" className="inline-block px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: "#1DA1F2", color: "#fff" }}>
+            Open Twitter to Tweet
+          </a>
+          <input
+            type="text"
+            value={xTweetUrl}
+            onChange={(e: any) => setXTweetUrl(e.target.value)}
+            placeholder="Paste your tweet URL here"
+            className="w-full px-3 py-2 rounded-lg text-xs outline-none"
+            style={{ fontFamily: "var(--font-mono)", background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+          />
+        </div>
+      ) : (
         <input
           type="text"
           value={xHandle}
@@ -862,8 +975,8 @@ export default function VerifyPage() {
           style={{ fontFamily: "var(--font-mono)", background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
         />
       ),
-      onVerify: handleXChallenge,
-      canVerify: !!profileId && !!xHandle,
+      onVerify: xChallenge ? handleXConfirm : handleXChallenge,
+      canVerify: xChallenge ? !!xTweetUrl : (!!profileId && !!xHandle),
     },
     {
       category: "wallets",
@@ -939,23 +1052,50 @@ export default function VerifyPage() {
       type: "domain",
       icon: Globe,
       title: "Domain",
-      desc: "Verify domain ownership via DNS TXT record",
+      desc: "Verify domain ownership via DNS TXT record or .well-known file",
       reward: "+1 Verification · Counts toward Level",
       color: "#F59E0B",
       bg: "rgba(245, 158, 11, 0.15)",
       state: domainState,
       input: (
-        <input
-          type="text"
-          value={domainName}
-          onChange={(e: any) => setDomainName(e.target.value)}
-          placeholder="youragent.com"
-          className="w-full px-3 py-2 rounded-lg text-xs outline-none mt-3"
-          style={{ fontFamily: "var(--font-mono)", background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-        />
+        <div>
+          <input
+            type="text"
+            value={domainName}
+            onChange={(e: any) => setDomainName(e.target.value)}
+            placeholder="youragent.com"
+            className="w-full px-3 py-2 rounded-lg text-xs outline-none mt-3"
+            style={{ fontFamily: "var(--font-mono)", background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+          />
+          {domainChallenge && domainState.result?.challenge && (
+            <div className="mt-3 p-3 rounded-lg text-xs" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
+              <p className="font-semibold mb-2" style={{ color: "var(--text-primary)" }}>Step 2: Add DNS TXT record or .well-known file</p>
+              <div className="mb-2">
+                <p className="mb-1" style={{ color: "var(--text-tertiary)" }}>Option A — DNS TXT Record:</p>
+                <pre className="p-2 rounded text-[10px] overflow-x-auto" style={{ background: "rgba(0,0,0,0.3)", color: "var(--text-secondary)" }}>
+{domainChallenge.verificationMethods?.dns?.instruction || "Add TXT record"}
+                </pre>
+              </div>
+              <div className="mb-2">
+                <p className="mb-1" style={{ color: "var(--text-tertiary)" }}>Option B — .well-known file:</p>
+                <pre className="p-2 rounded text-[10px] overflow-x-auto" style={{ background: "rgba(0,0,0,0.3)", color: "var(--text-secondary)" }}>
+{domainChallenge.verificationMethods?.wellKnown?.instruction || "Create .well-known/agentfolio.json"}
+                </pre>
+              </div>
+              <button
+                onClick={verifyDomainRecord}
+                disabled={domainState.loading}
+                className="mt-2 px-4 py-2 rounded-lg text-[11px] font-semibold uppercase tracking-wider transition-all disabled:opacity-40"
+                style={{ fontFamily: "var(--font-mono)", background: "var(--success)", color: "#fff" }}
+              >
+                Verify Domain
+              </button>
+            </div>
+          )}
+        </div>
       ),
       onVerify: verifyDomain,
-      canVerify: !!profileId && !!domainName,
+      canVerify: !!profileId && !!domainName && !domainChallenge,
     },
     {
       category: "infrastructure",

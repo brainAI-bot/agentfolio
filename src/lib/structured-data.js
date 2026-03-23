@@ -87,7 +87,7 @@ function generateAgentSchema(profile) {
   // Add social links
   const sameAs = [];
   if (profile.links?.x) {
-    sameAs.push(`https://x.com/${profile.links.twitter.replace('@', '')}`);
+    sameAs.push(`https://x.com/${(profile.links.x || profile.links.twitter || '').replace('@', '')}`);
   }
   if (profile.links?.github) {
     sameAs.push(`https://github.com/${profile.links.github}`);

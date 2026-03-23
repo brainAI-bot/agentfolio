@@ -1,10 +1,13 @@
 {
   "cluster": "mainnet",
   "nftNumber": 7,
-  "mint": "HwFJmshzEJvroQmAZdYPSB9afrN8H1jKHveVwJVzkDJK",
-  "collection": "xNQmPj1Tcx3PyNNN1RLPeNkaMsZMRthAgWZ7Tbn6RHY",
-  "metadataUri": "https://gateway.irys.xyz/9ygGckp9xSFwp2c6qnqntT2jY63KJVg8wpc5eynHMymx",
-  "imageUri": "https://gateway.irys.xyz/3Nk7wnUfBddSvCL7sGgCcrmejVns29zppmXfWk6JbjSk",
-  "recipient": "2LC5mqiFLci4ZiSxJSrUeUNuWkmaWk36itmVzGEftAUy",
-  "createdAt": "2026-03-10T08:59:56.684Z"
+  "mint": "uTBoSaQxFniqTNSEP1WSNR6eRnbnmVrgosedN14mTtG",
+  "collection": "CCw8NjAS3QpfDU4fBYkJ2kD4znNy468e3wqAJQKoJCFk",
+  "metadataUri": "https://gateway.irys.xyz/QgK8BKpVG4Yq5sFPSABiLGFgK8PGjnsrLLodFMvwJ1H",
+  "imageUri": "https://gateway.irys.xyz/D9AxCsCoPC9n5vv6WgsvfgdBfWwiWVqBvXRz9HsmY56b",
+  "recipient": "Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc",
+  "createdAt": "2026-03-20T05:24:31.001Z",
+  "source": "core-candy-machine",
+  "candyMachine": "BVso8ZjrV2G16eKZnVVhrfk8hPBgD7wgLKyxVbu489Gz",
+  "cmIndex": 6
 }

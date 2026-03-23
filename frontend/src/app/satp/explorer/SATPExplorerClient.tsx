@@ -9,6 +9,7 @@ interface AgentCard {
   handle: string;
   avatar: string;
   wallet: string;
+  pda: string;
   trustScore: number;
   tier: string;
   verificationLevel: number;
@@ -21,6 +22,9 @@ interface AgentCard {
   nftImage: string | null;
   nftMint: string | null;
   soulbound: boolean;
+  description: string;
+  programId: string;
+  profileId: string | null;
 }
 
 const TIER_COLORS: Record<string, string> = {
@@ -50,6 +54,20 @@ const PLATFORM_ICONS: Record<string, string> = {
 
 type SortKey = "score" | "level" | "date" | "reviews";
 
+function formatDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return "On-chain";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "On-chain";
+  return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
+
+function formatDateFull(dateStr: string | null | undefined): string {
+  if (!dateStr) return "On-chain genesis";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "On-chain genesis";
+  return d.toLocaleDateString();
+}
+
 export default function SATPExplorerPage() {
   const [agents, setAgents] = useState<AgentCard[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,56 +80,85 @@ export default function SATPExplorerPage() {
   useEffect(() => {
     async function fetchAll() {
       try {
-        // Fetch all profiles
-        const profilesRes = await fetch("/api/profiles?limit=200");
-        const profiles = await profilesRes.json();
+        // Step 1: Fetch on-chain agents from SATP Explorer API
+        const onChainRes = await fetch("/api/satp/explorer/agents");
+        if (!onChainRes.ok) throw new Error("Failed to fetch on-chain agents");
+        const onChainData = await onChainRes.json();
+        const onChainAgents = onChainData.agents || [];
 
-        // Filter to those with Solana wallets
-        const withWallets = profiles.filter((p: any) => {
-          const wallet = p.wallets?.solana || p.verificationData?.solana?.address;
-          return !!wallet;
-        });
+        // Step 2: Fetch profiles for NFT avatar cross-referencing
+        let profilesByWallet: Record<string, any> = {};
+        try {
+          const profilesRes = await fetch("/api/profiles?limit=200");
+          if (profilesRes.ok) {
+            const profiles = await profilesRes.json();
+            for (const p of profiles) {
+              const wallet = p.wallets?.solana || p.verificationData?.solana?.address;
+              if (wallet) {
+                profilesByWallet[wallet] = p;
+              }
+            }
+          }
+        } catch {}
 
-        // Fetch on-chain data for each
+        // Step 3: Enrich each on-chain agent with scores, reputation, and NFT data
         const cards: AgentCard[] = await Promise.all(
-          withWallets.map(async (p: any) => {
-            const wallet = p.wallets?.solana || p.verificationData?.solana?.address;
+          onChainAgents.map(async (agent: any) => {
+            const wallet = agent.authority;
+            const profile = profilesByWallet[wallet] || null;
+            
+            // Fetch trust score + verification level
+            let scores: any = {};
             let reputation: any = {};
             let reviewData: any = {};
 
             try {
-              const [repRes, revRes] = await Promise.all([
+              const [scoresRes, repRes, revRes] = await Promise.all([
+                fetch(`/api/satp/scores/${wallet}`).catch(() => null),
                 fetch(`/api/satp/reputation/${wallet}`).catch(() => null),
                 fetch(`/api/satp/reviews/${wallet}`).catch(() => null),
               ]);
+              if (scoresRes?.ok) scores = await scoresRes.json();
               if (repRes?.ok) reputation = await repRes.json();
               if (revRes?.ok) reviewData = await revRes.json();
             } catch {}
 
-            const nftAvatar = p.nftAvatar;
-            const platforms = reputation?.reputation?.platforms || 
-              Object.keys(p.verificationData || {}).filter((k: string) => 
-                p.verificationData?.[k]?.verified
-              );
+            // NFT avatar from profile cross-reference
+            const nftAvatar = profile?.nftAvatar;
+            
+            // Platforms: merge reputation API + profile verifications (union, deduplicated)
+            const repPlatforms = reputation?.reputation?.platforms || [];
+            const profilePlatforms = profile ? Object.keys(profile.verificationData || {}).filter((k: string) => 
+              profile.verificationData?.[k]?.verified
+            ) : [];
+            const platforms = [...new Set([...repPlatforms, ...profilePlatforms])];
+
+            // Use profile name if available (more human-readable), else on-chain name
+            const displayName = profile?.name || agent.name || "Unknown Agent";
+            const profileId = scores?.profileId || profile?.id || null;
 
             return {
-              id: p.id,
-              name: p.name || p.id,
-              handle: p.handle || "",
-              avatar: nftAvatar?.image || nftAvatar?.arweaveUrl || p.avatar || "",
+              id: agent.pda, // Use PDA as unique ID
+              name: displayName,
+              handle: profile?.handle || "",
+              avatar: nftAvatar?.image || nftAvatar?.arweaveUrl || agent.nftImage || profile?.avatar || "",
               wallet,
-              trustScore: reputation?.trustScore || p.trustScore || 0,
-              tier: (reputation?.tier || p.tier || "unverified").toLowerCase(),
-              verificationLevel: reputation?.verificationLevel || 0,
+              pda: agent.pda,
+              trustScore: scores?.trustScore || 0,
+              tier: (scores?.tier || "unverified").toLowerCase(),
+              verificationLevel: scores?.verificationLevel || 0,
               platforms,
-              reviewCount: reviewData?.data?.stats?.totalReviews || 0,
-              reviewAvg: reviewData?.data?.stats?.averageRating || 0,
-              jobCount: p.stats?.jobsCompleted || 0,
-              totalEarned: p.stats?.totalEarned || 0,
-              registeredAt: p.createdAt || "",
-              nftImage: nftAvatar?.image || nftAvatar?.arweaveUrl || null,
-              nftMint: nftAvatar?.soulboundMint || nftAvatar?.identifier || null,
-              soulbound: !!nftAvatar?.soulboundMint,
+              reviewCount: reviewData?.stats?.total || 0,
+              reviewAvg: reviewData?.stats?.avg_rating || 0,
+              jobCount: profile?.stats?.jobsCompleted || 0,
+              totalEarned: profile?.stats?.totalEarned || 0,
+              registeredAt: agent.createdAt || profile?.createdAt || "",
+              nftImage: nftAvatar?.image || nftAvatar?.arweaveUrl || agent.nftImage || null,
+              nftMint: nftAvatar?.soulboundMint || nftAvatar?.identifier || agent.nftMint || null,
+              soulbound: !!nftAvatar?.soulboundMint || !!agent.soulbound,
+              description: agent.description || profile?.tagline || "",
+              programId: agent.programId,
+              profileId,
             };
           })
         );
@@ -132,9 +179,10 @@ export default function SATPExplorerPage() {
       const q = search.toLowerCase();
       result = result.filter(a =>
         a.name.toLowerCase().includes(q) ||
-        a.id.toLowerCase().includes(q) ||
         a.wallet.toLowerCase().includes(q) ||
-        a.handle.toLowerCase().includes(q)
+        a.handle.toLowerCase().includes(q) ||
+        a.description.toLowerCase().includes(q) ||
+        a.pda.toLowerCase().includes(q)
       );
     }
     result.sort((a, b) => {
@@ -142,7 +190,12 @@ export default function SATPExplorerPage() {
       switch (sort) {
         case "score": cmp = a.trustScore - b.trustScore; break;
         case "level": cmp = a.verificationLevel - b.verificationLevel; break;
-        case "date": cmp = new Date(a.registeredAt).getTime() - new Date(b.registeredAt).getTime(); break;
+        case "date": {
+          const da = a.registeredAt ? new Date(a.registeredAt).getTime() : 0;
+          const db = b.registeredAt ? new Date(b.registeredAt).getTime() : 0;
+          cmp = (isNaN(da) ? 0 : da) - (isNaN(db) ? 0 : db);
+          break;
+        }
         case "reviews": cmp = a.reviewCount - b.reviewCount; break;
       }
       return sortAsc ? cmp : -cmp;
@@ -184,7 +237,7 @@ export default function SATPExplorerPage() {
           All data sourced directly from Solana mainnet · SATP Program: <a href="https://explorer.solana.com/address/97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: "var(--accent)" }}>97yL33...eSq</a>
         </p>
         <div className="flex flex-wrap gap-3 mt-2 text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
-          <span>{agents.length} verified agents</span>
+          <span>{agents.length} on-chain agents</span>
           <span>·</span>
           <span>{agents.reduce((s, a) => s + a.platforms.length, 0)} attestations</span>
           <span>·</span>
@@ -200,7 +253,7 @@ export default function SATPExplorerPage() {
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search by name, wallet, or handle..."
+            placeholder="Search by name, wallet, PDA, or description..."
             className="w-full pl-9 pr-4 py-2.5 rounded-lg text-sm"
             style={{ fontFamily: "var(--font-mono)", background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
           />
@@ -281,10 +334,21 @@ export default function SATPExplorerPage() {
             {/* Info */}
             <div className="p-4">
               <div className="flex items-center gap-2 mb-1">
-                <Link href={`/profile/${agent.id}`} onClick={e => e.stopPropagation()} className="text-sm font-bold hover:underline" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-                  {agent.name}
-                </Link>
+                {agent.profileId ? (
+                  <Link href={`/profile/${agent.profileId}`} onClick={e => e.stopPropagation()} className="text-sm font-bold hover:underline" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+                    {agent.name}
+                  </Link>
+                ) : (
+                  <span className="text-sm font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+                    {agent.name}
+                  </span>
+                )}
               </div>
+              {agent.description && (
+                <div className="text-[10px] mb-1 truncate" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
+                  {agent.description}
+                </div>
+              )}
               <div className="text-[11px] mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
                 {agent.wallet.slice(0, 6)}...{agent.wallet.slice(-4)}
                 <a href={`https://explorer.solana.com/address/${agent.wallet}`} target="_blank" rel="noopener noreferrer" className="ml-1 inline-flex" onClick={e => e.stopPropagation()}>
@@ -293,27 +357,29 @@ export default function SATPExplorerPage() {
               </div>
 
               {/* Platform badges */}
-              <div className="flex flex-wrap gap-1 mb-3">
-                {agent.platforms.slice(0, 8).map(p => (
-                  <span
-                    key={p}
-                    className="px-1.5 py-0.5 rounded text-[9px]"
-                    style={{ fontFamily: "var(--font-mono)", background: "var(--bg-tertiary)", color: "var(--text-secondary)" }}
-                    title={p}
-                  >
-                    {PLATFORM_ICONS[p] || "✓"} {p.slice(0, 3).toUpperCase()}
-                  </span>
-                ))}
-                {agent.platforms.length > 8 && (
-                  <span className="text-[9px]" style={{ color: "var(--text-tertiary)" }}>+{agent.platforms.length - 8}</span>
-                )}
-              </div>
+              {agent.platforms.length > 0 && (
+                <div className="flex flex-wrap gap-1 mb-3">
+                  {agent.platforms.slice(0, 8).map(p => (
+                    <span
+                      key={p}
+                      className="px-1.5 py-0.5 rounded text-[9px]"
+                      style={{ fontFamily: "var(--font-mono)", background: "var(--bg-tertiary)", color: "var(--text-secondary)" }}
+                      title={p}
+                    >
+                      {PLATFORM_ICONS[p] || "✓"} {p.slice(0, 3).toUpperCase()}
+                    </span>
+                  ))}
+                  {agent.platforms.length > 8 && (
+                    <span className="text-[9px]" style={{ color: "var(--text-tertiary)" }}>+{agent.platforms.length - 8}</span>
+                  )}
+                </div>
+              )}
 
               {/* Stats row */}
               <div className="flex gap-4 text-[10px]" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
                 <span>L{agent.verificationLevel}</span>
                 {agent.reviewCount > 0 && <span>★{agent.reviewAvg.toFixed(1)} ({agent.reviewCount})</span>}
-                <span>{new Date(agent.registeredAt).toLocaleDateString("en-US", { month: "short", year: "numeric" })}</span>
+                <span>{formatDate(agent.registeredAt)}</span>
               </div>
 
               {/* Expanded details */}
@@ -323,6 +389,12 @@ export default function SATPExplorerPage() {
                     <span style={{ color: "var(--text-tertiary)" }}>Wallet</span>
                     <a href={`https://explorer.solana.com/address/${agent.wallet}`} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-1" style={{ color: "var(--accent)" }} onClick={e => e.stopPropagation()}>
                       {agent.wallet.slice(0, 12)}... <ExternalLink size={10} />
+                    </a>
+                  </div>
+                  <div className="flex justify-between">
+                    <span style={{ color: "var(--text-tertiary)" }}>Identity PDA</span>
+                    <a href={`https://explorer.solana.com/address/${agent.pda}`} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-1" style={{ color: "var(--accent)" }} onClick={e => e.stopPropagation()}>
+                      {agent.pda.slice(0, 12)}... <ExternalLink size={10} />
                     </a>
                   </div>
                   {agent.nftMint && (
@@ -347,7 +419,13 @@ export default function SATPExplorerPage() {
                   </div>
                   <div className="flex justify-between">
                     <span style={{ color: "var(--text-tertiary)" }}>Registered</span>
-                    <span style={{ color: "var(--text-primary)" }}>{new Date(agent.registeredAt).toLocaleDateString()}</span>
+                    <span style={{ color: "var(--text-primary)" }}>{formatDateFull(agent.registeredAt)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span style={{ color: "var(--text-tertiary)" }}>SATP Program</span>
+                    <a href={`https://explorer.solana.com/address/${agent.programId}`} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-1" style={{ color: "var(--accent)" }} onClick={e => e.stopPropagation()}>
+                      {agent.programId.slice(0, 12)}... <ExternalLink size={10} />
+                    </a>
                   </div>
                   {agent.reviewCount > 0 && (
                     <div className="flex justify-between">
@@ -355,14 +433,16 @@ export default function SATPExplorerPage() {
                       <span style={{ color: "#F59E0B" }}>{"★".repeat(Math.round(agent.reviewAvg))} {agent.reviewAvg.toFixed(1)} ({agent.reviewCount})</span>
                     </div>
                   )}
-                  <Link
-                    href={`/profile/${agent.id}`}
-                    className="block text-center py-2 rounded-lg text-[11px] font-semibold uppercase tracking-wider mt-3"
-                    style={{ background: "var(--accent)", color: "#fff" }}
-                    onClick={e => e.stopPropagation()}
-                  >
-                    View Full Profile →
-                  </Link>
+                  {agent.profileId && (
+                    <Link
+                      href={`/profile/${agent.profileId}`}
+                      className="block text-center py-2 rounded-lg text-[11px] font-semibold uppercase tracking-wider mt-3"
+                      style={{ background: "var(--accent)", color: "#fff" }}
+                      onClick={e => e.stopPropagation()}
+                    >
+                      View Full Profile →
+                    </Link>
+                  )}
                 </div>
               )}
             </div>
@@ -383,7 +463,7 @@ export default function SATPExplorerPage() {
       <div className="mt-8 pt-6 border-t text-center" style={{ borderColor: "var(--border)" }}>
         <p className="text-[11px]" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
           All data sourced from Solana mainnet · No database · Trustless verification ·{" "}
-          <a href="/api/satp/overview" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: "var(--accent)" }}>
+          <a href="/api/satp/explorer/agents" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: "var(--accent)" }}>
             Raw API →
           </a>
         </p>
