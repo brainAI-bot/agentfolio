@@ -36,6 +36,10 @@ export function AgentCard({ agent, rank }: AgentCardProps) {
             <img
               src={agent.avatar}
               alt={agent.name}
+              width={40}
+              height={40}
+              loading="lazy"
+              decoding="async"
               className="w-10 h-10 rounded-full object-cover"
               style={{ border: "1px solid var(--border)" }}
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty('display'); }}
