@@ -18348,7 +18348,7 @@ res.writeHead(200, { 'Content-Type': 'text/html' });
     
     // Filter test profiles
     const TEST_IDS_AGENTS = ['test_satp', 'test-no-sig', 'test-check-id', 'ghosttest', 'ghosttest3806'];
-    const TEST_NAMES_AGENTS = ['SmokeTest', 'TestCLI', 'CEOTestAgent', 'test', 'E2E-Test-Agent', 'BrainForgeQA', 'brainTEST', 'ghosttest', 'ghost_test_3806'];
+    const TEST_NAMES_AGENTS = ['SmokeTest', 'TestCLI', 'CEOTestAgent', 'test', 'E2E-Test-Agent', 'BrainForgeQA', 'ghosttest', 'ghost_test_3806'];
     profiles = profiles.filter(p => {
       if (TEST_NAMES_AGENTS.includes(p.name)) return false;
       if (TEST_IDS_AGENTS.some(t => (p.id || '').includes(t))) return false;
