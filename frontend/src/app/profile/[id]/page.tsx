@@ -1,4 +1,5 @@
 export const dynamic = "force-dynamic";
+import { WalletRequired } from "@/components/WalletRequired";
 import { getAgent } from "@/lib/data";
 import { notFound } from "next/navigation";
 import { TrustBadge } from "@/components/TrustBadge";
@@ -120,6 +121,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <WalletRequired />
       {/* Profile Header */}
       <div
         className="rounded-lg p-6 mb-6 border-l-[3px]"

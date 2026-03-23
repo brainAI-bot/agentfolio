@@ -1,137 +1,70 @@
 "use client";
 
 import { Wallet, LogOut } from "lucide-react";
-import { useWallet } from "@solana/wallet-adapter-react";
-import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import { useSmartConnect } from "@/components/WalletProvider";
 import { useDemoMode } from "@/lib/demo-mode";
-import { useEffect, useState } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
+import { useWalletLoad } from "@/components/ClientProviders";
+import dynamic from "next/dynamic";
 
 function truncateAddress(addr: string) {
   return addr.slice(0, 4) + "..." + addr.slice(-4);
 }
 
+// Original full-featured wallet button — only loaded when wallet adapter is ready
+const WalletButtonActive = dynamic(
+  () => import("@/components/NavbarWalletButtonActive").then(m => m.NavbarWalletButtonActive),
+  { ssr: false }
+);
+
+const MobileWalletActive = dynamic(
+  () => import("@/components/NavbarWalletButtonActive").then(m => m.MobileWalletSectionActive),
+  { ssr: false }
+);
+
 export function NavbarWalletButton({ onProfileId }: { onProfileId?: (id: string | null) => void }) {
-  const wallet = useWallet();
-  const { setVisible } = useWalletModal();
-  const { smartConnect } = useSmartConnect();
-  const { isDemo, demoPublicKey } = useDemoMode();
-  const connected = isDemo ? true : wallet.connected;
-  const publicKey = isDemo ? demoPublicKey : wallet.publicKey;
+  const { loaded, triggerLoad } = useWalletLoad();
 
-  const handleConnect = () => { smartConnect(); };
-  const handleDisconnect = () => { if (!isDemo) wallet.disconnect(); onProfileId?.(null); };
-
-  useEffect(() => {
-    if (!publicKey) { onProfileId?.(null); return; }
-    const addr = publicKey.toBase58();
-    fetch(`/api/wallet/lookup/${addr}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => onProfileId?.(d?.profile?.id || null))
-      .catch(() => onProfileId?.(null));
-  }, [publicKey, onProfileId]);
-
-  if (connected && publicKey) {
+  if (!loaded) {
     return (
-      <>
-        {/* Desktop */}
-        <div className="hidden md:flex items-center gap-2">
-          <div
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs"
-            style={{
-              fontFamily: "var(--font-mono)",
-              background: "rgba(153, 69, 255, 0.1)",
-              border: "1px solid rgba(153, 69, 255, 0.2)",
-              color: "var(--solana)",
-            }}
-          >
-            <Wallet size={12} />
-            <span>{truncateAddress(publicKey.toBase58())}</span>
-          </div>
-          <button
-            onClick={handleDisconnect}
-            className="p-1.5 rounded-lg transition-all hover:bg-[var(--bg-tertiary)]"
-            style={{ color: "var(--text-tertiary)" }}
-            title="Disconnect wallet"
-          >
-            <LogOut size={14} />
-          </button>
-        </div>
-      </>
+      <button
+        onClick={triggerLoad}
+        className="hidden md:flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all hover:shadow-[0_0_20px_rgba(153,69,255,0.3)]"
+        style={{
+          fontFamily: "var(--font-mono)",
+          background: "rgba(153, 69, 255, 0.15)",
+          color: "var(--solana)",
+          border: "1px solid rgba(153, 69, 255, 0.3)",
+        }}
+      >
+        <Wallet size={14} />
+        Connect Wallet
+      </button>
     );
   }
 
-  return (
-    <button
-      onClick={handleConnect}
-      className="hidden md:flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all hover:shadow-[0_0_20px_rgba(153,69,255,0.3)]"
-      style={{
-        fontFamily: "var(--font-mono)",
-        background: "rgba(153, 69, 255, 0.15)",
-        color: "var(--solana)",
-        border: "1px solid rgba(153, 69, 255, 0.3)",
-      }}
-    >
-      <Wallet size={14} />
-      Connect Wallet
-    </button>
-  );
+  return <WalletButtonActive onProfileId={onProfileId} />;
 }
 
 export function MobileWalletSection() {
-  const wallet = useWallet();
-  const { smartConnect } = useSmartConnect();
-  const { isDemo, demoPublicKey } = useDemoMode();
-  const connected = isDemo ? true : wallet.connected;
-  const publicKey = isDemo ? demoPublicKey : wallet.publicKey;
+  const { loaded, triggerLoad } = useWalletLoad();
 
-  const handleConnect = () => { smartConnect(); };
-  const handleDisconnect = () => { if (!isDemo) wallet.disconnect(); };
-
-  if (connected && publicKey) {
+  if (!loaded) {
     return (
-      <div className="space-y-2 pt-2">
-        <div
-          className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs"
-          style={{
-            fontFamily: "var(--font-mono)",
-            background: "rgba(153, 69, 255, 0.1)",
-            border: "1px solid rgba(153, 69, 255, 0.2)",
-            color: "var(--solana)",
-          }}
-        >
-          <Wallet size={12} />
-          {truncateAddress(publicKey.toBase58())}
-        </div>
-        <button
-          onClick={handleDisconnect}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider"
-          style={{
-            fontFamily: "var(--font-mono)",
-            color: "var(--text-tertiary)",
-            border: "1px solid var(--border)",
-          }}
-        >
-          <LogOut size={14} />
-          Disconnect
-        </button>
-      </div>
+      <button
+        onClick={triggerLoad}
+        className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider mt-2"
+        style={{
+          fontFamily: "var(--font-mono)",
+          background: "rgba(153, 69, 255, 0.15)",
+          color: "var(--solana)",
+          border: "1px solid rgba(153, 69, 255, 0.3)",
+        }}
+      >
+        <Wallet size={14} />
+        Connect Wallet
+      </button>
     );
   }
 
-  return (
-    <button
-      onClick={handleConnect}
-      className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider mt-2"
-      style={{
-        fontFamily: "var(--font-mono)",
-        background: "rgba(153, 69, 255, 0.15)",
-        color: "var(--solana)",
-        border: "1px solid rgba(153, 69, 255, 0.3)",
-      }}
-    >
-      <Wallet size={14} />
-      Connect Wallet
-    </button>
-  );
+  return <MobileWalletActive />;
 }

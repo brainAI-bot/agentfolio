@@ -1,30 +1,41 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { ReactNode, useState, useEffect } from "react";
+import { ReactNode, useState, useCallback, createContext, useContext } from "react";
 
 const WalletProvider = dynamic(
   () => import("@/components/WalletProvider").then(m => m.WalletProvider),
   { ssr: false }
 );
 
+// Context to let any component trigger wallet loading
+const WalletLoadContext = createContext<{ loaded: boolean; triggerLoad: () => void }>({
+  loaded: false,
+  triggerLoad: () => {},
+});
+
+export function useWalletLoad() {
+  return useContext(WalletLoadContext);
+}
+
 export function ClientProviders({ children }: { children: ReactNode }) {
   const [walletReady, setWalletReady] = useState(false);
 
-  useEffect(() => {
-    // Defer wallet adapter JS loading until after initial paint
-    // This prevents 500KB+ of Solana wallet code from blocking FCP/LCP
-    const load = () => setWalletReady(true);
-    if ("requestIdleCallback" in window) {
-      (window as any).requestIdleCallback(load, { timeout: 3000 });
-    } else {
-      setTimeout(load, 1500);
-    }
-  }, []);
+  const triggerLoad = useCallback(() => {
+    if (!walletReady) setWalletReady(true);
+  }, [walletReady]);
 
   if (!walletReady) {
-    return <>{children}</>;
+    return (
+      <WalletLoadContext.Provider value={{ loaded: false, triggerLoad }}>
+        {children}
+      </WalletLoadContext.Provider>
+    );
   }
 
-  return <WalletProvider>{children}</WalletProvider>;
+  return (
+    <WalletLoadContext.Provider value={{ loaded: true, triggerLoad }}>
+      <WalletProvider>{children}</WalletProvider>
+    </WalletLoadContext.Provider>
+  );
 }

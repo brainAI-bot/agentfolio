@@ -1,4 +1,5 @@
 "use client";
+import { WalletRequired } from "@/components/WalletRequired";
 
 import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -224,6 +225,7 @@ export default function MintPage() {
 
   return (
     <div style={{ background: "var(--bg-primary)", minHeight: "calc(100vh - 56px)" }}>
+      <WalletRequired />
       {/* Hero */}
       <section className="relative overflow-hidden">
         <div className="absolute inset-0 grid-dots opacity-30" />
