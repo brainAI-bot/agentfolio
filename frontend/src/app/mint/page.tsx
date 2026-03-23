@@ -488,7 +488,7 @@ export default function MintPage() {
                       className="group rounded-xl overflow-hidden border-2 transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(153,69,255,0.3)] text-left"
                       style={{ borderColor: "var(--accent)", background: "var(--bg-tertiary)" }}>
                       <div className="aspect-square relative overflow-hidden">
-                        <img src={genesisInfo.image} alt={genesisInfo.name} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                        <img loading="lazy" src={genesisInfo.image} alt={genesisInfo.name} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
                         <div className="absolute top-3 right-3 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider" style={{ background: "var(--accent)", color: "#fff", fontFamily: "var(--font-mono)" }}>Genesis 1/1</div>
                       </div>
                       <div className="p-4">
@@ -502,7 +502,7 @@ export default function MintPage() {
                     <button key={nft.mint} onClick={() => { setSelectedNft(nft); setStep("preview"); }}
                       className="group rounded-xl overflow-hidden border transition-all hover:scale-[1.02] hover:border-[var(--accent)] text-left"
                       style={{ borderColor: "var(--border)", background: "var(--bg-tertiary)" }}>
-                      <div className="aspect-square overflow-hidden"><img src={nft.image} alt={nft.name} className="w-full h-full object-cover transition-transform group-hover:scale-105" /></div>
+                      <div className="aspect-square overflow-hidden"><img loading="lazy" src={nft.image} alt={nft.name} className="w-full h-full object-cover transition-transform group-hover:scale-105" /></div>
                       <div className="p-4">
                         <p className="font-bold text-sm" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{nft.name}</p>
                         <div className="flex items-center gap-1 mt-2 text-xs font-medium" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>Select to burn <ArrowRight size={12} /></div>
@@ -519,7 +519,7 @@ export default function MintPage() {
             <div className="flex flex-col sm:flex-row gap-8">
               <div className="w-full sm:w-5/12">
                 <div className="rounded-xl overflow-hidden border-2" style={{ borderColor: "var(--accent)" }}>
-                  <img src={selectedNft.image} alt={selectedNft.name} className="w-full aspect-square object-cover" />
+                  <img loading="lazy" src={selectedNft.image} alt={selectedNft.name} className="w-full aspect-square object-cover" />
                 </div>
                 <p className="text-center mt-3 font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{selectedNft.name}</p>
               </div>
@@ -597,7 +597,7 @@ export default function MintPage() {
                       <ImageIcon size={10} className="inline mr-1" /> {soulboundMint ? "Soulbound Token" : "Your BOA NFT"}
                     </p>
                     <div className="rounded-xl overflow-hidden border-2 accent-glow" style={{ borderColor: "var(--accent)" }}>
-                      <img src={selectedNft?.image || mintedNft?.image || ""} alt={selectedNft?.name || mintedNft?.name || "BOA"} className="w-full aspect-square object-cover" />
+                      <img loading="lazy" src={selectedNft?.image || mintedNft?.image || ""} alt={selectedNft?.name || mintedNft?.name || "BOA"} className="w-full aspect-square object-cover" />
                     </div>
                     <p className="text-center mt-2 font-bold text-sm" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{selectedNft?.name || mintedNft?.name || ""}</p>
                     <p className="mt-1 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>{soulboundMint ? "NON-TRANSFERABLE • PERMANENT" : "MINTED SUCCESSFULLY"}</p>
