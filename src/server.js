@@ -241,6 +241,7 @@ const { getEcosystemStats, generateShareText } = require('./lib/ecosystem-stats'
 const { LAUNCH_STATUS, PLATFORMS, canLaunch, launchToken, getProfileLaunches, getAllLaunches, getLaunch, getTokenStats, recordBuyback, completeLaunch, linkVirtualsToken, graduateVirtualsToken } = require('./lib/token-launch');
 const { calculateSpotlightScore, selectSpotlightCandidates, autoSelectSpotlight, createSpotlight, getCurrentSpotlight, getSpotlightHistory, trackSpotlightEngagement, getSpotlightStats, generateSpotlightShareText, needsRotation, getVerificationTypes, countVerifications, SPOTLIGHT_CRITERIA } = require('./lib/spotlight');
 const { generateSpotlightPage: _generateSpotlightPage } = require('./spotlight-page');
+const { generateBadgesShowcasePage } = require("./lib/badges-page");
 const { getSkillDemand, getSkillSupply, getSkillOpportunities, getTrendingSkills, getCategoryInsights, getSkillDemandReport } = require('./lib/skill-demand');
 const { generateCompactSkillBadge, generateFullSkillBadge, generateMiniSkillBadge, generateAllSkillsBadge, generateSkillBadgesPage, generateSkillEmbedCode } = require('./lib/skill-badges');
 const { compareAgents, calculateAgentScore, getAllProfilesForComparison } = require('./lib/agent-compare');
@@ -15765,6 +15766,11 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(generateLeaderboardPage(profiles, tab));
   }
+  else if (url.pathname === "/badges") {
+    const profiles = listProfiles(DATA_DIR);
+    res.writeHead(200, { "Content-Type": "text/html", "Cache-Control": "public, max-age=300" });
+    res.end(generateBadgesShowcasePage(profiles, { COMMON_STYLES, THEME_SCRIPT, escapeHtml, getCanonicalScore }));
+  }
   else if (url.pathname === '/activity') {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(generateActivityPage());
@@ -16511,6 +16517,17 @@ res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end("Not found");
     }
     return;
+  }
+  else if (url.pathname === "/.well-known/agent.json") {
+    const agentCardPath = require("path").join(__dirname, "..", "public", ".well-known", "agent.json");
+    try {
+      const agentCard = require("fs").readFileSync(agentCardPath, "utf-8");
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600" });
+      res.end(agentCard);
+    } catch (e) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "agent.json not found" }));
+    }
   }
   else if (url.pathname === '/.well-known/did-configuration.json') {
     const baseUrl = `https://${req.headers.host || 'agentfolio.bot'}`;
