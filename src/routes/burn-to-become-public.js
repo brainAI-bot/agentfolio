@@ -617,21 +617,24 @@ function handleBurnToBecome(req, res, url) {
             profileObj.moltbookStats = pf.moltbookStats || {};
           }
         } catch (e) {}
-        // Try V3 on-chain scores first, fall back to scoring-engine-v2
-        let level, reputation;
+        // Use best-of V3 on-chain + V2 computed scores (fixes stale Genesis Record bug)
+        let v3Lev = 0, v3Rp = 0, v2Lev = 0, v2Rp = 0;
         try {
           const { getV3Score } = require('../v3-score-service');
           const v3 = await getV3Score(matchedProfile.id);
           if (v3) {
-            level = v3.verificationLevel;
-            reputation = v3.reputationScore || 0;
+            v3Lev = v3.verificationLevel || 0;
+            v3Rp = v3.reputationScore || 0;
           }
         } catch {}
-        if (level === undefined) {
+        try {
           const scoreResult = getCompleteScore(profileObj);
-          level = scoreResult.verificationLevel ? scoreResult.verificationLevel.level : 0;
-          reputation = scoreResult.reputationScore ? scoreResult.reputationScore.score : 0;
-        }
+          v2Lev = scoreResult.verificationLevel ? scoreResult.verificationLevel.level : 0;
+          v2Rp = scoreResult.reputationScore ? scoreResult.reputationScore.score : 0;
+        } catch {}
+        const level = Math.max(v3Lev, v2Lev);
+        const reputation = Math.max(v3Rp, v2Rp);
+        console.log('[ELIGIBILITY] Score for', matchedProfile.id, 'V3:', v3Lev+'/'+v3Rp, 'V2:', v2Lev+'/'+v2Rp, 'Final:', level+'/'+reputation);
         const eligible = level >= 3 && reputation >= 50;
         db.close();
         sendJson(200, { found: true, agent: matchedProfile.id, name: matchedProfile.name, level, levelName: LEVEL_NAMES[level] || 'Unknown', badge: LEVEL_BADGES[level] || '⚪', reputation, eligible, freeFirstMint: eligible });
@@ -1078,36 +1081,36 @@ function handleBurnToBecome(req, res, url) {
         }
         
         if (profileId) {
-          let level = 0, rep = 0;
-          // Try V3 on-chain scores first
+          // Use best-of V3 on-chain + V2 computed scores (fixes stale Genesis Record bug)
+          let v3Level = 0, v3Rep = 0, v2Level = 0, v2Rep = 0;
           try {
             const { getV3Score } = require('../v3-score-service');
             const v3 = await getV3Score(profileId);
             if (v3) {
-              level = v3.verificationLevel;
-              rep = Math.round(parseFloat(v3.reputationPct));
+              v3Level = v3.verificationLevel || 0;
+              v3Rep = Math.round(parseFloat(v3.reputationPct)) || 0;
             }
           } catch (e) { console.error('[BURN] V3 score lookup failed:', e.message); }
-          // Fallback to scoring-engine-v2
-          if (level === 0 && rep === 0) {
-            try {
-              const { getCompleteScore } = require('../lib/scoring-engine-v2');
-              const profile = checkDb.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
-              if (profile) {
-                const profileObj = {
-                  id: profile.id, name: profile.name, handle: profile.handle, bio: profile.bio,
-                  skills: JSON.parse(profile.skills || '[]'),
-                  verification: JSON.parse(profile.verification || '{}'),
-                  endorsements: JSON.parse(profile.endorsements || '[]'),
-                  portfolio: JSON.parse(profile.portfolio || '[]'),
-                  track_record: JSON.parse(profile.track_record || '{}'),
-                };
-                const scoreResult = getCompleteScore(profileObj);
-                level = scoreResult.verificationLevel?.level || 0;
-                rep = scoreResult.reputationScore?.score || 0;
-              }
-            } catch (e) { console.error('[BURN] Scoring fallback error:', e.message); }
-          }
+          try {
+            const { getCompleteScore } = require('../lib/scoring-engine-v2');
+            const profile = checkDb.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
+            if (profile) {
+              const profileObj = {
+                id: profile.id, name: profile.name, handle: profile.handle, bio: profile.bio,
+                skills: JSON.parse(profile.skills || '[]'),
+                verification: JSON.parse(profile.verification || '{}'),
+                endorsements: JSON.parse(profile.endorsements || '[]'),
+                portfolio: JSON.parse(profile.portfolio || '[]'),
+                track_record: JSON.parse(profile.track_record || '{}'),
+              };
+              const scoreResult = getCompleteScore(profileObj);
+              v2Level = scoreResult.verificationLevel?.level || 0;
+              v2Rep = scoreResult.reputationScore?.score || 0;
+            }
+          } catch (e) { console.error('[BURN] V2 scoring error:', e.message); }
+          const level = Math.max(v3Level, v2Level);
+          const rep = Math.max(v3Rep, v2Rep);
+          console.log('[BURN] Score resolution for', profileId, 'V3:', v3Level+'/'+v3Rep, 'V2:', v2Level+'/'+v2Rep, 'Final:', level+'/'+rep);
           isEligibleFree = level >= 3 && rep >= 50;
         }
         checkDb.close();
