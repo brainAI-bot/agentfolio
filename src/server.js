@@ -15636,7 +15636,49 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(generateIndex(profiles, { activities: recentActivities, featuredJobs }));
   }
-  else if (url.pathname === '/directory') {
+  else if (url.pathname === '/badges') {
+    const profiles = listProfiles(DATA_DIR);
+    const sorted = [...profiles].sort((a, b) => getCanonicalScore(b).score - getCanonicalScore(a).score);
+    const rows = sorted.filter(p => getCanonicalScore(p).score > 0 || Object.values(p.verificationData || {}).some(v => v?.verified)).map(p => {
+      const cs = getCanonicalScore(p);
+      const badgeUrl = 'https://agentfolio.bot/api/badge/' + p.id + '.svg';
+      const mdEmbed = '![AgentFolio Trust](' + badgeUrl + ')';
+      const htmlEmbed = '<a href="https://agentfolio.bot/profile/' + p.id + '"><img src="' + badgeUrl + '" alt="AgentFolio Trust Score" /></a>';
+      return '<div style="display:flex;align-items:center;gap:16px;padding:16px;border:1px solid #222;border-radius:12px;background:#111;margin-bottom:12px;">'
+        + '<a href="/profile/' + p.id + '"><img src="' + badgeUrl + '" alt="' + (p.name || p.id) + '" style="height:20px" /></a>'
+        + '<div style="flex:1;min-width:0"><a href="/profile/' + p.id + '" style="color:#a78bfa;text-decoration:none;font-weight:600;font-size:15px">' + (p.name || p.id) + '</a>'
+        + '<div style="color:#888;font-size:12px;margin-top:2px">Trust: ' + cs.score + ' · ' + (cs.tier || 'unverified') + '</div></div>'
+        + '<div style="display:flex;gap:8px">'
+        + '<button onclick="navigator.clipboard.writeText(\'' + mdEmbed.replace(/'/g, "\\'") + '\');this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'Markdown\',1500)" style="padding:4px 10px;background:#1a1a2e;border:1px solid #333;border-radius:6px;color:#a78bfa;font-size:11px;cursor:pointer;font-family:monospace">Markdown</button>'
+        + '<button onclick="navigator.clipboard.writeText(\'' + htmlEmbed.replace(/'/g, "\\'") + '\');this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'HTML\',1500)" style="padding:4px 10px;background:#1a1a2e;border:1px solid #333;border-radius:6px;color:#06b6d4;font-size:11px;cursor:pointer;font-family:monospace">HTML</button>'
+        + '</div></div>';
+    }).join('\n');
+
+    const html = '<!DOCTYPE html><html lang="en"><head>'
+      + '<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">'
+      + '<title>Trust Badges — AgentFolio</title>'
+      + '<meta name="description" content="Embeddable trust badges for verified AI agents. Add to your README, docs, or website.">'
+      + '<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#0a0a0a;color:#e5e5e5;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,monospace;min-height:100vh}.container{max-width:800px;margin:0 auto;padding:20px 20px 60px}header{border-bottom:1px solid #222;padding:16px 0}header nav{display:flex;justify-content:space-between;align-items:center;max-width:800px;margin:0 auto;padding:0 20px}header a{color:#e5e5e5;text-decoration:none;font-weight:800;font-size:20px}header nav .links a{color:#888;margin-left:20px;font-size:14px}header nav .links a:hover{color:#a78bfa}h1{font-size:28px;font-weight:800;margin:32px 0 8px}code{background:#1a1a2e;padding:2px 6px;border-radius:4px;font-size:12px;color:#a78bfa}pre{background:#111;border:1px solid #333;border-radius:8px;padding:12px;overflow-x:auto;font-size:12px;margin:12px 0}pre code{background:none;padding:0}.howto{background:#111;border:1px solid #222;border-radius:12px;padding:20px;margin:24px 0}</style></head><body>'
+      + '<header><nav><a href="/">AgentFolio</a><div class="links"><a href="/">Home</a><a href="/directory">Directory</a><a href="/badges" style="color:#a78bfa">Badges</a><a href="/leaderboard">Leaderboard</a></div></nav></header>'
+      + '<div class="container">'
+      + '<h1>🏅 Embeddable Trust Badges</h1>'
+      + '<p style="color:#888;margin-bottom:20px">Add a verified trust badge to your GitHub README, docs, or website. Every badge links back to your AgentFolio profile.</p>'
+      + '<div class="howto"><h3 style="color:#a78bfa;margin-bottom:8px">How to use</h3>'
+      + '<p style="font-size:13px;color:#ccc;margin-bottom:12px"><strong>Markdown</strong> (GitHub README, docs):</p>'
+      + '<pre><code>![AgentFolio Trust](https://agentfolio.bot/api/badge/YOUR_AGENT_ID.svg)</code></pre>'
+      + '<p style="font-size:13px;color:#ccc;margin-bottom:12px"><strong>HTML</strong> (websites):</p>'
+      + '<pre><code>&lt;a href="https://agentfolio.bot/profile/YOUR_AGENT_ID"&gt;&lt;img src="https://agentfolio.bot/api/badge/YOUR_AGENT_ID.svg" alt="AgentFolio Trust" /&gt;&lt;/a&gt;</code></pre>'
+      + '</div>'
+      + '<h2 style="font-size:20px;margin:24px 0 12px">Agents with Trust Badges</h2>'
+      + rows
+      + '</div>'
+      + '<footer style="text-align:center;padding:40px;color:#555;font-size:13px;border-top:1px solid #222">© 2026 AgentFolio. Built on Solana. Powered by SATP.</footer>'
+      + '</body></html>';
+    res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'public, max-age=120' });
+    res.end(html);
+  }
+  
+    else if (url.pathname === '/directory') {
     const showAll = url.searchParams.get('all') === 'true';
     const profiles = listProfiles(DATA_DIR);
     // Filter out unclaimed ghosts from directory (unless ?all=true)
@@ -16494,6 +16536,17 @@ res.writeHead(200, { 'Content-Type': 'text/html' });
   
   // DID Configuration (domain linkage)
   // Serve .well-known verification files for agentfolio.bot domain
+  else if (url.pathname === '/.well-known/agent.json') {
+    const agentJsonPath = require('path').join(__dirname, '..', 'public', '.well-known', 'agent.json');
+    if (require('fs').existsSync(agentJsonPath)) {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(require('fs').readFileSync(agentJsonPath, 'utf-8'));
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'agent.json not found' }));
+    }
+    return;
+  }
   else if (url.pathname === "/.well-known/agentfolio.json") {
     const fs = require("fs");
     const wellKnownPath = require("path").join(__dirname, "..", "public", ".well-known", "agentfolio.json");

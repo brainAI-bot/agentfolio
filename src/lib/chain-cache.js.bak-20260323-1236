@@ -390,42 +390,13 @@ function getStats() {
  * @returns {{ reputationScore: number, verificationLevel: number } | null}
  */
 function getScore(profileId) {
-  // Check genesis records cache (override — team agents with manual scores)
+  // Check genesis records cache
   const genesis = cache.genesisRecords.get(profileId);
   if (genesis) return genesis;
   
-  // COMPUTE from attestation data when no Genesis Record exists
-  const attestations = cache.attestations.get(profileId) || [];
-  const platforms = new Set(attestations.map(a => a.platform));
-  
-  // Check if agent has SATP identity (by name match)
-  let hasIdentity = false;
-  const cleanId = profileId.replace('agent_', '').toLowerCase();
-  for (const [wallet, data] of cache.identities) {
-    if (data.name && data.name.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanId.replace(/[^a-z0-9]/g, '')) {
-      hasIdentity = true;
-      break;
-    }
-  }
-  
-  if (!hasIdentity && platforms.size === 0) return null;
-  
-  // Compute verification level (L0-L5 from spec)
-  let level = 0;
-  if (hasIdentity) level = 1;  // L1: SATP registered
-  if (platforms.size >= 2) level = 2;  // L2: 2+ verifications
-  if (platforms.size >= 5) level = 3;  // L3: 5+ verifications (simplified — full spec checks categories)
-  
-  // Compute trust score (from scoring-v2 spec)
-  let score = 0;
-  if (hasIdentity) score += 10;       // SATP genesis = +10
-  score += platforms.size * 25;        // Each attestation = +25
-  
-  return {
-    reputationScore: score,
-    verificationLevel: level,
-    source: 'computed'
-  };
+  // No attestation fallback — Genesis Record is the only source of truth.
+  // CEO directive: If no Genesis Record, score = 0.
+  return null;
 }
 
 /**
