@@ -196,18 +196,112 @@ async function getOnChainScores(profileId) {
 function postVerificationOnchainForProfile(profile, platform, proofData) {
   const wallet = profile?.wallets?.solana;
   if (!wallet) return;
+  // V2 on-chain write (legacy)
   postVerificationOnchain(wallet, platform, proofData).then(result => {
     if (result) {
       logger.info(`[OnchainVerification] ${platform} for ${profile.id}: ${result.explorerUrl}`);
     }
   }).catch(() => {});
-  // Also update reputation on-chain after each verification
+  // V3: Update Genesis Record scores after each verification (non-blocking)
+  updateV3GenesisScores(profile).catch(e => {
+    logger.warn(`[V3 Score Update] Failed for ${profile.id}: ${e.message}`);
+  });
+}
+
+/**
+ * Update V3 Genesis Record with correct verification level and reputation score.
+ * If no Genesis Record exists, create one first.
+ * Scoring: SATP identity = +10, each verified platform = +25
+ * Levels: L0=none, L1=SATP registered, L2=2+ verifications, L3=5+ verifications
+ */
+async function updateV3GenesisScores(profile) {
+  const profileId = profile?.id;
+  if (!profileId) return;
+  
   try {
-    const canon = getCanonicalScore(profile);
-    if (canon && canon.score > 0) {
-      postReputationOnchainForProfile(profile, canon.score);
+    const { createSATPClient } = require('./satp-client/src');
+    const { Keypair } = require('@solana/web3.js');
+    const fs = require('fs');
+    
+    const rpcUrl = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=HELIUS_API_KEY_REDACTED';
+    const client = createSATPClient({ rpcUrl });
+    const keypairPath = '/home/ubuntu/.config/solana/mainnet-deployer.json';
+    const keypair = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(keypairPath))));
+    
+    // Check if Genesis Record exists
+    let genesis = await client.getGenesisRecord(profileId);
+    
+    if (!genesis) {
+      // Auto-create Genesis Record
+      logger.info(`[V3 Auto-Create] Creating Genesis Record for ${profileId}`);
+      const { agentIdHash } = require('./satp-client/src/pda');
+      const hashBuf = agentIdHash(profileId);
+      const { transaction } = await client.buildCreateGenesisRecord(
+        keypair.publicKey, hashBuf,
+        profile.name || profileId,
+        profile.tagline || profile.bio || '',
+        profile.category || 'AI Agent',
+        profile.skills?.slice(0, 5) || [],
+        profile.metadataUri || ''
+      );
+      transaction.sign(keypair);
+      const conn = client.connection;
+      const sig = await conn.sendRawTransaction(transaction.serialize(), { skipPreflight: false });
+      await conn.confirmTransaction(sig, 'confirmed');
+      logger.info(`[V3 Auto-Create] Genesis Record created for ${profileId}: ${sig}`);
+      // Re-read after creation
+      genesis = await client.getGenesisRecord(profileId);
     }
-  } catch (e) { /* non-blocking */ }
+    
+    if (!genesis || genesis.error) return;
+    
+    // Compute correct level and score from profile verification data
+    const verifs = Object.entries(profile.verificationData || {}).filter(([k,v]) => v && v.verified);
+    const platformCount = verifs.length;
+    
+    // Level computation: L1=SATP, L2=2+, L3=5+
+    let level = 0;
+    if (platformCount >= 1) level = 1;
+    if (platformCount >= 2) level = 2;
+    if (platformCount >= 5) level = 3;
+    
+    // Score: SATP identity = +10, each platform verification = +25
+    let score = 10 + (platformCount * 25);
+    
+    // Don't downgrade existing scores (e.g. brainKID manually set to 550)
+    if (genesis.reputationScore > score) {
+      score = genesis.reputationScore;
+    }
+    if (genesis.verificationLevel > level) {
+      level = genesis.verificationLevel;
+    }
+    
+    // Update verification level if changed
+    if (level !== genesis.verificationLevel) {
+      const { transaction: vTx } = await client.buildUpdateVerification(keypair.publicKey, profileId, level);
+      vTx.sign(keypair);
+      const conn = client.connection;
+      const vSig = await conn.sendRawTransaction(vTx.serialize(), { skipPreflight: false });
+      await conn.confirmTransaction(vSig, 'confirmed');
+      logger.info(`[V3 Score Update] ${profileId} level: ${genesis.verificationLevel} → ${level} (${vSig})`);
+    }
+    
+    // Update reputation score if changed
+    if (score !== genesis.reputationScore) {
+      const { transaction: rTx } = await client.buildUpdateReputation(keypair.publicKey, profileId, score);
+      rTx.sign(keypair);
+      const conn = client.connection;
+      const rSig = await conn.sendRawTransaction(rTx.serialize(), { skipPreflight: false });
+      await conn.confirmTransaction(rSig, 'confirmed');
+      logger.info(`[V3 Score Update] ${profileId} score: ${genesis.reputationScore} → ${score} (${rSig})`);
+    }
+    
+    // Clear the SATP scores cache so next read picks up new values
+    _satpScoresCache.delete(profileId);
+    
+  } catch (e) {
+    logger.warn(`[V3 Score Update] Error for ${profileId}: ${e.message}`);
+  }
 }
 
 // Helper: post reputation on-chain (non-blocking)
@@ -30128,7 +30222,7 @@ ${THEME_SCRIPT}
         let onChainResult = { verified: false, identityPDA: null };
         try { onChainResult = await satpV2OnChainCheck(wallet); } catch (e2) { console.warn('[SATP Identity API] on-chain check failed:', e2.message); }
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ wallet, profileId: profile ? profile.id : null, name: profile ? profile.name : null, registered: !!profile, registeredOnChain: onChainResult.verified || (profile ? (profile.registeredOnChain || false) : false), identityPDA: onChainResult.identityPDA || null, verificationLevel: satpScores ? satpScores.verificationLevel : 0, tier: satpScores ? satpScores.tier : 'unverified', createdAt: profile ? profile.createdAt : null }));
+        res.end(JSON.stringify({ wallet, profileId: profile ? profile.id : null, name: profile ? profile.name : null, registered: !!profile, registeredOnChain: onChainResult.verified || (profile ? (profile.registeredOnChain || false) : false), identityPDA: onChainResult.identityPDA || null, verificationLevel: satpScores ? satpScores.verificationLevel : (profile ? getCanonicalScore(profile).verificationLevel : 0), tier: satpScores ? satpScores.tier : (profile ? getCanonicalScore(profile).tier : 'unverified'), createdAt: profile ? profile.createdAt : null }));
       } catch (e) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ wallet, registered: false })); }
     })();
   }
@@ -30140,7 +30234,7 @@ ${THEME_SCRIPT}
         const satpScores = profile ? await getOnChainScores(profile.id) : null;
         const rep = profile ? { score: getCanonicalScore(profile).score, tier: getCanonicalScore(profile).tier } : { score: 0, tier: 'unverified' };
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ wallet, profileId: profile ? profile.id : null, trustScore: satpScores ? satpScores.trustScore : rep.score, verificationLevel: satpScores ? satpScores.verificationLevel : 0, tier: satpScores ? satpScores.tier : rep.tier, onChain: !!satpScores }));
+        res.end(JSON.stringify({ wallet, profileId: profile ? profile.id : null, trustScore: satpScores ? satpScores.trustScore : rep.score, verificationLevel: satpScores ? satpScores.verificationLevel : (profile ? getCanonicalScore(profile).verificationLevel : 0), tier: satpScores ? satpScores.tier : rep.tier, onChain: !!satpScores }));
       } catch (e) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ wallet, trustScore: 0, tier: 'unverified' })); }
     })();
   }
@@ -30156,7 +30250,7 @@ ${THEME_SCRIPT}
         const verifs = profile ? d.prepare('SELECT platform, identifier, verified_at FROM verifications WHERE profile_id = ?').all(profile.id) : [];
         d.close();
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ wallet, profileId: profile ? profile.id : null, reputation: { score: satpScores ? satpScores.trustScore : rep.score, tier: satpScores ? satpScores.tier : rep.tier, verificationLevel: satpScores ? satpScores.verificationLevel : 0, verifications: verifs.length, platforms: verifs.map(v => v.platform) } }));
+        res.end(JSON.stringify({ wallet, profileId: profile ? profile.id : null, reputation: { score: satpScores ? satpScores.trustScore : rep.score, tier: satpScores ? satpScores.tier : rep.tier, verificationLevel: satpScores ? satpScores.verificationLevel : (profile ? getCanonicalScore(profile).verificationLevel : 0), verifications: verifs.length, platforms: verifs.map(v => v.platform) } }));
       } catch (e) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ wallet, reputation: { score: 0, tier: 'unverified' } })); }
     })();
   }

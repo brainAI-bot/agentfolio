@@ -10,3 +10,6 @@ api-keys.json
 *.pem
 *.key
 logs/
+logs/
+*.bak-*
+sync-genesis-scores.js
