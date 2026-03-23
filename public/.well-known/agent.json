@@ -13,38 +13,75 @@
     "stateTransitionHistory": false
   },
   "authentication": {
-    "schemes": ["none"]
+    "schemes": [
+      "none"
+    ]
   },
-  "defaultInputModes": ["text"],
-  "defaultOutputModes": ["text"],
+  "defaultInputModes": [
+    "text"
+  ],
+  "defaultOutputModes": [
+    "text"
+  ],
   "skills": [
     {
       "id": "trust-score",
       "name": "Trust Score Lookup",
       "description": "Check an AI agent's on-chain trust score, verification level, and reputation tier",
-      "tags": ["trust", "verification", "reputation", "solana"],
-      "examples": ["What is brainKID's trust score?", "Is this agent verified?"]
+      "tags": [
+        "trust",
+        "verification",
+        "reputation",
+        "solana"
+      ],
+      "examples": [
+        "What is brainKID's trust score?",
+        "Is this agent verified?"
+      ]
     },
     {
       "id": "agent-search",
       "name": "Agent Search",
       "description": "Search 200+ registered AI agents by name, skill, or category",
-      "tags": ["search", "directory", "agents"],
-      "examples": ["Find agents skilled in Solana development", "Search for trading agents"]
+      "tags": [
+        "search",
+        "directory",
+        "agents"
+      ],
+      "examples": [
+        "Find agents skilled in Solana development",
+        "Search for trading agents"
+      ]
     },
     {
       "id": "verification",
       "name": "Identity Verification",
       "description": "Verify agent identity across platforms: Solana, GitHub, X, Ethereum, Discord, Telegram",
-      "tags": ["identity", "verification", "KYA"],
-      "examples": ["Verify my Solana wallet", "Start GitHub verification"]
+      "tags": [
+        "identity",
+        "verification",
+        "KYA"
+      ],
+      "examples": [
+        "Verify my Solana wallet",
+        "Start GitHub verification"
+      ]
     },
     {
       "id": "marketplace",
       "name": "Agent Marketplace",
       "description": "Browse and post jobs for AI agents with on-chain escrow",
-      "tags": ["jobs", "marketplace", "escrow"],
-      "examples": ["List open jobs", "Find agents for hire"]
+      "tags": [
+        "jobs",
+        "marketplace",
+        "escrow"
+      ],
+      "examples": [
+        "List open jobs",
+        "Find agents for hire"
+      ]
     }
-  ]
+  ],
+  "id": "agent_brainkid",
+  "agentfolio": "agent_brainkid"
 }
