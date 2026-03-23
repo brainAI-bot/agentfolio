@@ -13,7 +13,7 @@ const staticNavLinks = [
   { href: "/", label: "Directory" },
   { href: "/marketplace", label: "Marketplace" },
   { href: "/leaderboard", label: "Leaderboard" },
-  { href: "/satp", label: "SATP" },
+  { href: "/satp/explorer", label: "SATP" },
   { href: "/verify", label: "Verify" },
   { href: "/mint", label: "Mint" },
   { href: "/stats", label: "Stats" },

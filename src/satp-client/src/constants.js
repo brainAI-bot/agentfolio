@@ -35,3 +35,7 @@ module.exports = {
   ATTESTATION_V3_SEED, LINKED_WALLET_SEED, MINT_TRACKER_SEED,
   IDENTITY_SEED, REPUTATION_SEED,
 };
+
+// V3 Name Registry seed (added 2026-03-22)
+const NAME_REGISTRY_SEED = 'name_registry';
+module.exports.NAME_REGISTRY_SEED = NAME_REGISTRY_SEED;

@@ -28,6 +28,10 @@ let initiateAgentMailVerification, verifyAgentMailCode;
 try { ({ initiateAgentMailVerification, verifyAgentMailCode } = require('./agentmail-verify-hardened')); } catch(e) { console.warn('[Hardened] agentmail-verify-hardened not loaded:', e.message); }
 let initiateSolanaVerification, verifySolanaSignature;
 try { ({ initiateSolanaVerification, verifySolanaSignature } = require('./solana-verify-hardened')); } catch(e) { console.warn('[Hardened] solana-verify-hardened not loaded:', e.message); }
+let initiateEthVerification, verifyEthSignature;
+try { ({ initiateEthVerification, verifyEthSignature } = require('./eth-verify-hardened')); } catch(e) { console.warn('[Hardened] eth-verify-hardened not loaded:', e.message); }
+let initiateDomainVerification, verifyDomainOwnership;
+try { ({ initiateDomainVerification, verifyDomainOwnership } = require('./domain-verify-hardened')); } catch(e) { console.warn('[Hardened] domain-verify-hardened not loaded:', e.message); }
 // Profile store for SQLite verification + on-chain updates
 let addVerification;
 try { ({ addVerification } = require('../profile-store')); } catch(e) { console.warn('[Hardened] profile-store addVerification not loaded:', e.message); }
@@ -75,6 +79,59 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
 
       try {
         const result = initiateHLVerification(profileId, walletAddress);
+        json(res, 200, result);
+      } catch (e) {
+        json(res, 400, { error: e.message });
+      }
+    })();
+    return true;
+  }
+
+  // Alias: /api/verify/hyperliquid/initiate (profileId in body)
+  if (pathname === '/api/verify/hyperliquid/initiate' && method === 'POST') {
+    (async () => {
+      const parsed = await parseBody(req);
+      const profileId = parsed.profileId;
+      if (!profileId) return json(res, 400, { error: 'profileId required' });
+      const profile = loadProfile?.(profileId, DATA_DIR);
+      if (!profile) return json(res, 404, { error: 'Profile not found' });
+      const walletAddress = parsed.walletAddress || parsed.address || profile.wallets?.hyperliquid;
+      if (!walletAddress) return json(res, 400, { error: 'No Hyperliquid wallet. Provide walletAddress or set it on your profile.' });
+      try {
+        const result = initiateHLVerification(profileId, walletAddress);
+        json(res, 200, result);
+      } catch (e) {
+        json(res, 400, { error: e.message });
+      }
+    })();
+    return true;
+  }
+
+  // Alias: /api/verify/hyperliquid/complete (profileId in body)
+  if (pathname === '/api/verify/hyperliquid/complete' && method === 'POST') {
+    (async () => {
+      const parsed = await parseBody(req);
+      const { challengeId, signature } = parsed;
+      if (!challengeId || !signature) return json(res, 400, { error: 'challengeId and signature required' });
+      try {
+        const result = await completeHLVerification(challengeId, signature);
+        if (result.verified && loadProfile && dbSaveProfileFn) {
+          const profileId = result.profileId;
+          if (profileId) {
+            const profile = loadProfile(profileId, DATA_DIR);
+            if (profile) {
+              profile.verificationData = profile.verificationData || {};
+              profile.verificationData.hyperliquid = {
+                verified: true,
+                address: result.walletAddress,
+                method: 'hardened_sign',
+                verifiedAt: new Date().toISOString(),
+              };
+              profile.updatedAt = new Date().toISOString();
+              dbSaveProfileFn(profile);
+            }
+          }
+        }
         json(res, 200, result);
       } catch (e) {
         json(res, 400, { error: e.message });
@@ -473,8 +530,9 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
   if (pathname === '/api/verify/github/initiate' && method === 'POST' && initiateGitHubVerification) {
     (async () => {
       const parsed = await parseBody(req);
-      const { profileId, username } = parsed;
-      if (!profileId || !username) return json(res, 400, { error: 'profileId and username required' });
+      const { profileId, username, xHandle, handle } = parsed;
+      const xUser = username || xHandle || handle;
+      if (!profileId || !xUser) return json(res, 400, { error: 'profileId and username required' });
       try {
         const result = await initiateGitHubVerification(profileId, username);
         json(res, result.success ? 200 : 400, result);
@@ -499,7 +557,90 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
               profile.updatedAt = new Date().toISOString();
               
               // Save to SQLite + trigger on-chain updates
-              if (addVerification) try { addVerification(profileId, 'github', result.username || result.identifier, { verifiedAt: new Date().toISOString() }); } catch(avErr) { console.error("[Hardened] addVerification:", avErr.message); }
+              if (addVerification) try { addVerification(challenge.challengeData.profileId, 'github', result.username || result.identifier, { verifiedAt: new Date().toISOString() }); } catch(avErr) { console.error("[Hardened] addVerification:", avErr.message); }
+              dbSaveProfileFn(profile);
+              // Fire on-chain attestation for GitHub verification
+              if (postVerificationMemo) postVerificationMemo(challenge.challengeData.profileId, 'github', { username: result.username || result.identifier }).catch(() => {});
+              if (postVerificationOnchainForProfile && profile) postVerificationOnchainForProfile(profile, 'github', { username: result.username || result.identifier });
+            }
+          }
+        }
+        json(res, result.verified ? 200 : 400, result);
+      } catch (e) { json(res, 500, { error: e.message }); }
+    })();
+    return true;
+  }
+
+  // ── ETH Wallet Hardened ──
+  if (pathname === '/api/verify/eth/initiate' && method === 'POST' && initiateEthVerification) {
+    (async () => {
+      const parsed = await parseBody(req);
+      const { profileId, walletAddress } = parsed;
+      if (!profileId || !walletAddress) return json(res, 400, { error: 'profileId and walletAddress required' });
+      try {
+        const result = await initiateEthVerification(profileId, walletAddress);
+        json(res, result.success ? 200 : 400, result);
+      } catch (e) { json(res, 500, { error: e.message }); }
+    })();
+    return true;
+  }
+  if (pathname === '/api/verify/eth/verify' && method === 'POST' && verifyEthSignature) {
+    (async () => {
+      const parsed = await parseBody(req);
+      const { challengeId, signature } = parsed;
+      if (!challengeId || !signature) return json(res, 400, { error: 'challengeId and signature required' });
+      try {
+        const result = await verifyEthSignature(challengeId, signature);
+        if (result.verified && getChallenge) {
+          const challenge = await getChallenge(challengeId);
+          if (challenge && loadProfile && dbSaveProfileFn) {
+            const profile = loadProfile(challenge.challengeData.profileId, DATA_DIR);
+            if (profile) {
+              profile.verificationData = profile.verificationData || {};
+              profile.verificationData.ethereum = { verified: true, address: challenge.challengeData.identifier, method: 'hardened_eip191', verifiedAt: new Date().toISOString() };
+              profile.wallets = profile.wallets || {};
+              profile.wallets.ethereum = challenge.challengeData.identifier;
+              profile.updatedAt = new Date().toISOString();
+              if (addVerification) try { addVerification(challenge.challengeData.profileId, 'ethereum', challenge.challengeData.identifier, { verifiedAt: new Date().toISOString() }); } catch(avErr) { console.error('[Hardened] addVerification:', avErr.message); }
+              dbSaveProfileFn(profile);
+            }
+          }
+        }
+        json(res, result.verified ? 200 : 400, result);
+      } catch (e) { json(res, 500, { error: e.message }); }
+    })();
+    return true;
+  }
+
+  // ── Domain Hardened ──
+  if (pathname === '/api/verify/domain/initiate' && method === 'POST' && initiateDomainVerification) {
+    (async () => {
+      const parsed = await parseBody(req);
+      const { profileId, domain } = parsed;
+      if (!profileId || !domain) return json(res, 400, { error: 'profileId and domain required' });
+      try {
+        const result = await initiateDomainVerification(profileId, domain);
+        json(res, result.success ? 200 : 400, result);
+      } catch (e) { json(res, 500, { error: e.message }); }
+    })();
+    return true;
+  }
+  if (pathname === '/api/verify/domain/verify' && method === 'POST' && verifyDomainOwnership) {
+    (async () => {
+      const parsed = await parseBody(req);
+      const { challengeId } = parsed;
+      if (!challengeId) return json(res, 400, { error: 'challengeId required' });
+      try {
+        const result = await verifyDomainOwnership(challengeId);
+        if (result.verified && getChallenge) {
+          const challenge = await getChallenge(challengeId);
+          if (challenge && loadProfile && dbSaveProfileFn) {
+            const profile = loadProfile(challenge.challengeData.profileId, DATA_DIR);
+            if (profile) {
+              profile.verificationData = profile.verificationData || {};
+              profile.verificationData.domain = { verified: true, domain: challenge.challengeData.identifier, method: 'hardened_dns_wellknown', verifiedAt: new Date().toISOString() };
+              profile.updatedAt = new Date().toISOString();
+              if (addVerification) try { addVerification(challenge.challengeData.profileId, 'domain', challenge.challengeData.identifier, { verifiedAt: new Date().toISOString() }); } catch(avErr) { console.error('[Hardened] addVerification:', avErr.message); }
               dbSaveProfileFn(profile);
             }
           }
@@ -514,10 +655,11 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
   if (pathname === '/api/verify/x/initiate' && method === 'POST' && initiateXVerification) {
     (async () => {
       const parsed = await parseBody(req);
-      const { profileId, username } = parsed;
-      if (!profileId || !username) return json(res, 400, { error: 'profileId and username required' });
+      const { profileId, username, xHandle, handle } = parsed;
+      const xUser = username || xHandle || handle;
+      if (!profileId || !xUser) return json(res, 400, { error: 'profileId and username required' });
       try {
-        const result = await initiateXVerification(profileId, username);
+        const result = await initiateXVerification(profileId, xUser);
         json(res, result.success ? 200 : 400, result);
       } catch (e) { json(res, 500, { error: e.message }); }
     })();
@@ -533,12 +675,35 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
         if (result.verified && getChallenge) {
           const challenge = await getChallenge(challengeId);
           if (challenge && loadProfile && dbSaveProfileFn) {
-            const profile = loadProfile(challenge.challengeData.profileId, DATA_DIR);
+            const profileId = challenge.challengeData.profileId;
+            const xHandle = result.username || challenge.challengeData.identifier || '';
+            const profile = loadProfile(profileId, DATA_DIR);
             if (profile) {
+              // Bug 1 fix: Save the ACTUAL X handle, not profileId
               profile.verificationData = profile.verificationData || {};
-              profile.verificationData.x = { ...result, method: 'hardened_tweet', verifiedAt: new Date().toISOString() };
+              profile.verificationData.x = {
+                verified: true,
+                handle: xHandle,
+                username: xHandle,
+                address: xHandle,
+                tweetUrl: result.tweetUrl,
+                tweetId: result.tweetId,
+                method: 'hardened_tweet',
+                verifiedAt: new Date().toISOString(),
+                stats: result.stats || {},
+              };
+              // Also update links.x
+              if (!profile.links) profile.links = {};
+              profile.links.x = xHandle;
               profile.updatedAt = new Date().toISOString();
               dbSaveProfileFn(profile);
+              // Bug 2 fix: Fire attestation TX
+              try {
+                const { postVerificationMemo } = require('./memo-attestation');
+                postVerificationMemo(profileId, 'x', { handle: xHandle, tweetUrl: result.tweetUrl })
+                  .then(r => { if (r && r.txSignature) console.log('[X Verify] Attestation TX:', r.explorerUrl); })
+                  .catch(e => console.error('[X Verify] Attestation failed:', e.message));
+              } catch (e) { console.error('[X Verify] Attestation module error:', e.message); }
             }
           }
         }
