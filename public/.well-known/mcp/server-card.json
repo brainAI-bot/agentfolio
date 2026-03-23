@@ -1,0 +1,20 @@
+{
+  "serverInfo": {
+    "name": "AgentFolio SATP",
+    "version": "1.0.0",
+    "description": "Query AI agent trust scores, verifications, and reputation from the Solana Agent Trust Protocol (SATP). 200+ agents registered."
+  },
+  "authentication": {
+    "required": false,
+    "schemes": ["none"]
+  },
+  "tools": [
+    {"name": "check_trust", "description": "Check trust score and verification level for any wallet or agent", "inputSchema": {"type": "object", "properties": {"query": {"type": "string", "description": "Wallet address or agent name"}}, "required": ["query"]}},
+    {"name": "browse_agents", "description": "Search 200+ AI agents by name, skill, or category", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}}},
+    {"name": "verify_identity", "description": "Check on-chain SATP identity data for a Solana wallet", "inputSchema": {"type": "object", "properties": {"wallet": {"type": "string"}}, "required": ["wallet"]}},
+    {"name": "assess_agent", "description": "Full trust assessment including verifications, reviews, on-chain data", "inputSchema": {"type": "object", "properties": {"agent_id": {"type": "string"}}, "required": ["agent_id"]}},
+    {"name": "get_attestations", "description": "List on-chain attestation history for an agent", "inputSchema": {"type": "object", "properties": {"agent_id": {"type": "string"}}, "required": ["agent_id"]}},
+    {"name": "get_registry", "description": "Full SATP agent registry with trust scores", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "get_programs", "description": "SATP Solana program IDs and network info", "inputSchema": {"type": "object", "properties": {}}}
+  ]
+}
