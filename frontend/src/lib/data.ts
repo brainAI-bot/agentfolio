@@ -251,7 +251,7 @@ function loadAllProfiles(): Agent[] {
     agents.sort((a, b) => (b.verificationLevel ?? b.tier) - (a.verificationLevel ?? a.tier) || b.trustScore - a.trustScore);
     // Filter out test profiles from public views
     const TEST_IDS = ["test_satp", "test-no-sig", "test-check-id", "ghosttest", "ghosttest3806"];
-    const TEST_EXACT_NAMES = ["SmokeTest", "TestCLI", "CEOTestAgent", "test", "E2E-Test-Agent", "BrainForgeQA", "brainTEST", "ghosttest", "ghost_test_3806"];
+    const TEST_EXACT_NAMES = ["SmokeTest", "TestCLI", "CEOTestAgent", "test", "E2E-Test-Agent", "BrainForgeQA", "ghosttest", "ghost_test_3806"];
     agents = agents.filter(a => !TEST_EXACT_NAMES.includes(a.name) && !TEST_IDS.some(t => a.id?.includes(t)));
     // Filter ghost profiles: unclaimed with no trust score
     // Show all profiles including unclaimed (CEO Mar 23)

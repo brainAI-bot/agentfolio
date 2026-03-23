@@ -18133,10 +18133,34 @@ res.writeHead(200, { 'Content-Type': 'text/html' });
   }
 
   
-  // GET /api/satp/explorer/agents — Server-side on-chain agent data (with NFT avatars)
+  // GET /api/satp/explorer/agents — Server-side on-chain agent data (with NFT avatars + V3 scores)
   else if (url.pathname === '/api/satp/explorer/agents' && req.method === 'GET') {
     const { getSatpAgents } = require('./routes/satp-explorer-api');
-    getSatpAgents().then(result => {
+    getSatpAgents().then(async (result) => {
+      // Enrich each V2 agent with V3 Genesis Record scores
+      const agents = result.agents || [];
+      const enrichedAgents = [];
+      for (const agent of agents) {
+        // Try to find matching profile by wallet (authority)
+        const profile = findProfileByWallet(agent.authority);
+        if (profile) {
+          // Get V3 on-chain scores (cached)
+          const satpScores = await getOnChainScores(profile.id).catch(() => null);
+          if (satpScores) {
+            agent.reputationScore = satpScores.trustScore;
+            agent.verificationLevel = satpScores.verificationLevel;
+          } else {
+            // Fallback: compute from chain-cache
+            const canon = getCanonicalScore(profile);
+            if (canon && canon.score > 0) {
+              agent.reputationScore = canon.score;
+              agent.verificationLevel = canon.verificationLevel;
+            }
+          }
+        }
+        enrichedAgents.push(agent);
+      }
+      result.agents = enrichedAgents;
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=60' });
       res.end(JSON.stringify(result));
     }).catch(e => {
