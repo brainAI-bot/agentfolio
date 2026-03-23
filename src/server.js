@@ -24849,6 +24849,76 @@ ${THEME_SCRIPT}
   }
   
   // API: List jobs
+  
+  // GET /api/marketplace/wallet/:addr — find jobs by wallet address
+  else if (url.pathname.match(/^\/api\/marketplace\/wallet\/[A-Za-z0-9]+$/) && req.method === 'GET') {
+    const walletAddr = url.pathname.split('/').pop();
+    trackApiCall('/api/marketplace/wallet/:addr');
+    try {
+      const { listJobs } = require('./lib/marketplace');
+      const allProfiles = listProfiles(DATA_DIR);
+      // Find profile(s) with this wallet
+      const matchedProfiles = allProfiles.filter(p => 
+        p.wallets?.solana === walletAddr || p.wallets?.ethereum === walletAddr
+      );
+      const profileIds = matchedProfiles.map(p => p.id);
+      
+      if (profileIds.length === 0) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ wallet: walletAddr, profile: null, postedJobs: [], appliedJobs: [], message: 'No profile found for this wallet' }));
+        return;
+      }
+
+      const result = listJobs({ limit: 100 });
+      const allJobs = result.jobs || [];
+      const postedJobs = allJobs.filter(j => profileIds.includes(j.clientId));
+      const appliedJobs = []; // Would need applications table lookup
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        wallet: walletAddr,
+        profiles: matchedProfiles.map(p => ({ id: p.id, name: p.name })),
+        postedJobs: postedJobs.map(j => ({ id: j.id, title: j.title, status: j.status, budget: j.budgetAmount + ' ' + j.budgetCurrency, createdAt: j.createdAt })),
+        appliedJobs,
+      }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+  // GET /api/marketplace/agent/:id — find jobs by agent profile ID
+  else if (url.pathname.match(/^\/api\/marketplace\/agent\/[A-Za-z0-9_-]+$/) && req.method === 'GET') {
+    const agentId = url.pathname.split('/').pop();
+    trackApiCall('/api/marketplace/agent/:id');
+    try {
+      const { listJobs, getJobApplications } = require('./lib/marketplace');
+      const profile = loadProfile(agentId, DATA_DIR);
+      if (!profile) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Agent not found' }));
+        return;
+      }
+      
+      const result = listJobs({ limit: 200 });
+      const allJobs = result.jobs || [];
+      const postedJobs = allJobs.filter(j => j.clientId === agentId);
+      const assignedJobs = allJobs.filter(j => j.selectedAgentId === agentId);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        agent: { id: profile.id, name: profile.name, handle: profile.handle },
+        postedJobs: postedJobs.map(j => ({ id: j.id, title: j.title, status: j.status, budget: j.budgetAmount + ' ' + j.budgetCurrency, createdAt: j.createdAt })),
+        assignedJobs: assignedJobs.map(j => ({ id: j.id, title: j.title, status: j.status, budget: j.budgetAmount + ' ' + j.budgetCurrency, assignedAt: j.selectedAt })),
+        totalPosted: postedJobs.length,
+        totalAssigned: assignedJobs.length,
+      }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
   else if (url.pathname === '/api/marketplace/jobs' && req.method === 'GET') {
     const filters = {
       status: url.searchParams.get('status') || 'open',
