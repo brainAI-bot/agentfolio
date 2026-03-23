@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { ReactNode } from "react";
+import { ReactNode, useState, useEffect } from "react";
 
 const WalletProvider = dynamic(
   () => import("@/components/WalletProvider").then(m => m.WalletProvider),
@@ -9,5 +9,24 @@ const WalletProvider = dynamic(
 );
 
 export function ClientProviders({ children }: { children: ReactNode }) {
+  const [walletReady, setWalletReady] = useState(false);
+
+  useEffect(() => {
+    // Defer wallet adapter JS loading until after initial paint
+    // This prevents 500KB+ of Solana wallet code from blocking FCP/LCP
+    const load = () => setWalletReady(true);
+    if ("requestIdleCallback" in window) {
+      (window as any).requestIdleCallback(load, { timeout: 3000 });
+    } else {
+      setTimeout(load, 1500);
+    }
+  }, []);
+
+  if (!walletReady) {
+    // Render children without WalletProvider — hooks return disconnected defaults
+    // Navbar shows connect button in disabled/disconnected state (no errors, just console warns)
+    return <>{children}</>;
+  }
+
   return <WalletProvider>{children}</WalletProvider>;
 }
