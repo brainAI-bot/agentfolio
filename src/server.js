@@ -18311,6 +18311,108 @@ res.writeHead(200, { 'Content-Type': 'text/html' });
   }
   
   // List profiles by availability
+  // GET /api/agents — Paginated agent listing for frontend LeaderboardTable
+  else if (url.pathname === '/api/agents' && req.method === 'GET') {
+    trackApiCall('/api/agents');
+    const page = Math.max(1, parseInt(url.searchParams.get('page') || '1'));
+    const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '24')));
+    const search = (url.searchParams.get('q') || '').toLowerCase();
+    const sort = url.searchParams.get('sort') || 'trustScore';
+    const skill = url.searchParams.get('skill') || '';
+
+    let profiles = listProfiles(DATA_DIR);
+    
+    // Filter test profiles
+    const TEST_IDS_AGENTS = ['test_satp', 'test-no-sig', 'test-check-id', 'ghosttest', 'ghosttest3806'];
+    const TEST_NAMES_AGENTS = ['SmokeTest', 'TestCLI', 'CEOTestAgent', 'test', 'E2E-Test-Agent', 'BrainForgeQA', 'brainTEST', 'ghosttest', 'ghost_test_3806'];
+    profiles = profiles.filter(p => {
+      if (TEST_NAMES_AGENTS.includes(p.name)) return false;
+      if (TEST_IDS_AGENTS.some(t => (p.id || '').includes(t))) return false;
+      return true;
+    });
+
+    // Search
+    if (search) {
+      profiles = profiles.filter(p =>
+        (p.name || '').toLowerCase().includes(search) ||
+        (p.handle || '').toLowerCase().includes(search) ||
+        (p.skills || []).some(s => ((typeof s === 'string' ? s : s.name) || '').toLowerCase().includes(search))
+      );
+    }
+
+    // Skill filter
+    if (skill) {
+      profiles = profiles.filter(p =>
+        (p.skills || []).some(s => (typeof s === 'string' ? s : s.name) === skill)
+      );
+    }
+
+    // Sort
+    switch (sort) {
+      case 'newest':
+        profiles.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        break;
+      case 'jobs':
+        profiles.sort((a, b) => (b.stats?.jobsCompleted || 0) - (a.stats?.jobsCompleted || 0));
+        break;
+      case 'rating':
+        profiles.sort((a, b) => (b.stats?.rating || 0) - (a.stats?.rating || 0));
+        break;
+      default: // trustScore
+        profiles.sort((a, b) => getCanonicalScore(b).score - getCanonicalScore(a).score);
+        break;
+    }
+
+    const total = profiles.length;
+    const totalPages = Math.ceil(total / limit);
+    const start = (page - 1) * limit;
+    const paged = profiles.slice(start, start + limit);
+
+    // Lightweight agent objects
+    const agents = paged.map(p => {
+      const canon = getCanonicalScore(p);
+      const vd = p.verificationData || {};
+      const skills = [...new Set((p.skills || []).map(s => typeof s === 'string' ? s : (s.name || '')).filter(Boolean))];
+      return {
+        id: p.id,
+        name: p.name,
+        handle: p.handle || '',
+        bio: (p.bio || '').slice(0, 120),
+        avatar: p.avatar || '',
+        nftAvatar: p.nftAvatar || null,
+        trustScore: canon.score,
+        tier: canon.tier === 'elite' ? 4 : canon.tier === 'gold' ? 3 : canon.tier === 'silver' ? 2 : canon.tier === 'bronze' ? 1 : 0,
+        skills: skills.slice(0, 5),
+        verificationLevel: canon.verificationLevel || 0,
+        verificationBadge: ['⚪','🟡','🔵','🟢','🟠','🟣'][canon.verificationLevel || 0] || '⚪',
+        verificationLevelName: ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'][canon.verificationLevel || 0] || 'Unclaimed',
+        reputationScore: canon.score,
+        reputationRank: ['Newcomer','Recognized','Competent','Expert','Master'][Math.min(Math.floor(canon.score / 250), 4)] || 'Newcomer',
+        jobsCompleted: p.stats?.jobsCompleted || 0,
+        rating: p.stats?.rating || 0,
+        registeredAt: p.createdAt || '',
+        status: p.unclaimed ? 'unclaimed' : 'online',
+        unclaimed: p.unclaimed || false,
+        verifications: {
+          solana: vd.solana?.verified ? { verified: true } : undefined,
+          github: vd.github?.verified ? { verified: true } : undefined,
+          x: (vd.x?.verified || vd.twitter?.verified) ? { verified: true } : undefined,
+          satp: vd.satp?.verified ? { verified: true } : undefined,
+          ethereum: vd.ethereum?.verified ? { verified: true } : undefined,
+          agentmail: vd.agentmail?.verified ? { verified: true } : undefined,
+        },
+      };
+    });
+
+    // Collect all skills for filter dropdown
+    const allProfiles = listProfiles(DATA_DIR);
+    const allSkills = [...new Set(allProfiles.flatMap(p => (p.skills || []).map(s => typeof s === 'string' ? s : (s.name || '')).filter(Boolean)))].sort();
+
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' });
+    res.end(JSON.stringify({ agents, total, totalPages, page, limit, allSkills }));
+    return;
+  }
+
   else if (url.pathname === '/api/profiles/available') {
     trackApiCall('/api/profiles/available');
     const status = url.searchParams.get('status') || null;
