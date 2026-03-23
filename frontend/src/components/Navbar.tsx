@@ -1,19 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { Menu, X, Terminal } from "lucide-react";
 import { useState, useCallback } from "react";
-
-const NavbarWalletButton = dynamic(
-  () => import("@/components/NavbarWalletButton").then(m => m.NavbarWalletButton),
-  { ssr: false, loading: () => <div className="hidden md:block w-[140px] h-[36px] rounded-lg animate-pulse" style={{ background: "rgba(153,69,255,0.08)" }} /> }
-);
-
-const MobileWalletSection = dynamic(
-  () => import("@/components/NavbarWalletButton").then(m => m.MobileWalletSection),
-  { ssr: false }
-);
+import { NavbarWalletButton, MobileWalletSection } from "@/components/NavbarWalletButton";
 
 const staticNavLinks = [
   { href: "/", label: "Directory" },
