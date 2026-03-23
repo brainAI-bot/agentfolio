@@ -116,23 +116,40 @@ function getCanonicalScore(profileOrId) {
   if (!profileId) return { score: 0, tier: 'unverified', verificationLevel: 0, source: 'none' };
   
   const genesis = chainCache.getScore(profileId);
-  if (genesis && genesis.reputationScore !== undefined) {
-    const score = genesis.reputationScore;
-    let tier;
-    if (score >= 500) tier = 'sovereign';
-    else if (score >= 400) tier = 'trusted';
-    else if (score >= 300) tier = 'established';
-    else if (score >= 200) tier = 'verified';
-    else if (score >= 100) tier = 'registered';
-    else tier = 'unverified';
-    return { 
-      score, 
-      tier, 
-      verificationLevel: genesis.verificationLevel || 0, 
-      source: genesis.source || 'genesis' 
-    };
+  let score = 0;
+  let source = 'none';
+  let verificationLevel = 0;
+  
+  if (genesis && genesis.reputationScore !== undefined && genesis.reputationScore > 0) {
+    score = genesis.reputationScore;
+    verificationLevel = genesis.verificationLevel || 0;
+    source = genesis.source || 'genesis';
+  } else {
+    // Fallback: use v2 scoring calculator for profiles with verifications but no on-chain score
+    try {
+      const { getProfileScoring } = require('./lib/scoring-v2');
+      const scoring = getProfileScoring(profileId);
+      if (scoring) {
+        score = scoring.trustScore || 0;
+        // Map v2 level to numeric: L1=1, L2=2, L3=3, L4=4, L5=5
+        const levelNum = parseInt((scoring.level || 'L1').replace('L', '')) || 1;
+        verificationLevel = levelNum;
+        source = 'v2-calculator';
+      }
+    } catch (e) {
+      // v2 scoring not available, fall through to zero
+    }
   }
-  return { score: 0, tier: 'unverified', verificationLevel: 0, source: 'none' };
+  
+  let tier;
+  if (score >= 500) tier = 'sovereign';
+  else if (score >= 400) tier = 'trusted';
+  else if (score >= 300) tier = 'established';
+  else if (score >= 200) tier = 'verified';
+  else if (score >= 100) tier = 'registered';
+  else tier = 'unverified';
+  
+  return { score, tier, verificationLevel, source };
 }
 const { postTrustScoreMemo } = require('./lib/memo-trust-score');
 const { postVerificationOnchain, postReputationOnchain } = require('./lib/verification-onchain');
@@ -17873,7 +17890,7 @@ res.writeHead(200, { 'Content-Type': 'text/html' });
           tier,
           score: trustScore,
           walletAddress: profile.wallets?.solana || profile.wallets?.ethereum || null,
-          verificationLevel: satpScores ? satpScores.verificationLevel : null,
+          verificationLevel: satpScores ? satpScores.verificationLevel : (canon.verificationLevel || null),
           unclaimed: profile.unclaimed || false,
           verificationProofs: (() => {
             const proofs = buildVerificationProofs(profile.verificationData);
