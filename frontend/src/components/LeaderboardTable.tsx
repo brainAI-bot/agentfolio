@@ -1,76 +1,71 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type { Agent } from "@/lib/types";
 import { AgentCard } from "./AgentCard";
 import { SearchBar } from "./SearchBar";
-import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 
 interface LeaderboardTableProps {
-  agents: Agent[];
+  agents: Agent[]; // Initial page from SSR
+  totalAgents?: number;
+  allSkills?: string[];
 }
 
 type SortKey = "trustScore" | "newest" | "jobs" | "rating";
 
 const PAGE_SIZE = 24;
 
-export function LeaderboardTable({ agents }: LeaderboardTableProps) {
+export function LeaderboardTable({ agents: initialAgents, totalAgents: initialTotal, allSkills: initialSkills }: LeaderboardTableProps) {
+  const [agents, setAgents] = useState<Agent[]>(initialAgents);
+  const [total, setTotal] = useState(initialTotal || initialAgents.length);
+  const [allSkills, setAllSkills] = useState<string[]>(initialSkills || []);
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("trustScore");
-  const [filterSkill, setFilterSkill] = useState<string>("");
+  const [filterSkill, setFilterSkill] = useState("");
   const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const allSkills = useMemo(() => {
-    const s = new Set<string>();
-    agents.forEach((a) => a.skills.forEach((sk) => s.add(sk)));
-    return Array.from(s).sort();
-  }, [agents]);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const filtered = useMemo(() => {
-    let result = [...agents];
-
-    if (search) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (a) =>
-          a.name.toLowerCase().includes(q) ||
-          a.skills.some((s) => s.toLowerCase().includes(q)) ||
-          a.handle.toLowerCase().includes(q)
-      );
+  const fetchAgents = useCallback(async (p: number, q: string, sort: string, skill: string) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(p), limit: String(PAGE_SIZE), sort });
+      if (q) params.set("q", q);
+      if (skill) params.set("skill", skill);
+      const res = await fetch(`/api/agents?${params}`);
+      if (!res.ok) throw new Error("fetch failed");
+      const data = await res.json();
+      setAgents(data.agents);
+      setTotal(data.total);
+      if (data.allSkills) setAllSkills(data.allSkills);
+    } catch {
+      // Fall back to initial data on error
+    } finally {
+      setLoading(false);
     }
+  }, []);
 
-    if (filterSkill) {
-      result = result.filter((a) => a.skills.includes(filterSkill));
-    }
+  // Fetch when page/sort/skill changes (not search — that's debounced)
+  useEffect(() => {
+    // Skip initial render if page 1 with default params (we have SSR data)
+    if (page === 1 && sortBy === "trustScore" && !filterSkill && !search) return;
+    fetchAgents(page, search, sortBy, filterSkill);
+  }, [page, sortBy, filterSkill]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    switch (sortBy) {
-      case "trustScore":
-        result.sort((a, b) => b.trustScore - a.trustScore);
-        break;
-      case "newest":
-        result.sort((a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime());
-        break;
-      case "jobs":
-        result.sort((a, b) => b.jobsCompleted - a.jobsCompleted);
-        break;
-      case "rating":
-        result.sort((a, b) => b.rating - a.rating);
-        break;
-    }
-
-    return result;
-  }, [agents, search, sortBy, filterSkill]);
-
-  // Reset page when filters change
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const startIdx = (currentPage - 1) * PAGE_SIZE;
-  const paged = filtered.slice(startIdx, startIdx + PAGE_SIZE);
-
-  // Reset to page 1 when search/filter/sort changes
-  const handleSearch = (v: string) => { setSearch(v); setPage(1); };
+  // Debounced search
+  const handleSearch = (v: string) => {
+    setSearch(v);
+    setPage(1);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchAgents(1, v, sortBy, filterSkill), 300);
+  };
   const handleSort = (v: SortKey) => { setSortBy(v); setPage(1); };
   const handleFilter = (v: string) => { setFilterSkill(v); setPage(1); };
+
+  const startIdx = (page - 1) * PAGE_SIZE;
 
   return (
     <div>
@@ -135,14 +130,19 @@ export function LeaderboardTable({ agents }: LeaderboardTableProps) {
         <span className="hidden md:block w-[120px]">Stats</span>
       </div>
 
-      {/* Rows — paginated */}
-      <div className="rounded-lg overflow-hidden" style={{ border: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
-        {paged.length === 0 ? (
+      {/* Rows */}
+      <div className="rounded-lg overflow-hidden relative" style={{ border: "1px solid var(--border)", background: "var(--bg-secondary)", minHeight: 200 }}>
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center z-10" style={{ background: "rgba(0,0,0,0.3)" }}>
+            <Loader2 size={24} className="animate-spin" style={{ color: "var(--accent)" }} />
+          </div>
+        )}
+        {agents.length === 0 ? (
           <div className="px-4 py-8 text-center text-sm" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
-            No agents found matching &ldquo;{search}&rdquo;
+            {search ? <>No agents found matching &ldquo;{search}&rdquo;</> : "No agents found"}
           </div>
         ) : (
-          paged.map((agent, i) => (
+          agents.map((agent, i) => (
             <AgentCard key={agent.id} agent={agent} rank={startIdx + i + 1} />
           ))
         )}
@@ -151,21 +151,21 @@ export function LeaderboardTable({ agents }: LeaderboardTableProps) {
       {/* Pagination + Count */}
       <div className="mt-3 flex items-center justify-between">
         <div className="text-[11px]" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-          Showing {startIdx + 1}–{Math.min(startIdx + PAGE_SIZE, filtered.length)} of {filtered.length} agents
+          Showing {startIdx + 1}&ndash;{Math.min(startIdx + PAGE_SIZE, total)} of {total} agents
         </div>
         {totalPages > 1 && (
           <div className="flex items-center gap-1">
             <button
-              onClick={() => setPage(Math.max(1, currentPage - 1))}
-              disabled={currentPage <= 1}
+              onClick={() => setPage(Math.max(1, page - 1))}
+              disabled={page <= 1}
               className="p-1.5 rounded transition-colors disabled:opacity-30"
-              style={{ color: "var(--text-secondary)", background: currentPage > 1 ? "var(--bg-primary)" : "transparent", border: "1px solid var(--border)" }}
+              style={{ color: "var(--text-secondary)", background: page > 1 ? "var(--bg-primary)" : "transparent", border: "1px solid var(--border)" }}
               aria-label="Previous page"
             >
               <ChevronLeft size={14} />
             </button>
             {Array.from({ length: totalPages }, (_, i) => i + 1)
-              .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2)
+              .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 2)
               .reduce<(number | string)[]>((acc, p, idx, arr) => {
                 if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push("...");
                 acc.push(p);
@@ -181,9 +181,9 @@ export function LeaderboardTable({ agents }: LeaderboardTableProps) {
                     className="px-2.5 py-1 rounded text-[11px] transition-colors"
                     style={{
                       fontFamily: "var(--font-mono)",
-                      background: p === currentPage ? "var(--accent)" : "var(--bg-primary)",
-                      color: p === currentPage ? "#fff" : "var(--text-secondary)",
-                      border: "1px solid " + (p === currentPage ? "var(--accent)" : "var(--border)"),
+                      background: p === page ? "var(--accent)" : "var(--bg-primary)",
+                      color: p === page ? "#fff" : "var(--text-secondary)",
+                      border: "1px solid " + (p === page ? "var(--accent)" : "var(--border)"),
                     }}
                   >
                     {p}
@@ -191,10 +191,10 @@ export function LeaderboardTable({ agents }: LeaderboardTableProps) {
                 )
               )}
             <button
-              onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
-              disabled={currentPage >= totalPages}
+              onClick={() => setPage(Math.min(totalPages, page + 1))}
+              disabled={page >= totalPages}
               className="p-1.5 rounded transition-colors disabled:opacity-30"
-              style={{ color: "var(--text-secondary)", background: currentPage < totalPages ? "var(--bg-primary)" : "transparent", border: "1px solid var(--border)" }}
+              style={{ color: "var(--text-secondary)", background: page < totalPages ? "var(--bg-primary)" : "transparent", border: "1px solid var(--border)" }}
               aria-label="Next page"
             >
               <ChevronRight size={14} />
