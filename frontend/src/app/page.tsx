@@ -294,15 +294,17 @@ export default async function HomePage() {
               style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
             >
               <div
-                className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold shrink-0"
+                className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold shrink-0 overflow-hidden"
                 style={{
                   background: resolveAvatar(agent)
-                    ? `url(${resolveAvatar(agent)}) center/cover`
+                    ? "transparent"
                     : "linear-gradient(135deg, var(--accent), #7c3aed)",
                   color: "#fff",
                 }}
               >
-                {!resolveAvatar(agent) && agent.name.charAt(0).toUpperCase()}
+                {resolveAvatar(agent) ? (
+                  <img src={resolveAvatar(agent)!} alt={agent.name} width={48} height={48} loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                ) : agent.name.charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
