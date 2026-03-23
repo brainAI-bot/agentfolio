@@ -1,4 +1,5 @@
 "use client";
+import { WalletRequired } from "@/components/WalletRequired";
 
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
@@ -145,6 +146,7 @@ export default function EditProfilePage({ params }: { params: Promise<{ id: stri
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
+      <WalletRequired />
         <Loader2 className="w-6 h-6 animate-spin" style={{ color: "var(--accent)" }} />
       </div>
     );
