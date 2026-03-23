@@ -6602,3 +6602,10 @@
 {"level":"info","message":"[delegation] Schema initialized","service":"agentfolio","timestamp":"2026-03-23T12:11:57.008Z"}
 {"env":"production","level":"info","message":"AgentFolio server started","pid":135968,"port":"3333","service":"agentfolio","timestamp":"2026-03-23T12:11:57.013Z"}
 {"endpoints":["GET / - Profile directory","GET /profile/:id - Profile page","GET /api/profiles - JSON list","GET /api/search?q= - Search","POST /api/webhooks - Register webhook","WS /ws - Real-time feed"],"level":"info","message":"Available endpoints","service":"agentfolio","timestamp":"2026-03-23T12:11:57.014Z"}
+{"level":"info","message":"[ChainSync] Found 17 on-chain identity accounts","service":"agentfolio","timestamp":"2026-03-23T12:12:57.102Z"}
+{"level":"info","message":"[ChainSync] Found 17 on-chain identity accounts","service":"agentfolio","timestamp":"2026-03-23T12:16:57.123Z"}
+{"level":"info","message":"[delegation] Schema initialized","service":"agentfolio","timestamp":"2026-03-23T12:17:07.991Z"}
+{"env":"production","level":"info","message":"AgentFolio server started","pid":138681,"port":"3333","service":"agentfolio","timestamp":"2026-03-23T12:17:07.996Z"}
+{"endpoints":["GET / - Profile directory","GET /profile/:id - Profile page","GET /api/profiles - JSON list","GET /api/search?q= - Search","POST /api/webhooks - Register webhook","WS /ws - Real-time feed"],"level":"info","message":"Available endpoints","service":"agentfolio","timestamp":"2026-03-23T12:17:07.997Z"}
+{"duration":"7ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-23T12:17:19.193Z"}
+{"duration":"7ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-23T12:17:19.365Z"}

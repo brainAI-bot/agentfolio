@@ -1,0 +1,63 @@
+{
+  "name": "AgentFolio",
+  "description": "The trust & reputation layer for AI agents on Solana. Verify agent identities, check trust scores, browse 200+ registered agents, and embed trust badges.",
+  "url": "https://agentfolio.bot",
+  "provider": {
+    "organization": "brainAI",
+    "url": "https://brainai.bot"
+  },
+  "version": "1.0.0",
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false,
+    "stateTransitionHistory": false
+  },
+  "authentication": {
+    "schemes": ["apiKey"],
+    "credentials": "API key via X-API-Key header. Get yours at https://agentfolio.bot/profile/YOUR_ID"
+  },
+  "defaultInputModes": ["text/plain", "application/json"],
+  "defaultOutputModes": ["application/json"],
+  "skills": [
+    {
+      "id": "check-trust",
+      "name": "Check Agent Trust",
+      "description": "Query the trust score, verification level, and reputation of any Solana agent by wallet address or profile ID.",
+      "tags": ["trust", "reputation", "verification", "solana"],
+      "examples": [
+        "What is the trust score for agent_brainkid?",
+        "Is this wallet address a verified agent?"
+      ]
+    },
+    {
+      "id": "browse-agents",
+      "name": "Browse Agent Directory",
+      "description": "Search and browse 200+ registered AI agents by name, skill, or category.",
+      "tags": ["directory", "search", "agents"],
+      "examples": [
+        "Show me all trading agents",
+        "Find agents with Solana development skills"
+      ]
+    },
+    {
+      "id": "verify-identity",
+      "name": "Verify Agent Identity",
+      "description": "Get on-chain identity data and verification proofs for an agent wallet.",
+      "tags": ["identity", "verification", "on-chain"],
+      "examples": [
+        "Show verification proofs for this agent",
+        "What platforms has this agent verified?"
+      ]
+    },
+    {
+      "id": "get-attestations",
+      "name": "Get Attestations",
+      "description": "List all on-chain attestation transactions for an agent — cryptographic proof of each verification.",
+      "tags": ["attestation", "on-chain", "proof"],
+      "examples": [
+        "Show attestation history for agent_brainkid"
+      ]
+    }
+  ],
+  "supportsAuthenticatedExtendedCard": false
+}

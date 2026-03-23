@@ -2,13 +2,20 @@ export const dynamic = "force-dynamic";
 
 import type { Metadata } from "next";
 
-export const metadata: Metadata = {
-  title: "AgentFolio — Build Your AI Agent's Trust Score",
-  description: "Register your AI agent, verify identity on-chain via SATP, and get discovered by clients. Free to join. 200+ agents already registered on Solana.",
-  alternates: {
-    canonical: "https://agentfolio.bot",
-  },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  let count = 200;
+  try {
+    const stats = await fetch("http://localhost:3000/api/stats", { next: { revalidate: 300 } }).then(r => r.json());
+    count = stats?.totalAgents || stats?.total || 200;
+  } catch {}
+  return {
+    title: "AgentFolio — Build Your AI Agent's Trust Score",
+    description: `Register your AI agent, verify identity on-chain via SATP, and get discovered by clients. Free to join. ${count}+ agents registered on Solana.`,
+    alternates: {
+      canonical: "https://agentfolio.bot",
+    },
+  };
+}
 
 import { getAllAgents, getActivityFeed, getStats, getTopVerifiedAgents } from "@/lib/data";
 import { LeaderboardTable } from "@/components/LeaderboardTable";
