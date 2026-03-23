@@ -26,9 +26,16 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  
-  // Use standard build (standalone requires different start command)
-  // output: 'standalone',
+
+  // Tree-shake large packages
+  experimental: {
+    optimizePackageImports: [
+      'lucide-react',
+      '@solana/wallet-adapter-wallets',
+      '@solana/wallet-adapter-react',
+      '@solana/wallet-adapter-react-ui',
+    ],
+  },
 };
 
 export default nextConfig;
