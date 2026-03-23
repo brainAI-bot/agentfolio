@@ -58,7 +58,7 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
       <div className="rounded-xl border p-8 text-center" style={{ background: "var(--bg-secondary)", borderColor: "var(--accent)" }}>
         <div className="mb-4">
           <div className="w-32 h-32 mx-auto rounded-full overflow-hidden border-4" style={{ borderColor: "var(--accent)" }}>
-            <img src={currentAvatar.image} alt="Permanent Avatar" className="w-full h-full object-cover" />
+            <img loading="lazy" src={currentAvatar.image} alt="Permanent Avatar" className="w-full h-full object-cover" />
           </div>
         </div>
         <div className="flex items-center justify-center gap-2 mb-2">
@@ -263,7 +263,7 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
               >
                 <div className="aspect-square bg-black/20">
                   {nft.image ? (
-                    <img src={nft.image} alt={nft.name || "NFT"} className="w-full h-full object-cover" />
+                    <img loading="lazy" src={nft.image} alt={nft.name || "NFT"} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center">
                       <Image size={32} style={{ color: "var(--text-tertiary)" }} />
@@ -297,7 +297,7 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
         <div className="flex flex-col items-center">
           <div className="w-48 h-48 rounded-xl overflow-hidden border-2 mb-6" style={{ borderColor: "#f97316" }}>
             {state.selectedNFT.image ? (
-              <img src={state.selectedNFT.image} alt={state.selectedNFT.name || "NFT"} className="w-full h-full object-cover" />
+              <img loading="lazy" src={state.selectedNFT.image} alt={state.selectedNFT.name || "NFT"} className="w-full h-full object-cover" />
             ) : (
               <div className="w-full h-full flex items-center justify-center bg-black/20">
                 <Image size={48} style={{ color: "var(--text-tertiary)" }} />
@@ -353,7 +353,7 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
 
           <div className="w-24 h-24 rounded-full overflow-hidden border-2 mb-6 opacity-75" style={{ borderColor: "#ef4444" }}>
             {state.selectedNFT.image && (
-              <img src={state.selectedNFT.image} alt="" className="w-full h-full object-cover" />
+              <img loading="lazy" src={state.selectedNFT.image} alt="" className="w-full h-full object-cover" />
             )}
           </div>
 
@@ -432,7 +432,7 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
             className="w-40 h-40 mx-auto rounded-full overflow-hidden border-4"
             style={{ borderColor: "var(--accent)", boxShadow: "0 0 40px rgba(var(--accent-rgb), 0.3)" }}
           >
-            {avatar?.image && <img src={avatar.image} alt="Your permanent face" className="w-full h-full object-cover" />}
+            {avatar?.image && <img loading="lazy" src={avatar.image} alt="Your permanent face" className="w-full h-full object-cover" />}
           </div>
         </div>
 
