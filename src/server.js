@@ -16536,6 +16536,11 @@ res.writeHead(200, { 'Content-Type': 'text/html' });
   
   // DID Configuration (domain linkage)
   // Serve .well-known verification files for agentfolio.bot domain
+  else if (url.pathname === '/.well-known/mcp/server-card.json') {
+    const p = require('path').join(__dirname, '..', 'public', '.well-known', 'mcp', 'server-card.json');
+    if (require('fs').existsSync(p)) { res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }); res.end(require('fs').readFileSync(p, 'utf-8')); } else { res.writeHead(404); res.end('{}'); }
+    return;
+  }
   else if (url.pathname === '/.well-known/agent.json') {
     const agentJsonPath = require('path').join(__dirname, '..', 'public', '.well-known', 'agent.json');
     if (require('fs').existsSync(agentJsonPath)) {
