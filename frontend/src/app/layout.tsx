@@ -4,7 +4,7 @@ import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { JetBrains_Mono, Inter } from "next/font/google";
 
-import { WalletProvider } from "@/components/WalletProvider";
+import { ClientProviders } from "@/components/ClientProviders";
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
@@ -61,11 +61,11 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${jetbrainsMono.variable} ${inter.variable}`}>
       <body className="antialiased min-h-screen" style={{ background: "var(--bg-primary)", color: "var(--text-primary)" }}>
-        <WalletProvider>
+        <ClientProviders>
           <Navbar />
           <main>{children}</main>
           <Footer />
-        </WalletProvider>
+        </ClientProviders>
       </body>
     </html>
   );
