@@ -1,5 +1,5 @@
 export const dynamic = "force-dynamic";
-import { getAllAgents, getAgent } from "@/lib/data";
+import { getAgent } from "@/lib/data";
 import { notFound } from "next/navigation";
 import { TrustBadge } from "@/components/TrustBadge";
 import { VerificationBadge, VERIFICATION_PRIORITY } from "@/components/VerificationBadge";
@@ -14,17 +14,13 @@ import Link from "next/link";
 import { ClaimButton } from "@/components/ClaimButton";
 import { WriteReviewForm } from "./WriteReviewForm";
 
-export async function generateStaticParams() {
-  return (await getAllAgents()).map((a) => ({ id: a.id }));
-}
-
 export default async function ProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const agent = await getAgent(id);
   if (!agent) return notFound();
 
   const v = agent.verifications;
-  const statusColor = agent.status === "online" ? "#10B981" : agent.status === "busy" ? "#F59E0B" : "#64748B";
+  const statusColor = agent.unclaimed ? "#F59E0B" : agent.status === "online" ? "#10B981" : agent.status === "busy" ? "#F59E0B" : "#64748B";
   // Fetch V3 on-chain Genesis Record for trust scores
   let genesis: any = null;
   try {
@@ -34,6 +30,16 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
       genesis = gData.genesis;
     }
   } catch {}
+
+  // Fetch SATP V2 on-chain identity status
+  let satpIdentity: any = null;
+  const solWallet = agent.verifications?.solana?.address || agent.walletAddress;
+  if (solWallet) {
+    try {
+      const satpIdRes = await fetch(`http://localhost:3333/api/satp/identity/${solWallet}`, { cache: "no-store" });
+      if (satpIdRes.ok) satpIdentity = await satpIdRes.json();
+    } catch {}
+  }
 
   let githubStats: any = null;
   if (v?.github?.verified && v.github.username) {
@@ -191,13 +197,14 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                 </a>
               ) : (
                 <a
-                  href="/satp"
+                  href="/satp/explorer"
                   className="px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider inline-block"
                   style={{ fontFamily: "var(--font-mono)", background: "transparent", color: "var(--text-tertiary)", border: "1px solid var(--border)", textDecoration: "none" }}
                 >
                   View SATP
                 </a>
               )}
+              {!agent.unclaimed && (
               <Link
                 href={`/profile/${agent.id}/edit`}
                 className="px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider inline-block"
@@ -205,6 +212,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
               >
                 Edit Profile
               </Link>
+              )}
             </div>
           </div>
 
@@ -213,7 +221,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
             {[
               { label: "Jobs", value: agent.jobsCompleted.toString() },
               { label: "Rating", value: `${displayRating.toFixed(1)}★` },
-              { label: "Status", value: agent.status.toUpperCase() },
+              { label: "Status", value: agent.unclaimed ? "UNCLAIMED" : agent.status.toUpperCase() },
             ].map(({ label, value }) => (
               <div key={label} className="flex items-center gap-1.5">
                 <span className="text-xs font-medium" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
@@ -411,9 +419,9 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
             </div>
           </div>}
 
-          <WriteReviewForm targetProfileId={agent.id} />
+          {!agent.unclaimed && (<WriteReviewForm targetProfileId={agent.id} />)}
           {/* SATP On-Chain Data (live from Solana) */}
-          <SATPOnChainSection walletAddress={agent.verifications?.solana?.address} />
+          <SATPOnChainSection walletAddress={agent.verifications?.solana?.address || agent.walletAddress} />
           {/* On-Chain */}
           <div className="rounded-lg p-5" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
             <h2 className="text-sm font-semibold uppercase tracking-wider mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
@@ -422,15 +430,15 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
             <div className="space-y-2 text-xs" style={{ fontFamily: "var(--font-mono)" }}>
               <div className="flex justify-between">
                 <span style={{ color: "var(--text-tertiary)" }}>SATP DID</span>
-                {v.satp?.verified || v.solana?.verified ? (
+                {v.satp?.verified || v.solana?.verified || satpIdentity?.registeredOnChain ? (
                   <a
-                    href={`https://explorer.solana.com/address/${v.solana?.address || ""}`}
+                    href={`https://explorer.solana.com/address/${satpIdentity?.identityPDA || v.solana?.address || ""}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-1 hover:underline"
                     style={{ color: "var(--success)" }}
                   >
-                    {(v.satp?.did || v.solana?.address || "unknown").slice(0, 20)}... <ExternalLink size={10} />
+                    {(satpIdentity?.identityPDA || v.satp?.did || v.solana?.address || "unknown").slice(0, 20)}... <ExternalLink size={10} />
                   </a>
                 ) : (
                   <span style={{ color: "var(--text-tertiary)" }}>Not registered</span>

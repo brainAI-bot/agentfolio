@@ -342,3 +342,65 @@ module.exports = {
   // Legacy
   getIdentityPDA, getReputationPDA,
 };
+
+// ═══ NAME REGISTRY + LINKED WALLETS (added 2026-03-22 by brainChain) ═══
+
+const { getNameRegistryPDA, nameHash } = require('./pda');
+
+// Add methods to prototype
+SATPV3SDK.prototype.getNameRegistry = async function(name) {
+  const [pda] = getNameRegistryPDA(name);
+  const acct = await this.connection.getAccountInfo(pda);
+  if (!acct) return null;
+  const data = acct.data;
+  let offset = 8; // skip discriminator
+  // name: String (4 + 32)
+  const nameLen = data.readUInt32LE(offset); offset += 4;
+  const regName = data.slice(offset, offset + nameLen).toString('utf8'); offset += 32;
+  // name_hash: [u8; 32]
+  const regHash = data.slice(offset, offset + 32); offset += 32;
+  // identity: Pubkey
+  const identity = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
+  // authority: Pubkey
+  const authority = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
+  // registered_at: i64
+  const registeredAt = Number(data.readBigInt64LE(offset)); offset += 8;
+  // is_active: bool
+  const isActive = data[offset] === 1;
+  return {
+    pda: pda.toBase58(), name: regName, nameHash: regHash.toString('hex'),
+    identity: identity.toBase58(), authority: authority.toBase58(),
+    registeredAt, isActive,
+  };
+};
+
+SATPV3SDK.prototype.isNameTaken = async function(name) {
+  const reg = await this.getNameRegistry(name);
+  return reg !== null && reg.isActive;
+};
+
+SATPV3SDK.prototype.getLinkedWallets = async function(agentId) {
+  const [genesisPda] = getGenesisPDA(agentId);
+  const accounts = await this.connection.getProgramAccounts(PROGRAM_IDS.IDENTITY_V3, {
+    filters: [
+      { dataSize: 138 },
+      { memcmp: { offset: 8, bytes: genesisPda.toBase58() } },
+    ],
+  });
+  return accounts.map(a => {
+    const d = a.account.data;
+    let o = 8; // skip disc
+    o += 32; // identity
+    const wallet = new PublicKey(d.slice(o, o + 32)); o += 32;
+    const chainLen = d.readUInt32LE(o); o += 4;
+    const chain = d.slice(o, o + chainLen).toString('utf8'); o += 16;
+    const labelLen = d.readUInt32LE(o); o += 4;
+    const label = d.slice(o, o + labelLen).toString('utf8'); o += 32;
+    const verifiedAt = Number(d.readBigInt64LE(o)); o += 8;
+    const isActive = d[o] === 1;
+    return { pubkey: a.pubkey.toBase58(), wallet: wallet.toBase58(), chain, label, verifiedAt, isActive };
+  });
+};
+
+module.exports.getNameRegistryPDA = getNameRegistryPDA;
+module.exports.nameHash = nameHash;

@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import type { Agent } from "@/lib/types";
 import { AgentCard } from "./AgentCard";
 import { SearchBar } from "./SearchBar";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface LeaderboardTableProps {
   agents: Agent[];
@@ -12,10 +12,13 @@ interface LeaderboardTableProps {
 
 type SortKey = "trustScore" | "newest" | "jobs" | "rating";
 
+const PAGE_SIZE = 24;
+
 export function LeaderboardTable({ agents }: LeaderboardTableProps) {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("trustScore");
   const [filterSkill, setFilterSkill] = useState<string>("");
+  const [page, setPage] = useState(1);
 
   const allSkills = useMemo(() => {
     const s = new Set<string>();
@@ -58,18 +61,29 @@ export function LeaderboardTable({ agents }: LeaderboardTableProps) {
     return result;
   }, [agents, search, sortBy, filterSkill]);
 
+  // Reset page when filters change
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const startIdx = (currentPage - 1) * PAGE_SIZE;
+  const paged = filtered.slice(startIdx, startIdx + PAGE_SIZE);
+
+  // Reset to page 1 when search/filter/sort changes
+  const handleSearch = (v: string) => { setSearch(v); setPage(1); };
+  const handleSort = (v: SortKey) => { setSortBy(v); setPage(1); };
+  const handleFilter = (v: string) => { setFilterSkill(v); setPage(1); };
+
   return (
     <div>
       {/* Controls */}
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <div className="flex-1">
-          <SearchBar value={search} onChange={setSearch} />
+          <SearchBar value={search} onChange={handleSearch} />
         </div>
         <div className="flex gap-2">
           <div className="relative">
             <select
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as SortKey)}
+              onChange={(e) => handleSort(e.target.value as SortKey)}
               className="appearance-none pl-3 pr-8 py-2.5 rounded-lg text-xs uppercase tracking-wider cursor-pointer outline-none"
               style={{
                 fontFamily: "var(--font-mono)",
@@ -89,7 +103,7 @@ export function LeaderboardTable({ agents }: LeaderboardTableProps) {
           <div className="relative">
             <select
               value={filterSkill}
-              onChange={(e) => setFilterSkill(e.target.value)}
+              onChange={(e) => handleFilter(e.target.value)}
               className="appearance-none pl-3 pr-8 py-2.5 rounded-lg text-xs uppercase tracking-wider cursor-pointer outline-none"
               style={{
                 fontFamily: "var(--font-mono)",
@@ -121,22 +135,72 @@ export function LeaderboardTable({ agents }: LeaderboardTableProps) {
         <span className="hidden md:block w-[120px]">Stats</span>
       </div>
 
-      {/* Rows */}
+      {/* Rows — paginated */}
       <div className="rounded-lg overflow-hidden" style={{ border: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
-        {filtered.length === 0 ? (
+        {paged.length === 0 ? (
           <div className="px-4 py-8 text-center text-sm" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
             No agents found matching &ldquo;{search}&rdquo;
           </div>
         ) : (
-          filtered.map((agent, i) => (
-            <AgentCard key={agent.id} agent={agent} rank={i + 1} />
+          paged.map((agent, i) => (
+            <AgentCard key={agent.id} agent={agent} rank={startIdx + i + 1} />
           ))
         )}
       </div>
 
-      {/* Count */}
-      <div className="mt-3 text-right text-[11px]" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-        Showing {filtered.length} of {agents.length} agents
+      {/* Pagination + Count */}
+      <div className="mt-3 flex items-center justify-between">
+        <div className="text-[11px]" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
+          Showing {startIdx + 1}–{Math.min(startIdx + PAGE_SIZE, filtered.length)} of {filtered.length} agents
+        </div>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage(Math.max(1, currentPage - 1))}
+              disabled={currentPage <= 1}
+              className="p-1.5 rounded transition-colors disabled:opacity-30"
+              style={{ color: "var(--text-secondary)", background: currentPage > 1 ? "var(--bg-primary)" : "transparent", border: "1px solid var(--border)" }}
+              aria-label="Previous page"
+            >
+              <ChevronLeft size={14} />
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2)
+              .reduce<(number | string)[]>((acc, p, idx, arr) => {
+                if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push("...");
+                acc.push(p);
+                return acc;
+              }, [])
+              .map((p, idx) =>
+                typeof p === "string" ? (
+                  <span key={`ellipsis-${idx}`} className="px-1 text-[11px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>…</span>
+                ) : (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p)}
+                    className="px-2.5 py-1 rounded text-[11px] transition-colors"
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      background: p === currentPage ? "var(--accent)" : "var(--bg-primary)",
+                      color: p === currentPage ? "#fff" : "var(--text-secondary)",
+                      border: "1px solid " + (p === currentPage ? "var(--accent)" : "var(--border)"),
+                    }}
+                  >
+                    {p}
+                  </button>
+                )
+              )}
+            <button
+              onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
+              disabled={currentPage >= totalPages}
+              className="p-1.5 rounded transition-colors disabled:opacity-30"
+              style={{ color: "var(--text-secondary)", background: currentPage < totalPages ? "var(--bg-primary)" : "transparent", border: "1px solid var(--border)" }}
+              aria-label="Next page"
+            >
+              <ChevronRight size={14} />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

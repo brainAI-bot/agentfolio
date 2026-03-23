@@ -517,7 +517,7 @@ async function notifyMatchingAgentsWebhook(job) {
   }
   
   // Get all profiles
-  const profiles = db.loadAllProfiles();
+  const profiles = db.listProfiles();
   const results = [];
   
   // Normalize skills for comparison

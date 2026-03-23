@@ -37,6 +37,7 @@ export interface Agent {
   registeredAt: string;
   createdAt: string;
   activity: Array<{ type: string; createdAt: string }>;
+  walletAddress?: string;
 }
 
 export interface Job {

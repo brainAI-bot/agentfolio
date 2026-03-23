@@ -112,3 +112,21 @@ module.exports = {
   // Legacy
   getIdentityPDA, getReputationPDA,
 };
+
+// ═══ NAME REGISTRY (added 2026-03-22) ═══
+
+/** Compute name hash: SHA-256(lowercase(name)) */
+function nameHash(name) {
+  return crypto.createHash('sha256').update(name.toLowerCase()).digest();
+}
+
+/** Derive Name Registry PDA: [b"name_registry", sha256(lowercase(name))] */
+function getNameRegistryPDA(name) {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('name_registry'), nameHash(name)],
+    PROGRAM_IDS.IDENTITY_V3
+  );
+}
+
+module.exports.nameHash = nameHash;
+module.exports.getNameRegistryPDA = getNameRegistryPDA;

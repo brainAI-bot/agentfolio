@@ -24,6 +24,14 @@ try { nacl = require('tweetnacl'); } catch {}
 let bs58;
 try { const _bs58 = require('bs58'); bs58 = _bs58.default || _bs58; } catch {}
 
+let postMemoAttestation;
+try {
+  postMemoAttestation = require('./memo-attestation').postVerificationMemo;
+  console.log('[ReviewsV2] Memo attestation loaded for review on-chain records');
+} catch (e) {
+  console.warn('[ReviewsV2] Memo attestation not available:', e.message);
+}
+
 // Ensure v2 columns exist
 try {
   db.exec(`ALTER TABLE peer_reviews ADD COLUMN reviewer_wallet TEXT DEFAULT ''`);
@@ -222,6 +230,28 @@ function submitSignedReview({ challengeId, signature, walletAddress, comment }) 
   }
 
   challenges.delete(challengeId);
+
+  // Fire-and-forget: post on-chain Memo attestation for the review
+  if (postMemoAttestation && result.review) {
+    const reviewProofData = {
+      type: 'review',
+      reviewer: ch.reviewerId,
+      reviewee: ch.revieweeId,
+      rating: ch.rating,
+      wallet: walletAddress,
+      chain: ch.chain,
+      verified_at: new Date().toISOString(),
+    };
+    postMemoAttestation(ch.revieweeId, 'review', reviewProofData)
+      .then(memoResult => {
+        if (memoResult && memoResult.txSignature) {
+          console.log(`[ReviewsV2] Memo attestation posted for review ${result.review.id}: ${memoResult.explorerUrl}`);
+          // Update review with memo TX
+          setReviewMemoTx(result.review.id, memoResult.txSignature);
+        }
+      })
+      .catch(err => console.error(`[ReviewsV2] Memo attestation failed for review ${result.review.id}:`, err.message));
+  }
 
   return {
     verified: true,

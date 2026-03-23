@@ -183,7 +183,7 @@ const RATE_LIMITS = {
   // Search: 30/min (more expensive)
   search: { limit: 30, windowMs: 60000, tier: 'search' },
   // Write operations: 10/min
-  write: { limit: 10, windowMs: 60000, tier: 'write' },
+  write: { limit: 30, windowMs: 60000, tier: 'write' },
   // Verification triggers: 5/min
   verify: { limit: 15, windowMs: 60000, tier: 'verify' }
 };
