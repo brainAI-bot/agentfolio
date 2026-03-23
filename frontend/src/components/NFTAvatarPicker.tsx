@@ -126,7 +126,7 @@ export function NFTAvatarPicker({ profileId, currentAvatar, nftAvatar, wallets, 
           style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
         >
           {nftAvatar.image && (
-            <img src={nftAvatar.image} alt={nftAvatar.name || "Current avatar"} className="w-12 h-12 rounded-md object-cover" />
+            <img loading="lazy" src={nftAvatar.image} alt={nftAvatar.name || "Current avatar"} className="w-12 h-12 rounded-md object-cover" />
           )}
           <div className="flex-1 min-w-0">
             <div className="text-xs font-medium truncate" style={{ color: "var(--text-primary)" }}>
@@ -196,7 +196,7 @@ export function NFTAvatarPicker({ profileId, currentAvatar, nftAvatar, wallets, 
                   style={{ border: "2px solid var(--border)" }}
                 >
                   {nft.image ? (
-                    <img src={nft.image} alt={nft.name || "NFT"} className="w-full h-full object-cover" />
+                    <img loading="lazy" src={nft.image} alt={nft.name || "NFT"} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center" style={{ background: "var(--bg-secondary)" }}>
                       <Image className="w-6 h-6" style={{ color: "var(--text-tertiary)" }} />

@@ -18,7 +18,8 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 import { getAllAgents, getActivityFeed, getStats, getTopVerifiedAgents } from "@/lib/data";
-import { LeaderboardTable } from "@/components/LeaderboardTable";
+import dynamicImport from "next/dynamic";
+const LeaderboardTable = dynamicImport(() => import("@/components/LeaderboardTable").then(m => m.LeaderboardTable), { loading: () => <div style={{height: 400, display: "flex", alignItems: "center", justifyContent: "center", color: "#666"}}>Loading agents...</div> });
 import { Activity, Users, Shield, Link as LinkIcon, Zap, Code, Globe, ArrowRight, CheckCircle, Lock, TrendingUp, Star, Award } from "lucide-react";
 import Link from "next/link";
 
