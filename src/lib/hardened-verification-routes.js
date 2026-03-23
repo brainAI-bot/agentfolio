@@ -129,6 +129,9 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
               };
               profile.updatedAt = new Date().toISOString();
               dbSaveProfileFn(profile);
+              // Attestation TX
+              if (postVerificationMemo) postVerificationMemo(profileId, 'hyperliquid', { address: result.walletAddress }).catch(() => {});
+              if (postVerificationOnchainForProfile) postVerificationOnchainForProfile(profile, 'hyperliquid', { address: result.walletAddress });
             }
           }
         }
@@ -603,6 +606,10 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
               profile.updatedAt = new Date().toISOString();
               if (addVerification) try { addVerification(challenge.challengeData.profileId, 'ethereum', challenge.challengeData.identifier, { verifiedAt: new Date().toISOString() }); } catch(avErr) { console.error('[Hardened] addVerification:', avErr.message); }
               dbSaveProfileFn(profile);
+              // Attestation TX
+              const ethProfileId = challenge.challengeData.profileId;
+              if (postVerificationMemo) postVerificationMemo(ethProfileId, 'ethereum', { address: challenge.challengeData.identifier }).catch(() => {});
+              if (postVerificationOnchainForProfile) postVerificationOnchainForProfile(profile, 'ethereum', { address: challenge.challengeData.identifier });
             }
           }
         }
@@ -695,6 +702,9 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
               // Also update links.x
               if (!profile.links) profile.links = {};
               profile.links.x = xHandle;
+              // Also store in social.twitter for MCP/SDK consumers
+              if (!profile.social) profile.social = {};
+              profile.social.twitter = xHandle;
               profile.updatedAt = new Date().toISOString();
               dbSaveProfileFn(profile);
               // Bug 2 fix: Fire attestation TX
@@ -742,6 +752,10 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
               profile.verificationData.agentmail = { ...result, method: 'hardened_email_code', verifiedAt: new Date().toISOString() };
               profile.updatedAt = new Date().toISOString();
               dbSaveProfileFn(profile);
+              // Attestation TX
+              const amProfileId = challenge.challengeData.profileId;
+              if (postVerificationMemo) postVerificationMemo(amProfileId, 'agentmail', { email: result.email || challenge.challengeData.identifier }).catch(() => {});
+              if (postVerificationOnchainForProfile) postVerificationOnchainForProfile(profile, 'agentmail', { email: result.email || challenge.challengeData.identifier });
             }
           }
         }
