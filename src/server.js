@@ -21294,6 +21294,25 @@ const { handleVerificationRoutes } = require('./lib/hardened-verification-routes
     res.end(JSON.stringify({ profileId, count: badges.length, badges }, null, 2));
   }
   // Analytics endpoints
+  // Trust Badge SVG — embeddable like shields.io
+  else if (url.pathname.match(/^\/api\/badge\/([^/]+)(\.svg)?$/)) {
+    const profileId = url.pathname.split('/')[3].replace('.svg', '');
+    const profile = loadProfile(profileId, DATA_DIR);
+    const tierColors = { sovereign: '#a78bfa', trusted: '#f59e0b', established: '#22c55e', verified: '#3b82f6', registered: '#6b7280', unverified: '#374151', unknown: '#374151' };
+    let score = 0, level = 0, tier = 'unknown';
+    if (profile) {
+      const cs = getCanonicalScore(profile);
+      score = cs.score; tier = cs.tier || 'unknown';
+      level = cs.verificationLevel || profile.verificationLevel || 0;
+    }
+    const color = tierColors[tier.toLowerCase()] || tierColors.unknown;
+    const label = 'AgentFolio Trust';
+    const value = score > 0 ? score + ' · L' + level : 'Unverified';
+    const lw = label.length * 6.5 + 10, vw = value.length * 6.5 + 10, tw = lw + vw;
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + tw + '" height="20"><linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient><clipPath id="r"><rect width="' + tw + '" height="20" rx="3" fill="#fff"/></clipPath><g clip-path="url(#r)"><rect width="' + lw + '" height="20" fill="#555"/><rect x="' + lw + '" width="' + vw + '" height="20" fill="' + color + '"/><rect width="' + tw + '" height="20" fill="url(#s)"/></g><g fill="#fff" text-anchor="middle" font-family="Verdana,sans-serif" font-size="11"><text x="' + (lw/2) + '" y="14">' + label + '</text><text x="' + (lw + vw/2) + '" y="14">' + value + '</text></g></svg>';
+    res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=300' });
+    res.end(svg);
+  }
   else if (url.pathname === '/api/analytics') {
     trackApiCall('/api/analytics');
     const analytics = getGlobalAnalytics();
