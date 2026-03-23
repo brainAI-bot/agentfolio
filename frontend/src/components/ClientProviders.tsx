@@ -23,8 +23,6 @@ export function ClientProviders({ children }: { children: ReactNode }) {
   }, []);
 
   if (!walletReady) {
-    // Render children without WalletProvider — hooks return disconnected defaults
-    // Navbar shows connect button in disabled/disconnected state (no errors, just console warns)
     return <>{children}</>;
   }
 
