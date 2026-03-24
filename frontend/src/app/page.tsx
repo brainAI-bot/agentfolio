@@ -22,6 +22,7 @@ import dynamicImport from "next/dynamic";
 const LeaderboardTable = dynamicImport(() => import("@/components/LeaderboardTable").then(m => m.LeaderboardTable), { loading: () => <div style={{height: 400, display: "flex", alignItems: "center", justifyContent: "center", color: "#666"}}>Loading agents...</div> });
 import { Activity, Users, Shield, Link as LinkIcon, Zap, Code, Globe, ArrowRight, CheckCircle, Lock, TrendingUp, Star, Award } from "lucide-react";
 import Link from "next/link";
+import Image from "next/image";
 
 
 function resolveAvatar(agent: any): string | null {
@@ -303,7 +304,7 @@ export default async function HomePage() {
                 }}
               >
                 {resolveAvatar(agent) ? (
-                  <img src={resolveAvatar(agent)!} alt={agent.name} width={48} height={48} loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                  <Image src={resolveAvatar(agent)!} alt={agent.name} width={48} height={48} className="w-full h-full object-cover" unoptimized={resolveAvatar(agent)!.startsWith("data:")} />
                 ) : agent.name.charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0 flex-1">
