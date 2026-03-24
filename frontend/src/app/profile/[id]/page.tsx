@@ -1,6 +1,12 @@
 export const revalidate = 120;
+export const dynamicParams = true;
+
+export async function generateStaticParams() {
+  // Return empty array — pages are generated on-demand and cached via ISR
+  return [];
+}
 import { WalletRequired } from "@/components/WalletRequired";
-import { getAgent } from "@/lib/data";
+import { fetchAgent } from "@/lib/data-fetch";
 import { notFound } from "next/navigation";
 import { TrustBadge } from "@/components/TrustBadge";
 import { VerificationBadge, VERIFICATION_PRIORITY } from "@/components/VerificationBadge";
@@ -17,7 +23,7 @@ import { WriteReviewForm } from "./WriteReviewForm";
 
 export default async function ProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const agent = await getAgent(id);
+  const agent = await fetchAgent(id);
   if (!agent) return notFound();
 
   const v = agent.verifications;
