@@ -52,6 +52,11 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
     ? new Date(nftAvatar.verifiedAt)
     : null;
 
+  // Level color coding
+  const levelColor = genesis.verificationLevel >= 5 ? "#A855F7" :
+                     genesis.verificationLevel >= 4 ? "#3B82F6" :
+                     genesis.verificationLevel >= 3 ? "#10B981" :
+                     genesis.verificationLevel >= 2 ? "#F59E0B" : "var(--text-secondary)";
 
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
@@ -103,6 +108,33 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
               <div className="font-semibold" style={{ color: "var(--text-primary)" }}>{genesis.agentName}</div>
             </div>
 
+            {genesis.description && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>Description</div>
+                <div style={{ color: "var(--text-secondary)" }}>{genesis.description}</div>
+              </div>
+            )}
+
+            {/* Level + Trust Score row */}
+            <div className="flex gap-4">
+              {genesis.verificationLevel > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>Level</div>
+                  <div className="font-semibold" style={{ color: levelColor }}>
+                    L{genesis.verificationLevel}{genesis.verificationLabel ? ` · ${genesis.verificationLabel}` : ""}
+                  </div>
+                </div>
+              )}
+              {genesis.reputationScore > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>Trust</div>
+                  <div className="font-semibold" style={{ color: levelColor }}>
+                    {genesis.reputationScore}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {isBorn && burnDate && (
               <div>
                 <div className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>Burn Date</div>
@@ -115,8 +147,22 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
           </div>
         </div>
 
-        {/* Footer: PDA + Burn TX links */}
+        {/* Footer: PDA + Authority + Burn TX links */}
         <div className="mt-3 pt-3 space-y-1" style={{ borderTop: "1px solid var(--border)" }}>
+          {genesis.authority && (
+            <div className="flex items-center justify-between text-[10px]" style={{ fontFamily: "var(--font-mono)" }}>
+              <span style={{ color: "var(--text-tertiary)" }}>Authority</span>
+              <a
+                href={`https://explorer.solana.com/address/${genesis.authority}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 hover:underline"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                {genesis.authority.slice(0, 12)}...{genesis.authority.slice(-6)} <ExternalLink size={9} />
+              </a>
+            </div>
+          )}
           <div className="flex items-center justify-between text-[10px]" style={{ fontFamily: "var(--font-mono)" }}>
             <span style={{ color: "var(--text-tertiary)" }}>PDA</span>
             <a
