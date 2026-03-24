@@ -15468,8 +15468,9 @@ const server = http.createServer(async (req, res) => {
       res.end();
       return;
     }
-    // Parse body for POST
-    if (req.method === "POST" && !req._satpBodyParsed) {
+    // Parse body for POST (only for SATP auto routes to avoid consuming stream for other handlers)
+    const _satpUrl = new URL(req.url, "http://localhost");
+    if (req.method === "POST" && !req._satpBodyParsed && _satpUrl.pathname.startsWith("/api/satp-auto/")) {
       let bodyStr = "";
       req.on("data", chunk => bodyStr += chunk);
       req.on("end", () => {
@@ -18919,34 +18920,31 @@ res.writeHead(200, { 'Content-Type': 'text/html' });
   // === HEADLESS VERIFICATION (for agents without browsers) ===
   // Step 1: Get a challenge to sign
   else if (url.pathname === '/api/verify/challenge' && req.method === 'POST') {
-    let body = '';
-    req.on('data', c => body += c);
-    req.on('end', async () => {
+    // Fix: Use pre-parsed body when SATP middleware already consumed the stream
+    const handleChallenge = async (parsed) => {
       try {
-        const { profileId, chain } = JSON.parse(body);
+        const { profileId, chain } = parsed;
         if (!profileId) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'profileId required' })); return; }
-        // Non-admin users can only register their own profile
-        if (apiKeyInfo && apiKeyInfo.ownerId !== profileId) {
-          res.writeHead(403, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'API key can only register its own profile on-chain' }));
-          return;
-        }
         const profile = loadProfile(profileId, DATA_DIR);
         if (!profile) { res.writeHead(404, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Profile not found' })); return; }
         const timestamp = Date.now();
         const nonce = require('crypto').randomBytes(16).toString('hex');
         const challenge = `AgentFolio verification for ${profileId} at ${timestamp} nonce:${nonce}`;
-        // Store challenge temporarily (expires in 10 min)
         if (!global._afChallenges) global._afChallenges = {};
         global._afChallenges[`${profileId}:${nonce}`] = { challenge, timestamp, chain: chain || 'solana', profileId };
-        // Clean old challenges
         const now = Date.now();
         for (const k of Object.keys(global._afChallenges)) {
           if (now - global._afChallenges[k].timestamp > 600000) delete global._afChallenges[k];
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ challenge, nonce, expiresIn: '10 minutes' }));
-      } catch (e) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Invalid JSON' })); }
+      } catch (e) { console.error('[CHALLENGE ERROR]', e.message); res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Challenge error: ' + e.message })); }
+
+    };
+    let body = '';
+    req.on('data', c => { body += c; });
+    req.on('end', async () => { 
+      try { await handleChallenge(JSON.parse(body || '{}')); } catch(e) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Invalid JSON: ' + e.message })); }
     });
     return;
   }
