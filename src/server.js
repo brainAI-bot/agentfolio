@@ -31070,7 +31070,7 @@ server.listen(PORT, () => {
   try { initX402(); } catch (e) { console.warn("[x402] Init failed:", e.message); }
 
   // Start chain cache (on-chain first architecture)
-  try { chainCache.start(45000); console.log("[ChainCache] Background refresh started (45s interval)"); } catch (e) { console.warn("[ChainCache] Start failed:", e.message); }
+  try { chainCache.start(120000); console.log("[ChainCache] Background refresh started (120s interval)"); } catch (e) { console.warn("[ChainCache] Start failed:", e.message); }
 
   // Sync SQLite profiles → JSON files (ensures frontend can see all profiles)
   try {
