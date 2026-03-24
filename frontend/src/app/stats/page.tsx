@@ -1,3 +1,4 @@
+export const revalidate = 120;
 import { getAllAgents, getAllJobs } from "@/lib/data";
 import { BarChart3, Users, ShieldCheck, Fingerprint, Briefcase, DollarSign, ExternalLink, Wallet, TrendingUp, ArrowDownToLine, ArrowUpFromLine, AlertTriangle, Percent } from "lucide-react";
 import ProtocolActivity from "./ProtocolActivity";
