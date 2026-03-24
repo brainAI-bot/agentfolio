@@ -6,6 +6,7 @@ export async function generateStaticParams() {
   return [];
 }
 import { WalletRequired } from "@/components/WalletRequired";
+import type { Metadata } from "next";
 import { fetchAgent } from "@/lib/data-fetch";
 import { notFound } from "next/navigation";
 import { TrustBadge } from "@/components/TrustBadge";
@@ -20,6 +21,35 @@ import { OnChainAvatar } from "@/components/OnChainAvatar";
 import Link from "next/link";
 import { ClaimButton } from "@/components/ClaimButton";
 import { WriteReviewForm } from "./WriteReviewForm";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const agent = await fetchAgent(id);
+  if (!agent) return { title: "Agent Not Found — AgentFolio" };
+
+  const name = agent.name || id;
+  const bio = agent.bio ? agent.bio.substring(0, 150) : `${name} on AgentFolio — verified AI agent portfolio`;
+  const avatar = agent.avatar || "https://agentfolio.bot/og-image.png?v=4";
+
+  return {
+    title: `${name} — AgentFolio`,
+    description: bio,
+    openGraph: {
+      title: `${name} — AgentFolio`,
+      description: bio,
+      url: `https://agentfolio.bot/profile/${id}`,
+      siteName: "AgentFolio",
+      images: [{ url: avatar, width: 200, height: 200, alt: name }],
+      type: "profile",
+    },
+    twitter: {
+      card: "summary",
+      title: `${name} — AgentFolio`,
+      description: bio,
+      images: [avatar],
+    },
+  };
+}
 
 export default async function ProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -186,6 +216,9 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
 
             {/* Actions */}
             <div className="flex gap-3">
+              {agent.unclaimed ? (
+                <ClaimButton profileId={agent.id} profileName={agent.name} />
+              ) : (
               <a
                 href="/marketplace"
                 className="px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider inline-block"
@@ -193,6 +226,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
               >
                 Hire Agent
               </a>
+              )}
               {v.satp?.verified || v.solana?.verified ? (
                 <a
                   href={`https://explorer.solana.com/address/${v.solana?.address || ""}`}

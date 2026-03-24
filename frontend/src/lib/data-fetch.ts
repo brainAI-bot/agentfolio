@@ -33,7 +33,7 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
       reputationScore: raw.trustScore || raw.score || 0,
       reputationRank: ["Newcomer","Recognized","Competent","Expert","Master"][Math.min(Math.floor((raw.trustScore || 0) / 250), 4)] || "Newcomer",
       skills: Array.isArray(raw.skills) ? raw.skills.map((s: any) => typeof s === "string" ? s : s.name || "").filter(Boolean) : [],
-      verifications: raw.verifications || {
+      verifications: {
         github: vd.github?.verified ? { username: vd.github.username || vd.github.handle || "", repos: vd.github.repos || 0, stars: vd.github.stars || 0, verified: true } : undefined,
         solana: vd.solana?.verified ? { address: vd.solana.address || raw.walletAddress || "", txCount: vd.solana.txCount || 0, balance: vd.solana.balance || "0 SOL", verified: true } : undefined,
         hyperliquid: vd.hyperliquid?.verified ? { address: vd.hyperliquid.address || "", volume: vd.hyperliquid.volume || "$0", verified: true } : undefined,
