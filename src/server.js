@@ -25251,11 +25251,9 @@ ${THEME_SCRIPT}
     trackApiCall('/api/marketplace/wallet/:addr');
     try {
       const { listJobs } = require('./lib/marketplace');
-      const allProfiles = listProfiles(DATA_DIR);
-      // Find profile(s) with this wallet
-      const matchedProfiles = allProfiles.filter(p => 
-        p.wallets?.solana === walletAddr || p.wallets?.ethereum === walletAddr
-      );
+      // Use loadProfileByWallet for direct DB lookup (works for all profiles)
+      const profile = loadProfileByWallet(walletAddr);
+      const matchedProfiles = profile ? [profile] : [];
       const profileIds = matchedProfiles.map(p => p.id);
       
       if (profileIds.length === 0) {
