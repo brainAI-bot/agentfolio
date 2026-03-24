@@ -162,6 +162,25 @@ function loadProfile(profileId, dataDir = null) {
     const profile = db.loadProfile(profileId);
     if (profile) {
       profile.activity = db.getActivities(profileId, 50);
+      // Enrich verification object with V3 scores (sync, from cache)
+      try {
+        const { _getFromCache } = require('../v3-score-service');
+        const v3 = _getFromCache(profileId);
+        if (v3 && v3.reputationScore !== undefined) {
+          const tiers = ['unverified','registered','verified','established','trusted','sovereign'];
+          profile.trustScore = v3.reputationScore;
+          profile.verificationLevel = v3.verificationLevel;
+          profile.tier = tiers[v3.verificationLevel] || 'unverified';
+          profile.verification = profile.verification || {};
+          profile.verification.score = v3.reputationScore;
+          profile.verification.tier = tiers[v3.verificationLevel] || 'unverified';
+          // Update verifiedPlatforms from verificationData
+          const vd = profile.verificationData || {};
+          profile.verification.verifiedPlatforms = Object.entries(vd)
+            .filter(([k, v]) => v && v.verified && k !== 'onboardingDismissed')
+            .map(([k]) => k);
+        }
+      } catch (e) { /* v3-score-service not available yet, skip enrichment */ }
     }
     return profile;
   });

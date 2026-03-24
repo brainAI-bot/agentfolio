@@ -101,6 +101,8 @@ function warmV3Scores() {
     const allProfiles = listProfiles(DATA_DIR);
     const ids = allProfiles.map(p => p.id);
     chainCache.fetchV3GenesisRecords(ids).catch(e => console.error('[V3 warmup]', e.message));
+    // Also warm v3-score-service cache (used by loadProfile enrichment)
+    try { const { getV3Scores } = require('./v3-score-service'); getV3Scores(ids).catch(e => console.error('[V3 score-service warmup]', e.message)); } catch {}
   } catch {}
 }
 setTimeout(warmV3Scores, 3000); // 3s after startup
@@ -18167,6 +18169,66 @@ res.writeHead(200, { 'Content-Type': 'text/html' });
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: e.message }));
     });
+  }
+
+  // GET /api/explorer/:id — Single agent explorer view with V3 on-chain data
+  else if (url.pathname.match(/^\/api\/explorer\/([^/]+)$/) && req.method === 'GET') {
+    const agentId = url.pathname.split('/')[3];
+    (async () => {
+      try {
+        const profile = loadProfile(agentId, DATA_DIR);
+        if (!profile) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Agent not found', agentId }));
+          return;
+        }
+
+        // V3 on-chain scores (source of truth)
+        const satpScores = await getOnChainScores(agentId).catch(() => null);
+        const canon = getCanonicalScore(profile);
+        const trustScore = satpScores ? satpScores.trustScore : canon.score;
+        const verificationLevel = satpScores ? satpScores.verificationLevel : canon.verificationLevel;
+        const tier = satpScores ? satpScores.tier : canon.tier;
+
+        // Verified platforms from profile
+        const vd = profile.verificationData || {};
+        const platforms = Object.entries(vd).filter(([k, v]) => v && v.verified).map(([k]) => k);
+
+        // On-chain identity check
+        const wallet = profile.wallets?.solana;
+        let onChainIdentity = null;
+        if (wallet) {
+          const ccAgent = chainCache.getAgent(wallet);
+          if (ccAgent) onChainIdentity = { pda: ccAgent.pda, verified: true };
+        }
+
+        // Attestations from chain-cache
+        const attestations = chainCache.getVerifications(agentId);
+
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' });
+        res.end(JSON.stringify({
+          agentId: profile.id,
+          name: profile.name,
+          handle: profile.handle || null,
+          avatar: profile.avatar || null,
+          wallet: wallet || null,
+          trustScore,
+          verificationLevel,
+          tier,
+          onChain: !!satpScores,
+          platforms,
+          platformCount: platforms.length,
+          onChainIdentity,
+          attestations: attestations.slice(0, 20),
+          attestationCount: attestations.length,
+          registeredAt: profile.createdAt || null,
+          profileUrl: 'https://agentfolio.bot/profile/' + profile.id,
+        }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    })();
   }
 
 // GET /api/agent/:id/attestations — On-chain verification attestation TXs

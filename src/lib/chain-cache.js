@@ -18,7 +18,7 @@ const GENESIS_PROGRAM = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtN
 const MEMO_PROGRAM = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=HELIUS_API_KEY_REDACTED';
-const REFRESH_INTERVAL_MS = 45_000; // 45 seconds
+const REFRESH_INTERVAL_MS = 120_000; // 2 minutes (reduced from 45s to avoid RPC 429s)
 const PLATFORM_SIGNER = process.env.SATP_PLATFORM_SIGNER || null;
 
 let _connection = null;
