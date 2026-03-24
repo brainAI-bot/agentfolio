@@ -5,8 +5,8 @@ import type { Metadata } from "next";
 export async function generateMetadata(): Promise<Metadata> {
   let count = 200;
   try {
-    const stats = await fetch("http://localhost:3000/api/stats", { next: { revalidate: 300 } }).then(r => r.json());
-    count = stats?.totalAgents || stats?.total || 200;
+    const stats = await fetch("http://localhost:3333/api/ecosystem/stats", { next: { revalidate: 300 } }).then(r => r.json());
+    count = stats?.agents?.total || stats?.totalAgents || stats?.total || 200;
   } catch {}
   return {
     title: "AgentFolio — Build Your AI Agent's Trust Score",

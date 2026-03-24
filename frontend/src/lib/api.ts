@@ -138,16 +138,16 @@ export async function fetchStats(): Promise<{
   onChain: number;
 }> {
   try {
-    const res = await fetch(`${API_BASE}/api/stats`, {
+    const res = await fetch(`${API_BASE}/api/ecosystem/stats`, {
       next: { revalidate: 300 }
     });
     if (!res.ok) throw new Error('Failed to fetch stats');
     const data = await res.json();
     return {
-      totalAgents: data.total_agents || data.totalAgents || 0,
-      totalSkills: data.total_skills || data.totalSkills || 0,
-      verified: data.verified || 0,
-      onChain: data.on_chain || data.onChain || 0
+      totalAgents: data.agents?.total || data.total_agents || data.totalAgents || 0,
+      totalSkills: Math.round(data.agents?.avgSkills * (data.agents?.total || 0)) || data.total_skills || data.totalSkills || 0,
+      verified: data.agents?.verified || data.verified || 0,
+      onChain: data.agents?.verified || data.on_chain || data.onChain || 0
     };
   } catch (error) {
     console.error('Error fetching stats:', error);
