@@ -7990,3 +7990,10 @@
 {"env":"production","level":"info","message":"AgentFolio server started","pid":411131,"port":"3333","service":"agentfolio","timestamp":"2026-03-24T09:33:37.789Z"}
 {"endpoints":["GET / - Profile directory","GET /profile/:id - Profile page","GET /api/profiles - JSON list","GET /api/search?q= - Search","POST /api/webhooks - Register webhook","WS /ws - Real-time feed"],"level":"info","message":"Available endpoints","service":"agentfolio","timestamp":"2026-03-24T09:33:37.790Z"}
 {"level":"info","message":"[ChainSync] Found 17 on-chain identity accounts","service":"agentfolio","timestamp":"2026-03-24T09:34:37.887Z"}
+{"duration":"1222ms","ip":"93.109.61.184","level":"info","message":"Slow request","method":"GET","path":"/api/satp/explorer/agents","service":"agentfolio","status":200,"timestamp":"2026-03-24T09:36:50.402Z"}
+{"duration":"1ms","ip":"13.53.199.22","level":"warn","message":"HTTP Request","method":"GET","path":"/api/profile/agent_braintest/endorsements","service":"agentfolio","status":404,"timestamp":"2026-03-24T09:36:52.067Z"}
+{"duration":"1616ms","ip":"13.53.199.22","level":"info","message":"Slow request","method":"GET","path":"/api/profile/agent_suppi/genesis","service":"agentfolio","status":200,"timestamp":"2026-03-24T09:36:52.695Z"}
+{"duration":"1610ms","ip":"13.53.199.22","level":"info","message":"Slow request","method":"GET","path":"/api/profile/agent_brainforge/genesis","service":"agentfolio","status":200,"timestamp":"2026-03-24T09:36:52.696Z"}
+{"level":"info","message":"[delegation] Schema initialized","service":"agentfolio","timestamp":"2026-03-24T09:38:21.626Z"}
+{"env":"production","level":"info","message":"AgentFolio server started","pid":413687,"port":"3333","service":"agentfolio","timestamp":"2026-03-24T09:38:21.631Z"}
+{"endpoints":["GET / - Profile directory","GET /profile/:id - Profile page","GET /api/profiles - JSON list","GET /api/search?q= - Search","POST /api/webhooks - Register webhook","WS /ws - Real-time feed"],"level":"info","message":"Available endpoints","service":"agentfolio","timestamp":"2026-03-24T09:38:21.632Z"}

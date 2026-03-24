@@ -18078,6 +18078,7 @@ res.writeHead(200, { 'Content-Type': 'text/html' });
           verifications: profile.verifications || [],
           social: profile.social || { twitter: (profile.links?.x || profile.twitter || null) },
           attestationCount: getAttestations(profile.id).length,
+          nftAvatar: profile.nftAvatar || null,
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(basic, null, 2));
@@ -18124,6 +18125,7 @@ res.writeHead(200, { 'Content-Type': 'text/html' });
           verifications: profile.verifications || [],
           social: profile.social || { twitter: (profile.links?.x || profile.twitter || null) },
           attestationCount: getAttestations(profile.id).length,
+          nftAvatar: profile.nftAvatar || null,
         };
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(basic, null, 2));
