@@ -61,9 +61,9 @@ const VERIFICATION_LEVELS = {
 // Verification Categories for Level 3+ requirements
 const VERIFICATION_CATEGORIES = {
   wallets: ['solana', 'ethereum', 'bitcoin', 'hyperliquid', 'polymarket'],
-  platforms: ['agentmail', 'moltbook', 'telegram', 'discord', 'farcaster'],
+  platforms: ['agentmail', 'moltbook', 'telegram', 'discord', 'farcaster', 'github', 'x'],
   infrastructure: ['domain', 'mcp', 'a2a', 'openclaw', 'did', 'website'],
-  onchain: ['ens', 'eas']
+  onchain: ['ens', 'eas', 'satp']
 };
 
 // Human-required verifications (for Level 5)
