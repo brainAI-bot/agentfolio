@@ -158,6 +158,7 @@ export default async function DocsPage() {
     // === x402 ===
     { method: "GET", path: "/api/x402/info", desc: "x402 payment protocol info", body: null, returns: "Payment instructions" },
     { method: "GET", path: "/api/profile/:id/trust-score", desc: "Detailed trust score (paid via x402)", body: null, returns: "Full score breakdown" },
+    { method: "GET", path: "/api/explorer/:id", desc: "Full agent profile with attestations, trust score, and on-chain data", body: null, returns: "Extended profile + attestations" },
   ];
 
   return (

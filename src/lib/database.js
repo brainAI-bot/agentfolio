@@ -657,6 +657,20 @@ function deserializeProfile(row) {
       verifiedAt: v.verified_at,
       status: 'verified',
     }));
+    // Merge verificationData entries not already in verifications table
+    const vd = profile.verificationData || {};
+    const existingPlatforms = new Set(profile.verifications.map(v => v.platform));
+    for (const [platform, data] of Object.entries(vd)) {
+      if (data && data.verified && !existingPlatforms.has(platform)) {
+        profile.verifications.push({
+          platform,
+          identifier: data.address || data.handle || data.username || data.email || data.url || data.did || data.domain || '',
+          proof: { verifiedAt: data.verifiedAt || data.linkedAt || null },
+          verifiedAt: data.verifiedAt || data.linkedAt || null,
+          status: 'verified',
+        });
+      }
+    }
   } catch (e) {
     profile.verifications = [];
   }
