@@ -471,6 +471,7 @@ function enrichProfile(row) {
     endorsements: { items: endorsements, total: endorsements.length },
     verifications: (() => {
       const vMap = {};
+      // 1) DB verifications table entries
       for (const v of verifications) {
         const proof = parseJsonField(v.proof);
         vMap[v.platform] = {
@@ -480,6 +481,19 @@ function enrichProfile(row) {
           proof,
           verified_at: v.verified_at,
         };
+      }
+      // 2) Merge verification_data (JSON column) — catches platforms not in DB table
+      const vd = parseJsonField(row.verification_data, {});
+      for (const [platform, data] of Object.entries(vd)) {
+        if (data && data.verified && !vMap[platform]) {
+          vMap[platform] = {
+            verified: true,
+            address: data.address || data.handle || data.username || data.email || data.url || data.did || data.domain || "",
+            identifier: data.address || data.handle || data.username || data.email || data.url || data.did || data.domain || "",
+            proof: { verifiedAt: data.verifiedAt || data.linkedAt || null },
+            verified_at: data.verifiedAt || data.linkedAt || null,
+          };
+        }
       }
       return vMap;
     })(),
