@@ -25,16 +25,10 @@ export function ClientProviders({ children }: { children: ReactNode }) {
     if (!walletReady) setWalletReady(true);
   }, [walletReady]);
 
-  if (!walletReady) {
-    return (
-      <WalletLoadContext.Provider value={{ loaded: false, triggerLoad }}>
-        {children}
-      </WalletLoadContext.Provider>
-    );
-  }
-
+  // Always render WalletProvider so useWallet() never throws.
+  // The dynamic import means the JS only loads client-side.
   return (
-    <WalletLoadContext.Provider value={{ loaded: true, triggerLoad }}>
+    <WalletLoadContext.Provider value={{ loaded: walletReady, triggerLoad }}>
       <WalletProvider>{children}</WalletProvider>
     </WalletLoadContext.Provider>
   );
