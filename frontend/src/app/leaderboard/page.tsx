@@ -1,7 +1,7 @@
 import { getAllAgents } from "@/lib/data";
 import { LeaderboardTable } from "@/components/LeaderboardTable";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 export default async function LeaderboardPage() {
   const agents = await getAllAgents();
