@@ -1,4 +1,4 @@
-export const revalidate = 120;
+export const dynamic = "force-dynamic";
 import { WalletRequired } from "@/components/WalletRequired";
 import { getAgent } from "@/lib/data";
 import { notFound } from "next/navigation";
@@ -25,7 +25,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   // Fetch V3 on-chain Genesis Record for trust scores
   let genesis: any = null;
   try {
-    const genesisRes = await fetch(`https://agentfolio.bot/api/profile/${id}/genesis`, { next: { revalidate: 120 } });
+    const genesisRes = await fetch(`https://agentfolio.bot/api/profile/${id}/genesis`, { cache: "no-store" });
     if (genesisRes.ok) {
       const gData = await genesisRes.json();
       genesis = gData.genesis;
@@ -37,7 +37,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   const solWallet = agent.verifications?.solana?.address || agent.walletAddress;
   if (solWallet) {
     try {
-      const satpIdRes = await fetch(`http://localhost:3333/api/satp/identity/${solWallet}`, { next: { revalidate: 120 } });
+      const satpIdRes = await fetch(`http://localhost:3333/api/satp/identity/${solWallet}`, { cache: "no-store" });
       if (satpIdRes.ok) satpIdentity = await satpIdRes.json();
     } catch {}
   }
@@ -45,7 +45,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   let githubStats: any = null;
   if (v?.github?.verified && v.github.username) {
     try {
-      const ghRes = await fetch(`http://localhost:3333/api/verify/github/stats?username=${encodeURIComponent(v.github.username)}`, { next: { revalidate: 120 } });
+      const ghRes = await fetch(`http://localhost:3333/api/verify/github/stats?username=${encodeURIComponent(v.github.username)}`, { cache: "no-store" });
       if (ghRes.ok) githubStats = await ghRes.json();
     } catch {}
   }
