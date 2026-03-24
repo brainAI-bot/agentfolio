@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import type { Agent } from "@/lib/types";
 import { TrustBadge } from "./TrustBadge";
 import { VerificationBadge } from "./VerificationBadge";
@@ -33,13 +34,12 @@ export function AgentCard({ agent, rank }: AgentCardProps) {
         {/* Avatar + status */}
         <div className="relative shrink-0">
           {agent.avatar ? (
-            <img
+            <Image
               src={agent.avatar}
               alt={agent.name}
               width={40}
               height={40}
               loading="lazy"
-              decoding="async"
               className="w-10 h-10 rounded-full object-cover"
               style={{ border: "1px solid var(--border)" }}
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling && ((e.target as HTMLImageElement).nextElementSibling as HTMLElement).style.removeProperty('display'); }}
