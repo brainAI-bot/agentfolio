@@ -7643,3 +7643,52 @@
 {"level":"info","message":"[ChainSync] Found 17 on-chain identity accounts","service":"agentfolio","timestamp":"2026-03-24T02:03:56.990Z"}
 {"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:05:22.977Z"}
 {"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:05:40.578Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:06:47.458Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/profile/brainTrade","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:08:13.202Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:08:16.336Z"}
+{"level":"info","message":"[ChainSync] Found 17 on-chain identity accounts","service":"agentfolio","timestamp":"2026-03-24T02:08:57.020Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:09:29.067Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:10:29.369Z"}
+{"duration":"0ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:10:32.420Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:11:52.889Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:12:56.342Z"}
+{"level":"info","message":"[ChainSync] Found 17 on-chain identity accounts","service":"agentfolio","timestamp":"2026-03-24T02:13:57.011Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:14:02.758Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:15:42.374Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:16:47.431Z"}
+{"duration":"0ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:17:50.513Z"}
+{"duration":"0ms","ip":"93.109.61.184","level":"warn","message":"HTTP Request","method":"GET","path":"/api/mint/eligibility","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:18:07.386Z"}
+{"duration":"0ms","ip":"93.109.61.184","level":"warn","message":"HTTP Request","method":"GET","path":"/api/profile/agent_brainkid/trust-score","service":"agentfolio","status":402,"timestamp":"2026-03-24T02:18:07.387Z"}
+{"duration":"0ms","ip":"93.109.61.184","level":"warn","message":"HTTP Request","method":"POST","path":"/api/reviews","service":"agentfolio","status":401,"timestamp":"2026-03-24T02:18:19.333Z"}
+{"duration":"0ms","ip":"93.109.61.184","level":"warn","message":"HTTP Request","method":"GET","path":"/api/mint/eligibility","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:18:19.334Z"}
+{"duration":"1ms","ip":"93.109.61.184","level":"warn","message":"HTTP Request","method":"GET","path":"/api/avatar/burn-to-become/eligibility","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:18:19.694Z"}
+{"level":"info","message":"[ChainSync] Found 17 on-chain identity accounts","service":"agentfolio","timestamp":"2026-03-24T02:18:56.988Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:23:30.007Z"}
+{"level":"info","message":"[ChainSync] Found 17 on-chain identity accounts","service":"agentfolio","timestamp":"2026-03-24T02:23:57.018Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:28:17.649Z"}
+{"level":"info","message":"[ChainSync] Found 17 on-chain identity accounts","service":"agentfolio","timestamp":"2026-03-24T02:28:56.993Z"}
+{"level":"info","message":"[ChainSync] Found 17 on-chain identity accounts","service":"agentfolio","timestamp":"2026-03-24T02:33:57.032Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:38:56.871Z"}
+{"level":"info","message":"[ChainSync] Found 17 on-chain identity accounts","service":"agentfolio","timestamp":"2026-03-24T02:38:56.995Z"}
+{"level":"info","message":"[ChainSync] Found 17 on-chain identity accounts","service":"agentfolio","timestamp":"2026-03-24T02:43:57.005Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:45:18.356Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:46:57.261Z"}
+{"level":"info","message":"[ChainSync] Found 17 on-chain identity accounts","service":"agentfolio","timestamp":"2026-03-24T02:48:56.994Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:50:08.105Z"}
+{"level":"info","message":"[ChainSync] Found 17 on-chain identity accounts","service":"agentfolio","timestamp":"2026-03-24T02:53:57.022Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:55:38.112Z"}
+{"duration":"1580ms","ip":"13.53.199.22","level":"info","message":"Slow request","method":"GET","path":"/api/profile/agent_aremes/genesis","service":"agentfolio","status":200,"timestamp":"2026-03-24T02:56:00.252Z"}
+{"duration":"1593ms","ip":"158.222.232.137","level":"info","message":"Slow request","method":"GET","path":"/api/profile/agent_aremes/genesis","service":"agentfolio","status":200,"timestamp":"2026-03-24T02:56:02.528Z"}
+{"duration":"0ms","ip":"158.222.232.137","level":"warn","message":"HTTP Request","method":"PATCH","path":"/api/profile/agent_aremes","service":"agentfolio","status":401,"timestamp":"2026-03-24T02:58:33.265Z"}
+{"level":"info","message":"[ChainSync] Found 17 on-chain identity accounts","service":"agentfolio","timestamp":"2026-03-24T02:58:57.005Z"}
+{"duration":"0ms","ip":"158.222.232.137","level":"warn","message":"HTTP Request","method":"GET","path":"/api/avatar/nfts/solana/Ewhn1YZdvZTkLnbgQBkLDcEJaRb2nFiQLLks8xdMDZFC","service":"agentfolio","status":401,"timestamp":"2026-03-24T02:59:01.444Z"}
+{"duration":"0ms","ip":"158.222.232.137","level":"warn","message":"HTTP Request","method":"GET","path":"/api/avatar/nfts/hyperliquid/null","service":"agentfolio","status":401,"timestamp":"2026-03-24T02:59:10.963Z"}
+{"duration":"1ms","ip":"158.222.232.137","level":"warn","message":"HTTP Request","method":"GET","path":"/api/avatar/nfts/ethereum/null","service":"agentfolio","status":401,"timestamp":"2026-03-24T02:59:16.397Z"}
+{"duration":"1ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T02:59:51.606Z"}
+{"duration":"0ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T03:02:39.904Z"}
+{"level":"info","message":"[ChainSync] Found 17 on-chain identity accounts","service":"agentfolio","timestamp":"2026-03-24T03:03:57.028Z"}
+{"level":"info","message":"[delegation] Schema initialized","service":"agentfolio","timestamp":"2026-03-24T03:04:17.769Z"}
+{"env":"production","level":"info","message":"AgentFolio server started","pid":320205,"port":"3333","service":"agentfolio","timestamp":"2026-03-24T03:04:17.774Z"}
+{"endpoints":["GET / - Profile directory","GET /profile/:id - Profile page","GET /api/profiles - JSON list","GET /api/search?q= - Search","POST /api/webhooks - Register webhook","WS /ws - Real-time feed"],"level":"info","message":"Available endpoints","service":"agentfolio","timestamp":"2026-03-24T03:04:17.775Z"}
+{"duration":"9ms","ip":"::ffff:127.0.0.1","level":"warn","message":"HTTP Request","method":"GET","path":"/api/stats","service":"agentfolio","status":404,"timestamp":"2026-03-24T03:04:38.963Z"}
+{"duration":"0ms","ip":"13.61.142.217","level":"warn","message":"HTTP Request","method":"GET","path":"/api/profile/agent_jarvis","service":"agentfolio","status":404,"timestamp":"2026-03-24T03:04:48.818Z"}
