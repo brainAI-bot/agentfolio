@@ -1,0 +1,14 @@
+{
+  "apps": [
+    {
+      "name": "integrity-check",
+      "script": "/home/ubuntu/agentfolio/tools/integrity-cron.sh",
+      "cron_restart": "0 6 * * *",
+      "autorestart": false,
+      "watch": false,
+      "max_restarts": 0,
+      "cwd": "/home/ubuntu/agentfolio",
+      "interpreter": "bash"
+    }
+  ]
+}

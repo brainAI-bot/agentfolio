@@ -300,11 +300,11 @@ export default function RegisterPage() {
       {error && (
         <div
           className="rounded-lg p-4 mb-6 flex items-center gap-3"
-          style={{ background: "rgba(220, 38, 38, 0.1)", border: "1px solid rgba(220, 38, 38, 0.3)" }}
+          style={{ background: "rgba(239, 68, 68, 0.08)", border: "1px solid rgba(239, 68, 68, 0.3)" }}
         >
-          <AlertCircle size={20} style={{ color: "var(--accent)" }} />
-          <span className="text-sm flex-1" style={{ color: "var(--accent)" }}>{error}</span>
-          <button onClick={() => setError("")}><X size={16} style={{ color: "var(--accent)" }} /></button>
+          <AlertCircle size={20} style={{ color: "#ef4444" }} />
+          <span className="text-sm flex-1" style={{ color: "#ef4444" }}>{error}</span>
+          <button onClick={() => setError("")}><X size={16} style={{ color: "#ef4444" }} /></button>
         </div>
       )}
 
@@ -445,7 +445,7 @@ export default function RegisterPage() {
               {!loading && <ArrowRight size={16} />}
             </button>
             <p className="text-[11px] text-center mt-2" style={{ color: "var(--text-tertiary)" }}>
-              This will save your profile and create an on-chain SATP identity (requires ~0.003 SOL for rent)
+              This will save your profile and create an on-chain SATP identity (requires ~0.005 SOL for rent)
             </p>
           </div>
         </div>

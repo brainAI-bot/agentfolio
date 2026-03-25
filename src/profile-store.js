@@ -389,7 +389,35 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
     })();
   }
 
-  // Record score history on verification change
+  // Notify CMD Center of verification
+  try {
+    const http = require('http');
+    // Count total verifications
+    const vdRow = getDb().prepare('SELECT verification_data FROM profiles WHERE id = ?').get(profileId);
+    let totalVerifs = 0;
+    try {
+      const vd = JSON.parse(vdRow?.verification_data || '{}');
+      totalVerifs = Object.values(vd).filter(v => v && v.verified).length;
+    } catch {}
+    
+    const notifData = JSON.stringify({
+      agent_id: 'agentfolio',
+      project_id: 'agentfolio',
+      text: `🔐 ${profileId} verified: ${platform}${identifier ? ' (' + (typeof identifier === 'string' ? identifier.slice(0,20) : '') + ')' : ''} (total: ${totalVerifs})`,
+      color: '#00BFFF',
+    });
+    const notifReq = http.request({
+      hostname: 'localhost', port: 3456, path: '/api/comms/push',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-HQ-Key': 'REDACTED_HQ_KEY' },
+      timeout: 3000,
+    });
+    notifReq.on('error', () => {});
+    notifReq.write(notifData);
+    notifReq.end();
+  } catch (_) {}
+
+    // Record score history on verification change
   if (global._recordScoreHistory) {
     (async () => {
       try {
@@ -784,6 +812,26 @@ function registerRoutes(app) {
       if (resolvedEmail) {
         sendWelcomeEmail(resolvedEmail, { id, name: name.trim(), handle: h });
       }
+      // Notify CMD Center of new registration
+      try {
+        const http = require('http');
+        const notifData = JSON.stringify({
+          agent_id: 'agentfolio',
+          project_id: 'agentfolio',
+          text: `🆕 New agent registered: ${name.trim()} (agent_${id.replace('agent_','')}) — ${(resolvedSkills || []).slice(0,3).map(s => s.name || s).join(', ') || 'no skills'}${solanaWallet ? ' • wallet: ' + solanaWallet.slice(0,8) + '...' : ''}`,
+          color: '#00BFFF',
+        });
+        const notifReq = http.request({
+          hostname: 'localhost', port: 3456, path: '/api/comms/push',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-HQ-Key': 'REDACTED_HQ_KEY' },
+          timeout: 3000,
+        });
+        notifReq.on('error', () => {}); // fire-and-forget
+        notifReq.write(notifData);
+        notifReq.end();
+      } catch (_) {} // Never fail registration due to notification
+
       res.status(201).json({
         id,
         api_key: apiKey,

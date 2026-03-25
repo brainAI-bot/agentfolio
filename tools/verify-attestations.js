@@ -2,8 +2,8 @@
 /**
  * Attestation Verification Script
  * 
- * Verifies ALL attestation memos on-chain for a given agent.
- * Useful for external auditors who want to independently verify trust scores.
+ * Verifies ALL attestation memos for a given agent using AgentFolio API endpoints.
+ * No direct DB access — works from any machine with internet.
  * 
  * Usage:
  *   node verify-attestations.js <agent_id>
@@ -16,18 +16,15 @@
  * brainChain — 2026-03-25
  */
 
-const { Connection, PublicKey, Keypair } = require('@solana/web3.js');
+const { Connection, PublicKey } = require('@solana/web3.js');
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
 
 // ── Config ──────────────────────────────────────────────
-const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+const API_BASE = process.env.AGENTFOLIO_API || 'https://agentfolio.bot';
+const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const GENESIS_PROGRAM = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
-const DB_PATH = process.env.DB_PATH || '/home/ubuntu/agentfolio/data/agentfolio.db';
 
 // Platform signer — the AgentFolio platform key that signs attestation memos
-// Only attestations signed by this key are considered valid
 const TRUSTED_SIGNERS = new Set([
   'JAbcYnKy4p2c5SYV3bHu14VtD6EDDpzj44uGYW8BMud4', // brainforge-personal (current platform signer)
   'Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc', // deploy wallet (legacy signer)
@@ -106,8 +103,17 @@ function parseGenesisRecord(data) {
 }
 
 /**
+ * Fetch JSON from API endpoint
+ */
+async function fetchAPI(path) {
+  const url = `${API_BASE}${path}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText} (${url})`);
+  return res.json();
+}
+
+/**
  * Verify a single attestation TX on-chain
- * Confirms the memo exists and was signed by a trusted signer
  */
 async function verifyTxOnChain(conn, txSig) {
   try {
@@ -119,7 +125,6 @@ async function verifyTxOnChain(conn, txSig) {
     if (!tx) return { verified: false, reason: 'TX not found on chain' };
     if (tx.meta?.err) return { verified: false, reason: 'TX failed on-chain' };
 
-    // Check log messages for VERIFY| memo
     const logs = tx.meta?.logMessages || [];
     let memoContent = null;
     for (const log of logs) {
@@ -137,7 +142,6 @@ async function verifyTxOnChain(conn, txSig) {
 
     if (!memoContent) return { verified: false, reason: 'No VERIFY| memo found in TX logs' };
 
-    // Check signers
     const accountKeys = tx.transaction?.message?.staticAccountKeys ||
                         tx.transaction?.message?.accountKeys || [];
     const signerKeys = accountKeys.map(k => k.toBase58 ? k.toBase58() : k);
@@ -149,7 +153,7 @@ async function verifyTxOnChain(conn, txSig) {
       blockTime: tx.blockTime ? new Date(tx.blockTime * 1000).toISOString() : null,
       slot: tx.slot,
       trustedSigner: trustedSignerFound,
-      signers: signerKeys.slice(0, 3), // First 3 account keys (signers)
+      signers: signerKeys.slice(0, 3),
     };
   } catch (e) {
     return { verified: false, reason: e.message };
@@ -177,10 +181,11 @@ async function main() {
     console.log(`  ATTESTATION VERIFICATION REPORT`);
     console.log(`  Agent: ${agentId}`);
     console.log(`  Time: ${new Date().toISOString()}`);
+    console.log(`  API: ${API_BASE}`);
     console.log('═══════════════════════════════════════════════════════════\n');
   }
 
-  // ── 1. Fetch Genesis Record from chain ────────────────
+  // ── 1. Fetch Genesis Record from chain (direct RPC — trustless) ──
   const pda = getGenesisPDA(agentId);
   let genesis = null;
 
@@ -195,7 +200,7 @@ async function main() {
 
   if (!jsonOutput) {
     console.log('┌─────────────────────────────────────────────────────────┐');
-    console.log('│  ON-CHAIN IDENTITY (Genesis Record)                    │');
+    console.log('│  ON-CHAIN IDENTITY (Genesis Record — direct RPC)       │');
     console.log('└─────────────────────────────────────────────────────────┘\n');
 
     if (genesis) {
@@ -212,50 +217,58 @@ async function main() {
     }
   }
 
-  // ── 2. Fetch attestations from DB ─────────────────────
+  // ── 2. Fetch attestations from API ────────────────────
   let attestations = [];
   try {
-    const Database = require('better-sqlite3');
-    const db = new Database(DB_PATH, { readonly: true });
-
-    attestations = db.prepare(`
-      SELECT profile_id, platform, tx_signature, memo, proof_hash, signer, created_at
-      FROM attestations
-      WHERE profile_id = ?
-      ORDER BY created_at ASC
-    `).all(agentId);
-
-    db.close();
+    const attResult = await fetchAPI(`/api/satp/attestations/by-agent/${agentId}`);
+    if (attResult.ok && attResult.data) {
+      attestations = attResult.data.attestations || [];
+    }
   } catch (e) {
-    if (!jsonOutput) console.log(`\n  ⚠️  DB read failed: ${e.message}`);
+    if (!jsonOutput) console.log(`\n  ⚠️  Attestation API failed: ${e.message}`);
   }
+
+  // Deduplicate by platform (keep first occurrence = most recent from chain-cache)
+  const seenPlatforms = new Set();
+  const deduped = [];
+  for (const att of attestations) {
+    if (!seenPlatforms.has(att.platform)) {
+      seenPlatforms.add(att.platform);
+      deduped.push(att);
+    }
+  }
+  attestations = deduped;
 
   if (!jsonOutput) {
     console.log('\n┌─────────────────────────────────────────────────────────┐');
-    console.log('│  ATTESTATION MEMOS                                     │');
+    console.log('│  ATTESTATION MEMOS (via API)                           │');
     console.log('└─────────────────────────────────────────────────────────┘\n');
 
     if (attestations.length === 0) {
       console.log(`  ❌ No attestation memos found for ${agentId}`);
+      console.log(`  Hint: Chain-cache may still be loading (2-min refresh cycle).`);
+      console.log(`  Try again in a minute, or check: ${API_BASE}/api/satp/attestations/by-agent/${agentId}`);
     } else {
-      console.log(`  Found ${attestations.length} attestation(s):\n`);
+      console.log(`  Found ${attestations.length} unique platform attestation(s):\n`);
 
       for (let i = 0; i < attestations.length; i++) {
         const att = attestations[i];
         const trusted = att.signer && TRUSTED_SIGNERS.has(att.signer);
         const signerStatus = trusted ? '✅ trusted' : '⚠️  unknown signer';
 
-        console.log(`  ${(i + 1).toString().padStart(2)}. ${att.platform.toUpperCase().padEnd(14)}`);
-        console.log(`      TX:        ${att.tx_signature}`);
-        console.log(`      Solscan:   https://solscan.io/tx/${att.tx_signature}`);
-        console.log(`      Proof:     ${att.proof_hash}`);
+        console.log(`  ${(i + 1).toString().padStart(2)}. ${(att.platform || 'unknown').toUpperCase().padEnd(14)}`);
+        console.log(`      TX:        ${att.txSignature || 'N/A'}`);
+        if (att.txSignature) {
+          console.log(`      Solscan:   https://solscan.io/tx/${att.txSignature}`);
+        }
+        console.log(`      Proof:     ${att.proofHash || 'N/A'}`);
         console.log(`      Signer:    ${att.signer || 'unknown'} (${signerStatus})`);
-        console.log(`      Timestamp: ${att.created_at}`);
+        console.log(`      Timestamp: ${att.timestamp || 'N/A'}`);
 
         // On-chain verification if requested
-        if (verifyTx) {
+        if (verifyTx && att.txSignature) {
           process.stdout.write('      On-chain:  verifying...');
-          const result = await verifyTxOnChain(conn, att.tx_signature);
+          const result = await verifyTxOnChain(conn, att.txSignature);
           process.stdout.clearLine?.(0);
           process.stdout.cursorTo?.(0);
           if (result.verified) {
@@ -266,7 +279,6 @@ async function main() {
           } else {
             console.log(`      On-chain:  ❌ ${result.reason}`);
           }
-          // Rate limit RPC calls
           await new Promise(r => setTimeout(r, 300));
         }
 
@@ -275,25 +287,66 @@ async function main() {
     }
   }
 
-  // ── 3. Summary ────────────────────────────────────────
+  // ── 3. Cross-reference with explorer API ──────────────
+  let explorerData = null;
+  try {
+    explorerData = await fetchAPI(`/api/explorer/${agentId}`);
+  } catch (e) {
+    if (!jsonOutput) console.log(`  ⚠️  Explorer API failed: ${e.message}`);
+  }
+
+  if (!jsonOutput && explorerData) {
+    console.log('┌─────────────────────────────────────────────────────────┐');
+    console.log('│  CROSS-REFERENCE (Explorer API)                        │');
+    console.log('└─────────────────────────────────────────────────────────┘\n');
+
+    const explorerVerifs = explorerData.verifications || [];
+    const explorerPlatforms = explorerVerifs.filter(v => v.verified).map(v => v.platform);
+    const attPlatforms = attestations.map(a => a.platform);
+
+    console.log(`  Explorer platforms:     ${explorerPlatforms.length} — [${explorerPlatforms.join(', ')}]`);
+    console.log(`  Attestation platforms:  ${attPlatforms.length} — [${attPlatforms.join(', ')}]`);
+    console.log(`  Explorer score:         ${explorerData.trustScore}`);
+    console.log(`  Explorer tier:          ${explorerData.tier}`);
+
+    // Check for mismatches
+    const inExplorerNotAttestation = explorerPlatforms.filter(p => !attPlatforms.includes(p));
+    const inAttestationNotExplorer = attPlatforms.filter(p => !explorerPlatforms.includes(p));
+
+    if (inExplorerNotAttestation.length > 0) {
+      console.log(`  ⚠️  In explorer but no attestation: ${inExplorerNotAttestation.join(', ')}`);
+    }
+    if (inAttestationNotExplorer.length > 0) {
+      console.log(`  ℹ️  Has attestation but not in explorer: ${inAttestationNotExplorer.join(', ')}`);
+    }
+    if (inExplorerNotAttestation.length === 0 && inAttestationNotExplorer.length === 0) {
+      console.log('  ✅ Explorer and attestation platforms match perfectly');
+    }
+  }
+
+  // ── 4. Summary ────────────────────────────────────────
   const platforms = [...new Set(attestations.map(a => a.platform))];
   const trustedCount = attestations.filter(a => TRUSTED_SIGNERS.has(a.signer)).length;
 
   if (jsonOutput) {
-    // JSON output for programmatic consumption
     console.log(JSON.stringify({
       agentId,
       pda: pda.toBase58(),
       genesis: genesis || null,
       attestations: attestations.map(a => ({
         platform: a.platform,
-        txSignature: a.tx_signature,
-        proofHash: a.proof_hash,
+        txSignature: a.txSignature,
+        proofHash: a.proofHash,
         signer: a.signer,
-        trustedSigner: TRUSTED_SIGNERS.has(a.signer),
-        timestamp: a.created_at,
-        solscanUrl: `https://solscan.io/tx/${a.tx_signature}`,
+        trustedSigner: a.signer ? TRUSTED_SIGNERS.has(a.signer) : false,
+        timestamp: a.timestamp,
+        solscanUrl: a.txSignature ? `https://solscan.io/tx/${a.txSignature}` : null,
       })),
+      explorer: explorerData ? {
+        trustScore: explorerData.trustScore,
+        tier: explorerData.tier,
+        verifications: explorerData.verifications,
+      } : null,
       summary: {
         totalAttestations: attestations.length,
         trustedAttestations: trustedCount,
@@ -306,7 +359,7 @@ async function main() {
       verifiedAt: new Date().toISOString(),
     }, null, 2));
   } else {
-    console.log('┌─────────────────────────────────────────────────────────┐');
+    console.log('\n┌─────────────────────────────────────────────────────────┐');
     console.log('│  SUMMARY                                               │');
     console.log('└─────────────────────────────────────────────────────────┘\n');
 
@@ -329,6 +382,7 @@ async function main() {
     console.log(`  1. Genesis Record: solscan.io/account/${pda.toBase58()}`);
     console.log('  2. Each TX signature links to an on-chain memo proof');
     console.log('  3. Memo format: VERIFY|agent_id|platform|timestamp|proof_hash');
+    console.log(`  4. API: ${API_BASE}/api/satp/attestations/by-agent/${agentId}`);
     console.log('═══════════════════════════════════════════════════════════');
   }
 }
