@@ -1401,17 +1401,19 @@ export default function VerifyPage() {
 
                   <button
                     onClick={v.onVerify}
-                    disabled={!v.canVerify || v.state.loading || v.state.success || existingVerifications?.[v.type]?.verified}
+                    disabled={!v.canVerify || v.state.loading}
                     className="mt-3 flex items-center gap-2 px-4 py-2 rounded-lg text-[11px] font-semibold uppercase tracking-wider transition-all disabled:opacity-40"
                     style={{
                       fontFamily: "var(--font-mono)",
-                      background: (v.state.success || existingVerifications?.[v.type]?.verified) ? "var(--success)" : "var(--accent)",
+                      background: v.state.success ? "var(--success)" : existingVerifications?.[v.type]?.verified ? "var(--accent)" : "var(--accent)",
                       color: "#fff",
                     }}
                   >
                     {v.state.loading ? (
                       <>Verifying... <Loader2 size={12} className="animate-spin" /></>
-                    ) : (v.state.success || existingVerifications?.[v.type]?.verified) ? (
+                    ) : existingVerifications?.[v.type]?.verified && !v.state.success ? (
+                      <>Re-verify <ArrowRight size={12} /></>
+                    ) : v.state.success ? (
                       <>Verified <CheckCircle size={12} /></>
                     ) : (
                       <>Start Verification <ArrowRight size={12} /></>

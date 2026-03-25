@@ -189,19 +189,13 @@ export default function SATPExplorerPage() {
       const attData = attRes?.ok ? await attRes.json() : null;
       const explorerData = explorerRes?.ok ? await explorerRes.json() : null;
       
-      // Deduplicate attestations by platform
+      // Show all attestation memos (no dedup — multiple per platform is valid)
       const rawAtts = attData?.data?.attestations || [];
-      const seen = new Set<string>();
-      const uniqueAtts = rawAtts.filter((a: any) => {
-        if (seen.has(a.platform)) return false;
-        seen.add(a.platform);
-        return true;
-      });
 
       setDetailData(prev => ({
         ...prev,
         [profileId]: {
-          attestations: uniqueAtts,
+          attestations: rawAtts,
           explorer: explorerData,
         },
       }));
@@ -423,6 +417,7 @@ export default function SATPExplorerPage() {
               {/* Stats row */}
               <div className="flex gap-4 text-[10px]" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
                 <span>L{agent.verificationLevel}</span>
+                <span>{agent.platforms.length} attestations</span>
                 {agent.reviewCount > 0 && <span>★{agent.reviewAvg.toFixed(1)} ({agent.reviewCount})</span>}
                 <span>{formatDate(agent.registeredAt)}</span>
               </div>
@@ -455,7 +450,7 @@ export default function SATPExplorerPage() {
                     </div>
                     <div className="flex justify-between">
                       <span style={{ color: "var(--text-tertiary)" }}>Trust Score</span>
-                      <span style={{ color: "var(--text-primary)" }}>{agent.trustScore} / 1000</span>
+                      <span style={{ color: "var(--text-primary)" }}>{agent.trustScore} / 800</span>
                     </div>
                     <div className="flex justify-between">
                       <span style={{ color: "var(--text-tertiary)" }}>Verification Level</span>
@@ -497,25 +492,32 @@ export default function SATPExplorerPage() {
                     ) : attestations.length > 0 ? (
                       <div className="space-y-1.5 max-h-48 overflow-y-auto">
                         {attestations.map((att: any, i: number) => (
-                          <div key={i} className="flex items-center justify-between py-1 px-2 rounded" style={{ background: "var(--bg-tertiary)" }}>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px]">{PLATFORM_ICONS[att.platform] || "✓"}</span>
-                              <span className="text-[10px] font-semibold uppercase" style={{ color: "var(--text-primary)" }}>{att.platform}</span>
+                          <div key={i} className="py-1.5 px-2 rounded" style={{ background: "var(--bg-tertiary)" }}>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px]">{PLATFORM_ICONS[att.platform] || "✓"}</span>
+                                <span className="text-[10px] font-semibold uppercase" style={{ color: "var(--text-primary)" }}>{att.platform}</span>
+                              </div>
+                              {att.txSignature ? (
+                                <a
+                                  href={att.solscanUrl || `https://solscan.io/tx/${att.txSignature}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="hover:underline flex items-center gap-1 text-[9px]"
+                                  style={{ color: "var(--accent)" }}
+                                  onClick={e => e.stopPropagation()}
+                                  title={att.txSignature}
+                                >
+                                  {att.txSignature.slice(0, 8)}...{att.txSignature.slice(-4)} <ExternalLink size={8} />
+                                </a>
+                              ) : (
+                                <span className="text-[9px]" style={{ color: "var(--text-tertiary)" }}>no tx</span>
+                              )}
                             </div>
-                            {att.txSignature ? (
-                              <a
-                                href={`https://solscan.io/tx/${att.txSignature}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="hover:underline flex items-center gap-1 text-[9px]"
-                                style={{ color: "var(--accent)" }}
-                                onClick={e => e.stopPropagation()}
-                                title={att.txSignature}
-                              >
-                                {att.txSignature.slice(0, 8)}...{att.txSignature.slice(-4)} <ExternalLink size={8} />
-                              </a>
-                            ) : (
-                              <span className="text-[9px]" style={{ color: "var(--text-tertiary)" }}>no tx</span>
+                            {att.memo && (
+                              <div className="text-[9px] mt-0.5 truncate" style={{ color: "var(--text-tertiary)" }} title={att.memo}>
+                                {att.memo}
+                              </div>
                             )}
                           </div>
                         ))}
