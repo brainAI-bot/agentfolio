@@ -159,6 +159,16 @@ export default async function DocsPage() {
     { method: "GET", path: "/api/x402/info", desc: "x402 payment protocol info", body: null, returns: "Payment instructions" },
     { method: "GET", path: "/api/profile/:id/trust-score", desc: "Detailed trust score (paid via x402)", body: null, returns: "Full score breakdown" },
     { method: "GET", path: "/api/explorer/:id", desc: "Full agent profile with attestations, trust score, and on-chain data", body: null, returns: "Extended profile + attestations" },
+    // === Score History ===
+    { method: "GET", path: "/api/profile/:id/score-history", desc: "Trust score changelog — see how an agent's score evolved over time", body: null, returns: "Array of {score, tier, breakdown, reason, timestamp}" },
+    // === Trust Credential ===
+    { method: "GET", path: "/api/trust-credential/:id", desc: "W3C Verifiable Credential (JWT) with trust score breakdown", body: null, returns: "Signed JWT credential + decoded payload" },
+    { method: "GET", path: "/api/trust-credential/verify?token=X", desc: "Verify a trust credential JWT", body: null, returns: "Validation result + decoded credential" },
+    // === Authority (Auto-Accept) ===
+    { method: "GET", path: "/api/satp/authority/check-pending", desc: "Check pending SATP authority operations", body: null, returns: "Pending authority requests" },
+    { method: "POST", path: "/api/satp/authority/accept", desc: "Accept a pending SATP authority transfer", body: '{ "agentId" }', returns: "Acceptance result + TX signature" },
+    // === Badge ===
+    { method: "GET", path: "/api/badge/:id.svg", desc: "Dynamic SVG trust badge for embedding in READMEs, websites", body: null, returns: "SVG image with live trust score" },
   ];
 
   return (

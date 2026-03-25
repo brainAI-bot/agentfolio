@@ -15,6 +15,16 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
     if (!res.ok) return null;
     const raw = await res.json();
     
+    // Fetch trust credential breakdown (normalized)
+    let trustBreakdown = null;
+    try {
+      const tcRes = await globalThis.fetch(`${API_BASE}/api/trust-credential/${encodeURIComponent(id)}?format=json`, { next: { revalidate: 120 } });
+      if (tcRes.ok) {
+        const tcData = await tcRes.json();
+        trustBreakdown = tcData?.credential?.credentialSubject?.breakdown || null;
+      }
+    } catch {}
+
     // Map backend response to frontend Agent type
     const vd = raw.verificationData || {};
     
@@ -59,6 +69,7 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
       createdAt: raw.createdAt || "",
       activity: [],
       walletAddress: raw.walletAddress || raw.wallets?.solana || undefined,
+      trustBreakdown,
     };
   } catch {
     return null;

@@ -391,32 +391,76 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
             <h2 className="text-sm font-semibold uppercase tracking-wider mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
               Trust Breakdown
             </h2>
-            <div className="space-y-2">
-              {(() => {
-                const v3Rep = genesis ? parseFloat(genesis.reputationPct) : null;
-                const v3Level = genesis ? genesis.verificationLevel : null;
-                if (genesis) {
-                  return [
-                    { label: "Trust Score", pct: Math.min(100, Math.round((genesis.reputationScore || 0) / 8)) },
-                    { label: "Verification", pct: Math.round(((v3Level || 0) / 5) * 100) },
-                  ];
-                }
-                return [
-                  { label: "Trust Score", pct: Math.min(100, Math.round(displayRating * 20)) },
-                  { label: "Verification", pct: Math.min(100, agent.trustScore) },
-                ];
-              })().map(({ label, pct }) => (
-                <div key={label}>
-                  <div className="flex justify-between text-[11px] mb-1" style={{ fontFamily: "var(--font-mono)" }}>
-                    <span style={{ color: "var(--text-secondary)" }}>{label}</span>
-                    <span style={{ color: "var(--text-primary)" }}>{pct}%</span>
+            {agent.trustBreakdown ? (() => {
+              const bd = agent.trustBreakdown;
+              const total = (bd.onChainReputation || 0) + (bd.verifications || 0) + (bd.socialProof || 0) + (bd.completeness || 0) + (bd.marketplace || 0) + (bd.tenure || 0);
+              const items = [
+                { label: "On-Chain", value: bd.onChainReputation || 0, color: "#3fb950" },
+                { label: "Verifications", value: bd.verifications || 0, color: "#58a6ff" },
+                { label: "Social Proof", value: bd.socialProof || 0, color: "#79c0ff" },
+                { label: "Completeness", value: bd.completeness || 0, color: "#a371f7" },
+                { label: "Marketplace", value: bd.marketplace || 0, color: "#56d364" },
+                { label: "Tenure", value: bd.tenure || 0, color: "#8b949e" },
+              ].filter(i => i.value > 0);
+              return (
+                <div className="space-y-3">
+                  {/* Stacked bar */}
+                  <div>
+                    <div className="flex justify-between text-[11px] mb-1.5" style={{ fontFamily: "var(--font-mono)" }}>
+                      <span style={{ color: "var(--text-secondary)" }}>Score Composition</span>
+                      <span style={{ color: "var(--text-primary)" }}>{total} pts</span>
+                    </div>
+                    <div className="flex h-5 rounded-lg overflow-hidden" style={{ background: "var(--bg-tertiary)" }}>
+                      {items.map((item) => (
+                        <div key={item.label} title={`${item.label}: ${item.value}`} style={{ width: `${total > 0 ? (item.value / total * 100) : 0}%`, background: item.color, transition: "width 0.3s ease" }} />
+                      ))}
+                    </div>
                   </div>
-                  <div className="h-1.5 rounded-full" style={{ background: "var(--bg-tertiary)" }}>
-                    <div className="h-full rounded-full" style={{ width: `${pct}%`, background: "var(--accent)" }} />
-                  </div>
+                  {/* Individual bars */}
+                  {items.map((item) => (
+                    <div key={item.label}>
+                      <div className="flex justify-between text-[11px] mb-1" style={{ fontFamily: "var(--font-mono)" }}>
+                        <span className="flex items-center gap-1.5" style={{ color: "var(--text-secondary)" }}>
+                          <span className="inline-block w-2 h-2 rounded-full" style={{ background: item.color }} />
+                          {item.label}
+                        </span>
+                        <span style={{ color: "var(--text-primary)" }}>{item.value}</span>
+                      </div>
+                      <div className="h-1.5 rounded-full" style={{ background: "var(--bg-tertiary)" }}>
+                        <div className="h-full rounded-full" style={{ width: `${total > 0 ? (item.value / total * 100) : 0}%`, background: item.color, transition: "width 0.3s ease" }} />
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              );
+            })() : (
+              <div className="space-y-2">
+                {(() => {
+                  const v3Rep = genesis ? parseFloat(genesis.reputationPct) : null;
+                  const v3Level = genesis ? genesis.verificationLevel : null;
+                  if (genesis) {
+                    return [
+                      { label: "Trust Score", pct: Math.min(100, Math.round((genesis.reputationScore || 0) / 8)) },
+                      { label: "Verification", pct: Math.round(((v3Level || 0) / 5) * 100) },
+                    ];
+                  }
+                  return [
+                    { label: "Trust Score", pct: Math.min(100, Math.round(displayRating * 20)) },
+                    { label: "Verification", pct: Math.min(100, agent.trustScore) },
+                  ];
+                })().map(({ label, pct }) => (
+                  <div key={label}>
+                    <div className="flex justify-between text-[11px] mb-1" style={{ fontFamily: "var(--font-mono)" }}>
+                      <span style={{ color: "var(--text-secondary)" }}>{label}</span>
+                      <span style={{ color: "var(--text-primary)" }}>{pct}%</span>
+                    </div>
+                    <div className="h-1.5 rounded-full" style={{ background: "var(--bg-tertiary)" }}>
+                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: "var(--accent)" }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           {reviews.length > 0 &&
           <div className="rounded-lg p-5" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
