@@ -14,6 +14,7 @@ interface AgentCard {
   tier: string;
   verificationLevel: number;
   platforms: string[];
+  onChainAttestations: number;
   reviewCount: number;
   reviewAvg: number;
   jobCount: number;
@@ -155,6 +156,7 @@ export default function SATPExplorerPage() {
               reviewAvg: reviewData?.data?.stats?.avg_rating || reviewData?.stats?.avg_rating || 0,
               jobCount: profile?.stats?.jobsCompleted || 0,
               totalEarned: profile?.stats?.totalEarned || 0,
+              onChainAttestations: agent.onChainAttestations || 0,
               registeredAt: agent.createdAt || profile?.createdAt || "",
               nftImage: nftAvatar?.image || nftAvatar?.arweaveUrl || agent.nftImage || null,
               nftMint: nftAvatar?.soulboundMint || nftAvatar?.identifier || agent.nftMint || null,
@@ -272,7 +274,7 @@ export default function SATPExplorerPage() {
         <div className="flex flex-wrap gap-3 mt-2 text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
           <span>{agents.length} on-chain agents</span>
           <span>·</span>
-          <span>{agents.reduce((s, a) => s + a.platforms.length, 0)} attestations</span>
+          <span>{agents.reduce((s, a) => s + (a.onChainAttestations || a.platforms.length), 0)} attestations</span>
           <span>·</span>
           <span>{agents.filter(a => a.soulbound).length} soulbound NFTs</span>
         </div>
