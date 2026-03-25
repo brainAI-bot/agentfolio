@@ -21,7 +21,7 @@ const path = require('path');
 
 // ─── Key Management ─────────────────────────────────────
 const KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR ||
-  '/home/ubuntu/.config/solana/brainforge-personal.json';
+  process.env.SATP_KEYPAIR_PATH || './config/platform-keypair.json';
 
 let cachedKeyPair = null;
 
@@ -189,7 +189,7 @@ function registerTrustCredentialRoutes(app) {
         tier: v3Data ? v3Data.verificationLabel.toUpperCase() : (scoreResult.level || scoreTier(scoreResult.score)),
         scoreVersion: v3Data ? 'v3' : 'v2',
         verificationCount: parsed.verifications.filter(v => v.verified !== false).length,
-        onChainRegistered: v3Data ? true : (scoreResult.onChainRegistered || false),
+        onChainRegistered: v3Data ? true : (scoreResult.onChainRegistered || parsed.metadata?.registeredOnChain || parsed.verifications?.some(v => v.platform === 'satp' && v.verified) || false),
         breakdown: (() => {
           // V3 scoring uses different category structure than V2
           const cats = scoreResult.breakdown?.trustScore?.categories || {};

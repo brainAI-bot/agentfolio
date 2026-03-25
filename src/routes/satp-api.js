@@ -417,7 +417,39 @@ function registerSATPRoutes(app) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  console.log('[SATP API] Routes registered: /api/satp/{identity,scores,attestations,registry,profile,programs,reviews,reputation} + /api/satp/v3/{agent,scores,resolve,name,wallets}');
+  console.log('[SATP API] Routes registered: /api/satp/{identity,scores,attestations,registry,profile,programs,reviews,reputation} + /api/satp/v3/{agent,scores,resolve,name,wallets} + /api/satp/attestations/by-agent/:agentId');
+
+  // ═══ Attestations by Agent ID (with TX signatures) ═══
+  // Returns full attestation data from chain-cache for verify-attestations tool
+  app.get('/api/satp/attestations/by-agent/:agentId', async (req, res) => {
+    try {
+      const chainCache = require('../lib/chain-cache');
+      const { agentId } = req.params;
+      const attestations = chainCache.getVerifications(agentId);
+      const platforms = [...new Set(attestations.map(a => a.platform))];
+      
+      res.json({
+        ok: true,
+        data: {
+          agentId,
+          count: attestations.length,
+          platforms,
+          attestations: attestations.map(a => ({
+            platform: a.platform,
+            txSignature: a.txSignature,
+            memo: a.memo,
+            proofHash: a.proofHash,
+            signer: a.signer,
+            timestamp: a.timestamp,
+            solscanUrl: a.solscanUrl || (a.txSignature ? 'https://solscan.io/tx/' + a.txSignature : null),
+          })),
+        },
+      });
+    } catch (err) {
+      console.error('[SATP API] attestations by-agent error:', err.message);
+      res.status(500).json({ error: 'Failed to fetch attestations', detail: err.message });
+    }
+  });
 }
 
 module.exports = { registerSATPRoutes };
