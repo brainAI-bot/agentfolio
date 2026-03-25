@@ -185,7 +185,7 @@ function registerTrustCredentialRoutes(app) {
         agentId,
         name: profile.name,
         trustScore: v3Data ? v3Data.reputationScore : scoreResult.score,
-        maxScore: v3Data ? 1000 : scoreResult.maxScore,
+        maxScore: v3Data ? 800 : scoreResult.maxScore,
         tier: v3Data ? v3Data.verificationLabel.toUpperCase() : (scoreResult.level || scoreTier(scoreResult.score)),
         scoreVersion: v3Data ? 'v3' : 'v2',
         verificationCount: parsed.verifications.filter(v => v.verified !== false).length,
