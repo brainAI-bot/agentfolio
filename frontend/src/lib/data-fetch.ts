@@ -26,8 +26,16 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
     } catch {}
 
     // Map backend response to frontend Agent type
-    const vd = raw.verificationData || {};
-    
+    // Use verification_data (snake_case from API) with fallback to verificationData
+    const vd = raw.verification_data || raw.verificationData || {};
+
+    // V3 on-chain Genesis Record is canonical — prefer trust_score/v3 fields
+    const v3ts = raw.trust_score?.source === 'satp_v3_onchain' ? raw.trust_score : null;
+    const v3cache = raw.v3 || null;
+    const repScore = v3ts?.reputationScore ?? v3cache?.reputationScore ?? raw.trustScore ?? raw.score ?? 0;
+    const vLevel = v3ts?.verificationLevel ?? v3cache?.verificationLevel ?? raw.verificationLevel ?? 0;
+    const vLabel = v3ts?.verificationLabel ?? v3cache?.verificationLabel ?? ["Unclaimed","Registered","Verified","Established","Trusted","Sovereign"][vLevel] ?? "Unclaimed";
+
     return {
       id: raw.id,
       name: raw.name,
@@ -35,13 +43,13 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
       bio: raw.bio || "",
       avatar: raw.avatar || "",
       nftAvatar: raw.nftAvatar || null,
-      trustScore: raw.trustScore || raw.score || 0,
-      tier: raw.tier || 0,
-      verificationLevel: raw.verificationLevel || 0,
-      verificationLevelName: ["Unclaimed","Registered","Verified","Established","Trusted","Sovereign"][raw.verificationLevel || 0] || "Unclaimed",
-      verificationBadge: ["⚪","🟡","🔵","🟢","🟠","🟣"][raw.verificationLevel || 0] || "⚪",
-      reputationScore: raw.trustScore || raw.score || 0,
-      reputationRank: ["Newcomer","Recognized","Competent","Expert","Master"][Math.min(Math.floor((raw.trustScore || 0) / 250), 4)] || "Newcomer",
+      trustScore: repScore,
+      tier: vLevel,
+      verificationLevel: vLevel,
+      verificationLevelName: vLabel,
+      verificationBadge: ["⚪","🟡","🔵","🟢","🟠","🟣"][vLevel] || "⚪",
+      reputationScore: repScore,
+      reputationRank: ["Newcomer","Recognized","Competent","Expert","Master"][Math.min(Math.floor(repScore / 250), 4)] || "Newcomer",
       skills: Array.isArray(raw.skills) ? raw.skills.map((s: any) => typeof s === "string" ? s : s.name || "").filter(Boolean) : [],
       verifications: {
         github: vd.github?.verified ? { username: vd.github.username || vd.github.handle || "", repos: vd.github.repos || 0, stars: vd.github.stars || 0, verified: true } : undefined,
@@ -76,10 +84,10 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
         if (raw.avatar?.trim()) filled++;
         const skills = Array.isArray(raw.skills) ? raw.skills : [];
         if (skills.length > 0) filled++;
-        const vd = raw.verificationData || {};
+        const vd2 = raw.verification_data || raw.verificationData || {};
         const links = raw.links || {};
-        if (vd.x?.verified || vd.twitter?.verified || links.x) filled++;
-        if (vd.github?.verified || links.github) filled++;
+        if (vd2.x?.verified || vd2.twitter?.verified || links.x) filled++;
+        if (vd2.github?.verified || links.github) filled++;
         if (links.website) filled++;
         if (raw.walletAddress || raw.wallets?.solana) filled++;
         return Math.round((filled / total) * 100);
