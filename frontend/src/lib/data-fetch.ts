@@ -69,6 +69,21 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
       createdAt: raw.createdAt || "",
       activity: [],
       walletAddress: raw.walletAddress || raw.wallets?.solana || undefined,
+      profileCompleteness: (() => {
+        let filled = 0, total = 8;
+        if (raw.name?.trim()) filled++;
+        if ((raw.bio || raw.description)?.trim()) filled++;
+        if (raw.avatar?.trim()) filled++;
+        const skills = Array.isArray(raw.skills) ? raw.skills : [];
+        if (skills.length > 0) filled++;
+        const vd = raw.verificationData || {};
+        const links = raw.links || {};
+        if (vd.x?.verified || vd.twitter?.verified || links.x) filled++;
+        if (vd.github?.verified || links.github) filled++;
+        if (links.website) filled++;
+        if (raw.walletAddress || raw.wallets?.solana) filled++;
+        return Math.round((filled / total) * 100);
+      })(),
       trustBreakdown,
     };
   } catch {

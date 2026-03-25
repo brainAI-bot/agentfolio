@@ -33,6 +33,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
   return {
     title: `${name} — AgentFolio`,
+    alternates: { canonical: `https://agentfolio.bot/profile/${id}` },
     description: bio,
     openGraph: {
       title: `${name} — AgentFolio`,
@@ -155,8 +156,33 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   } catch (e) { /* API unavailable, show no reviews */ }
   const displayRating = avgRating > 0 ? avgRating : agent.rating;
 
+  // JSON-LD Structured Data for SEO
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": agent.name,
+    "description": agent.bio || `${agent.name} on AgentFolio — verified AI agent portfolio`,
+    "url": `https://agentfolio.bot/profile/${agent.id}`,
+    "image": agent.avatar || "https://agentfolio.bot/og-image.png",
+    "applicationCategory": "AI Agent",
+    "operatingSystem": "Blockchain",
+    "aggregateRating": {
+      "@type": "AggregateRating",
+      "ratingValue": genesis ? String(Math.min(5, genesis.reputationScore / 200)) : String(Math.min(5, agent.trustScore / 20)),
+      "bestRating": "5",
+      "worstRating": "0",
+      "ratingCount": String(Math.max(1, Object.values(agent.verifications || {}).filter(v => v?.verified).length)),
+    },
+    "author": {
+      "@type": "Organization",
+      "name": "AgentFolio",
+      "url": "https://agentfolio.bot",
+    },
+  };
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <WalletRequired />
       {/* Profile Header */}
       <div
@@ -386,6 +412,25 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
 
         {/* Right sidebar */}
         <div className="space-y-4">
+          {/* Profile Completeness */}
+          {agent.profileCompleteness !== undefined && agent.profileCompleteness < 100 && (
+            <div className="rounded-lg p-5 mb-4" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
+              <div className="flex justify-between items-center mb-2">
+                <h2 className="text-sm font-semibold uppercase tracking-wider" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+                  Profile Complete
+                </h2>
+                <span className="text-sm font-bold" style={{ fontFamily: "var(--font-mono)", color: agent.profileCompleteness >= 75 ? "var(--success)" : agent.profileCompleteness >= 50 ? "#eab308" : "var(--text-tertiary)" }}>
+                  {agent.profileCompleteness}%
+                </span>
+              </div>
+              <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--bg-tertiary)" }}>
+                <div className="h-full rounded-full transition-all" style={{ width: `${agent.profileCompleteness}%`, background: agent.profileCompleteness >= 75 ? "var(--success)" : agent.profileCompleteness >= 50 ? "#eab308" : "var(--accent)" }} />
+              </div>
+              <p className="text-[11px] mt-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
+                {agent.profileCompleteness < 50 ? "Add more info to improve discoverability" : agent.profileCompleteness < 75 ? "Almost there — add links and verifications" : "Just a few more fields to complete"}
+              </p>
+            </div>
+          )}
           {/* Trust Score Breakdown */}
           <div className="rounded-lg p-5" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
             <h2 className="text-sm font-semibold uppercase tracking-wider mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
@@ -546,6 +591,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
       </div>
 
     </div>
+      </>
   );
 }
 

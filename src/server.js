@@ -404,7 +404,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       wallets,
       tags,
       skills,
-      onChainRegistered: v3Data ? v3Data.isBorn : (scoreResult.onChainRegistered || false),
+      onChainRegistered: v3Data ? true : (scoreResult.onChainRegistered || parsed.metadata?.registeredOnChain || parsed.verifications?.some(v => v.platform === 'satp' && v.verified) || false),
       ...(v3Data ? {
         v3: {
           reputationScore: v3Data.reputationScore,
@@ -746,6 +746,264 @@ app.get('/docs', (req, res) => {
 
 
 
+
+
+
+
+// ─── Profile Analytics ──────────────────────────────────
+// Create analytics table
+(() => {
+  try {
+    const Database = require('better-sqlite3');
+    const path = require('path');
+    const db = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'));
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS profile_analytics (
+        agent_id TEXT PRIMARY KEY,
+        profile_views INTEGER DEFAULT 0,
+        credential_requests INTEGER DEFAULT 0,
+        export_requests INTEGER DEFAULT 0,
+        badge_embeds INTEGER DEFAULT 0,
+        search_appearances INTEGER DEFAULT 0,
+        last_viewed TEXT
+      );
+    `);
+    db.close();
+  } catch (e) { console.error('[Analytics] Init error:', e.message); }
+})();
+
+function incrementAnalytic(agentId, field) {
+  try {
+    const Database = require('better-sqlite3');
+    const path = require('path');
+    const db = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'));
+    db.prepare(`INSERT INTO profile_analytics (agent_id, ${field}, last_viewed) VALUES (?, 1, datetime('now'))
+      ON CONFLICT(agent_id) DO UPDATE SET ${field} = ${field} + 1, last_viewed = datetime('now')`).run(agentId);
+    db.close();
+  } catch {}
+}
+
+// Hook into existing endpoints to count
+const _origProfileHandler = {};
+app.use((req, res, next) => {
+  const match = req.path.match(/^\/api\/profile\/([^/]+)$/);
+  if (match && req.method === 'GET' && !req.path.includes('/analytics')) {
+    incrementAnalytic(match[1], 'profile_views');
+  }
+  const tcMatch = req.path.match(/^\/api\/trust-credential\/([^/]+)$/);
+  if (tcMatch && req.method === 'GET' && tcMatch[1] !== 'verify') {
+    incrementAnalytic(tcMatch[1], 'credential_requests');
+  }
+  const exportMatch = req.path.match(/^\/api\/profile\/([^/]+)\/export$/);
+  if (exportMatch && req.method === 'GET') {
+    incrementAnalytic(exportMatch[1], 'export_requests');
+  }
+  const badgeMatch = req.path.match(/^\/api\/badge\/([^.]+)\.svg$/);
+  if (badgeMatch && req.method === 'GET') {
+    incrementAnalytic(badgeMatch[1], 'badge_embeds');
+  }
+  next();
+});
+
+app.get('/api/profile/:id/analytics', (req, res) => {
+  const { id } = req.params;
+  try {
+    const Database = require('better-sqlite3');
+    const path = require('path');
+    const db = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
+    
+    const profile = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(id);
+    if (!profile) { db.close(); return res.status(404).json({ error: 'Agent not found' }); }
+    
+    const analytics = db.prepare('SELECT * FROM profile_analytics WHERE agent_id = ?').get(id);
+    db.close();
+    
+    res.json({
+      agentId: id,
+      name: profile.name,
+      analytics: analytics ? {
+        profileViews: analytics.profile_views || 0,
+        credentialRequests: analytics.credential_requests || 0,
+        exportRequests: analytics.export_requests || 0,
+        badgeEmbeds: analytics.badge_embeds || 0,
+        searchAppearances: analytics.search_appearances || 0,
+        lastViewed: analytics.last_viewed,
+      } : {
+        profileViews: 0, credentialRequests: 0, exportRequests: 0, badgeEmbeds: 0, searchAppearances: 0, lastViewed: null,
+      },
+    });
+  } catch (err) {
+    console.error('[Analytics] Error:', err);
+    res.status(500).json({ error: 'Analytics failed' });
+  }
+});
+
+// ─── Webhook Documentation ──────────────────────────────
+app.get('/api/webhooks/docs', (req, res) => {
+  res.json({
+    description: 'AgentFolio webhook event documentation',
+    events: [
+      {
+        event: 'agent.registered',
+        description: 'Fired when a new agent profile is registered',
+        payload: {
+          agent_id: 'agentfolio',
+          project_id: 'agentfolio',
+          text: '🆕 New agent registered: {name} ({id}) — {skills}',
+          color: '#00BFFF',
+        },
+        example: '🆕 New agent registered: brainKID (agent_brainkid) — Trading, Research',
+      },
+      {
+        event: 'agent.verified',
+        description: 'Fired when an agent completes a new verification',
+        payload: {
+          agent_id: 'agentfolio',
+          project_id: 'agentfolio',
+          text: '🔐 {profileId} verified: {platform} ({identifier}) (total: {count})',
+          color: '#00BFFF',
+        },
+        example: '🔐 agent_brainkid verified: github (0xbrainkid) (total: 8)',
+      },
+    ],
+    delivery: {
+      method: 'POST',
+      format: 'JSON',
+      endpoint: 'Configured via CMD Center (localhost:3456/api/comms/push)',
+      headers: { 'Content-Type': 'application/json', 'X-HQ-Key': '<your-key>' },
+    },
+    note: 'Webhook delivery is fire-and-forget. Events are not retried on failure.',
+  });
+});
+
+// ─── Profile Export (portable identity) ─────────────────
+app.get('/api/profile/:id/export', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const profileStore = require('./profile-store');
+    const { getV3Score } = require('../v3-score-service');
+    const db = profileStore.getDb();
+    
+    const profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(id);
+    if (!profile) return res.status(404).json({ error: 'Agent not found' });
+    
+    const { api_key, ...safeProfile } = profile;
+    
+    // Parse JSON fields
+    const verificationData = (() => { try { return JSON.parse(profile.verification_data || '{}'); } catch { return {}; } })();
+    const wallets = (() => { try { return JSON.parse(profile.wallets || '{}'); } catch { return {}; } })();
+    const skills = (() => { try { return JSON.parse(profile.skills || '[]'); } catch { return []; } })();
+    const endorsements = (() => { try { return JSON.parse(profile.endorsements || '[]'); } catch { return []; } })();
+    const metadata = (() => { try { return JSON.parse(profile.metadata || '{}'); } catch { return {}; } })();
+    
+    // V3 on-chain score
+    let v3Score = null;
+    try { v3Score = await getV3Score(id); } catch {}
+    
+    // Trust credential breakdown
+    let trustBreakdown = null;
+    try {
+      const tcRes = await fetch('http://localhost:3333/api/trust-credential/' + id + '?format=json');
+      if (tcRes.ok) {
+        const tcData = await tcRes.json();
+        trustBreakdown = tcData?.credential?.credentialSubject || null;
+      }
+    } catch {}
+    
+    // Score history
+    let scoreHistory = [];
+    try {
+      const history = db.prepare('SELECT score, tier, reason, created_at FROM score_history WHERE agent_id = ? ORDER BY created_at DESC LIMIT 20').all(id);
+      scoreHistory = history;
+    } catch {}
+    
+    // On-chain attestations
+    let attestations = [];
+    try {
+      const path = require('path');
+      const Database = require('better-sqlite3');
+      const mainDb = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
+      attestations = mainDb.prepare("SELECT * FROM satp_attestations WHERE agent_id = ? ORDER BY created_at DESC").all(id);
+      mainDb.close();
+    } catch {}
+    
+    // Verifications list
+    const verifications = Object.entries(verificationData)
+      .filter(([_, v]) => v && v.verified)
+      .map(([platform, data]) => ({
+        platform,
+        verified: true,
+        verifiedAt: data.verifiedAt,
+        identifier: data.address || data.username || data.handle || data.email || data.did || null,
+      }));
+    
+    const exported = {
+      exportVersion: '1.0',
+      exportedAt: new Date().toISOString(),
+      format: 'agentfolio-portable-identity',
+      
+      // Identity
+      id: profile.id,
+      did: 'did:agentfolio:' + profile.id,
+      satpDid: wallets.solana ? 'did:satp:sol:' + wallets.solana : null,
+      name: profile.name,
+      handle: profile.handle,
+      bio: profile.bio,
+      avatar: profile.avatar,
+      
+      // Wallets
+      wallets,
+      
+      // Skills
+      skills: Array.isArray(skills) ? skills.map(s => typeof s === 'string' ? s : s.name || '').filter(Boolean) : [],
+      
+      // Verifications
+      verifications,
+      verificationCount: verifications.length,
+      
+      // Trust Score
+      trustScore: v3Score ? {
+        score: v3Score.reputationScore,
+        tier: v3Score.verificationLabel,
+        level: v3Score.verificationLevel,
+        isBorn: v3Score.isBorn,
+        source: 'satp_v3_onchain',
+      } : null,
+      trustBreakdown: trustBreakdown?.breakdown || null,
+      
+      // On-chain
+      onChain: {
+        registered: metadata.registeredOnChain || false,
+        identityPDA: metadata._identityPDA || verificationData.satp?.identityPDA || null,
+        attestations: attestations.length,
+        attestationTxs: attestations.map(a => a.tx_signature).filter(Boolean),
+      },
+      
+      // History
+      scoreHistory: scoreHistory.map(h => ({ score: h.score, tier: h.tier, reason: h.reason, timestamp: h.created_at })),
+      
+      // Endorsements
+      endorsements,
+      
+      // Metadata
+      registeredAt: profile.created_at,
+      updatedAt: profile.updated_at,
+      
+      // Links
+      links: {
+        profile: 'https://agentfolio.bot/profile/' + profile.id,
+        trustCredential: 'https://agentfolio.bot/api/trust-credential/' + profile.id,
+        badge: 'https://agentfolio.bot/api/badge/' + profile.id + '.svg',
+        explorer: 'https://agentfolio.bot/api/explorer/' + profile.id,
+      },
+    };
+    
+    res.json(exported);
+  } catch (err) {
+    console.error('[Export] Error:', err);
+    res.status(500).json({ error: 'Export failed' });
+  }
+});
 
 // ─── Platform Stats ─────────────────────────────────────
 app.get('/api/stats', async (req, res) => {
