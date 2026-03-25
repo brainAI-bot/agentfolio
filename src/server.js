@@ -135,8 +135,70 @@ try {
 const app = express();
 const PORT = process.env.PORT || 3333;
 const NODE_ENV = process.env.NODE_ENV || 'development';
+const _AGENTFOLIO_VERSION = '1.0.0-5a57e72';
+
+
+// ─── API Response Cache (in-memory, 60s TTL) ────────────
+const _apiCache = new Map();
+const API_CACHE_TTL = 60 * 1000; // 60 seconds
+const CACHEABLE_PATTERNS = [
+  /^\/api\/profile\/[^/]+$/,
+  /^\/api\/explorer\/[^/]+$/,
+  /^\/api\/trust-credential\/[^/]+$/,
+  /^\/api\/profiles/,
+  /^\/api\/leaderboard/,
+  /^\/api\/search/,
+];
+
+// Cleanup stale cache entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of _apiCache) {
+    if (now - v.ts > API_CACHE_TTL) _apiCache.delete(k);
+  }
+}, 5 * 60 * 1000);
+
+app.use((req, res, next) => {
+  // Only cache GET requests
+  if (req.method !== 'GET') return next();
+  
+  // Check if URL matches cacheable patterns
+  const isCacheable = CACHEABLE_PATTERNS.some(p => p.test(req.path));
+  if (!isCacheable) return next();
+  
+  const cacheKey = req.originalUrl;
+  const cached = _apiCache.get(cacheKey);
+  
+  if (cached && (Date.now() - cached.ts) < API_CACHE_TTL) {
+    res.set('X-Cache', 'HIT');
+    res.set('X-Cache-Age', Math.round((Date.now() - cached.ts) / 1000) + 's');
+    res.set('Content-Type', cached.contentType || 'application/json');
+    return res.status(cached.status).send(cached.body);
+  }
+  
+  // Intercept response to cache it
+  res.set('X-Cache', 'MISS');
+  const originalJson = res.json.bind(res);
+  res.json = (data) => {
+    _apiCache.set(cacheKey, {
+      body: JSON.stringify(data),
+      status: res.statusCode || 200,
+      contentType: 'application/json',
+      ts: Date.now(),
+    });
+    return originalJson(data);
+  };
+  
+  next();
+});
 
 // Basic middleware
+// API version header
+app.use((req, res, next) => {
+  res.set('X-AgentFolio-Version', _AGENTFOLIO_VERSION);
+  next();
+});
+
 app.use(cors({
   origin: NODE_ENV === 'production' 
     ? ['https://agentfolio.bot', 'https://www.agentfolio.bot']
@@ -678,6 +740,519 @@ app.get('/docs', (req, res) => {
 });
 
 // Health check endpoint
+
+
+
+
+
+
+
+// ─── Platform Stats ─────────────────────────────────────
+app.get('/api/stats', async (req, res) => {
+  try {
+    const profileStore = require('./profile-store');
+    const { getV3Score } = require('../v3-score-service');
+    const db = profileStore.getDb();
+    const path = require('path');
+    
+    // Profile counts
+    const totalProfiles = db.prepare("SELECT COUNT(*) as c FROM profiles WHERE status = 'active'").get().c;
+    const claimedProfiles = db.prepare("SELECT COUNT(*) as c FROM profiles WHERE status = 'active' AND wallets IS NOT NULL AND wallets != '{}'").get().c;
+    const unclaimedProfiles = totalProfiles - claimedProfiles;
+    
+    // Verification counts
+    let totalVerifications = 0;
+    const allVd = db.prepare("SELECT verification_data FROM profiles WHERE status = 'active'").all();
+    for (const row of allVd) {
+      try {
+        const vd = JSON.parse(row.verification_data || '{}');
+        totalVerifications += Object.values(vd).filter(v => v && v.verified).length;
+      } catch {}
+    }
+    
+    // On-chain attestations
+    let totalAttestations = 0;
+    try {
+      const Database = require('better-sqlite3');
+      const mainDb = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
+      totalAttestations = mainDb.prepare("SELECT COUNT(*) as c FROM satp_attestations").get().c;
+      mainDb.close();
+    } catch {}
+    
+    // V3 scores + tier distribution
+    const profiles = db.prepare("SELECT id FROM profiles WHERE status = 'active' AND (hidden = 0 OR hidden IS NULL)").all();
+    const tierCounts = { SOVEREIGN: 0, TRUSTED: 0, ESTABLISHED: 0, VERIFIED: 0, REGISTERED: 0, UNCLAIMED: 0 };
+    let scoreSum = 0, scoredCount = 0;
+    
+    for (const p of profiles) {
+      try {
+        const v3 = await getV3Score(p.id);
+        if (v3 && v3.reputationScore > 0) {
+          scoreSum += v3.reputationScore;
+          scoredCount++;
+          const tier = v3.verificationLabel.toUpperCase();
+          if (tierCounts[tier] !== undefined) tierCounts[tier]++;
+          else tierCounts[tier] = 1;
+        } else {
+          tierCounts.UNCLAIMED++;
+        }
+      } catch {
+        tierCounts.UNCLAIMED++;
+      }
+    }
+    
+    const avgScore = scoredCount > 0 ? Math.round(scoreSum / scoredCount) : 0;
+    
+    // Uptime
+    const uptimeSeconds = process.uptime();
+    const hours = Math.floor(uptimeSeconds / 3600);
+    const mins = Math.floor((uptimeSeconds % 3600) / 60);
+    
+    res.json({
+      platform: 'AgentFolio',
+      url: 'https://agentfolio.bot',
+      profiles: { total: totalProfiles, claimed: claimedProfiles, unclaimed: unclaimedProfiles },
+      verifications: { total: totalVerifications },
+      attestations: { onChain: totalAttestations },
+      trustScores: { average: avgScore, scored: scoredCount },
+      tierDistribution: tierCounts,
+      uptime: hours + 'h ' + mins + 'm',
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[Stats] Error:', err);
+    res.status(500).json({ error: 'Failed to generate stats' });
+  }
+});
+
+// ─── Leaderboard ────────────────────────────────────────
+app.get('/api/leaderboard', async (req, res) => {
+  const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+  
+  try {
+    const profileStore = require('./profile-store');
+    const { getV3Score } = require('../v3-score-service');
+    const db = profileStore.getDb();
+    
+    const profiles = db.prepare(
+      "SELECT id, name, handle, avatar, verification_data, skills FROM profiles WHERE status = 'active' AND (hidden = 0 OR hidden IS NULL) ORDER BY created_at ASC"
+    ).all();
+    
+    // Get V3 scores for all profiles
+    const scored = [];
+    for (const p of profiles) {
+      let score = 0, tier = 'NEW', verificationCount = 0;
+      try {
+        const v3 = await getV3Score(p.id);
+        if (v3) {
+          score = v3.reputationScore;
+          tier = v3.verificationLabel.toUpperCase();
+        }
+      } catch {}
+      
+      try {
+        const vd = JSON.parse(p.verification_data || '{}');
+        verificationCount = Object.values(vd).filter(v => v && v.verified).length;
+      } catch {}
+      
+      if (score > 0) {
+        let skills = [];
+        try { skills = JSON.parse(p.skills || '[]').map(s => typeof s === 'string' ? s : s.name || '').filter(Boolean).slice(0, 5); } catch {}
+        
+        scored.push({
+          rank: 0,
+          id: p.id,
+          name: p.name,
+          handle: p.handle,
+          avatar: p.avatar,
+          score,
+          tier,
+          verifications: verificationCount,
+          skills,
+          url: 'https://agentfolio.bot/profile/' + p.id,
+        });
+      }
+    }
+    
+    // Sort by score descending
+    scored.sort((a, b) => b.score - a.score);
+    
+    // Assign ranks and limit
+    const leaderboard = scored.slice(0, limit).map((entry, i) => ({
+      ...entry,
+      rank: i + 1,
+    }));
+    
+    res.json({ leaderboard, total: scored.length, showing: leaderboard.length });
+  } catch (err) {
+    console.error('[Leaderboard] Error:', err);
+    res.status(500).json({ error: 'Failed to generate leaderboard' });
+  }
+});
+
+
+// ─── Agent Comparison ───────────────────────────────────
+app.get('/api/compare', async (req, res) => {
+  const agentIds = (req.query.agents || req.query.id1 ? [req.query.id1, req.query.id2].filter(Boolean) : []).length > 0
+    ? (req.query.id1 ? [req.query.id1, req.query.id2].filter(Boolean) : [])
+    : (req.query.agents || '').split(',').map(s => s.trim()).filter(Boolean);
+  
+  if (agentIds.length < 2) {
+    return res.status(400).json({ error: 'Provide at least 2 agent IDs via ?agents=id1,id2 or ?id1=X&id2=Y' });
+  }
+  if (agentIds.length > 5) {
+    return res.status(400).json({ error: 'Maximum 5 agents for comparison' });
+  }
+  
+  try {
+    const profileStore = require('./profile-store');
+    const { getV3Score } = require('../v3-score-service');
+    const db = profileStore.getDb();
+    
+    const agents = [];
+    for (const agentId of agentIds) {
+      const profile = db.prepare('SELECT id, name, handle, avatar, bio, skills, verification_data, wallets, created_at FROM profiles WHERE id = ?').get(agentId);
+      if (!profile) {
+        agents.push({ id: agentId, error: 'Not found' });
+        continue;
+      }
+      
+      let score = 0, tier = 'NEW', verificationLevel = 0;
+      try {
+        const v3 = await getV3Score(agentId);
+        if (v3) {
+          score = v3.reputationScore;
+          tier = v3.verificationLabel.toUpperCase();
+          verificationLevel = v3.verificationLevel;
+        }
+      } catch {}
+      
+      let verifications = [];
+      try {
+        const vd = JSON.parse(profile.verification_data || '{}');
+        verifications = Object.entries(vd).filter(([_, v]) => v && v.verified).map(([k]) => k);
+      } catch {}
+      
+      let skills = [];
+      try { skills = JSON.parse(profile.skills || '[]').map(s => typeof s === 'string' ? s : s.name || '').filter(Boolean); } catch {}
+      
+      // Get breakdown from trust-credential
+      let breakdown = null;
+      try {
+        const tcRes = await fetch('http://localhost:3333/api/trust-credential/' + agentId + '?format=json');
+        if (tcRes.ok) {
+          const tcData = await tcRes.json();
+          breakdown = tcData?.credential?.credentialSubject?.breakdown || null;
+        }
+      } catch {}
+      
+      agents.push({
+        id: profile.id,
+        name: profile.name,
+        handle: profile.handle,
+        avatar: profile.avatar,
+        bio: (profile.bio || '').substring(0, 120),
+        score,
+        tier,
+        verificationLevel,
+        verifications,
+        verificationCount: verifications.length,
+        skills,
+        breakdown,
+        registeredAt: profile.created_at,
+        url: 'https://agentfolio.bot/profile/' + profile.id,
+      });
+    }
+    
+    // Find shared skills
+    const allSkillSets = agents.filter(a => !a.error).map(a => new Set((a.skills || []).map(s => s.toLowerCase())));
+    const sharedSkills = allSkillSets.length >= 2
+      ? [...allSkillSets[0]].filter(s => allSkillSets.every(set => set.has(s)))
+      : [];
+    
+    res.json({
+      comparison: agents,
+      sharedSkills,
+      winner: agents.filter(a => !a.error).sort((a, b) => b.score - a.score)[0]?.id || null,
+    });
+  } catch (err) {
+    console.error('[Compare] Error:', err);
+    res.status(500).json({ error: 'Comparison failed' });
+  }
+});
+
+// ─── Search ─────────────────────────────────────────────
+app.get('/api/search', (req, res) => {
+  const q = (req.query.q || '').trim().toLowerCase();
+  if (!q || q.length < 2) return res.status(400).json({ error: 'Query must be at least 2 characters', results: [] });
+  
+  const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+  
+  try {
+    const profileStore = require('./profile-store');
+    const db = profileStore.getDb();
+    
+    const pattern = '%' + q + '%';
+    const rows = db.prepare(
+      'SELECT id, name, handle, bio, skills, tags, avatar, verification_data, created_at, updated_at FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL) AND (LOWER(name) LIKE ? OR LOWER(bio) LIKE ? OR LOWER(handle) LIKE ? OR LOWER(skills) LIKE ? OR LOWER(tags) LIKE ? OR LOWER(id) LIKE ?) ORDER BY CASE WHEN LOWER(name) LIKE ? THEN 0 ELSE 1 END, updated_at DESC LIMIT ?'
+    ).all('active', pattern, pattern, pattern, pattern, pattern, pattern, pattern, limit);
+    
+    const results = rows.map(r => {
+      let skills = [];
+      try { skills = JSON.parse(r.skills || '[]'); } catch {}
+      let verifications = 0;
+      try {
+        const vd = JSON.parse(r.verification_data || '{}');
+        verifications = Object.values(vd).filter(v => v && v.verified).length;
+      } catch {}
+      
+      return {
+        id: r.id,
+        name: r.name,
+        handle: r.handle,
+        bio: (r.bio || '').substring(0, 120),
+        avatar: r.avatar,
+        skills: Array.isArray(skills) ? skills.map(s => typeof s === 'string' ? s : s.name || '').filter(Boolean) : [],
+        verifications,
+        url: `https://agentfolio.bot/profile/${r.id}`,
+      };
+    });
+    
+    res.json({ query: q, results, total: results.length });
+  } catch (err) {
+    console.error('[Search] Error:', err);
+    res.status(500).json({ error: 'Search failed', results: [] });
+  }
+});
+
+// ─── robots.txt ─────────────────────────────────────────
+app.get('/robots.txt', (req, res) => {
+  res.set('Content-Type', 'text/plain');
+  res.send([
+    'User-agent: *',
+    'Allow: /',
+    '',
+    'Sitemap: https://agentfolio.bot/sitemap.xml',
+    '',
+    '# AgentFolio — The Trust Layer for AI Agents',
+    '# https://agentfolio.bot',
+  ].join('\n'));
+});
+
+// ─── Sitemap.xml ────────────────────────────────────────
+let _sitemapCache = { xml: '', generated: 0 };
+const SITEMAP_TTL = 60 * 60 * 1000; // 1 hour
+
+app.get('/sitemap.xml', (req, res) => {
+  const now = Date.now();
+  if (_sitemapCache.xml && (now - _sitemapCache.generated) < SITEMAP_TTL) {
+    res.set('Content-Type', 'application/xml');
+    return res.send(_sitemapCache.xml);
+  }
+
+  try {
+    const profileStore = require('./profile-store');
+    const db = profileStore.getDb();
+    const profiles = db.prepare("SELECT id, updated_at FROM profiles WHERE hidden = 0 OR hidden IS NULL ORDER BY updated_at DESC").all();
+    
+    const BASE = 'https://agentfolio.bot';
+    const today = new Date().toISOString().split('T')[0];
+    
+    const staticPages = [
+      { url: '/', priority: '1.0', changefreq: 'daily' },
+      { url: '/register', priority: '0.8', changefreq: 'monthly' },
+      { url: '/docs', priority: '0.7', changefreq: 'weekly' },
+      { url: '/verify', priority: '0.6', changefreq: 'monthly' },
+      { url: '/leaderboard', priority: '0.7', changefreq: 'daily' },
+      { url: '/satp', priority: '0.6', changefreq: 'weekly' },
+      { url: '/satp/explorer', priority: '0.6', changefreq: 'daily' },
+      { url: '/mint', priority: '0.5', changefreq: 'monthly' },
+      { url: '/marketplace', priority: '0.7', changefreq: 'daily' },
+      { url: '/stats', priority: '0.5', changefreq: 'daily' },
+      { url: '/staking', priority: '0.5', changefreq: 'weekly' },
+    ];
+    
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+    xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n';
+    
+    for (const page of staticPages) {
+      xml += '  <url>\n';
+      xml += `    <loc>${BASE}${page.url}</loc>\n`;
+      xml += `    <lastmod>${today}</lastmod>\n`;
+      xml += `    <changefreq>${page.changefreq}</changefreq>\n`;
+      xml += `    <priority>${page.priority}</priority>\n`;
+      xml += '  </url>\n';
+    }
+    
+    for (const p of profiles) {
+      const lastmod = p.updated_at ? p.updated_at.split('T')[0].split(' ')[0] : today;
+      xml += '  <url>\n';
+      xml += `    <loc>${BASE}/profile/${p.id}</loc>\n`;
+      xml += `    <lastmod>${lastmod}</lastmod>\n`;
+      xml += '    <changefreq>weekly</changefreq>\n';
+      xml += '    <priority>0.6</priority>\n';
+      xml += '  </url>\n';
+    }
+    
+    xml += '</urlset>';
+    
+    _sitemapCache = { xml, generated: now };
+    res.set('Content-Type', 'application/xml');
+    res.send(xml);
+  } catch (err) {
+    console.error('[Sitemap] Error:', err);
+    res.status(500).send('<?xml version="1.0"?><urlset/>');
+  }
+});
+
+// ─── Claim Flow (unclaimed profiles) ────────────────────
+app.get('/api/claims/eligible', (req, res) => {
+  const { profileId } = req.query;
+  if (!profileId) return res.status(400).json({ eligible: false, reason: 'profileId is required' });
+  
+  try {
+    const profileStore = require('./profile-store');
+    const db = profileStore.getDb();
+    const profile = db.prepare('SELECT id, name, wallets, verification_data FROM profiles WHERE id = ?').get(profileId);
+    
+    if (!profile) return res.status(404).json({ eligible: false, reason: 'Profile not found' });
+    
+    // Check if already claimed (has a wallet with verified signature)
+    const wallets = (() => { try { return JSON.parse(profile.wallets || '{}'); } catch { return {}; } })();
+    const vd = (() => { try { return JSON.parse(profile.verification_data || '{}'); } catch { return {}; } })();
+    const hasSolanaVerified = vd.solana?.verified === true;
+    
+    if (hasSolanaVerified) {
+      return res.json({ eligible: false, reason: 'This profile has already been claimed and wallet-verified' });
+    }
+    
+    // Determine available claim methods based on profile data
+    const methods = [];
+    const links = (() => { try { return JSON.parse(profile.links || '{}'); } catch { return {}; } })();
+    
+    if (vd.github?.username || links?.github) methods.push({ method: 'github', handle: vd.github?.username || links?.github });
+    if (vd.x?.handle || vd.twitter?.handle || links?.x) methods.push({ method: 'x', handle: vd.x?.handle || vd.twitter?.handle || links?.x });
+    
+    // Wallet verification is always available
+    methods.push({ method: 'wallet', description: 'Connect and sign with a Solana wallet' });
+    
+    return res.json({ eligible: true, profileId, name: profile.name, methods });
+  } catch (err) {
+    console.error('[Claims] Eligibility check error:', err);
+    return res.status(500).json({ eligible: false, reason: 'Server error' });
+  }
+});
+
+// In-memory claim challenge store (30min TTL)
+const _claimChallenges = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of _claimChallenges) {
+    if (now - v.created > 30 * 60 * 1000) _claimChallenges.delete(k);
+  }
+}, 5 * 60 * 1000);
+
+app.post('/api/claims/initiate', (req, res) => {
+  const { profileId, method, wallet } = req.body;
+  if (!profileId || !method) return res.status(400).json({ error: 'profileId and method are required' });
+  
+  try {
+    const profileStore = require('./profile-store');
+    const db = profileStore.getDb();
+    const profile = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(profileId);
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
+    
+    const crypto = require('crypto');
+    const challengeCode = crypto.randomBytes(16).toString('hex');
+    const challengeMessage = `AgentFolio Claim: ${profileId}\nCode: ${challengeCode}\nTimestamp: ${Date.now()}`;
+    
+    _claimChallenges.set(challengeCode, { profileId, method, wallet, message: challengeMessage, created: Date.now() });
+    
+    if (method === 'wallet') {
+      return res.json({ 
+        challengeId: challengeCode, 
+        message: challengeMessage,
+        instructions: 'Sign this message with your Solana wallet to claim this profile'
+      });
+    }
+    
+    if (method === 'github') {
+      return res.json({
+        challengeId: challengeCode,
+        instructions: `Create a GitHub Gist containing: ${challengeCode}`,
+        code: challengeCode,
+      });
+    }
+    
+    if (method === 'x') {
+      return res.json({
+        challengeId: challengeCode,
+        instructions: `Tweet containing: ${challengeCode}`,
+        code: challengeCode,
+      });
+    }
+    
+    return res.status(400).json({ error: 'Unsupported claim method' });
+  } catch (err) {
+    console.error('[Claims] Initiate error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/claims/self-verify', async (req, res) => {
+  const { profileId, challengeId, signature, walletAddress } = req.body;
+  if (!profileId || !challengeId || !signature || !walletAddress) {
+    return res.status(400).json({ error: 'profileId, challengeId, signature, and walletAddress are required' });
+  }
+  
+  try {
+    const profileStore = require('./profile-store');
+    const db = profileStore.getDb();
+    
+    // Verify challenge exists (in-memory)
+    const challengeData = _claimChallenges.get(challengeId);
+    if (!challengeData || challengeData.profileId !== profileId) {
+      return res.status(404).json({ error: 'Challenge not found or expired' });
+    }
+    
+    // Verify wallet signature
+    const nacl = require('tweetnacl');
+    const bs58 = (require('bs58')).default || require('bs58');
+    
+    try {
+      const pubBytes = bs58.decode(walletAddress);
+      let sigBytes;
+      try { sigBytes = bs58.decode(signature); } catch { sigBytes = Buffer.from(signature, 'base64'); }
+      const msgBytes = new TextEncoder().encode(challengeData.message);
+      const valid = nacl.sign.detached.verify(msgBytes, sigBytes, pubBytes);
+      if (!valid) return res.status(401).json({ error: 'Invalid signature' });
+    } catch (sigErr) {
+      return res.status(400).json({ error: 'Signature verification failed: ' + sigErr.message });
+    }
+    
+    // Claim the profile — update wallet and mark as verified
+    const wallets = { solana: walletAddress };
+    db.prepare("UPDATE profiles SET wallets = ?, updated_at = datetime('now') WHERE id = ?").run(
+      JSON.stringify(wallets), profileId
+    );
+    
+    // Add Solana verification
+    profileStore.addVerification(profileId, 'solana', walletAddress, { method: 'claim_self_verify', claimChallengeId: challengeId });
+    
+    // Clean up challenge
+    _claimChallenges.delete(challengeId);
+    
+    return res.json({ 
+      success: true, 
+      message: 'Profile claimed successfully!',
+      profileId,
+      wallet: walletAddress,
+    });
+  } catch (err) {
+    console.error('[Claims] Self-verify error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
 
 // ─── Score History ──────────────────────────────────────
 // Create score_history table if it doesn't exist
@@ -1636,6 +2211,9 @@ registerBatchRoutes(app);
 const { registerBadgeRoute } = require("./routes/badge");
 registerBadgeRoute(app, { profileStore, computeScoreWithOnChain, getV3Score });
 
+// Activity Feed API
+const { registerActivityRoutes } = require("./routes/activity");
+registerActivityRoutes(app);
 // SATP Explorer API (on-chain agent data for explorer.satp.bot)
 const chainCache = require("./lib/chain-cache");
 chainCache.start();
@@ -1696,6 +2274,7 @@ app.get("/api/satp/explorer/agents", async (req, res) => {
         tierLabel: v3.tierLabel,
         platforms: platforms,
         platformCount: platforms.length,
+        onChainAttestations: attestations.length,
         nftImage: nftImage,
         nftMint: nftMint,
         soulbound: soulbound,
@@ -1717,6 +2296,19 @@ app.get("/api/satp/explorer/agents", async (req, res) => {
   }
 });
 
+
+// Catch-all for unknown API routes — return proper JSON 404
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/")) {
+    return res.status(404).json({
+      error: "Endpoint not found",
+      path: req.path,
+      method: req.method,
+      hint: "Check /docs for available API endpoints"
+    });
+  }
+  next();
+});
 app.use((err, req, res, next) => {
   console.error(`[ERROR] ${err.message}`, { 
     path: req.path,
