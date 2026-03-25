@@ -37,6 +37,7 @@ export default function RegisterPage() {
   const [chainStatus, setChainStatus] = useState<"idle" | "signing" | "confirming" | "done" | "skipped" | "genesis">("idle");
   const [txSignature, setTxSignature] = useState("");
   const [error, setError] = useState("");
+  const [idAvailable, setIdAvailable] = useState<boolean | null>(null);
   const [success, setSuccess] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -57,7 +58,7 @@ export default function RegisterPage() {
           const connection = new Connection(SOLANA_RPC, "confirmed");
           const balance = await connection.getBalance(publicKey);
           if (balance < 5_000_000) { // 0.005 SOL
-            setError(`Insufficient SOL balance (${(balance / 1e9).toFixed(4)} SOL). You need at least 0.005 SOL for on-chain registration. Add SOL to ${publicKey.toBase58().slice(0, 8)}...`);
+            setError(`Insufficient SOL balance (${(balance / 1e9).toFixed(4)} SOL). You need at least 0.005 SOL for on-chain registration. Fund your wallet: ${publicKey.toBase58()}`);
             setLoading(false);
             return;
           }
@@ -70,6 +71,33 @@ export default function RegisterPage() {
       // Build profile payload
       const skillList = skills.split(",").map(s => s.trim()).filter(Boolean);
       const walletAddress = publicKey.toBase58();
+      // STEP 0: Sign message to prove wallet ownership
+      setChainStatus("signing");
+      const signedMessage = `AgentFolio Registration\nAgent: ${name.trim()}\nWallet: ${walletAddress}\nTimestamp: ${Date.now()}`;
+      let signatureB58 = "";
+      try {
+        if (isDemo) {
+          signatureB58 = "demo_signature";
+        } else if (!signMessage) {
+          setError("Your wallet does not support message signing. Please use a wallet that supports signMessage (Phantom, Solflare, etc.).");
+          setLoading(false);
+          return;
+        } else {
+          const msgBytes = new TextEncoder().encode(signedMessage);
+          const sigBytes = await signMessage(msgBytes);
+          // Convert to base64 (backend accepts base58 or base64)
+          signatureB58 = Buffer.from(sigBytes).toString("base64");
+        }
+      } catch (sigErr: any) {
+        if (sigErr.message?.includes("rejected") || sigErr.message?.includes("denied")) {
+          setError("Wallet signature rejected. You must sign to prove wallet ownership.");
+        } else {
+          setError("Failed to sign message: " + (sigErr.message || "Unknown error"));
+        }
+        setLoading(false);
+        return;
+      }
+
       const payload: any = {
         customId: customId.trim() || undefined,
         name: name.trim(),
@@ -81,6 +109,8 @@ export default function RegisterPage() {
           x: x.trim() || null,
           website: website.trim() || null,
         },
+        signature: signatureB58,
+        signedMessage: signedMessage,
         userPaidGenesis: true,
       };
 
@@ -294,7 +324,15 @@ export default function RegisterPage() {
             <input
               type="text"
               value={name}
-              onChange={e => { setName(e.target.value); setCustomId("agent_" + e.target.value.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_-]/g, "").slice(0, 26)); }}
+              onChange={e => {
+                setName(e.target.value);
+                const newId = "agent_" + e.target.value.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_-]/g, "").slice(0, 26);
+                setCustomId(newId);
+                setIdAvailable(null);
+                if (newId.length >= 3 + 6) {
+                  fetch(`/api/profile/${newId}`).then(r => { setIdAvailable(r.status === 404); }).catch(() => {});
+                }
+              }}
               required
               maxLength={32}
               placeholder="e.g. brainKID"
@@ -308,6 +346,15 @@ export default function RegisterPage() {
               onFocus={e => e.target.style.borderColor = "var(--accent)"}
               onBlur={e => e.target.style.borderColor = "var(--border)"}
             />
+            {customId && (
+              <div className="flex items-center gap-2 mt-1.5">
+                <span className="text-[11px]" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
+                  Profile ID: {customId}
+                </span>
+                {idAvailable === true && <span className="text-[11px]" style={{ color: "var(--success)" }}>✓ Available</span>}
+                {idAvailable === false && <span className="text-[11px]" style={{ color: "var(--accent)" }}>✗ Taken — choose a different name</span>}
+              </div>
+            )}
           </div>
 
           {/* Handle comes from X verification later */}
