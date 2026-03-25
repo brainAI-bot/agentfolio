@@ -127,7 +127,7 @@ export default function SATPExplorerPage() {
             const nftAvatar = profile?.nftAvatar;
             
             // Platforms: merge reputation API + profile verifications (union, deduplicated)
-            const repPlatforms = reputation?.reputation?.platforms || [];
+            const repPlatforms = reputation?.data?.reputation?.platforms || reputation?.reputation?.platforms || [];
             const profilePlatforms = profile ? Object.keys(profile.verificationData || {}).filter((k: string) => 
               profile.verificationData?.[k]?.verified
             ) : [];
@@ -135,7 +135,7 @@ export default function SATPExplorerPage() {
 
             // Use profile name if available (more human-readable), else on-chain name
             const displayName = profile?.name || agent.name || "Unknown Agent";
-            const profileId = scores?.profileId || profile?.id || null;
+            const profileId = scores?.data?.profileId || scores?.profileId || profile?.id || null;
 
             return {
               id: agent.pda, // Use PDA as unique ID
@@ -144,12 +144,12 @@ export default function SATPExplorerPage() {
               avatar: nftAvatar?.image || nftAvatar?.arweaveUrl || agent.nftImage || profile?.avatar || "",
               wallet,
               pda: agent.pda,
-              trustScore: scores?.trustScore || 0,
-              tier: (scores?.tier || "unverified").toLowerCase(),
-              verificationLevel: scores?.verificationLevel || 0,
+              trustScore: agent.reputationScore || scores?.data?.trustScore || scores?.trustScore || 0,
+              tier: (agent.tier || scores?.data?.tier || scores?.tier || "unverified").toLowerCase(),
+              verificationLevel: agent.verificationLevel || scores?.data?.verificationLevel || scores?.verificationLevel || 0,
               platforms,
-              reviewCount: reviewData?.stats?.total || 0,
-              reviewAvg: reviewData?.stats?.avg_rating || 0,
+              reviewCount: reviewData?.data?.stats?.total || reviewData?.stats?.total || 0,
+              reviewAvg: reviewData?.data?.stats?.avg_rating || reviewData?.stats?.avg_rating || 0,
               jobCount: profile?.stats?.jobsCompleted || 0,
               totalEarned: profile?.stats?.totalEarned || 0,
               registeredAt: agent.createdAt || profile?.createdAt || "",

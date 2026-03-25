@@ -18,6 +18,7 @@ const _bs58 = require('bs58');
 const bs58 = _bs58.default || _bs58;
 const path = require('path');
 const crypto = require('crypto');
+const { sendWelcomeEmail } = require('./lib/welcome-email');
 
 // SATP on-chain identity registration (fire-and-forget on profile creation)
 let satpWrite;
@@ -385,6 +386,19 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
       } catch (err) {
         console.error(`[SATP V3] Failed to update verification for ${profileId}:`, err.message);
       }
+    })();
+  }
+
+  // Record score history on verification change
+  if (global._recordScoreHistory) {
+    (async () => {
+      try {
+        const { getV3Score } = require('./v3-score-service');
+        const v3 = await getV3Score(profileId);
+        if (v3) {
+          global._recordScoreHistory(profileId, v3.reputationScore, v3.verificationLabel.toUpperCase(), JSON.stringify({ verificationLevel: v3.verificationLevel, verificationLabel: v3.verificationLabel, isBorn: v3.isBorn }), 'verification_' + platform);
+        }
+      } catch (e) { console.error('[ScoreHistory] Post-verification record failed:', e.message); }
     })();
   }
 
@@ -757,11 +771,19 @@ function registerRoutes(app) {
         const level = scoringData.verificationLevel?.name || 'NEW';
         const breakdown = JSON.stringify(scoringData);
         d.prepare("INSERT OR REPLACE INTO satp_trust_scores (agent_id, overall_score, level, score_breakdown, last_computed) VALUES (?, ?, ?, ?, datetime('now'))").run(id, overallScore, level, breakdown);
+        // Record score history
+        if (global._recordScoreHistory) {
+          global._recordScoreHistory(id, overallScore, level, breakdown, 'registration');
+        }
         console.log('[ProfileStore] Trust score calculated for ' + id + ': ' + overallScore);
       } catch (scoreErr) {
         console.error('[ProfileStore] Trust scoring failed for ' + id + ':', scoreErr.message);
       }
 
+      // Fire-and-forget: send welcome email if agent provided an email
+      if (resolvedEmail) {
+        sendWelcomeEmail(resolvedEmail, { id, name: name.trim(), handle: h });
+      }
       res.status(201).json({
         id,
         api_key: apiKey,
@@ -1030,6 +1052,10 @@ function registerRoutes(app) {
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(id, req.params.id, endorser_id, endorser_name || '', skill, comment || '', weight || 1);
       addActivity(req.params.id, 'endorsement', { endorser_id, endorser_name, skill });
+      // Fire-and-forget: send welcome email if agent provided an email
+      if (resolvedEmail) {
+        sendWelcomeEmail(resolvedEmail, { id, name: name.trim(), handle: h });
+      }
       res.status(201).json({ id, message: 'Endorsement added' });
     } catch (e) {
       if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Duplicate endorsement (same endorser + skill)' });
@@ -1063,6 +1089,10 @@ function registerRoutes(app) {
     `).run(id, req.params.id, reviewer_id, reviewer_name || '', r, title || '', comment || '', job_id || '');
     addActivity(req.params.id, 'review', { reviewer_id, reviewer_name, rating: r, title });
 
+      // Fire-and-forget: send welcome email if agent provided an email
+      if (resolvedEmail) {
+        sendWelcomeEmail(resolvedEmail, { id, name: name.trim(), handle: h });
+      }
     res.status(201).json({ id, rating: r, title: title || '', comment: comment || '', reviewer_id, reviewer_name: reviewer_name || '', job_id: job_id || '', message: 'Review added' });
   });
 

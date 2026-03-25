@@ -88,10 +88,6 @@ export default function VerifyPage() {
   const [polymarketAddress, setPolymarketAddress] = useState("");
   const [polymarketState, setPolymarketState] = useState(initialState);
   
-  // Authority transfer state
-  const [authorityStatus, setAuthorityStatus] = useState<string>("");
-  const [authorityError, setAuthorityError] = useState<string>("");
-  
   // Existing verifications (fetched on load)
   const [existingVerifications, setExistingVerifications] = useState<Record<string, any>>({});
 
@@ -400,50 +396,6 @@ export default function VerifyPage() {
     }
   };
 
-  /**
-   * Check for pending authority transfers and auto-accept if found.
-   * Called after successful SOL wallet verification.
-   */
-  const checkAndAcceptAuthority = async (agentProfileId: string, walletAddr: string) => {
-    if (!sendTransaction) return;
-    setAuthorityStatus("Checking for pending authority transfers...");
-    setAuthorityError("");
-    try {
-      const res = await fetch("/api/satp/authority/check-pending", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profileId: agentProfileId, walletAddress: walletAddr }),
-      });
-      const data = await res.json();
-      if (!data.hasPending) {
-        setAuthorityStatus("");
-        return;
-      }
-
-      // Pending transfer found — deserialize and prompt wallet to sign
-      setAuthorityStatus("Authority transfer found! Prompting wallet to sign...");
-      const { Transaction, Connection } = await import("@solana/web3.js");
-      const connection = new Connection(SOLANA_RPC, "confirmed");
-      const txBuf = Buffer.from(data.transaction, "base64");
-      const tx = Transaction.from(txBuf);
-
-      // Send via wallet adapter (will prompt user to sign)
-      const sig = await sendTransaction(tx, connection);
-      setAuthorityStatus("Confirming on-chain...");
-      await connection.confirmTransaction(sig, "confirmed");
-      setAuthorityStatus("Authority transferred successfully! ✅ TX: " + sig.slice(0, 12) + "...");
-    } catch (err: any) {
-      if (err?.message?.includes("User rejected")) {
-        setAuthorityStatus("");
-        setAuthorityError("Authority transfer declined by user.");
-      } else {
-        console.warn("Authority transfer failed (non-blocking):", err);
-        setAuthorityStatus("");
-        setAuthorityError("Authority transfer failed: " + (err.message || "Unknown error"));
-      }
-    }
-  };
-
   const verifySolana = async () => {
     if (!profileId || !effectiveSolana) return;
     if (!signMessage) {
@@ -483,8 +435,6 @@ export default function VerifyPage() {
         sendOnChainAttestation();
         // Auto-trigger SATP identity creation after wallet verification
         autoTriggerSatpIdentity();
-        // Auto-check for pending authority transfers
-        checkAndAcceptAuthority(profileId, effectiveSolana);
       }
     } catch (err: any) {
       setSolanaState({ loading: false, success: false, error: err.message, result: null });
@@ -1232,22 +1182,6 @@ export default function VerifyPage() {
           )}
           <span className="text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--success)" }}>
             {satpAutoStatus}
-          </span>
-        </div>
-      )}
-
-      {/* Authority Transfer Auto-Accept status banner */}
-      {(authorityStatus || authorityError) && (
-        <div className="rounded-lg p-3 mb-4 flex items-center gap-2" style={{ background: authorityError ? "rgba(234,179,8,0.08)" : "rgba(59,130,246,0.08)", border: authorityError ? "1px solid rgba(234,179,8,0.2)" : "1px solid rgba(59,130,246,0.2)" }}>
-          {authorityStatus.includes("✅") ? (
-            <CheckCircle size={14} style={{ color: "var(--success)" }} />
-          ) : authorityError ? (
-            <AlertCircle size={14} style={{ color: "rgb(234,179,8)" }} />
-          ) : (
-            <Loader2 size={14} className="animate-spin" style={{ color: "rgb(59,130,246)" }} />
-          )}
-          <span className="text-xs" style={{ fontFamily: "var(--font-mono)", color: authorityError ? "rgb(234,179,8)" : authorityStatus.includes("✅") ? "var(--success)" : "rgb(59,130,246)" }}>
-            {authorityStatus || authorityError}
           </span>
         </div>
       )}

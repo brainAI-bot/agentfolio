@@ -54,14 +54,32 @@ function registerSATPRoutes(app) {
    */
   app.get('/api/satp/scores/:wallet', async (req, res) => {
     try {
-      const network = req.query.network || 'mainnet';
-      const scores = await satpIdentity.getAgentScores(req.params.wallet, network);
+      var wallet = req.params.wallet;
+      var network = req.query.network || 'mainnet';
+      var scores = await satpIdentity.getAgentScores(wallet, network);
       if (!scores) {
-        return res.status(404).json({ error: 'Agent not found on-chain', wallet: req.params.wallet });
+        return res.status(404).json({ error: 'Agent not found on-chain', wallet: wallet });
+      }
+      // Enrich with V3 on-chain scores (cached, from Solana V3 program)
+      try {
+        var v3Explorer = require('../v3-explorer');
+        var v3Agents = await v3Explorer.fetchAllV3Agents();
+        var v3Match = v3Agents.find(function(a) { return a.authority === wallet; });
+        if (v3Match) {
+          scores.reputationScore = v3Match.reputationScore;
+          scores.verificationLevel = v3Match.verificationLevel;
+          scores.verificationLabel = v3Match.tierLabel;
+          scores.reputationRank = satpIdentity.scoreToRank(v3Match.reputationScore);
+          scores.tier = v3Match.tier;
+          scores.trustScore = v3Match.reputationScore;
+          scores.source = 'v3-onchain';
+        }
+      } catch (v3e) {
+        // V3 lookup failed, return V2 data as-is
       }
       res.json({ ok: true, data: scores });
     } catch (err) {
-      console.error('[SATP API] scores error:', err.message);
+      console.error('[SATP API] scores error: ' + err.message);
       res.status(500).json({ error: 'Failed to fetch scores', detail: err.message });
     }
   });
