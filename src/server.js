@@ -2234,6 +2234,18 @@ app.post('/api/verify/x/confirm', async (req, res) => {
 });
 
 // Solana: challenge → user signs message → confirm (ed25519 verified)
+app.post('/api/verify/solana/initiate', async (req, res) => {
+  try {
+    const { profileId, walletAddress } = req.body;
+    if (!profileId || !walletAddress) return res.status(400).json({ error: 'profileId and walletAddress required' });
+    const challenge = verificationChallenges.generateChallenge(profileId, 'solana', walletAddress);
+    const message = `AgentFolio verification: ${challenge.id}`;
+    challenge.challengeData.message = message;
+    await verificationChallenges.storeChallenge(challenge);
+    res.json({ challengeId: challenge.id, message, walletAddress, expiresAt: challenge.challengeData.expiresAt });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/verify/solana/challenge', async (req, res) => {
   try {
     const { profileId, walletAddress } = req.body;
