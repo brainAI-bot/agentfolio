@@ -2555,6 +2555,115 @@ app.get("/api/satp/explorer/agents", async (req, res) => {
 });
 
 
+
+// ══════════════════════════════════════════════════════════════
+// P0-1 FIX: Route aliases — frontend fetch() paths → backend routes
+// Do NOT rename backend routes. Add aliases instead.
+// ══════════════════════════════════════════════════════════════
+
+// GitHub: frontend calls /initiate, backend has /challenge
+app.post("/api/verify/github/initiate", (req, res) => {
+  req.url = "/api/verify/github/challenge";
+  app.handle(req, res);
+});
+
+// X: frontend calls /initiate, backend has /challenge
+app.post("/api/verify/x/initiate", (req, res) => {
+  req.url = "/api/verify/x/challenge";
+  app.handle(req, res);
+});
+
+// AgentMail: frontend calls /start, backend has /challenge
+app.post("/api/verify/agentmail/start", (req, res) => {
+  req.url = "/api/verify/agentmail/challenge";
+  app.handle(req, res);
+});
+
+// Discord: frontend calls /api/verify/discord/initiate, backend has /api/verification/discord/initiate
+app.post("/api/verify/discord/initiate", (req, res) => {
+  req.url = "/api/verification/discord/initiate";
+  app.handle(req, res);
+});
+
+// Telegram: frontend calls /api/verify/telegram/*
+app.post("/api/verify/telegram/initiate", (req, res) => {
+  req.url = "/api/verification/telegram/initiate";
+  app.handle(req, res);
+});
+app.post("/api/verify/telegram/verify", (req, res) => {
+  req.url = "/api/verification/telegram/verify";
+  app.handle(req, res);
+});
+
+// ETH: frontend calls /api/verify/eth/*
+app.post("/api/verify/eth/initiate", (req, res) => {
+  req.url = "/api/verification/eth/initiate";
+  app.handle(req, res);
+});
+app.post("/api/verify/eth/verify", (req, res) => {
+  req.url = "/api/verification/eth/verify";
+  app.handle(req, res);
+});
+
+// Domain: frontend calls /api/verify/domain/*
+app.post("/api/verify/domain/initiate", (req, res) => {
+  req.url = "/api/verification/domain/initiate";
+  app.handle(req, res);
+});
+app.post("/api/verify/domain/verify", (req, res) => {
+  req.url = "/api/verification/domain/verify";
+  app.handle(req, res);
+});
+
+// Website: frontend calls /api/verify/website/*
+app.post("/api/verify/website/initiate", (req, res) => {
+  req.url = "/api/verification/website/initiate";
+  app.handle(req, res);
+});
+app.post("/api/verify/website/verify", (req, res) => {
+  req.url = "/api/verification/website/verify";
+  app.handle(req, res);
+});
+
+// Wallet lookup: frontend calls /api/wallet/lookup/:addr
+app.get("/api/wallet/lookup/:addr", (req, res) => {
+  try {
+    const addr = req.params.addr;
+    const db = require("better-sqlite3")("/home/ubuntu/agentfolio/data/agentfolio.db", { readonly: true });
+    const rows = db.prepare("SELECT id, name, json_extract(wallets, '$.solana') as sol FROM profiles").all();
+    db.close();
+    const match = rows.find(r => r.sol === addr);
+    if (match) {
+      return res.json({ profile: { id: match.id, name: match.name } });
+    }
+    return res.status(404).json({ error: "No profile found for this wallet" });
+  } catch (err) {
+    return res.status(500).json({ error: "Wallet lookup failed" });
+  }
+});
+
+// GitHub stats (used on profile page)
+app.get("/api/verify/github/stats", (req, res) => {
+  const username = req.query.username;
+  if (!username) return res.status(400).json({ error: "username required" });
+  res.json({ username, repos: 0, contributions: 0, note: "GitHub stats integration pending" });
+});
+
+// Verify endpoints not yet built — return helpful 501
+app.post("/api/verify/moltbook/initiate", (req, res) => {
+  res.status(501).json({ error: "Moltbook verification coming soon" });
+});
+app.post("/api/verify/mcp/initiate", (req, res) => {
+  res.status(501).json({ error: "MCP endpoint verification coming soon" });
+});
+app.post("/api/verify/a2a/initiate", (req, res) => {
+  res.status(501).json({ error: "A2A agent card verification coming soon" });
+});
+app.get("/api/verify/polymarket/stats", (req, res) => {
+  res.status(501).json({ error: "Polymarket verification coming soon" });
+});
+
+
 // Catch-all for unknown API routes — return proper JSON 404
 app.use((req, res, next) => {
   if (req.path.startsWith("/api/")) {
