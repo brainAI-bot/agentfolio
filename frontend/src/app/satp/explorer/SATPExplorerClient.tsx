@@ -25,6 +25,7 @@ interface AgentCard {
   description: string;
   programId: string;
   profileId: string | null;
+  isBorn: boolean;
 }
 
 const TIER_COLORS: Record<string, string> = {
@@ -76,6 +77,8 @@ export default function SATPExplorerPage() {
   const [sortAsc, setSortAsc] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [detailData, setDetailData] = useState<Record<string, any>>({});
+  const [detailLoading, setDetailLoading] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     async function fetchAll() {
@@ -126,12 +129,12 @@ export default function SATPExplorerPage() {
             // NFT avatar from profile cross-reference
             const nftAvatar = profile?.nftAvatar;
             
-            // Platforms: merge reputation API + profile verifications (union, deduplicated)
-            const repPlatforms = reputation?.data?.reputation?.platforms || reputation?.reputation?.platforms || [];
+            // Platforms: use on-chain agent.platforms as primary, merge with profile verifications
+            const onChainPlatforms: string[] = agent.platforms || [];
             const profilePlatforms = profile ? Object.keys(profile.verificationData || {}).filter((k: string) => 
               profile.verificationData?.[k]?.verified
             ) : [];
-            const platforms = [...new Set([...repPlatforms, ...profilePlatforms])];
+            const platforms = [...new Set([...onChainPlatforms, ...profilePlatforms])];
 
             // Use profile name if available (more human-readable), else on-chain name
             const displayName = profile?.name || agent.name || "Unknown Agent";
@@ -156,6 +159,7 @@ export default function SATPExplorerPage() {
               nftImage: nftAvatar?.image || nftAvatar?.arweaveUrl || agent.nftImage || null,
               nftMint: nftAvatar?.soulboundMint || nftAvatar?.identifier || agent.nftMint || null,
               soulbound: !!nftAvatar?.soulboundMint || !!agent.soulbound,
+              isBorn: !!agent.isBorn,
               description: agent.description || profile?.tagline || "",
               programId: agent.programId,
               profileId,
@@ -172,6 +176,41 @@ export default function SATPExplorerPage() {
     }
     fetchAll();
   }, []);
+
+  // Fetch detailed data (attestations + explorer) when card is expanded
+  async function fetchDetail(profileId: string) {
+    if (detailData[profileId] || detailLoading[profileId]) return;
+    setDetailLoading(prev => ({ ...prev, [profileId]: true }));
+    try {
+      const [attRes, explorerRes] = await Promise.all([
+        fetch(`/api/satp/attestations/by-agent/${profileId}`).catch(() => null),
+        fetch(`/api/explorer/${profileId}`).catch(() => null),
+      ]);
+      const attData = attRes?.ok ? await attRes.json() : null;
+      const explorerData = explorerRes?.ok ? await explorerRes.json() : null;
+      
+      // Deduplicate attestations by platform
+      const rawAtts = attData?.data?.attestations || [];
+      const seen = new Set<string>();
+      const uniqueAtts = rawAtts.filter((a: any) => {
+        if (seen.has(a.platform)) return false;
+        seen.add(a.platform);
+        return true;
+      });
+
+      setDetailData(prev => ({
+        ...prev,
+        [profileId]: {
+          attestations: uniqueAtts,
+          explorer: explorerData,
+        },
+      }));
+    } catch (e) {
+      console.error("Detail fetch failed:", e);
+    } finally {
+      setDetailLoading(prev => ({ ...prev, [profileId]: false }));
+    }
+  }
 
   const filtered = useMemo(() => {
     let result = agents;
@@ -291,7 +330,13 @@ export default function SATPExplorerPage() {
             key={agent.id}
             className="rounded-xl overflow-hidden transition-all hover:scale-[1.02] cursor-pointer"
             style={{ background: "var(--bg-secondary)", border: `1px solid ${expanded === agent.id ? "var(--accent)" : "var(--border)"}` }}
-            onClick={() => setExpanded(expanded === agent.id ? null : agent.id)}
+            onClick={() => {
+              const newExpanded = expanded === agent.id ? null : agent.id;
+              setExpanded(newExpanded);
+              if (newExpanded && agent.profileId) {
+                fetchDetail(agent.profileId);
+              }
+            }}
           >
             {/* Hero Image */}
             <div className="relative" style={{ height: 180, background: "var(--bg-tertiary)" }}>
@@ -383,68 +428,139 @@ export default function SATPExplorerPage() {
               </div>
 
               {/* Expanded details */}
-              {expanded === agent.id && (
+              {expanded === agent.id && (() => {
+                const detail = agent.profileId ? detailData[agent.profileId] : null;
+                const isLoading = agent.profileId ? detailLoading[agent.profileId] : false;
+                const attestations = detail?.attestations || [];
+                const v3 = detail?.explorer?.v3 || {};
+
+                return (
                 <div className="mt-4 pt-3 border-t space-y-2 text-xs" style={{ borderColor: "var(--border)", fontFamily: "var(--font-mono)" }}>
-                  <div className="flex justify-between">
-                    <span style={{ color: "var(--text-tertiary)" }}>Wallet</span>
-                    <a href={`https://explorer.solana.com/address/${agent.wallet}`} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-1" style={{ color: "var(--accent)" }} onClick={e => e.stopPropagation()}>
-                      {agent.wallet.slice(0, 12)}... <ExternalLink size={10} />
-                    </a>
-                  </div>
-                  <div className="flex justify-between">
-                    <span style={{ color: "var(--text-tertiary)" }}>Identity PDA</span>
-                    <a href={`https://explorer.solana.com/address/${agent.pda}`} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-1" style={{ color: "var(--accent)" }} onClick={e => e.stopPropagation()}>
-                      {agent.pda.slice(0, 12)}... <ExternalLink size={10} />
-                    </a>
-                  </div>
-                  {agent.nftMint && (
+                  {/* Genesis Record Data */}
+                  <div className="mb-2">
+                    <div className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{ color: "var(--accent)" }}>
+                      ⛓️ Genesis Record
+                    </div>
                     <div className="flex justify-between">
-                      <span style={{ color: "var(--text-tertiary)" }}>{agent.soulbound ? "Soulbound NFT" : "NFT"}</span>
-                      <a href={`https://explorer.solana.com/address/${agent.nftMint}`} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-1" style={{ color: "var(--accent)" }} onClick={e => e.stopPropagation()}>
-                        {agent.nftMint.slice(0, 12)}... <ExternalLink size={10} />
+                      <span style={{ color: "var(--text-tertiary)" }}>Authority</span>
+                      <a href={`https://explorer.solana.com/address/${agent.wallet}`} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-1" style={{ color: "var(--accent)" }} onClick={e => e.stopPropagation()}>
+                        {agent.wallet.slice(0, 8)}...{agent.wallet.slice(-4)} <ExternalLink size={10} />
                       </a>
                     </div>
-                  )}
-                  <div className="flex justify-between">
-                    <span style={{ color: "var(--text-tertiary)" }}>Verification Level</span>
-                    <span style={{ color: "var(--text-primary)" }}>L{agent.verificationLevel} — {agent.tier}</span>
+                    <div className="flex justify-between">
+                      <span style={{ color: "var(--text-tertiary)" }}>PDA</span>
+                      <a href={`https://explorer.solana.com/address/${agent.pda}`} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-1" style={{ color: "var(--accent)" }} onClick={e => e.stopPropagation()}>
+                        {agent.pda.slice(0, 8)}...{agent.pda.slice(-4)} <ExternalLink size={10} />
+                      </a>
+                    </div>
+                    <div className="flex justify-between">
+                      <span style={{ color: "var(--text-tertiary)" }}>Trust Score</span>
+                      <span style={{ color: "var(--text-primary)" }}>{agent.trustScore} / 1000</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span style={{ color: "var(--text-tertiary)" }}>Verification Level</span>
+                      <span style={{ color: TIER_COLORS[agent.tier] || "var(--text-primary)" }}>L{agent.verificationLevel} — {(TIER_LABELS[agent.tier] || agent.tier)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span style={{ color: "var(--text-tertiary)" }}>Born (Soulbound)</span>
+                      <span style={{ color: "var(--text-primary)" }}>
+                        {agent.isBorn || v3.isBorn ? `🔥 ${v3.bornAt ? new Date(v3.bornAt).toLocaleDateString() : "Yes"}` : "❌ Not yet"}
+                      </span>
+                    </div>
+                    {(agent.nftMint || v3.faceMint) && (
+                      <div className="flex justify-between">
+                        <span style={{ color: "var(--text-tertiary)" }}>Face NFT</span>
+                        <a href={`https://explorer.solana.com/address/${agent.nftMint || v3.faceMint}`} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-1" style={{ color: "var(--accent)" }} onClick={e => e.stopPropagation()}>
+                          {(agent.nftMint || v3.faceMint || "").slice(0, 8)}... <ExternalLink size={10} />
+                        </a>
+                      </div>
+                    )}
+                    <div className="flex justify-between">
+                      <span style={{ color: "var(--text-tertiary)" }}>SATP Program</span>
+                      <a href={`https://explorer.solana.com/address/${agent.programId}`} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-1" style={{ color: "var(--accent)" }} onClick={e => e.stopPropagation()}>
+                        {agent.programId.slice(0, 8)}... <ExternalLink size={10} />
+                      </a>
+                    </div>
+                    <div className="flex justify-between">
+                      <span style={{ color: "var(--text-tertiary)" }}>Registered</span>
+                      <span style={{ color: "var(--text-primary)" }}>{formatDateFull(agent.registeredAt)}</span>
+                    </div>
                   </div>
-                  <div className="flex justify-between">
-                    <span style={{ color: "var(--text-tertiary)" }}>Platforms Verified</span>
-                    <span style={{ color: "var(--text-primary)" }}>{agent.platforms.length}</span>
+
+                  {/* Attestation List */}
+                  <div className="mb-2">
+                    <div className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{ color: "var(--accent)" }}>
+                      🛡️ Attestation Memos ({attestations.length})
+                    </div>
+                    {isLoading ? (
+                      <div className="text-[10px] animate-pulse" style={{ color: "var(--text-tertiary)" }}>Loading attestations...</div>
+                    ) : attestations.length > 0 ? (
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                        {attestations.map((att: any, i: number) => (
+                          <div key={i} className="flex items-center justify-between py-1 px-2 rounded" style={{ background: "var(--bg-tertiary)" }}>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px]">{PLATFORM_ICONS[att.platform] || "✓"}</span>
+                              <span className="text-[10px] font-semibold uppercase" style={{ color: "var(--text-primary)" }}>{att.platform}</span>
+                            </div>
+                            {att.txSignature ? (
+                              <a
+                                href={`https://solscan.io/tx/${att.txSignature}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="hover:underline flex items-center gap-1 text-[9px]"
+                                style={{ color: "var(--accent)" }}
+                                onClick={e => e.stopPropagation()}
+                                title={att.txSignature}
+                              >
+                                {att.txSignature.slice(0, 8)}...{att.txSignature.slice(-4)} <ExternalLink size={8} />
+                              </a>
+                            ) : (
+                              <span className="text-[9px]" style={{ color: "var(--text-tertiary)" }}>no tx</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>No attestation memos found</div>
+                    )}
                   </div>
-                  <div className="flex justify-between">
-                    <span style={{ color: "var(--text-tertiary)" }}>Trust Score</span>
-                    <span style={{ color: "var(--text-primary)" }}>{agent.trustScore}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span style={{ color: "var(--text-tertiary)" }}>Registered</span>
-                    <span style={{ color: "var(--text-primary)" }}>{formatDateFull(agent.registeredAt)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span style={{ color: "var(--text-tertiary)" }}>SATP Program</span>
-                    <a href={`https://explorer.solana.com/address/${agent.programId}`} target="_blank" rel="noopener noreferrer" className="hover:underline flex items-center gap-1" style={{ color: "var(--accent)" }} onClick={e => e.stopPropagation()}>
-                      {agent.programId.slice(0, 12)}... <ExternalLink size={10} />
-                    </a>
-                  </div>
+
+                  {/* Reviews */}
                   {agent.reviewCount > 0 && (
                     <div className="flex justify-between">
                       <span style={{ color: "var(--text-tertiary)" }}>Reviews</span>
                       <span style={{ color: "#F59E0B" }}>{"★".repeat(Math.round(agent.reviewAvg))} {agent.reviewAvg.toFixed(1)} ({agent.reviewCount})</span>
                     </div>
                   )}
-                  {agent.profileId && (
-                    <Link
-                      href={`/profile/${agent.profileId}`}
-                      className="block text-center py-2 rounded-lg text-[11px] font-semibold uppercase tracking-wider mt-3"
-                      style={{ background: "var(--accent)", color: "#fff" }}
-                      onClick={e => e.stopPropagation()}
-                    >
-                      View Full Profile →
-                    </Link>
-                  )}
+
+                  {/* Actions */}
+                  <div className="flex gap-2 mt-3">
+                    {agent.profileId && (
+                      <Link
+                        href={`/profile/${agent.profileId}`}
+                        className="flex-1 block text-center py-2 rounded-lg text-[11px] font-semibold uppercase tracking-wider"
+                        style={{ background: "var(--accent)", color: "#fff" }}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        Profile →
+                      </Link>
+                    )}
+                    {agent.profileId && (
+                      <a
+                        href={`/api/trust-credential/${agent.profileId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 block text-center py-2 rounded-lg text-[11px] font-semibold uppercase tracking-wider"
+                        style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        Trust Credential →
+                      </a>
+                    )}
+                  </div>
                 </div>
-              )}
+                );
+              })()}
             </div>
           </div>
         ))}
