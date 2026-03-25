@@ -2510,9 +2510,24 @@ app.get("/api/satp/explorer/agents", async (req, res) => {
         if (attestations[a].platform) platformSet[attestations[a].platform] = true;
       }
       var platforms = Object.keys(platformSet);
+      // Build attestation memo list (deduplicated by platform, with TX signatures)
+      var attMemos = [];
+      var attSeen = {};
+      for (var a = 0; a < attestations.length; a++) {
+        var att = attestations[a];
+        if (att.platform && !attSeen[att.platform]) {
+          attSeen[att.platform] = true;
+          attMemos.push({
+            platform: att.platform,
+            txSignature: att.txSignature || null,
+            timestamp: att.timestamp || null,
+            solscanUrl: att.solscanUrl || (att.txSignature ? 'https://solscan.io/tx/' + att.txSignature : null)
+          });
+        }
+      }
       
-      // NFT: ONLY from Genesis Record face_image/face_mint (NOT from wallet Token-2022 lookup)
-      // This is data ON this agent's Genesis Record PDA — never another agent's
+      // NFT: Primary from Genesis Record (burn-to-become)
+      // Fallback: Token-2022 lookup added below after loop
       var nftImage = v3.faceImage || null;
       var nftMint = v3.faceMint || null;
       var soulbound = !!(v3.faceBurnTx && v3.faceBurnTx.length > 10);
@@ -2533,6 +2548,7 @@ app.get("/api/satp/explorer/agents", async (req, res) => {
         platforms: platforms,
         platformCount: platforms.length,
         onChainAttestations: attestations.length,
+        attestationMemos: attMemos,
         nftImage: nftImage,
         nftMint: nftMint,
         soulbound: soulbound,
@@ -2543,6 +2559,22 @@ app.get("/api/satp/explorer/agents", async (req, res) => {
       });
     }
     
+    // Token-2022 NFT fallback: batch-fetch for agents without faceImage
+    try {
+      var { Connection: Conn2, PublicKey: PK2 } = require('@solana/web3.js');
+      var nftConn = new Conn2(process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb', 'confirmed');
+      var TOKEN_2022_PID = new PK2('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+      var authCount = {}; combined.forEach(function(c) { authCount[c.authority] = (authCount[c.authority] || 0) + 1; }); var needsNft = combined.filter(function(c) { return !c.nftImage && c.authority && authCount[c.authority] === 1; });
+      if (needsNft.length > 0) {
+        await Promise.all(needsNft.map(function(ag) {
+          return nftConn.getParsedTokenAccountsByOwner(new PK2(ag.authority), {programId: TOKEN_2022_PID}).then(function(r) {
+            var nft = r.value.find(function(ta) { var i = ta.account.data.parsed.info; return i.tokenAmount.uiAmount === 1 && i.tokenAmount.decimals === 0; });
+            if (nft) { ag.nftMint = nft.account.data.parsed.info.mint; return nftConn.getParsedAccountInfo(new PK2(ag.nftMint)).then(function(mi) { var exts = (mi.value && mi.value.data && mi.value.data.parsed && mi.value.data.parsed.info && mi.value.data.parsed.info.extensions) || []; for (var x = 0; x < exts.length; x++) { if (exts[x].extension === 'tokenMetadata' && exts[x].state && exts[x].state.uri) { ag.nftImage = exts[x].state.uri; break; } } }).catch(function(){}); }
+          }).catch(function(){});
+        }));
+      }
+    } catch(nftErr) { console.warn('[Explorer] NFT fallback error:', nftErr.message); }
+
     combined.sort(function(a, b) {
       if ((b.verificationLevel || 0) !== (a.verificationLevel || 0)) return (b.verificationLevel || 0) - (a.verificationLevel || 0);
       return (b.reputationScore || 0) - (a.reputationScore || 0);
