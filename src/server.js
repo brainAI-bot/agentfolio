@@ -22,6 +22,9 @@ const profileStore = require('./profile-store');
 // Scoring module
 const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainData } = require('./scoring');
 
+// V3 on-chain score service (Genesis Records — authoritative)
+const { getV3Score } = require('../v3-score-service');
+
 // x402 Payment Layer
 const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
 const { HTTPFacilitatorClient } = require('@x402/core/server');
@@ -144,6 +147,48 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// ─── Rate Limiting ──────────────────────────────────────
+const rateLimit = require('express-rate-limit');
+
+// Skip rate limiting for internal/localhost requests (frontend ISR, health checks)
+const isInternal = (req) => {
+  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1' || ip === 'localhost';
+};
+
+// General API rate limit: 100 req/min per IP
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later', retryAfter: '60s' },
+  // keyGenerator removed — using default (handles IPv6 properly)
+  skip: isInternal,
+});
+
+// Strict rate limit for write endpoints: 10 req/min per IP
+const writeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many write requests, please try again later', retryAfter: '60s' },
+  // keyGenerator removed — using default (handles IPv6 properly)
+  skip: isInternal,
+});
+
+// Apply general limiter to all /api routes
+app.use('/api', apiLimiter);
+
+// Apply strict limiter to POST /api routes
+app.use('/api', (req, res, next) => {
+  if (req.method === 'POST' || req.method === 'PATCH' || req.method === 'PUT' || req.method === 'DELETE') {
+    return writeLimiter(req, res, next);
+  }
+  next();
+});
+
 // Security logging middleware
 app.use((req, res, next) => {
   const suspicious = [
@@ -258,26 +303,58 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     }
     
     let verifications = [], wallets = {}, tags = [], skills = [];
-    try { verifications = JSON.parse(profile.verification_data || '[]'); } catch (_) {}
+    try {
+      let vData = JSON.parse(profile.verification_data || '[]');
+      if (vData && typeof vData === 'object' && !Array.isArray(vData)) {
+        vData = Object.entries(vData).map(([p, i]) => ({ platform: p, ...i }));
+      }
+      verifications = Array.isArray(vData) ? vData : [];
+    } catch (_) {}
     try { wallets = JSON.parse(profile.wallets || '{}'); } catch (_) {}
     try { tags = JSON.parse(profile.tags || '[]'); } catch (_) {}
     try { skills = JSON.parse(profile.skills || '[]'); } catch (_) {}
     
-    const { computeScoreWithOnChain } = require('./scoring');
     const parsed = { ...profile, verifications, wallets, tags, skills };
     const scoreResult = await computeScoreWithOnChain(parsed);
+    
+    // V3: Fetch authoritative on-chain Genesis Record score
+    let v3Data = null;
+    try {
+      v3Data = await getV3Score(agentId);
+    } catch (e) {
+      console.warn('[Explorer] V3 score fetch failed for', agentId, e.message);
+    }
+    
+    // Use V3 on-chain score if available, otherwise fall back to V2
+    const trustScore = v3Data ? v3Data.reputationScore : scoreResult.score;
+    const tier = v3Data
+      ? v3Data.verificationLabel.toUpperCase()
+      : (scoreResult.level || (scoreResult.score >= 80 ? 'ELITE' : scoreResult.score >= 60 ? 'PRO' : scoreResult.score >= 40 ? 'VERIFIED' : scoreResult.score >= 20 ? 'BASIC' : 'NEW'));
     
     res.json({
       agentId: profile.id,
       name: profile.name,
       did: `did:agentfolio:${profile.id}`,
-      trustScore: scoreResult.score,
-      tier: scoreResult.level || (scoreResult.score >= 80 ? 'ELITE' : scoreResult.score >= 60 ? 'PRO' : scoreResult.score >= 40 ? 'VERIFIED' : scoreResult.score >= 20 ? 'BASIC' : 'NEW'),
+      trustScore,
+      tier,
+      scoreVersion: v3Data ? 'v3' : 'v2',
       verifications: verifications.filter(v => v.verified !== false).map(v => ({ platform: v.platform, verified: true })),
       wallets,
       tags,
       skills,
-      onChainRegistered: scoreResult.onChainRegistered || false,
+      onChainRegistered: v3Data ? v3Data.isBorn : (scoreResult.onChainRegistered || false),
+      ...(v3Data ? {
+        v3: {
+          reputationScore: v3Data.reputationScore,
+          reputationPct: v3Data.reputationPct,
+          verificationLevel: v3Data.verificationLevel,
+          verificationLabel: v3Data.verificationLabel,
+          isBorn: v3Data.isBorn,
+          bornAt: v3Data.bornAt,
+          faceImage: v3Data.faceImage,
+          faceMint: v3Data.faceMint,
+        },
+      } : {}),
       breakdown: scoreResult.breakdown,
       links: {
         profile: `https://agentfolio.bot/profile/${profile.id}`,
@@ -421,6 +498,7 @@ app.get('/docs', (req, res) => {
         <span class="tag tag-free">FREE</span>
         <p class="desc">Search profiles. Query: <code>?q=&lt;term&gt;</code></p>
       </div>
+      <div class="endpoint">        <span class="method get">GET</span>        <span class="path">/api/badge/:id.svg</span>        <span class="tag tag-new">NEW</span>        <p class="desc">Embeddable SVG trust badge. Use in READMEs: <code>![Trust](https://agentfolio.bot/api/badge/AGENT_ID.svg)</code>. Query: <code>?label=Custom</code></p>      </div>
     </div>
 
     <div class="section">
@@ -478,6 +556,18 @@ app.get('/docs', (req, res) => {
         <span class="path">/api/satp/programs</span>
         <span class="tag tag-free">FREE</span>
         <p class="desc">SATP program addresses and network info.</p>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/api/satp/authority/check-pending</span>
+        <span class="tag tag-new">NEW</span>
+        <p class="desc">Check if an agent has a pending authority transfer. Body: <code>{ "profileId": "...", "walletAddress": "..." }</code>. Returns <code>hasPending</code> and pre-built transaction if found.</p>
+      </div>
+      <div class="endpoint">
+        <span class="method post">POST</span>
+        <span class="path">/api/satp/authority/accept</span>
+        <span class="tag tag-new">NEW</span>
+        <p class="desc">Accept a pending SATP authority transfer. Body: <code>{ "profileId": "...", "signedTx": "..." }</code>. Submits the signed transaction on-chain.</p>
       </div>
     </div>
 
@@ -545,6 +635,12 @@ app.get('/docs', (req, res) => {
         <span class="tag tag-paid">x402</span>
         <p class="desc">Trust score leaderboard. Requires x402 payment.</p>
       </div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/api/profile/:id/score-history</span>
+        <span class="tag tag-new">NEW</span>
+        <p class="desc">Trust score history for an agent. Returns timestamped entries with score, tier, breakdown, and reason. Query: <code>?limit=50</code> (max 200).</p>
+      </div>
     </div>
 
     <div class="section">
@@ -553,7 +649,7 @@ app.get('/docs', (req, res) => {
         <span class="method get">GET</span>
         <span class="path">/api/health</span>
         <span class="tag tag-free">FREE</span>
-        <p class="desc">Health check — status, version, uptime.</p>
+        <p class="desc">Enhanced health check — status, version, uptime, DB connection (profiles/attestations count), PM2 process status, last score-sync timestamp, commit hash, and green/red/yellow indicators for all systems.</p>
       </div>
       <div class="endpoint">
         <span class="method get">GET</span>
@@ -582,22 +678,174 @@ app.get('/docs', (req, res) => {
 });
 
 // Health check endpoint
+
+// ─── Score History ──────────────────────────────────────
+// Create score_history table if it doesn't exist
+(() => {
+  try {
+    const Database = require('better-sqlite3');
+    const db = new Database(require('path').join(__dirname, '..', 'data', 'agentfolio.db'));
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS score_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id TEXT NOT NULL,
+        score REAL NOT NULL,
+        tier TEXT,
+        breakdown TEXT,
+        reason TEXT DEFAULT 'score_sync',
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_score_history_agent ON score_history(agent_id, created_at);
+    `);
+    db.close();
+    console.log('[ScoreHistory] Table ready');
+  } catch (e) { console.error('[ScoreHistory] Init error:', e.message); }
+})();
+
+// Record a score history entry
+function recordScoreHistory(agentId, score, tier, breakdown, reason) {
+  try {
+    const Database = require('better-sqlite3');
+    const db = new Database(require('path').join(__dirname, '..', 'data', 'agentfolio.db'));
+    db.prepare('INSERT INTO score_history (agent_id, score, tier, breakdown, reason) VALUES (?, ?, ?, ?, ?)').run(
+      agentId, score, tier || '', typeof breakdown === 'string' ? breakdown : JSON.stringify(breakdown || {}), reason || 'score_sync'
+    );
+    db.close();
+  } catch (e) { console.error('[ScoreHistory] Record error:', e.message); }
+}
+
+// GET /api/profile/:id/score-history
+app.get('/api/profile/:id/score-history', (req, res) => {
+  const { id } = req.params;
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+  try {
+    const Database = require('better-sqlite3');
+    const db = new Database(require('path').join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
+    
+    const profile = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(id);
+    if (!profile) {
+      db.close();
+      return res.status(404).json({ error: 'Agent not found', agentId: id });
+    }
+    
+    const history = db.prepare('SELECT score, tier, breakdown, reason, created_at FROM score_history WHERE agent_id = ? ORDER BY created_at DESC LIMIT ?').all(id, limit);
+    const current = db.prepare('SELECT overall_score, level, score_breakdown, last_computed FROM satp_trust_scores WHERE agent_id = ?').get(id);
+    
+    db.close();
+    
+    const entries = history.map(h => ({
+      score: h.score,
+      tier: h.tier,
+      breakdown: (() => { try { return JSON.parse(h.breakdown); } catch { return null; } })(),
+      reason: h.reason,
+      timestamp: h.created_at,
+    }));
+    
+    if (entries.length === 0 && current) {
+      entries.push({
+        score: current.overall_score,
+        tier: current.level,
+        breakdown: (() => { try { return JSON.parse(current.score_breakdown); } catch { return null; } })(),
+        reason: 'current_snapshot',
+        timestamp: current.last_computed || new Date().toISOString(),
+      });
+    }
+    
+    res.json({
+      agentId: id,
+      name: profile.name,
+      entries,
+      total: entries.length,
+    });
+  } catch (err) {
+    console.error('[ScoreHistory] Error:', err);
+    res.status(500).json({ error: 'Failed to fetch score history', details: err.message });
+  }
+});
+
+// Export recordScoreHistory for use in profile-store
+global._recordScoreHistory = recordScoreHistory;
+
 app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'healthy',
+  const uptime = process.uptime();
+  const uptimeStr = Math.floor(uptime / 3600) + 'h ' + Math.floor((uptime % 3600) / 60) + 'm ' + Math.floor(uptime % 60) + 's';
+  
+  // DB connection check
+  let dbStatus = 'error';
+  let dbProfiles = 0;
+  let dbAttestations = 0;
+  try {
+    const Database = require('better-sqlite3');
+    const db = new Database(require('path').join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
+    dbProfiles = db.prepare('SELECT COUNT(*) as c FROM profiles').get().c;
+    try { dbAttestations = db.prepare('SELECT COUNT(*) as c FROM attestations').get().c; } catch {}
+    db.close();
+    dbStatus = 'connected';
+  } catch (e) { dbStatus = 'error: ' + e.message; }
+  
+  // Score sync last run
+  let lastScoreSync = null;
+  try {
+    const Database = require('better-sqlite3');
+    const db = new Database(require('path').join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
+    const row = db.prepare('SELECT MAX(created_at) as last FROM score_history').get();
+    lastScoreSync = row?.last || null;
+    db.close();
+  } catch {}
+  
+  // PM2 process count (via env or file)
+  let pm2Processes = null;
+  try {
+    const { execSync } = require('child_process');
+    const out = execSync('pm2 jlist 2>/dev/null', { timeout: 3000, encoding: 'utf8' });
+    const procs = JSON.parse(out);
+    pm2Processes = {
+      total: procs.length,
+      online: procs.filter(p => p.pm2_env?.status === 'online').length,
+      errored: procs.filter(p => p.pm2_env?.status === 'errored').length,
+      stopped: procs.filter(p => p.pm2_env?.status === 'stopped').length,
+    };
+  } catch {}
+  
+  // Git commit hash
+  let commitHash = null;
+  try {
+    const { execSync } = require('child_process');
+    commitHash = execSync('git -C /home/ubuntu/agentfolio rev-parse --short HEAD 2>/dev/null', { encoding: 'utf8' }).trim();
+  } catch {}
+  
+  const health = {
+    status: dbStatus === 'connected' ? 'healthy' : 'degraded',
     timestamp: new Date().toISOString(),
     version: '1.0.0',
-    environment: NODE_ENV,
-    discord_verification: discordVerify ? 'hardened' : 'fallback',
-    telegram_verification: telegramVerify ? 'active' : 'fallback',
-    domain_verification: domainVerify ? 'active' : 'fallback',
-    website_verification: websiteVerify ? 'active' : 'fallback',
-    fix_status: 'SERVER_IMPORT_FIXED',
-    eth_verification: ethVerify ? 'active' : 'fallback',
-    ens_verification: ensVerify ? 'active' : 'fallback',
-    farcaster_verification: farcasterVerify ? 'active' : 'fallback',
-    providers: ['discord', 'telegram', 'domain', 'website', 'eth', 'ens', 'farcaster']
-  });
+    commit: commitHash,
+    environment: process.env.NODE_ENV || 'production',
+    uptime: uptimeStr,
+    uptimeSeconds: Math.floor(uptime),
+    database: {
+      status: dbStatus,
+      profiles: dbProfiles,
+      attestations: dbAttestations,
+    },
+    pm2: pm2Processes,
+    lastScoreSync: lastScoreSync,
+    providers: ['discord', 'telegram', 'domain', 'website', 'eth', 'ens', 'farcaster'].filter(p => {
+      try {
+        if (p === 'discord') return !!discordVerify;
+        if (p === 'telegram') return !!telegramVerify;
+        if (p === 'domain') return !!domainVerify;
+        return true;
+      } catch { return false; }
+    }),
+    indicators: {
+      database: dbStatus === 'connected' ? 'green' : 'red',
+      server: 'green',
+      pm2: pm2Processes ? (pm2Processes.errored > 0 ? 'yellow' : 'green') : 'unknown',
+      scoreSync: lastScoreSync ? 'green' : 'yellow',
+    }
+  };
+  
+  res.json(health);
 });
 
 // Discord verification endpoints
@@ -927,12 +1175,59 @@ app.get('/profile/:id', (req, res) => {
           <div class="stat"><div class="num" style="color:${trustScore.overall_score >= 50 ? '#3fb950' : trustScore.overall_score >= 25 ? '#d29922' : '#f85149'}">${trustScore.overall_score}</div><div class="label">Trust Score</div></div>
           <div class="stat"><div class="num">${esc(trustScore.level)}</div><div class="label">Level</div></div>
         </div>
-        ${trustScore.breakdown ? `<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:12px">
-          ${Object.entries(trustScore.breakdown).map(([k, v]) => `<div style="flex:1;min-width:120px;background:#161b22;border:1px solid #21262d;border-radius:6px;padding:8px 12px">
-            <div style="font-size:.75em;color:#8b949e;text-transform:capitalize">${esc(k.replace(/([A-Z])/g, ' $1').trim())}</div>
-            <div style="font-size:1.1em;font-weight:600;color:#e6edf3">${typeof v === 'object' ? (v.score !== undefined ? v.score + '/' + v.max : JSON.stringify(v)) : v}</div>
-          </div>`).join('')}
-        </div>` : ''}
+        ${trustScore.breakdown ? (() => {
+          const colors = { onChainReputation:'#3fb950', verifications:'#58a6ff', reviews:'#d29922', activity:'#f0883e', completeness:'#a371f7', tenure:'#8b949e', socialProof:'#79c0ff', marketplace:'#56d364', reputationScore:'#58a6ff', verificationLevel:'#3fb950', overall:'#d29922', legacy:'#8b949e' };
+          const labels = { onChainReputation:'On-Chain', verifications:'Verifications', reviews:'Reviews', activity:'Activity', completeness:'Completeness', tenure:'Tenure', socialProof:'Social Proof', marketplace:'Marketplace' };
+          // Extract numeric scores from breakdown entries
+          const entries = Object.entries(trustScore.breakdown)
+            .map(([k, v]) => {
+              let score = 0, max = 0;
+              if (typeof v === 'object' && v !== null) {
+                if (v.score !== undefined) { score = Number(v.score) || 0; max = Number(v.max) || 0; }
+                else if (v.level !== undefined) return null; // skip non-score objects like verificationLevel
+                else return null;
+              } else {
+                score = Number(v) || 0;
+              }
+              return { key: k, score, max, color: colors[k] || '#8b949e', label: labels[k] || k.replace(/([A-Z])/g, ' $1').trim() };
+            })
+            .filter(e => e && (e.score > 0 || e.max > 0));
+
+          if (entries.length === 0) return '';
+
+          const totalScore = entries.reduce((s, e) => s + e.score, 0);
+          const totalMax = entries.reduce((s, e) => s + (e.max || e.score), 0) || 1;
+
+          // Cards
+          const cards = entries.map(e => `<div style="flex:1;min-width:120px;background:#161b22;border:1px solid #21262d;border-radius:6px;padding:8px 12px">
+            <div style="font-size:.75em;color:#8b949e;text-transform:capitalize">${esc(e.label)}</div>
+            <div style="font-size:1.1em;font-weight:600;color:#e6edf3">${e.max ? e.score.toFixed(1) + '/' + e.max : e.score}</div>
+          </div>`).join('');
+
+          // Stacked bar
+          const barSegments = entries.filter(e => e.score > 0).map(e => {
+            const pct = (e.score / totalMax * 100).toFixed(1);
+            return `<div style="width:${pct}%;background:${e.color};height:100%;position:relative" title="${esc(e.label)}: ${e.score.toFixed(1)}"></div>`;
+          }).join('');
+
+          // Legend
+          const legend = entries.filter(e => e.score > 0).map(e =>
+            `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px;font-size:.75em;color:#8b949e">
+              <span style="width:8px;height:8px;border-radius:50%;background:${e.color};display:inline-block"></span>
+              ${esc(e.label)} (${e.score.toFixed(1)})
+            </span>`
+          ).join('');
+
+          return `<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:12px">${cards}</div>
+          <div style="margin-top:16px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+              <span style="font-size:.75em;color:#8b949e">Score Breakdown</span>
+              <span style="font-size:.75em;color:#8b949e">${totalScore.toFixed(1)} / ${totalMax}</span>
+            </div>
+            <div style="width:100%;height:20px;background:#21262d;border-radius:10px;overflow:hidden;display:flex">${barSegments}</div>
+            <div style="margin-top:8px;line-height:1.8">${legend}</div>
+          </div>`;
+        })() : ''}
       </div>` : ''}
     </div>
 
@@ -1145,6 +1440,84 @@ app.post('/api/verify/solana/confirm', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════
+// AUTO-ACCEPT AUTHORITY TRANSFER ON SOL WALLET VERIFICATION
+// ═══════════════════════════════════════════════════════════
+
+// Check if agent has a pending authority transfer matching their wallet
+app.post('/api/satp/authority/check-pending', async (req, res) => {
+  try {
+    const { profileId, walletAddress } = req.body;
+    if (!profileId || !walletAddress) return res.status(400).json({ error: 'profileId and walletAddress required' });
+    
+    const crypto = require('crypto');
+    const { Connection, PublicKey, Transaction, TransactionInstruction } = require('@solana/web3.js');
+    const { createSATPClient } = require('./satp-client/src');
+    const IDENTITY_V3 = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
+    const RPC = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=HELIUS_API_KEY_REDACTED';
+    
+    const agentId = profileId.startsWith('agent_') ? profileId : 'agent_' + profileId.toLowerCase();
+    
+    // Use SATP client to read Genesis Record (proper Borsh deserialization)
+    const client = createSATPClient({ rpcUrl: RPC });
+    const genesis = await client.getGenesisRecord(agentId);
+    if (!genesis) return res.json({ hasPending: false, reason: 'No Genesis Record found' });
+    
+    const pendingAuth = genesis.pendingAuthority;
+    if (!pendingAuth || pendingAuth === '11111111111111111111111111111111') {
+      return res.json({ hasPending: false, reason: 'No pending authority transfer' });
+    }
+    if (pendingAuth !== walletAddress) {
+      return res.json({ hasPending: false, reason: 'Pending authority does not match wallet' });
+    }
+    
+    // Match! Build accept_authority TX for frontend to sign
+    const hashBuf = crypto.createHash('sha256').update(agentId).digest();
+    const [genesisPda] = PublicKey.findProgramAddressSync([Buffer.from('genesis'), hashBuf], IDENTITY_V3);
+    const disc = crypto.createHash('sha256').update('global:accept_authority').digest().slice(0, 8);
+    const ix = new TransactionInstruction({
+      programId: IDENTITY_V3,
+      keys: [
+        { pubkey: genesisPda, isSigner: false, isWritable: true },
+        { pubkey: new PublicKey(walletAddress), isSigner: true, isWritable: false },
+      ],
+      data: disc,
+    });
+    
+    const conn = new Connection(RPC, 'confirmed');
+    const tx = new Transaction().add(ix);
+    tx.feePayer = new PublicKey(walletAddress);
+    tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
+    const serialized = tx.serialize({ requireAllSignatures: false, verifySignatures: false }).toString('base64');
+    
+    console.log('[Authority] Pending transfer found for ' + agentId + ' → ' + walletAddress);
+    res.json({ hasPending: true, pendingAuthority: pendingAuth, genesisPda: genesisPda.toBase58(), transaction: serialized });
+  } catch (e) {
+    console.error('[Authority Check]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Submit signed accept_authority TX
+app.post('/api/satp/authority/accept', async (req, res) => {
+  try {
+    const { signedTransaction } = req.body;
+    if (!signedTransaction) return res.status(400).json({ error: 'signedTransaction required (base64)' });
+    
+    const { Connection } = require('@solana/web3.js');
+    const conn = new Connection(process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=HELIUS_API_KEY_REDACTED', 'confirmed');
+    const txBuf = Buffer.from(signedTransaction, 'base64');
+    const sig = await conn.sendRawTransaction(txBuf, { skipPreflight: false });
+    await conn.confirmTransaction(sig, 'confirmed');
+    
+    console.log('[Authority Accept] TX confirmed:', sig);
+    res.json({ success: true, signature: sig });
+  } catch (e) {
+    console.error('[Authority Accept]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // AgentMail: challenge → sends code to email → confirm
 app.post('/api/verify/agentmail/challenge', async (req, res) => {
   try {
@@ -1259,14 +1632,87 @@ registerTrustCredentialRoutes(app);
 const { registerBatchRoutes } = require('./routes/batch-register');
 registerBatchRoutes(app);
 
+// Badge SVG API (embeddable trust badges)
+const { registerBadgeRoute } = require("./routes/badge");
+registerBadgeRoute(app, { profileStore, computeScoreWithOnChain, getV3Score });
+
 // SATP Explorer API (on-chain agent data for explorer.satp.bot)
-const { getSatpAgents } = require("./routes/satp-explorer-api");
+const chainCache = require("./lib/chain-cache");
+chainCache.start();
 app.get("/api/satp/explorer/agents", async (req, res) => {
   try {
-    const agents = await getSatpAgents();
-    res.json({ ok: true, agents });
+    // Source: V3 Genesis Records from chain (via v3-explorer.js)
+    var v3Explorer = require("./v3-explorer");
+    var v3Agents = await v3Explorer.fetchAllV3Agents();
+    
+    // Filter test/smoke accounts
+    var TEST_NAMES = ['braintest3','braintest11','braintest12','braintest20','braintest22',
+      'mainnet-deploy-test','smoketestagent','smoketest2','smoketest','smoketestbot',
+      'e2etestagent','brantest','agent_suppi'];
+    var isTest = function(name) {
+      var ln = (name || '').toLowerCase();
+      return TEST_NAMES.indexOf(ln) >= 0 || (ln.startsWith('braintest') && ln !== 'braintest');
+    };
+
+    var combined = [];
+    var seenNames = {};
+    
+    for (var i = 0; i < v3Agents.length; i++) {
+      var v3 = v3Agents[i];
+      if (isTest(v3.agentName)) continue;
+      
+      var lName = v3.agentName.toLowerCase();
+      if (seenNames[lName]) continue;
+      seenNames[lName] = true;
+      
+      // Attestation platforms from chain-cache (on-chain memo TXs)
+      // chain-cache keys by profileId (agent_<name>)
+      var profileId = 'agent_' + lName;
+      var attestations = chainCache.getVerifications(profileId);
+      var platformSet = {};
+      for (var a = 0; a < attestations.length; a++) {
+        if (attestations[a].platform) platformSet[attestations[a].platform] = true;
+      }
+      var platforms = Object.keys(platformSet);
+      
+      // NFT: ONLY from Genesis Record face_image/face_mint (NOT from wallet Token-2022 lookup)
+      // This is data ON this agent's Genesis Record PDA — never another agent's
+      var nftImage = v3.faceImage || null;
+      var nftMint = v3.faceMint || null;
+      var soulbound = !!(v3.faceBurnTx && v3.faceBurnTx.length > 10);
+      
+      combined.push({
+        pda: v3.pda,
+        authority: v3.authority,
+        name: v3.agentName,
+        profileId: profileId,
+        description: v3.description,
+        category: v3.category,
+        capabilities: v3.capabilities,
+        metadataUri: v3.metadataUri,
+        reputationScore: v3.reputationScore,
+        verificationLevel: v3.verificationLevel,
+        tier: v3.tier,
+        tierLabel: v3.tierLabel,
+        platforms: platforms,
+        platformCount: platforms.length,
+        nftImage: nftImage,
+        nftMint: nftMint,
+        soulbound: soulbound,
+        isBorn: v3.isBorn,
+        createdAt: v3.bornAt,
+        programId: "GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG",
+        source: "v3"
+      });
+    }
+    
+    combined.sort(function(a, b) {
+      if ((b.verificationLevel || 0) !== (a.verificationLevel || 0)) return (b.verificationLevel || 0) - (a.verificationLevel || 0);
+      return (b.reputationScore || 0) - (a.reputationScore || 0);
+    });
+    res.json({ agents: combined, count: combined.length, source: "v3-onchain" });
   } catch (e) {
-    console.error("[SATP Explorer]", e.message);
+    console.error("[SATP Explorer] " + e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
