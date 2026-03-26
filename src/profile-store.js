@@ -924,8 +924,8 @@ function registerRoutes(app) {
     const offset = (page - 1) * limit;
     const status = req.query.status || 'active';
 
-    const total = d.prepare('SELECT COUNT(*) as c FROM profiles WHERE status = ?').get(status).c;
-    const rows = d.prepare('SELECT * FROM profiles WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(status, limit, offset);
+    const total = d.prepare('SELECT COUNT(*) as c FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL)').get(status).c;
+    const rows = d.prepare('SELECT * FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL) ORDER BY created_at DESC LIMIT ? OFFSET ?').all(status, limit, offset);
 
     // Strip api_key from list responses
     const profiles = rows.map(r => {
