@@ -94,7 +94,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     if (connected && publicKey) {
       fetch(`${API_BASE}/api/profile-by-wallet?wallet=${publicKey.toBase58()}`)
         .then(r => r.ok ? r.json() : null)
-        .then(d => { if (d?.profileId) setMyProfileId(d.profileId); })
+        .then(d => { if (d?.id) setMyProfileId(d.id); })
         .catch(() => {});
     } else {
       setMyProfileId(null);

@@ -5,7 +5,7 @@
  * - Link any NFT (Solana, ETH, Base) as verified on-chain face
  * - Verify wallet ownership + NFT ownership on-chain
  * - Resolve agent avatar via API
- * - Default: Bored Robots collection for agents without NFTs
+ * - Default: Burned-Out Agents collection for agents without NFTs
  */
 
 const https = require('https');
