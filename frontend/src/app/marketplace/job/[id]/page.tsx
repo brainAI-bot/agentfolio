@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { JobApplyForm } from "@/components/JobApplyForm";
+import { SubmitWorkForm } from "@/components/SubmitWorkForm";
 
 export const dynamic = "force-dynamic";
 
@@ -87,6 +88,22 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             {job.description}
           </div>
         </div>
+
+        {/* Submit Work / Review Deliverables (in_progress only) */}
+        {job.status === "in_progress" && (
+          <div className="mb-6">
+            <SubmitWorkForm
+              jobId={job.id}
+              jobStatus={job.status}
+              assigneeId={job.assigneeId}
+              clientId={job.clientId}
+              deliverableId={job.deliverableId}
+              deliverableDescription={job.deliverableDescription}
+              deliverableStatus={job.deliverableStatus}
+              deliverableSubmittedAt={job.deliverableSubmittedAt}
+            />
+          </div>
+        )}
 
         {/* Apply / Actions */}
         <div className="rounded-xl p-6" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
