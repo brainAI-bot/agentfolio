@@ -553,40 +553,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
           {!agent.unclaimed && (<WriteReviewForm targetProfileId={agent.id} />)}
           {/* SATP On-Chain Data (live from Solana) */}
           <SATPOnChainSection walletAddress={agent.verifications?.solana?.address || agent.walletAddress} />
-          {/* On-Chain */}
-          <div className="rounded-lg p-5" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
-            <h2 className="text-sm font-semibold uppercase tracking-wider mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-              On-Chain
-            </h2>
-            <div className="space-y-2 text-xs" style={{ fontFamily: "var(--font-mono)" }}>
-              <div className="flex justify-between">
-                <span style={{ color: "var(--text-tertiary)" }}>SATP DID</span>
-                {v.satp?.verified || v.solana?.verified || satpIdentity?.registeredOnChain ? (
-                  <a
-                    href={`https://explorer.solana.com/address/${satpIdentity?.identityPDA || v.solana?.address || ""}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 hover:underline"
-                    style={{ color: "var(--success)" }}
-                  >
-                    {(satpIdentity?.identityPDA || v.satp?.did || v.solana?.address || "unknown").slice(0, 20)}... <ExternalLink size={10} />
-                  </a>
-                ) : (
-                  <span style={{ color: "var(--text-tertiary)" }}>Not registered</span>
-                )}
-              </div>
-              <div className="flex justify-between">
-                <span style={{ color: "var(--text-tertiary)" }}>Registered</span>
-                <span style={{ color: "var(--text-primary)" }}>{agent.registeredAt}</span>
-              </div>
-              <div className="flex justify-between">
-                <span style={{ color: "var(--text-tertiary)" }}>Attestations</span>
-                <span style={{ color: "var(--text-primary)" }}>
-                  {Object.values(v).filter((x) => x && typeof x === "object" && "verified" in x && x.verified).length}
-                </span>
-              </div>
-            </div>
-          </div>
+          
         </div>
       </div>
 

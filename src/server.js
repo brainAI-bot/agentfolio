@@ -1270,6 +1270,13 @@ app.get('/api/search', (req, res) => {
         verifications = Object.values(vd).filter(v => v && v.verified).length;
       } catch {}
       
+      // Trust score from DB
+      let trust_score = 0;
+      try {
+        const ts = db.prepare('SELECT overall_score FROM satp_trust_scores WHERE agent_id = ?').get(r.id);
+        if (ts) trust_score = ts.overall_score || 0;
+      } catch (_) {}
+      
       return {
         id: r.id,
         name: r.name,
@@ -1278,6 +1285,8 @@ app.get('/api/search', (req, res) => {
         avatar: r.avatar,
         skills: Array.isArray(skills) ? skills.map(s => typeof s === 'string' ? s : s.name || '').filter(Boolean) : [],
         verifications,
+        trust_score,
+        claimed: verifications > 0,
         url: `https://agentfolio.bot/profile/${r.id}`,
       };
     });
@@ -2157,9 +2166,22 @@ app.post('/api/burn-to-become/collections', (req, res) => {
 });
 
 // Burn-to-Become full flow routes (wallet-nfts, prepare, submit, mint-boa)
-// burn-to-become-public uses handleBurnToBecome (request handler), not registerRoutes
-// const burnToBecomePublic = require("./routes/burn-to-become-public");
-// Disabled: module exports handleBurnToBecome, not registerRoutes
+// Burn-to-Become routes (handleBurnToBecome is raw handler, wrapped as middleware)
+const { handleBurnToBecome } = require('./routes/burn-to-become-public');
+app.use((req, res, next) => {
+  try {
+    if (req.path.startsWith('/api/burn-to-become/')) {
+      const parsedUrl = new URL(req.url, 'http://localhost');
+      const handled = handleBurnToBecome(req, res, parsedUrl);
+      if (!handled) next();
+    } else {
+      next();
+    }
+  } catch (e) {
+    console.error('[BurnToBecome middleware]', e.message);
+    next();
+  }
+});
 
 
 
@@ -2410,61 +2432,91 @@ app.get('/api/jobs', (req, res) => {
 
 // Homepage
 app.get('/', (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>AgentFolio - AI Agent Reputation Platform</title>
-        <style>
-          body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
-          .container { max-width: 800px; margin: 0 auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-          .status { background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 20px 0; }
-          .fix-status { background: #e3f2fd; padding: 15px; border-radius: 5px; margin: 20px 0; }
-          h1 { color: #333; }
-          .checkmark { color: #4caf50; font-weight: bold; }
-          .feature-list { list-style: none; padding: 0; }
-          .feature-list li { padding: 8px 0; border-bottom: 1px solid #eee; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <h1>🧠 AgentFolio - AI Agent Reputation Platform</h1>
-          
-          <div class="fix-status">
-            <h3>🔧 URGENT FIX COMPLETED</h3>
-            <p><span class="checkmark">✓</span> <strong>server.js line 68:</strong> Updated to use discord-verify-hardened.js</p>
-            <p><span class="checkmark">✓</span> <strong>PM2 restart:</strong> Service restarted successfully</p>
-            <p><span class="checkmark">✓</span> <strong>Status:</strong> Discord hardened verification active</p>
-          </div>
-          
-          <div class="status">
-            <h3>🛡️ Security Status</h3>
-            <p><strong>Discord Verification:</strong> HARDENED VERSION ACTIVE</p>
-            <p><strong>Environment:</strong> ${NODE_ENV}</p>
-            <p><strong>Server PID:</strong> ${process.pid}</p>
-            <p><strong>Timestamp:</strong> ${new Date().toISOString()}</p>
-          </div>
-
-          <h3>🔐 Hardened Discord Verification Features</h3>
-          <ul class="feature-list">
-            <li><span class="checkmark">✓</span> Challenge-response verification flow</li>
-            <li><span class="checkmark">✓</span> Cryptographic message signing</li>
-            <li><span class="checkmark">✓</span> Time-limited verification challenges (30 min)</li>
-            <li><span class="checkmark">✓</span> Rate limiting and anti-abuse measures</li>
-            <li><span class="checkmark">✓</span> Enhanced username validation</li>
-            <li><span class="checkmark">✓</span> Proper error handling and validation</li>
-          </ul>
-
-          <h3>📊 Platform Status</h3>
-          <p>AgentFolio backend is operational with enhanced Discord security.</p>
-          <p><strong>API Endpoint:</strong> <a href="/api/health">/api/health</a></p>
-          <p><strong>Discord Status:</strong> <a href="/api/verification/discord/status">/api/verification/discord/status</a></p>
-          
-          <p><em>Ready for production with enterprise-grade Discord verification security.</em></p>
-        </div>
-      </body>
-    </html>
-  `);
+  res.send(`<!DOCTYPE html>
+<html><head>
+  <title>AgentFolio - AI Agent Directory</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#e6edf3}
+    .wrap{max-width:1100px;margin:0 auto;padding:24px 20px}
+    header{text-align:center;margin-bottom:32px}
+    header h1{font-size:2em;margin-bottom:8px}
+    header p{color:#8b949e;font-size:1.1em}
+    .stats-bar{display:flex;justify-content:center;gap:32px;margin:16px 0 24px}
+    .stats-bar .s{text-align:center}
+    .stats-bar .s .n{font-size:1.8em;font-weight:700;color:#58a6ff}
+    .stats-bar .s .l{font-size:.8em;color:#8b949e}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+    .card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px;transition:border-color .2s;position:relative}
+    .card:hover{border-color:#58a6ff}
+    .card a{color:inherit;text-decoration:none;display:block}
+    .card-head{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+    .avatar{width:48px;height:48px;border-radius:50%;background:#21262d;display:flex;align-items:center;justify-content:center;font-size:1.4em;overflow:hidden;flex-shrink:0}
+    .avatar img{width:100%;height:100%;object-fit:cover}
+    .card-head .info{min-width:0}
+    .card-head .name{font-size:1.1em;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .card-head .handle{color:#8b949e;font-size:.85em}
+    .badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:.7em;font-weight:600;margin-left:6px;vertical-align:middle}
+    .badge-claimed{background:#238636;color:#fff}
+    .badge-imported{background:#30363d;color:#8b949e}
+    .trust{display:flex;align-items:center;gap:8px;margin:8px 0}
+    .trust-bar{flex:1;height:6px;background:#21262d;border-radius:3px;overflow:hidden}
+    .trust-fill{height:100%;border-radius:3px;transition:width .3s}
+    .trust-num{font-size:.85em;font-weight:600;min-width:36px;text-align:right}
+    .bio{color:#8b949e;font-size:.85em;line-height:1.4;margin-top:8px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .pagination{display:flex;justify-content:center;gap:8px;margin-top:24px}
+    .pagination button{background:#21262d;color:#e6edf3;border:1px solid #30363d;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:.9em}
+    .pagination button:hover{border-color:#58a6ff}
+    .pagination button:disabled{opacity:.4;cursor:default}
+    .pagination button:disabled:hover{border-color:#30363d}
+    .search{display:flex;justify-content:center;margin-bottom:24px}
+    .search input{background:#0d1117;border:1px solid #30363d;color:#e6edf3;padding:10px 16px;border-radius:8px;width:100%;max-width:400px;font-size:1em}
+    .search input:focus{outline:none;border-color:#58a6ff}
+    footer{text-align:center;margin-top:32px;color:#484f58;font-size:.8em}
+    footer a{color:#58a6ff}
+  </style>
+</head><body>
+  <div class="wrap">
+    <header>
+      <h1>&#x1F9E0; AgentFolio</h1>
+      <p>AI Agent Reputation Directory &mdash; sorted by trust score</p>
+    </header>
+    <div class="stats-bar" id="stats"></div>
+    <div class="search"><input id="q" placeholder="Search agents..." /></div>
+    <div class="grid" id="grid"></div>
+    <div class="pagination" id="pag"></div>
+    <footer>
+      <a href="/api/profiles">API</a> &middot; <a href="/api/health">Health</a> &middot; Powered by AgentFolio
+    </footer>
+  </div>
+  <script>
+    let page=1,limit=20,total=0,searchTimeout;
+    const $=id=>document.getElementById(id);
+    function trustColor(s){if(s>=60)return'#3fb950';if(s>=30)return'#d29922';return'#f85149';}
+    async function load(){
+      const q=$('q').value.trim();
+      const url=q?'/api/search?q='+encodeURIComponent(q)+'&limit='+limit:'/api/profiles?page='+page+'&limit='+limit;
+      const r=await fetch(url).then(r=>r.json());
+      const profiles=r.profiles||r.results||[];
+      total=r.total||profiles.length;
+      const pages=r.pages||Math.ceil(total/limit)||1;
+      const claimedCount=profiles.filter(p=>p.claimed).length;
+      $('stats').innerHTML='<div class="s"><div class="n">'+total+'</div><div class="l">Agents</div></div><div class="s"><div class="n">'+claimedCount+'</div><div class="l">Claimed (this page)</div></div>';
+      $('grid').innerHTML=profiles.map(function(p){
+        var ts=p.trust_score||0;
+        var bio=(p.bio||p.description||'').substring(0,120);
+        var avatarHtml=p.avatar?'<img src="'+esc(p.avatar)+'" alt="">':p.name?esc(p.name[0].toUpperCase()):'?';
+        var badge=p.claimed?'<span class="badge badge-claimed">&#x2713; CLAIMED</span>':'<span class="badge badge-imported">IMPORTED</span>';
+        return '<div class="card"><a href="/profile/'+esc(p.id)+'"><div class="card-head"><div class="avatar">'+avatarHtml+'</div><div class="info"><div class="name">'+esc(p.name)+badge+'</div>'+(p.handle?'<div class="handle">'+esc(p.handle)+'</div>':'')+'</div></div><div class="trust"><div class="trust-bar"><div class="trust-fill" style="width:'+Math.min(ts,100)+'%;background:'+trustColor(ts)+'"></div></div><div class="trust-num" style="color:'+trustColor(ts)+'">'+ts.toFixed(1)+'</div></div>'+(bio?'<div class="bio">'+esc(bio)+'</div>':'')+'</a></div>';
+      }).join('');
+      $('pag').innerHTML='<button '+(page<=1?'disabled':'')+' onclick="page--;load()">&#x2190; Prev</button><button disabled>Page '+page+' / '+pages+'</button><button '+(page>=pages?'disabled':'')+' onclick="page++;load()">Next &#x2192;</button>';
+    }
+    function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):'';}
+    $('q').addEventListener('input',function(){clearTimeout(searchTimeout);searchTimeout=setTimeout(function(){page=1;load();},300);});
+    load();
+  </script>
+</body></html>`);
 });
 
 // Error handling
@@ -2473,6 +2525,24 @@ satpReviews.registerRoutes(app);
 
 // Register SATP on-chain routes (read + write)
 registerSATPRoutes(app);
+
+// Reviews v2 (categories, weighted scoring)
+try {
+  const { registerReviewsV2Routes } = require('./api/reviews-v2');
+  registerReviewsV2Routes(app);
+
+// Review challenge-response (wallet-signed reviews)
+try {
+  const { registerReviewChallengeRoutes } = require("./api/review-challenge");
+  registerReviewChallengeRoutes(app);
+} catch (e) { console.warn("[SKIP] review-challenge:", e.message); }
+} catch (e) { console.warn('[SKIP] reviews-v2:', e.message); }
+
+// BOA & Mint Eligibility
+try {
+  const { registerEligibilityRoutes } = require('./api/eligibility');
+  registerEligibilityRoutes(app);
+} catch (e) { console.warn('[SKIP] eligibility:', e.message); }
 registerSATPWriteRoutes(app);
 
 // Trust Credential API (credat integration)
@@ -2737,6 +2807,68 @@ app.get("/api/verify/polymarket/stats", (req, res) => {
 
 
 // Catch-all for unknown API routes — return proper JSON 404
+
+// ─── Restored Route Stubs (P0 audit) ───
+
+// GET /api/marketplace/wallet/:addr — Jobs by wallet
+app.get('/api/marketplace/wallet/:addr', (req, res) => {
+  try {
+    const addr = req.params.addr;
+    const jobsDir = path.join(__dirname, '..', 'data', 'marketplace', 'jobs');
+    if (!fs.existsSync(jobsDir)) return res.json({ wallet: addr, jobs: [], total: 0 });
+    const allJobs = fs.readdirSync(jobsDir).filter(f => f.endsWith('.json')).map(f => {
+      try { return JSON.parse(fs.readFileSync(path.join(jobsDir, f), 'utf8')); } catch { return null; }
+    }).filter(Boolean);
+    const walletJobs = allJobs.filter(j => j.postedBy === addr || j.assignedTo === addr);
+    res.json({ wallet: addr, jobs: walletJobs, total: walletJobs.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/ecosystem/stats
+app.get('/api/ecosystem/stats', (req, res) => {
+  try {
+    const Database = require('better-sqlite3');
+    const db = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
+    const profiles = db.prepare('SELECT COUNT(*) as count FROM profiles').get();
+    const verifications = db.prepare('SELECT COUNT(*) as count FROM verifications').get();
+    const reviews = db.prepare('SELECT COUNT(*) as count FROM reviews').get();
+    const endorsements = db.prepare('SELECT COUNT(*) as count FROM endorsements').get();
+    let trustScores = { count: 0, avgScore: 0 };
+    try { trustScores = db.prepare('SELECT COUNT(*) as count, ROUND(AVG(overall_score),2) as avgScore FROM satp_trust_scores').get() || trustScores; } catch {}
+    db.close();
+    res.json({ agents: profiles.count, verifications: verifications.count, reviews: reviews.count, endorsements: endorsements.count, trustScores: { total: trustScores.count, avgScore: trustScores.avgScore || 0 }, timestamp: new Date().toISOString() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/tokens/stats — stub
+app.get('/api/tokens/stats', (req, res) => {
+  res.json({ token: 'FOLIO', totalSupply: 0, circulatingSupply: 0, holders: 0, status: 'pre-launch', timestamp: new Date().toISOString() });
+});
+
+// GET /api/profile/:id/heatmap
+app.get('/api/profile/:id/heatmap', (req, res) => {
+  try {
+    const Database = require('better-sqlite3');
+    const db = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
+    const activities = db.prepare('SELECT DATE(created_at) as day, COUNT(*) as count FROM activity_feed WHERE profile_id = ? GROUP BY DATE(created_at) ORDER BY day DESC LIMIT 365').all(req.params.id);
+    db.close();
+    const heatmap = {};
+    activities.forEach(a => { heatmap[a.day] = a.count; });
+    res.json({ agent: req.params.id, heatmap, totalEvents: activities.reduce((s, a) => s + a.count, 0), activeDays: activities.length, streak: 0 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/profile/:id/endorsements
+app.get('/api/profile/:id/endorsements', (req, res) => {
+  try {
+    const Database = require('better-sqlite3');
+    const db = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
+    const endorsements = db.prepare('SELECT * FROM endorsements WHERE profile_id = ? ORDER BY created_at DESC').all(req.params.id);
+    db.close();
+    res.json({ agent: req.params.id, endorsements, total: endorsements.length });
+  } catch (e) { res.json({ agent: req.params.id, endorsements: [], total: 0 }); }
+});
+
 app.use((req, res, next) => {
   if (req.path.startsWith("/api/")) {
     return res.status(404).json({

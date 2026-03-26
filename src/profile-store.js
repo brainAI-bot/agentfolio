@@ -475,7 +475,7 @@ function enrichProfile(row) {
     try {
       const nft = typeof row.nft_avatar === 'string' ? JSON.parse(row.nft_avatar) : row.nft_avatar;
       if (nft.image || nft.arweaveUrl) {
-        resolvedAvatar = (nft.image || nft.arweaveUrl).replace('gateway.irys.xyz', 'node1.irys.xyz');
+        resolvedAvatar = (nft.image || nft.arweaveUrl).replace('node1.irys.xyz', 'gateway.irys.xyz');
       }
     } catch {}
   }
@@ -547,6 +547,12 @@ function enrichProfile(row) {
       negative: reviewStats.negative,
     },
     trust_score,
+    // Computed level/tier/score from V3 on-chain or SATP trust data
+    level: v3 ? v3.verificationLevel : (trust_score ? trust_score.level : null),
+    tier: v3 ? v3.verificationLabel : (trust_score ? (trust_score.level >= 4 ? 'Elite' : trust_score.level >= 3 ? 'Established' : trust_score.level >= 2 ? 'Verified' : trust_score.level >= 1 ? 'Basic' : 'Unclaimed') : null),
+    score: v3 ? v3.reputationScore : (trust_score ? trust_score.overall_score : null),
+    verification_level: v3 ? v3.verificationLevel : (trust_score ? trust_score.level : 0),
+    reputation_score: v3 ? v3.reputationScore : (trust_score ? trust_score.overall_score : 0),
   };
 }
 
@@ -925,7 +931,19 @@ function registerRoutes(app) {
     const status = req.query.status || 'active';
 
     const total = d.prepare('SELECT COUNT(*) as c FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL)').get(status).c;
-    const rows = d.prepare('SELECT * FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL) ORDER BY created_at DESC LIMIT ? OFFSET ?').all(status, limit, offset);
+    let rows;
+    try {
+      rows = d.prepare(`
+        SELECT p.*, COALESCE(t.overall_score, 0) AS _trust_score
+        FROM profiles p
+        LEFT JOIN satp_trust_scores t ON t.agent_id = p.id
+        WHERE p.status = ? AND (p.hidden = 0 OR p.hidden IS NULL)
+        ORDER BY _trust_score DESC, p.created_at DESC
+        LIMIT ? OFFSET ?
+      `).all(status, limit, offset);
+    } catch (e) {
+      rows = d.prepare('SELECT * FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL) ORDER BY created_at DESC LIMIT ? OFFSET ?').all(status, limit, offset);
+    }
 
     // Strip api_key from list responses
     const profiles = rows.map(r => {
@@ -936,14 +954,21 @@ function registerRoutes(app) {
         try {
           const nft = typeof rest.nft_avatar === 'string' ? JSON.parse(rest.nft_avatar) : rest.nft_avatar;
           if (nft.image || nft.arweaveUrl) {
-            resolvedAvatar = (nft.image || nft.arweaveUrl).replace('gateway.irys.xyz', 'node1.irys.xyz');
+            resolvedAvatar = (nft.image || nft.arweaveUrl).replace('node1.irys.xyz', 'gateway.irys.xyz');
           }
         } catch {}
       }
-      return { ...rest, avatar: resolvedAvatar, capabilities: parseJsonField(rest.capabilities), tags: parseJsonField(rest.tags), links: parseJsonField(rest.links), wallets: parseJsonField(rest.wallets), skills: parseJsonField(rest.skills), verification_data: parseJsonField(rest.verification_data), portfolio: parseJsonField(rest.portfolio), endorsements_given: parseJsonField(rest.endorsements_given), custom_badges: parseJsonField(rest.custom_badges), metadata: parseJsonField(rest.metadata), nft_avatar: parseJsonField(rest.nft_avatar) };
+      // P1: Determine claimed status (has at least one verified platform)
+      let claimed = false;
+      try {
+        const vd = typeof rest.verification_data === 'string' ? JSON.parse(rest.verification_data || '{}') : (rest.verification_data || {});
+        claimed = Object.values(vd).some(v => v && v.verified === true);
+      } catch (_) {}
+      const { _trust_score: ts, ...cleanRest } = rest;
+      return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: parseJsonField(cleanRest.verification_data), portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: parseJsonField(cleanRest.metadata), nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, claimed };
     });
 
-    // V3 on-chain score overlay
+    // V3 on-chain score overlay — authoritative
     if (v3ScoreService) {
       try {
         const ids = profiles.map(p => p.id);
@@ -958,8 +983,14 @@ function registerRoutes(app) {
               verificationLabel: v3.verificationLabel,
               isBorn: v3.isBorn,
             };
+            // V3 on-chain is authoritative — override DB trust_score
+            if (v3.reputationScore > p.trust_score) {
+              p.trust_score = v3.reputationScore;
+            }
           }
         }
+        // Re-sort by trust_score DESC after V3 overlay (DB sort may be stale)
+        profiles.sort((a, b) => (b.trust_score || 0) - (a.trust_score || 0));
       } catch (e) {
         console.warn('[V3 Scores] Batch profiles warm-up failed:', e.message);
       }
