@@ -27,6 +27,13 @@ function readJSON(filepath) {
   try { return JSON.parse(fs.readFileSync(filepath, 'utf8')); } catch { return null; }
 }
 
+// Normalize job.applications to always be an array
+function readJob(filepath) {
+  const job = readJSON(filepath);
+  if (job && !Array.isArray(job.applications)) job.applications = [];
+  return job;
+}
+
 function writeJSON(filepath, data) {
   fs.writeFileSync(filepath, JSON.stringify(data, null, 2));
 }
@@ -93,7 +100,7 @@ function registerRoutes(app) {
 
   // GET /api/marketplace/jobs/:id — Get single job (with hydrated applications)
   app.get('/api/marketplace/jobs/:id', (req, res) => {
-    const job = readJSON(path.join(DATA_DIR, 'jobs', `${req.params.id}.json`));
+    const job = readJob(path.join(DATA_DIR, 'jobs', `${req.params.id}.json`));
     if (!job) return res.status(404).json({ error: 'Job not found' });
     // Hydrate application IDs into full application objects
     if (Array.isArray(job.applications)) {
@@ -108,7 +115,7 @@ function registerRoutes(app) {
   // 2. POST /api/marketplace/jobs/:id/apply (or /applications) — Apply to a job
   const applyHandler = (req, res) => {
     const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
-    const job = readJSON(jobPath);
+    const job = readJob(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
     if (job.status !== 'open') return res.status(400).json({ error: 'Job is not open for applications' });
 
@@ -141,7 +148,7 @@ function registerRoutes(app) {
 
   // GET /api/marketplace/jobs/:id/applications — List applications for a job
   app.get('/api/marketplace/jobs/:id/applications', (req, res) => {
-    const job = readJSON(path.join(DATA_DIR, 'jobs', `${req.params.id}.json`));
+    const job = readJob(path.join(DATA_DIR, 'jobs', `${req.params.id}.json`));
     if (!job) return res.status(404).json({ error: 'Job not found' });
     const apps = job.applications.map(appId => readJSON(path.join(DATA_DIR, 'applications', `${appId}.json`))).filter(Boolean);
     res.json({ applications: apps, total: apps.length });
@@ -155,7 +162,7 @@ function registerRoutes(app) {
     if (application.status !== 'pending') return res.status(400).json({ error: 'Application already processed' });
 
     const jobPath = path.join(DATA_DIR, 'jobs', `${application.jobId}.json`);
-    const job = readJSON(jobPath);
+    const job = readJob(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
 
     // Bug fix: Only job poster can accept applications

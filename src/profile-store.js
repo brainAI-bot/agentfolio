@@ -1013,6 +1013,30 @@ function registerRoutes(app) {
       }
     }
 
+    // Chain-cache score overlay: for agents without V3, compute from on-chain attestations
+    try {
+      const chainCache = require('./lib/chain-cache');
+      for (const p of profiles) {
+        if (!p.v3) {
+          const ccScore = chainCache.getScore(p.id);
+          if (ccScore && ccScore.reputationScore > (p.trust_score || 0)) {
+            p.trust_score = ccScore.reputationScore;
+            p.chain_cache_score = ccScore;
+          }
+        }
+        // Add verification count from chain-cache (on-chain source of truth)
+        const ccPlatforms = chainCache.getVerifiedPlatforms(p.id);
+        if (ccPlatforms.length > 0) {
+          p.onchain_verification_count = ccPlatforms.length;
+          p.onchain_platforms = ccPlatforms;
+        }
+      }
+      // Re-sort after chain-cache overlay
+      profiles.sort((a, b) => (b.trust_score || 0) - (a.trust_score || 0));
+    } catch (e) {
+      // chain-cache may not be available yet
+    }
+
     // P0-13: Paginate after V3 overlay sort
     const paginatedProfiles = profiles.slice(offset, offset + limit);
     res.json({ profiles: paginatedProfiles, total, page, limit, pages: Math.ceil(total / limit) });
