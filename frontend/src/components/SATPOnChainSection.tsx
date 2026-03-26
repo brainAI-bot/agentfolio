@@ -78,10 +78,10 @@ export function SATPOnChainSection({ walletAddress }: { walletAddress?: string }
               <div>
                 <div className="flex justify-between text-xs mb-1" style={{ fontFamily: "var(--font-mono)" }}>
                   <span style={{ color: "var(--text-tertiary)" }}>Trust Score</span>
-                  <span style={{ color: "var(--text-primary)" }}>{scores.reputationScore}/1000</span>
+                  <span style={{ color: "var(--text-primary)" }}>{scores.reputationScore}/800</span>
                 </div>
                 <div className="h-1.5 rounded-full" style={{ background: "var(--bg-tertiary)" }}>
-                  <div className="h-full rounded-full" style={{ width: `${(scores.reputationScore / 1000) * 100}%`, background: "var(--success)" }} />
+                  <div className="h-full rounded-full" style={{ width: `${(scores.reputationScore / 800) * 100}%`, background: "var(--success)" }} />
                 </div>
               </div>
             )}

@@ -1088,7 +1088,7 @@ function handleBurnToBecome(req, res, url) {
             const v3 = await getV3Score(profileId);
             if (v3) {
               v3Level = v3.verificationLevel || 0;
-              v3Rep = Math.round(parseFloat(v3.reputationPct)) || 0;
+              v3Rep = v3.reputationScore || 0;
             }
           } catch (e) { console.error('[BURN] V3 score lookup failed:', e.message); }
           try {
