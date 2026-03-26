@@ -2169,12 +2169,13 @@ app.post('/api/burn-to-become/collections', (req, res) => {
 // Burn-to-Become full flow routes (wallet-nfts, prepare, submit, mint-boa)
 // Burn-to-Become routes (handleBurnToBecome is raw handler, wrapped as middleware)
 const { handleBurnToBecome } = require('./routes/burn-to-become-public');
+let handleBirthEndpoints;try { handleBirthEndpoints = require('./routes/burn-to-become-public-birth').handleBirthEndpoints; } catch(e) { console.warn('[Birth] Handler not loaded:', e.message); }
 app.use((req, res, next) => {
   try {
     if (req.path.startsWith('/api/burn-to-become/')) {
       const parsedUrl = new URL(req.url, 'http://localhost');
       const handled = handleBurnToBecome(req, res, parsedUrl);
-      if (!handled) next();
+      if (!handled && handleBirthEndpoints) { const birthHandled = handleBirthEndpoints(req, res, parsedUrl); if (!birthHandled) next(); } else if (!handled) { next(); }
     } else {
       next();
     }

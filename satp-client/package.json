@@ -1,14 +1,31 @@
 {
-  "name": "satp-sdk",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "@brainai/satp-client",
+  "version": "2.0.0",
+  "description": "SATP v2 Client SDK — Solana Agent Token Protocol (Identity, Reviews, Reputation, Attestations, Validation)",
+  "main": "src/index.js",
+  "files": [
+    "src/",
+    "README.md"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node test.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "solana",
+    "satp",
+    "agent",
+    "identity",
+    "reputation",
+    "blockchain",
+    "web3"
+  ],
+  "author": "brainAI",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brainai-dev/satp-client"
+  },
+  "homepage": "https://agentfolio.bot",
   "dependencies": {
     "@solana/web3.js": "^1.98.4",
     "borsh": "^2.0.0",
