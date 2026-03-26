@@ -497,7 +497,7 @@ function enrichProfile(row) {
 
   return {
     ...row,
-    avatar: resolvedAvatar,
+    avatar: resolvedAvatar ? resolvedAvatar.replace('node1.irys.xyz', 'gateway.irys.xyz') : resolvedAvatar,
     v3,
     capabilities: parseJsonField(row.capabilities),
     tags: parseJsonField(row.tags),
@@ -513,47 +513,64 @@ function enrichProfile(row) {
     endorsements: { items: endorsements, total: endorsements.length },
     verifications: (() => {
       const vMap = {};
-      // 1) DB verifications table entries
-      for (const v of verifications) {
-        const proof = parseJsonField(v.proof);
-        vMap[v.platform] = {
-          verified: true,
-          address: v.identifier,
-          identifier: v.identifier,
-          proof,
-          verified_at: v.verified_at,
-        };
-      }
-      // 2) Merge verification_data (JSON column) — catches platforms not in DB table
-      const vd = parseJsonField(row.verification_data, {});
-      for (const [platform, data] of Object.entries(vd)) {
-        if (data && data.verified && !vMap[platform]) {
-          vMap[platform] = {
-            verified: true,
-            address: data.address || data.handle || data.username || data.email || data.url || data.did || data.domain || "",
-            identifier: data.address || data.handle || data.username || data.email || data.url || data.did || data.domain || "",
-            proof: { verifiedAt: data.verifiedAt || data.linkedAt || null },
-            verified_at: data.verifiedAt || data.linkedAt || null,
-          };
-        }
-      }
-      // Merge chain-cache attestations (on-chain source of truth)
+      // === CHAIN-CACHE FIRST (on-chain source of truth) ===
       try {
         const chainCache = require('./lib/chain-cache');
         const atts = chainCache.getVerifications(row.id);
         for (const att of atts) {
-          if (att.platform && !vMap[att.platform]) {
+          if (att.platform) {
             vMap[att.platform] = {
               verified: true,
               address: att.identifier || '',
               identifier: att.identifier || '',
               proof: { txSignature: att.txSignature, timestamp: att.timestamp },
               verified_at: att.timestamp || null,
-              source: 'chain-cache',
+              source: 'on-chain',
             };
           }
         }
-      } catch (e) { /* chain-cache may not be available */ }
+      } catch (e) { /* chain-cache not available — fall back to DB */ }
+      
+      // === DB verifications (fill gaps not covered by chain-cache) ===
+      for (const v of verifications) {
+        if (!vMap[v.platform]) {
+          const proof = parseJsonField(v.proof);
+          vMap[v.platform] = {
+            verified: true,
+            address: v.identifier,
+            identifier: v.identifier,
+            proof,
+            verified_at: v.verified_at,
+            source: 'db',
+          };
+        }
+      }
+      // === verification_data JSON column (additional metadata) ===
+      const vd = parseJsonField(row.verification_data, {});
+      for (const [platform, data] of Object.entries(vd)) {
+        if (data && data.verified) {
+          if (!vMap[platform]) {
+            vMap[platform] = {
+              verified: true,
+              address: data.address || data.handle || data.username || data.email || data.url || data.did || data.domain || "",
+              identifier: data.address || data.handle || data.username || data.email || data.url || data.did || data.domain || "",
+              proof: { verifiedAt: data.verifiedAt || data.linkedAt || null },
+              verified_at: data.verifiedAt || data.linkedAt || null,
+              source: 'db-json',
+            };
+          } else {
+            // Merge extra metadata from DB into chain-cache entry (handle, username, etc.)
+            const existing = vMap[platform];
+            if (data.handle && !existing.handle) existing.handle = data.handle;
+            if (data.username && !existing.username) existing.username = data.username;
+            if (data.email && !existing.email) existing.email = data.email;
+            if (data.url && !existing.url) existing.url = data.url;
+            if (data.did && !existing.did) existing.did = data.did;
+            if (data.domain && !existing.domain) existing.domain = data.domain;
+            if (data.address && !existing.address) existing.address = data.address;
+          }
+        }
+      }
       return vMap;
     })(),
     activity: activity.map(a => ({ ...a, detail: parseJsonField(a.detail) })),
@@ -564,10 +581,35 @@ function enrichProfile(row) {
       negative: reviewStats.negative,
     },
     trust_score,
-    // Computed level/tier/score from V3 on-chain or SATP trust data
-    level: v3 ? v3.verificationLevel : (trust_score ? trust_score.level : null),
-    tier: v3 ? v3.verificationLabel : (trust_score ? (trust_score.level >= 4 ? 'Elite' : trust_score.level >= 3 ? 'Established' : trust_score.level >= 2 ? 'Verified' : trust_score.level >= 1 ? 'Basic' : 'Unclaimed') : null),
-    score: v3 ? v3.reputationScore : (trust_score ? trust_score.overall_score : null),
+    // Computed level/tier/score — chain-cache is primary source
+    level: (() => {
+      // Priority: V3 Genesis Record > chain-cache computed > DB trust_score
+      if (v3) return v3.verificationLevel;
+      try {
+        const cc = require('./lib/chain-cache');
+        const s = cc.getScore(row.id);
+        if (s) return s.verificationLevel;
+      } catch {}
+      return trust_score ? trust_score.level : null;
+    })(),
+    tier: (() => {
+      if (v3) return v3.verificationLabel || ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'][v3.verificationLevel] || 'Unclaimed';
+      try {
+        const cc = require('./lib/chain-cache');
+        const s = cc.getScore(row.id);
+        if (s) return ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'][s.verificationLevel] || 'Unclaimed';
+      } catch {}
+      return trust_score ? (trust_score.level >= 4 ? 'Elite' : trust_score.level >= 3 ? 'Established' : trust_score.level >= 2 ? 'Verified' : trust_score.level >= 1 ? 'Basic' : 'Unclaimed') : null;
+    })(),
+    score: (() => {
+      if (v3) return v3.reputationScore;
+      try {
+        const cc = require('./lib/chain-cache');
+        const s = cc.getScore(row.id);
+        if (s) return s.reputationScore;
+      } catch {}
+      return trust_score ? trust_score.overall_score : null;
+    })(),
     verification_level: v3 ? v3.verificationLevel : (trust_score ? trust_score.level : 0),
     reputation_score: v3 ? v3.reputationScore : (trust_score ? trust_score.overall_score : 0),
   };

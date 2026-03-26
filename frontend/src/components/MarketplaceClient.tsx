@@ -85,6 +85,8 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   // Apply form
   const [applyMessage, setApplyMessage] = useState("");
   const [applyBid, setApplyBid] = useState("");
+  const [resolvedProfileId, setResolvedProfileId] = useState<string | null>(null);
+  const [resolvingProfile, setResolvingProfile] = useState(false);
 
   const filtered = filter === "all" ? jobs : jobs.filter((j) => j.status === filter);
 
@@ -92,6 +94,24 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 5000);
   };
+
+  // Resolve wallet → profile ID when apply modal opens
+  const resolveWalletProfile = useCallback(async (walletAddr: string) => {
+    setResolvingProfile(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/profile-by-wallet?wallet=${walletAddr}`);
+      if (res.ok) {
+        const data = await res.json();
+        setResolvedProfileId(data.id || null);
+      } else {
+        setResolvedProfileId(null);
+      }
+    } catch {
+      setResolvedProfileId(null);
+    } finally {
+      setResolvingProfile(false);
+    }
+  }, []);
 
   const refreshJobs = useCallback(async () => {
     try {
@@ -132,7 +152,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: publicKey.toBase58(),
+          clientId: resolvedProfileId || publicKey.toBase58(),
           title: postForm.title,
           description: postForm.description,
           category: postForm.category,
@@ -165,9 +185,9 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          agentId: publicKey.toBase58(),
-          message: applyMessage,
-          proposedBudget: applyBid ? parseFloat(applyBid) : undefined,
+          applicantId: resolvedProfileId || publicKey.toBase58(),
+          proposal: applyMessage,
+          bidAmount: applyBid ? parseFloat(applyBid) : undefined,
         }),
       });
       const data = await res.json();
@@ -223,7 +243,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: publicKey.toBase58(),
+          clientId: resolvedProfileId || publicKey.toBase58(),
           txSignature: sig,
           amount,
           currency: "USDC",
@@ -247,7 +267,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: publicKey.toBase58(),
+          clientId: resolvedProfileId || publicKey.toBase58(),
           completionNote: "Work completed and approved.",
         }),
       });
@@ -276,6 +296,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   };
 
   const openJobAction = (job: Job, action: ModalType) => {
+    if ((action === "apply" || action === "post-job") && publicKey) resolveWalletProfile(publicKey.toBase58());
     setSelectedJob(job);
     setModal(action);
   };
@@ -536,6 +557,9 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                 <div className="p-3 rounded-lg" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
                   <div className="text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>Budget: {selectedJob.budget}</div>
                 </div>
+                {resolvingProfile && <div className="text-[11px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>Resolving profile...</div>}
+                {resolvedProfileId && <div className="text-[11px]" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>Applying as: <strong>{resolvedProfileId}</strong></div>}
+                {!resolvingProfile && !resolvedProfileId && publicKey && <div className="text-[11px]" style={{ color: "var(--warning, #f59e0b)", fontFamily: "var(--font-mono)" }}>⚠️ No profile found for this wallet. Create a profile first.</div>}
                 <Textarea label="Your Proposal" value={applyMessage} onChange={setApplyMessage} placeholder="Why are you the best fit for this job?" />
                 <Input label="Your Bid (USDC, optional)" value={applyBid} onChange={setApplyBid} placeholder="Leave empty to match budget" type="number" />
                 <button onClick={handleApply} disabled={loading}
