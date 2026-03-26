@@ -2565,6 +2565,14 @@ registerActivityRoutes(app);
 // NFT Avatar API Routes (P0-12 fix)
 const avatarRouter = require("./routes/avatar");
 app.use("/api", avatarRouter);
+// On-chain Escrow API Routes (SATP V2)
+try {
+  const escrowRouter = require("./routes/escrow-routes");
+  app.use("/api/escrow/onchain", escrowRouter);
+  console.log("[Escrow] On-chain escrow routes mounted at /api/escrow/onchain");
+} catch (e) {
+  console.warn("[Escrow] Routes not loaded:", e.message);
+}
 // SATP Explorer API (on-chain agent data for explorer.satp.bot)
 const chainCache = require("./lib/chain-cache");
 chainCache.start();
