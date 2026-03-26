@@ -1006,6 +1006,62 @@ function handleBurnToBecome(req, res, url) {
   }
 
 
+  // POST /api/burn-to-become/prepare-mint — build unsigned TX for client-side signing
+  if (url.pathname === "/api/burn-to-become/prepare-mint" && req.method === "POST") {
+    const wallet = req.body && req.body.wallet;
+    const flow = req.body && req.body.flow;
+    if (!wallet) return sendJson(400, { error: "wallet required" });
+    if (!flow || !["free", "paid"].includes(flow)) return sendJson(400, { error: "flow must be 'free' or 'paid'" });
+
+    (async () => {
+      try {
+        const { PublicKey } = require("@solana/web3.js");
+        try { new PublicKey(wallet); } catch { return sendJson(400, { error: "Invalid wallet" }); }
+
+        // Free flow: check eligibility
+        if (flow === "free") {
+          const Database = require("better-sqlite3");
+          const dbPath = require("path").join(__dirname, "../../data/agentfolio.db");
+          const db = new Database(dbPath, { readonly: true });
+          let profileId = null;
+          const profiles = db.prepare("SELECT * FROM profiles").all();
+          for (const p of profiles) {
+            try { const vd = JSON.parse(p.verification_data || "{}"); if (vd.solana && vd.solana.address === wallet) { profileId = p.id; break; } } catch {}
+            try { const w = JSON.parse(p.wallets || "{}"); if (w.solana === wallet) { profileId = p.id; break; } } catch {}
+          }
+          db.close();
+          if (!profileId) return sendJson(403, { error: "No profile found for this wallet" });
+          
+          let level = 0, rep = 0, isBorn = false;
+          try {
+            const { getV3Score } = require("../v3-score-service");
+            const v3 = await getV3Score(profileId);
+            if (v3) { level = v3.verificationLevel || 0; rep = v3.reputationScore || 0; isBorn = !!v3.isBorn; }
+          } catch {}
+          if (level < 3 || rep < 50) return sendJson(403, { error: "Free mint requires Level 3+ and Rep 50+", level, rep });
+          if (isBorn) return sendJson(403, { error: "Already used free burn-to-become", isBorn: true });
+        }
+
+        // Build unsigned TX via worker
+        const { execFile } = require("child_process");
+        execFile("node", ["/home/ubuntu/agentfolio/core-cm-v2/core-cm-prepare-worker.mjs", wallet, flow], {
+          timeout: 30000, cwd: "/home/ubuntu/agentfolio/core-cm-v2",
+          env: { ...process.env, HOME: process.env.HOME },
+        }, (err, stdout, stderr) => {
+          if (err) return sendJson(500, { error: "Prepare failed: " + err.message });
+          try {
+            const lines = stdout.trim().split("\n");
+            const result = JSON.parse(lines[lines.length - 1]);
+            if (result.error) return sendJson(500, result);
+            sendJson(200, result);
+          } catch (e) { sendJson(500, { error: "Parse error" }); }
+        });
+      } catch (e) { sendJson(500, { error: e.message }); }
+    })();
+    return true;
+  }
+
+  
   // POST /api/burn-to-become/mint-boa — Metaplex pipeline mint (server-side)
   if (url.pathname === "/api/burn-to-become/mint-boa" && req.method === "POST") {
     const wallet = req.body && req.body.wallet;
@@ -1331,7 +1387,88 @@ try {
     return true;
   }
 
+  // POST /api/burn-to-become/confirm-mint — record a client-signed mint after TX confirms
+  if (url.pathname === '/api/burn-to-become/confirm-mint' && req.method === 'POST') {
+    const { wallet, signature, asset, boaId, flow } = req.body || {};
+    if (!wallet || !signature) return sendJson(400, { error: 'wallet and signature required' });
+    
+    (async () => {
+      try {
+        const { Connection, PublicKey } = require('@solana/web3.js');
+        const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=HELIUS_API_KEY_REDACTED', 'confirmed');
+        
+        // Verify the TX actually confirmed on-chain
+        const txInfo = await connection.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
+        if (!txInfo) return sendJson(404, { error: 'Transaction not found or not confirmed yet. Try again in a few seconds.' });
+        if (txInfo.meta && txInfo.meta.err) return sendJson(400, { error: 'Transaction failed on-chain', txError: txInfo.meta.err });
+        
+        // Verify wallet was a signer
+        const signers = txInfo.transaction.message.staticAccountKeys 
+          ? txInfo.transaction.message.staticAccountKeys.map(k => k.toBase58())
+          : txInfo.transaction.message.accountKeys.map(k => k.toBase58());
+        if (!signers.includes(wallet)) return sendJson(403, { error: 'Wallet was not a signer on this transaction' });
+        
+        // Record the mint
+        const MINT_RECORDS_DIR = '/home/ubuntu/agentfolio/boa-pipeline/mint-records';
+        const effectiveBoaId = boaId || 'client-' + Date.now();
+        const recordPath = require('path').join(MINT_RECORDS_DIR, effectiveBoaId + '.json');
+        
+        // Find agent ID from wallet
+        const Database = require('better-sqlite3');
+        const dbPath = require('path').join(__dirname, '../../data/agentfolio.db');
+        let agentId = null;
+        try {
+          const db = new Database(dbPath, { readonly: true });
+          const profiles = db.prepare('SELECT * FROM profiles').all();
+          for (const p of profiles) {
+            try { const vd = JSON.parse(p.verification_data || '{}'); if (vd.solana && vd.solana.address === wallet) { agentId = p.id; break; } } catch {}
+            try { const w = JSON.parse(p.wallets || '{}'); if (w.solana === wallet) { agentId = p.id; break; } } catch {}
+          }
+          db.close();
+        } catch {}
+        
+        const record = {
+          cluster: 'mainnet',
+          nftNumber: boaId || null,
+          mint: asset || null,
+          collection: 'CCw8NjAS3QpfDU4fBYkJ2kD4znNy468e3wqAJQKoJCFk',
+          recipient: wallet,
+          agentId: agentId,
+          flow: flow || 'unknown',
+          signature,
+          clientSigned: true,
+          timestamp: new Date().toISOString(),
+        };
+        
+        if (!fs.existsSync(MINT_RECORDS_DIR)) fs.mkdirSync(MINT_RECORDS_DIR, { recursive: true });
+        fs.writeFileSync(recordPath, JSON.stringify(record, null, 2));
+        console.log('[ConfirmMint] Recorded client-signed mint:', effectiveBoaId, 'agent:', agentId, 'sig:', signature.slice(0, 20));
+        
+        // If free flow + agent has Genesis Record, trigger burnToBecome
+        if (flow === 'free' && agentId && asset) {
+          try {
+            const { SatpV3Client } = require('../satp/satp-v3-client');
+            const client = new SatpV3Client();
+            const genesisRecord = await client.getGenesisRecord(agentId);
+            if (genesisRecord && !genesisRecord.error && !genesisRecord.isBorn) {
+              const sig = await client.burnToBecome(agentId, asset);
+              console.log('[ConfirmMint] V3 burnToBecome recorded:', agentId, 'tx:', sig);
+              record.burnToBecomeTx = sig;
+            }
+          } catch (e) { console.warn('[ConfirmMint] burnToBecome failed:', e.message); }
+        }
+        
+        sendJson(200, { success: true, recorded: true, agentId, boaId: effectiveBoaId, ...record });
+      } catch (e) {
+        console.error('[ConfirmMint] Error:', e.message);
+        sendJson(500, { error: e.message });
+      }
+    })();
+    return true;
+  }
+
   return false; // not handled
+
 }
 
 module.exports = { handleBurnToBecome };
