@@ -133,6 +133,7 @@ try {
 
 // App configuration
 const app = express();
+app.set('trust proxy', 1); // Behind Caddy reverse proxy — required for express-rate-limit
 const PORT = process.env.PORT || 3333;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const _AGENTFOLIO_VERSION = '1.0.0-5a57e72';
@@ -2530,13 +2531,13 @@ registerSATPRoutes(app);
 try {
   const { registerReviewsV2Routes } = require('./api/reviews-v2');
   registerReviewsV2Routes(app);
-
-// Review challenge-response (wallet-signed reviews)
-try {
-  const { registerReviewChallengeRoutes } = require("./api/review-challenge");
-  registerReviewChallengeRoutes(app);
-} catch (e) { console.warn("[SKIP] review-challenge:", e.message); }
 } catch (e) { console.warn('[SKIP] reviews-v2:', e.message); }
+
+// Review challenge-response (wallet-signed, escrow-gated)
+try {
+  const { registerReviewChallengeRoutes } = require('./api/review-challenge');
+  registerReviewChallengeRoutes(app);
+} catch (e) { console.warn('[SKIP] review-challenge:', e.message); }
 
 // BOA & Mint Eligibility
 try {
@@ -2560,6 +2561,9 @@ registerBadgeRoute(app, { profileStore, computeScoreWithOnChain, getV3Score });
 // Activity Feed API
 const { registerActivityRoutes } = require("./routes/activity");
 registerActivityRoutes(app);
+// NFT Avatar API Routes (P0-12 fix)
+const avatarRouter = require("./routes/avatar");
+app.use("/api", avatarRouter);
 // SATP Explorer API (on-chain agent data for explorer.satp.bot)
 const chainCache = require("./lib/chain-cache");
 chainCache.start();
@@ -2809,6 +2813,25 @@ app.get("/api/verify/polymarket/stats", (req, res) => {
 // Catch-all for unknown API routes — return proper JSON 404
 
 // ─── Restored Route Stubs (P0 audit) ───
+
+// GET /api/escrow/check — check completed escrow between wallet and agent
+app.get('/api/escrow/check', (req, res) => {
+  const { wallet, targetAgent } = req.query;
+  if (!wallet || !targetAgent) return res.status(400).json({ error: 'wallet and targetAgent required' });
+  try {
+    const path = require('path');
+    const fs = require('fs');
+    const escrowDir = path.join(__dirname, '..', 'data', 'marketplace', 'escrow');
+    if (!fs.existsSync(escrowDir)) return res.json({ hasCompletedEscrow: false });
+    const escrows = fs.readdirSync(escrowDir).filter(f => f.endsWith('.json')).map(f => {
+      try { return JSON.parse(fs.readFileSync(path.join(escrowDir, f), 'utf8')); } catch { return null; }
+    }).filter(e => e && e.status === 'completed' && (
+      (e.clientWallet === wallet && e.workerAgent === targetAgent) ||
+      (e.workerWallet === wallet && e.clientAgent === targetAgent)
+    ));
+    res.json({ hasCompletedEscrow: escrows.length > 0 });
+  } catch (e) { res.json({ hasCompletedEscrow: false }); }
+});
 
 // GET /api/marketplace/wallet/:addr — Jobs by wallet
 app.get('/api/marketplace/wallet/:addr', (req, res) => {
