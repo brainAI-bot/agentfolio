@@ -50,30 +50,43 @@ function registerRoutes(app) {
 
   // 1. POST /api/marketplace/jobs — Create a job
   app.post('/api/marketplace/jobs', (req, res) => {
-    const { title, description, budget, budgetAmount, currency, postedBy, skills, skills_required, deadline } = req.body;
+    const { title, description, budget, budgetAmount, currency, postedBy, clientId, skills, skills_required, deadline, category, budgetType, budgetCurrency, timeline, requirements, escrowRequired, budgetMax, attachments, expiresAt } = req.body;
     const resolvedBudget = budget || budgetAmount;
-    if (!title || !description || !resolvedBudget || !postedBy) {
-      return res.status(400).json({ error: 'title, description, budget, and postedBy are required' });
+    const resolvedPostedBy = postedBy || clientId;
+    if (!title || !description || !resolvedBudget || !resolvedPostedBy) {
+      return res.status(400).json({ error: 'title, description, budget, and postedBy (or clientId) are required' });
     }
     const job = {
       id: genId('job'),
       title,
       description,
       budget: parseFloat(resolvedBudget),
-      currency: currency || 'USDC',
-      postedBy,
+      currency: currency || budgetCurrency || 'USDC',
+      postedBy: resolvedPostedBy,
+      clientId: resolvedPostedBy,
+      category: category || 'other',
       skills: skills || skills_required || [],
       skills_required: skills_required || skills || [],
+      budgetType: budgetType || 'fixed',
+      budgetAmount: parseFloat(resolvedBudget),
+      budgetCurrency: currency || budgetCurrency || 'USDC',
+      budgetMax: budgetMax || null,
+      timeline: timeline || deadline || null,
       deadline: deadline || null,
-      status: 'open', // open → in_progress → completed → closed
+      requirements: requirements || '',
+      escrowRequired: escrowRequired !== false,
+      attachments: attachments || [],
+      expiresAt: expiresAt || null,
+      status: 'open',
       applications: [],
       acceptedApplicant: null,
+      selectedAgentId: null,
       escrowId: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
     writeJSON(path.join(DATA_DIR, 'jobs', `${job.id}.json`), job);
-    try { addActivity(postedBy, 'job_posted', { jobId: job.id, title }); } catch {}
+    try { addActivity(resolvedPostedBy, 'job_posted', { jobId: job.id, title }); } catch {}
     res.status(201).json(job);
   });
 
@@ -121,7 +134,7 @@ function registerRoutes(app) {
 
     const { applicantId, proposal, bidAmount } = req.body;
     if (!applicantId || !proposal) return res.status(400).json({ error: 'applicantId and proposal required' });
-    if (applicantId === job.postedBy) return res.status(400).json({ error: 'Cannot apply to your own job' });
+    if (applicantId === job.postedBy || applicantId === job.clientId) return res.status(400).json({ error: 'Cannot apply to your own job' });
 
     // Bug fix: Prevent duplicate applications from same agent
     const existingApps = job.applications.map(appId => readJSON(path.join(DATA_DIR, 'applications', `${appId}.json`))).filter(Boolean);

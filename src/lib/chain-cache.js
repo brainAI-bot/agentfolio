@@ -51,6 +51,10 @@ const cache = {
   isRefreshing: false,
 };
 
+// Track known TX signatures to avoid re-fetching on each refresh cycle
+const _knownSigs = new Set();
+let _lastScannedSig = null;
+
 // ============ REFRESH FROM CHAIN ============
 
 /**
@@ -148,9 +152,10 @@ async function refreshIdentities() {
 }
 
 /**
- * Scan Solana for attestation Memo TXs from platform signer.
- * Finds VERIFY|agent_id|platform|timestamp|proof_hash memos on-chain.
- * Writes discovered attestations to DB for fast future lookups.
+ * Scan Solana for NEW attestation Memo TXs from platform signer.
+ * OPTIMIZED: Only fetches TXs newer than last scan. Skips already-known signatures.
+ * Seeds known sigs from DB on first run to avoid redundant RPC calls.
+ * Typical steady-state: 0 RPC getTransaction calls (all sigs already known).
  */
 async function refreshAttestationsFromChain() {
   try {
@@ -161,19 +166,52 @@ async function refreshAttestationsFromChain() {
     const kp = Keypair.fromSecretKey(Uint8Array.from(raw));
     const signerPubkey = kp.publicKey;
 
-    // Fetch recent signatures (last 100 TXs from platform signer)
-    const sigs = await conn.getSignaturesForAddress(signerPubkey, { limit: 200 });
+    // Seed _knownSigs from DB on first run (avoid re-scanning known TXs)
+    if (_knownSigs.size === 0) {
+      try {
+        const Database = require('better-sqlite3');
+        const db = new Database('/home/ubuntu/agentfolio/data/agentfolio.db', { readonly: true });
+        const rows = db.prepare('SELECT tx_signature FROM attestations').all();
+        rows.forEach(r => _knownSigs.add(r.tx_signature));
+        db.close();
+        console.log(`[ChainCache] Seeded ${_knownSigs.size} known TX signatures from DB`);
+      } catch (e) {
+        console.warn('[ChainCache] Could not seed known sigs from DB:', e.message);
+      }
+    }
+
+    // Fetch signatures — only NEW ones since last scan
+    const fetchOpts = { limit: 100 };
+    if (_lastScannedSig) {
+      fetchOpts.until = _lastScannedSig;
+    }
+    
+    const sigs = await conn.getSignaturesForAddress(signerPubkey, fetchOpts);
     if (!sigs || sigs.length === 0) {
-      console.log('[ChainCache] No signatures found for platform signer');
+      console.log('[ChainCache] No new signatures since last scan');
       return 0;
     }
 
-    const path = require('path');
+    // Remember the newest signature for next scan
+    if (sigs.length > 0) _lastScannedSig = sigs[0].signature;
+
+    // Filter out already-known signatures and failed TXs
+    const newSigs = sigs.filter(s => !_knownSigs.has(s.signature) && !s.err);
+    
+    // Mark all scanned sigs as known (including non-memo TXs)
+    sigs.forEach(s => _knownSigs.add(s.signature));
+    
+    if (newSigs.length === 0) {
+      console.log(`[ChainCache] Scanned ${sigs.length} sigs, all already known — 0 RPC TX fetches needed`);
+      return 0;
+    }
+
+    console.log(`[ChainCache] ${newSigs.length} new TXs to fetch (${sigs.length - newSigs.length} already known)`);
+
     const Database = require('better-sqlite3');
     const dbPath = '/home/ubuntu/agentfolio/data/agentfolio.db';
     const db = new Database(dbPath);
     
-    // Ensure table exists
     db.exec(`CREATE TABLE IF NOT EXISTS attestations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       profile_id TEXT NOT NULL,
@@ -195,66 +233,53 @@ async function refreshAttestationsFromChain() {
     const newAttestations = new Map();
     const MEMO_PREFIX = 'VERIFY|';
 
-    // Batch fetch transactions to find memo content
-    // Process in chunks of 20
-    for (let i = 0; i < sigs.length; i += 20) {
-      const batch = sigs.slice(i, i + 20);
-      for (const sigInfo of batch) {
-        if (sigInfo.err) continue; // Skip failed TXs
-        try {
-          const tx = await conn.getTransaction(sigInfo.signature, { 
-            maxSupportedTransactionVersion: 0,
-            commitment: 'confirmed'
-          });
-          if (!tx || !tx.meta || !tx.meta.logMessages) continue;
-          
-          // Find memo in log messages
-          const memoLog = tx.meta.logMessages.find(l => 
-            l.includes('Program log: Memo') || l.includes(MEMO_PREFIX)
-          );
-          if (!memoLog) continue;
-          
-          // Extract memo content - could be in different formats
-          let memoContent = null;
-          for (const log of tx.meta.logMessages) {
-            if (log.includes(MEMO_PREFIX)) {
-              // Extract the VERIFY|... part
-              const match = log.match(/VERIFY\|([^|]+)\|([^|]+)\|([^|]+)\|([^|\s"]+)/);
-              if (match) {
-                memoContent = { agentId: match[1], platform: match[2], timestamp: match[3], proofHash: match[4] };
-                break;
-              }
+    // Fetch only NEW TXs with 100ms throttling between calls
+    for (const sigInfo of newSigs) {
+      try {
+        const tx = await conn.getTransaction(sigInfo.signature, { 
+          maxSupportedTransactionVersion: 0,
+          commitment: 'confirmed'
+        });
+        
+        if (!tx || !tx.meta || !tx.meta.logMessages) continue;
+        
+        let memoContent = null;
+        for (const log of tx.meta.logMessages) {
+          if (log.includes(MEMO_PREFIX)) {
+            const match = log.match(/VERIFY\|([^|]+)\|([^|]+)\|([^|]+)\|([^|\s"]+)/);
+            if (match) {
+              memoContent = { agentId: match[1], platform: match[2], timestamp: match[3], proofHash: match[4] };
+              break;
             }
           }
-          
-          if (!memoContent) continue;
-          
-          const { agentId, platform, timestamp, proofHash } = memoContent;
-          const fullMemo = `VERIFY|${agentId}|${platform}|${timestamp}|${proofHash}`;
-          const txTime = sigInfo.blockTime ? new Date(sigInfo.blockTime * 1000).toISOString() : new Date().toISOString();
-          
-          // Write to DB
-          try {
-            insertStmt.run(agentId, platform, sigInfo.signature, fullMemo, proofHash, signerPubkey.toBase58(), txTime);
-          } catch (dbErr) {
-            // UNIQUE constraint — already exists, that's fine
-          }
-          
-          // Add to in-memory cache
-          if (!newAttestations.has(agentId)) newAttestations.set(agentId, []);
-          newAttestations.get(agentId).push({
-            platform, txSignature: sigInfo.signature, memo: fullMemo, 
-            proofHash, signer: signerPubkey.toBase58(), timestamp: txTime,
-            solscanUrl: `https://solscan.io/tx/${sigInfo.signature}`,
-          });
-          discovered++;
-        } catch (txErr) {
-          // Skip individual TX fetch errors
         }
+        
+        if (!memoContent) continue;
+        
+        const { agentId, platform, timestamp, proofHash } = memoContent;
+        const fullMemo = `VERIFY|${agentId}|${platform}|${timestamp}|${proofHash}`;
+        const txTime = sigInfo.blockTime ? new Date(sigInfo.blockTime * 1000).toISOString() : new Date().toISOString();
+        
+        try {
+          insertStmt.run(agentId, platform, sigInfo.signature, fullMemo, proofHash, signerPubkey.toBase58(), txTime);
+        } catch (dbErr) {}
+        
+        if (!newAttestations.has(agentId)) newAttestations.set(agentId, []);
+        newAttestations.get(agentId).push({
+          platform, txSignature: sigInfo.signature, memo: fullMemo, 
+          proofHash, signer: signerPubkey.toBase58(), timestamp: txTime,
+          solscanUrl: `https://solscan.io/tx/${sigInfo.signature}`,
+        });
+        discovered++;
+        
+        // Throttle: 100ms between TX fetches to avoid 429 bursts
+        await new Promise(r => setTimeout(r, 100));
+      } catch (txErr) {
+        // Skip individual TX fetch errors
       }
     }
     
-    // Merge with existing cache.attestations
+    // Merge with existing cache
     for (const [profileId, atts] of newAttestations) {
       const existing = cache.attestations.get(profileId) || [];
       const existingSigs = new Set(existing.map(a => a.txSignature));
@@ -263,7 +288,7 @@ async function refreshAttestationsFromChain() {
     }
     
     db.close();
-    console.log(`[ChainCache] Scanned ${sigs.length} on-chain TXs, discovered ${discovered} attestation memos`);
+    console.log(`[ChainCache] Fetched ${newSigs.length} new TXs, discovered ${discovered} attestation memos`);
     return discovered;
   } catch (e) {
     console.warn('[ChainCache] On-chain attestation scan failed:', e.message);
