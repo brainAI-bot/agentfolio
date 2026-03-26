@@ -74,6 +74,46 @@ export default function MintPage() {
     setStep("choose");
   };
 
+  // Client-signed mint flow (user signs in Phantom)
+  const handleClientMint = async (flow: "free" | "paid") => {
+    if (!wallet.publicKey || !wallet.signTransaction) return;
+    setStep("minting");
+    setError("");
+    try {
+      const walletAddr = wallet.publicKey.toBase58();
+      const prepRes = await fetch(API + "/api/burn-to-become/prepare-mint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet: walletAddr, flow }),
+      });
+      if (!prepRes.ok) { const err = await prepRes.json(); throw new Error(err.error || "Failed to prepare mint"); }
+      const prepData = await prepRes.json();
+      const { Transaction, Connection } = await import("@solana/web3.js");
+      const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY", "confirmed");
+      const txBuf = Buffer.from(prepData.transaction, "base64");
+      const tx = Transaction.from(txBuf);
+      const signed = await wallet.signTransaction(tx);
+      const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false });
+      await connection.confirmTransaction(sig, "confirmed");
+      // Record the mint server-side
+      try {
+        await fetch(API + "/api/burn-to-become/confirm-mint", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet: walletAddr, signature: sig, asset: prepData.asset, boaId: prepData.boaId, flow }),
+        });
+      } catch (e) { console.warn("confirm-mint failed (non-critical):", e); }
+      setBurnTx(sig);
+      setMintedNft({ image: prepData.imageUri || "", name: prepData.boaName || "Bored Robot", number: prepData.boaId || 0, mint: prepData.asset || "" });
+      await loadWalletData(walletAddr);
+      setStep("complete");
+    } catch (e: any) {
+      const msg = e?.code === 4001 ? "Transaction rejected in wallet" : e?.message?.includes("insufficient") ? "Insufficient SOL balance" : e?.message || "Mint failed";
+      setError(msg);
+      setStep("error");
+    }
+  };
+
   const handleMintBOA = async () => {
     if (!wallet.publicKey) return;
     setStep("minting");
@@ -384,7 +424,7 @@ export default function MintPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 {/* Path 1: Mint a BOA */}
                 <button
-                  onClick={handleMintBOA}
+                  onClick={() => handleClientMint(eligibility?.eligible ? "free" : "paid")}
                   className="group rounded-xl border p-6 text-left transition-all hover:border-[var(--accent)] hover:shadow-[0_0_30px_rgba(153,69,255,0.15)]"
                   style={{ background: "var(--bg-tertiary)", borderColor: "var(--border)" }}
                 >
@@ -392,7 +432,7 @@ export default function MintPage() {
                     <Plus size={28} style={{ color: "var(--accent)" }} />
                   </div>
                   <h3 className="text-base font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-                    Mint from the Collection
+                    Collect a Bored Robot
                   </h3>
                   <p className="text-xs mb-4" style={{ color: "var(--text-secondary)" }}>
                     Mint a random Burned-Out Agent from the 5,000 collection. Tradeable on Magic Eden — or burn it to become your permanent face.
@@ -433,7 +473,7 @@ export default function MintPage() {
                     <Flame size={28} style={{ color: "var(--accent)" }} />
                   </div>
                   <h3 className="text-base font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-                    Burn an Existing NFT
+                    Burn-to-Become (Identity)
                   </h3>
                   <p className="text-xs mb-4" style={{ color: "var(--text-secondary)" }}>
                     Already have an NFT? Burn it to receive your soulbound token and Genesis Record.
@@ -477,7 +517,7 @@ export default function MintPage() {
                     <Flame size={28} style={{ color: "var(--text-tertiary)" }} />
                   </div>
                   <p className="font-semibold" style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>No eligible NFTs found</p>
-                  <p className="text-sm mt-2 mb-6" style={{ color: "var(--text-tertiary)" }}>Mint from the Collection first, then come back to burn it.</p>
+                  <p className="text-sm mt-2 mb-6" style={{ color: "var(--text-tertiary)" }}>Collect a Bored Robot first, then come back to burn it.</p>
                   <button onClick={() => setStep("choose")} className="px-6 py-3 rounded-lg text-sm font-semibold uppercase tracking-wider"
                     style={{ fontFamily: "var(--font-mono)", background: "var(--accent-glow)", color: "var(--accent)", border: "1px solid rgba(153,69,255,0.2)" }}>
                     ← Go Back
@@ -609,7 +649,7 @@ export default function MintPage() {
                         className="mt-4 px-6 py-2 rounded-lg font-bold text-sm transition-all hover:scale-105"
                         style={{ background: "var(--accent)", color: "var(--bg-primary)", fontFamily: "var(--font-mono)" }}
                       >
-                        Make This Minted Successfully →
+                        Burn to Become →
                       </button>
                     )}
                   </div>
