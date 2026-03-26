@@ -108,7 +108,7 @@ router.delete('/avatar', requireAuth, async (req, res) => {
  * GET /api/avatar/nfts/:chain/:wallet
  * Auth required: List NFTs in wallet for avatar selection UI
  */
-router.get('/avatar/nfts/:chain/:wallet', requireAuth, async (req, res) => {
+router.get('/avatar/nfts/:chain/:wallet', async (req, res) => {
   try {
     const { chain, wallet } = req.params;
     if (!SUPPORTED_CHAINS.includes(chain)) {

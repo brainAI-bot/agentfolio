@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useSmartConnect } from "@/components/WalletProvider";
@@ -295,8 +295,19 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     } finally { setLoading(false); }
   };
 
+  // Auto-resolve wallet profile whenever wallet connects/changes
+  useEffect(() => {
+    if (connected && publicKey) {
+      resolveWalletProfile(publicKey.toBase58());
+    } else {
+      setResolvedProfileId(null);
+    }
+  }, [connected, publicKey, resolveWalletProfile]);
+
   const openJobAction = (job: Job, action: ModalType) => {
-    if ((action === "apply" || action === "post-job") && publicKey) resolveWalletProfile(publicKey.toBase58());
+    if ((action === "apply" || action === "post-job") && publicKey && !resolvedProfileId) {
+      resolveWalletProfile(publicKey.toBase58());
+    }
     setSelectedJob(job);
     setModal(action);
   };
