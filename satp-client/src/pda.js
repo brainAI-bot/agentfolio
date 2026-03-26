@@ -156,6 +156,24 @@ function getEscrowPDA(client, descriptionHash, network = 'devnet') {
   );
 }
 
+/**
+ * Derive the Review V3 PDA (job-scoped reviews).
+ * Seeds: ["review", job_pubkey, reviewer_pubkey]
+ * @param {PublicKey|string} jobPDA - Job/Escrow account pubkey
+ * @param {PublicKey|string} reviewer - Reviewer wallet
+ * @param {'mainnet'|'devnet'} network
+ */
+function getReviewV3PDA(jobPDA, reviewer, network = 'devnet') {
+  const jobKey = new PublicKey(jobPDA);
+  const reviewerKey = new PublicKey(reviewer);
+  const programIds = getProgramIds(network);
+  // Reviews V3 uses the same REVIEWS program ID
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from(REVIEW_SEED), jobKey.toBuffer(), reviewerKey.toBuffer()],
+    programIds.REVIEWS
+  );
+}
+
 module.exports = {
   getIdentityPDA,
   getReputationAuthorityPDA,
@@ -166,4 +184,5 @@ module.exports = {
   getReviewPDA,
   getReviewAttestationPDA,
   getEscrowPDA,
+  getReviewV3PDA,
 };

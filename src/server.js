@@ -2573,6 +2573,13 @@ try {
 } catch (e) {
   console.warn("[Escrow] Routes not loaded:", e.message);
 }
+try {
+  const reviewsRouter = require("./routes/reviews-routes");
+  app.use("/api/reviews/onchain", reviewsRouter);
+  console.log("[Reviews] On-chain reviews routes mounted at /api/reviews/onchain");
+} catch (e) {
+  console.warn("[Reviews] Routes not loaded:", e.message);
+}
 // SATP Explorer API (on-chain agent data for explorer.satp.bot)
 const chainCache = require("./lib/chain-cache");
 chainCache.start();
@@ -2899,6 +2906,57 @@ app.get('/api/profile/:id/endorsements', (req, res) => {
     db.close();
     res.json({ agent: req.params.id, endorsements, total: endorsements.length });
   } catch (e) { res.json({ agent: req.params.id, endorsements: [], total: 0 }); }
+});
+
+
+// x402 paid endpoint aliases (placed before 404 handler)
+app.get('/api/x402/pricing', (req, res) => {
+  const X402_NETWORK = process.env.X402_NETWORK || 'base-sepolia';
+  const X402_RECEIVE_ADDRESS = process.env.X402_RECEIVE_ADDRESS || '0xEE13776767542F3a8d67d9fAd723fc43213052Bd';
+  res.json({
+    protocol: 'x402', network: X402_NETWORK, currency: 'USDC',
+    receivingAddress: X402_RECEIVE_ADDRESS,
+    endpoints: {
+      paid: [
+        { path: '/api/score?id=<profileId>', method: 'GET', price: '0.01 USDC' },
+        { path: '/api/leaderboard/scores', method: 'GET', price: '0.05 USDC' },
+      ],
+    },
+  });
+});
+
+app.get('/api/x402/info', (req, res) => {
+  res.json({
+    protocol: 'x402', version: '1.0',
+    description: 'AgentFolio API uses x402 for paid endpoints (USDC on Solana)',
+    docs: 'https://x402.org',
+    paidEndpoints: ['/api/score', '/api/leaderboard/scores'],
+  });
+});
+
+app.get('/api/profile/:id/trust-score', async (req, res) => {
+  try {
+    const profileId = req.params.id;
+    // Use chain-cache score if available, fallback to V3
+    let score = null;
+    try {
+      const { getV3Score } = require('./v3-score-service');
+      score = await getV3Score(profileId);
+    } catch {}
+    if (!score) {
+      try {
+        const cc = require('./lib/chain-cache');
+        score = cc.getScore(profileId);
+      } catch {}
+    }
+    if (score) {
+      res.json({ ok: true, agent: profileId, trustScore: score.reputationScore, level: score.verificationLevel, data: score });
+    } else {
+      res.status(404).json({ error: 'No trust score found', agent: profileId });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.use((req, res, next) => {
