@@ -22,7 +22,7 @@ router.get('/agent/:id/avatar', async (req, res) => {
         error: 'No NFT avatar set',
         hint: 'Agent has not linked an NFT avatar yet',
         default: true,
-        image: null // Could return default Bored Robots placeholder
+        image: null // Could return default Burned-Out Agents placeholder
       });
     }
 
