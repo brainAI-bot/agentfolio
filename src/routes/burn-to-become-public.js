@@ -637,7 +637,14 @@ function handleBurnToBecome(req, res, url) {
         console.log('[ELIGIBILITY] Score for', matchedProfile.id, 'V3:', v3Lev+'/'+v3Rp, 'V2:', v2Lev+'/'+v2Rp, 'Final:', level+'/'+reputation);
         const eligible = level >= 3 && reputation >= 50;
         db.close();
-        sendJson(200, { found: true, agent: matchedProfile.id, name: matchedProfile.name, level, levelName: LEVEL_NAMES[level] || 'Unknown', badge: LEVEL_BADGES[level] || '⚪', reputation, eligible, freeFirstMint: eligible });
+        // Check isBorn from Genesis Record — free first mint only if not already born
+        let isBorn = false;
+        try {
+          const { getV3Score } = require('../v3-score-service');
+          const v3Data = await getV3Score(matchedProfile.id);
+          if (v3Data && v3Data.isBorn) isBorn = true;
+        } catch {}
+        sendJson(200, { found: true, agent: matchedProfile.id, name: matchedProfile.name, level, levelName: LEVEL_NAMES[level] || 'Unknown', badge: LEVEL_BADGES[level] || '⚪', reputation, eligible, freeFirstMint: eligible && !isBorn, isBorn });
       } catch (e) { console.error('[BurnPublic] eligibility error:', e); sendJson(500, { error: e.message }); }
     })();
     return true;
@@ -1022,14 +1029,15 @@ function handleBurnToBecome(req, res, url) {
         // If already has boa_soulbound attestation (already burned), no free mint
         if (satpCheck.hasBoaSoulbound) {
           console.log("[MintBOA] Wallet already has boa_soulbound attestation — no free mint");
-          // They can still do paid mints (up to max 3), just not free
+          // They can still do paid mints, just not free
         }
 
-        const MINT_RECORDS_DIR = "/home/ubuntu/agentfolio/boa-pipeline/mint-records";
-        
-        // First, find the agent profile for this wallet (needed for mint count)
-        const countDb = new Database(dbPath, { readonly: true });
+        // === ON-CHAIN MINT GATING (V3 Genesis Record isBorn) ===
+        // Free mint: ONE per Genesis Record PDA. isBorn=true means already minted.
+        // This is wallet-rotation proof — Genesis Record PDA is permanent identity.
+        let v3IsBorn = false;
         let agentIdForCount = null;
+        const countDb = new Database(dbPath, { readonly: true });
         const allProfiles = countDb.prepare("SELECT * FROM profiles").all();
         for (const p of allProfiles) {
           try {
@@ -1044,7 +1052,18 @@ function handleBurnToBecome(req, res, url) {
         }
         countDb.close();
         
-        // Count mints by BOTH wallet AND agent_id (whichever is higher = true count)
+        // Check V3 Genesis Record isBorn (on-chain source of truth)
+        if (agentIdForCount) {
+          try {
+            const { getV3Score } = require("../v3-score-service");
+            const v3 = await getV3Score(agentIdForCount);
+            if (v3 && v3.isBorn) v3IsBorn = true;
+            console.log("[MintBOA] V3 Genesis Record for", agentIdForCount, "isBorn:", v3IsBorn);
+          } catch (e) { console.warn("[MintBOA] V3 check failed:", e.message); }
+        }
+        
+        // Mint count: prefer on-chain isBorn, fallback to JSON records for legacy
+        const MINT_RECORDS_DIR = "/home/ubuntu/agentfolio/boa-pipeline/mint-records";
         let walletMintCount = 0;
         let agentMintCount = 0;
         if (fs.existsSync(MINT_RECORDS_DIR)) {
@@ -1056,10 +1075,9 @@ function handleBurnToBecome(req, res, url) {
             } catch {}
           });
         }
-        const effectiveMintCount = Math.max(walletMintCount, agentMintCount);
-        if (effectiveMintCount >= 3) {
-          return sendJson(403, { error: "Maximum 3 BOA mints per agent reached.", minted: effectiveMintCount, max: 3 });
-        }
+        // On-chain isBorn overrides: if born on-chain, count is at least 1
+        const effectiveMintCount = Math.max(walletMintCount, agentMintCount, v3IsBorn ? 1 : 0);
+        console.log("[MintBOA] Effective mint count:", effectiveMintCount, "(wallet:", walletMintCount, "agent:", agentMintCount, "v3IsBorn:", v3IsBorn, ")");
 
         // === 2. Unified eligibility check (DB level + rep) ===
         const checkDb = new Database(dbPath, { readonly: true });
@@ -1112,6 +1130,7 @@ function handleBurnToBecome(req, res, url) {
           const rep = Math.max(v3Rep, v2Rep);
           console.log('[BURN] Score resolution for', profileId, 'V3:', v3Level+'/'+v3Rep, 'V2:', v2Level+'/'+v2Rep, 'Final:', level+'/'+rep);
           isEligibleFree = level >= 3 && rep >= 50;
+          console.log("[BURN DEBUG]", { profileId, level, rep, isEligibleFree, effectiveMintCount: typeof effectiveMintCount !== "undefined" ? effectiveMintCount : "not set yet" });
         }
         checkDb.close();
 
@@ -1119,7 +1138,7 @@ function handleBurnToBecome(req, res, url) {
         const isFirstMint = effectiveMintCount === 0;
         const isFree = isFirstMint && isEligibleFree;
         // Override: if already has soulbound attestation, no free mint
-        const actuallyFree = isFree && !satpCheck.hasBoaSoulbound;
+        const actuallyFree = isFree && !satpCheck.hasBoaSoulbound && !v3IsBorn;
         const price = isFree ? 0 : 1; // 1 SOL for paid mints
 
         // === 4. Verify SOL payment for paid mints ===

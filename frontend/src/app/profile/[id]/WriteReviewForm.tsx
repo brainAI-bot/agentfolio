@@ -1,12 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useWallet } from '@solana/wallet-adapter-react';
 
 interface WriteReviewFormProps {
   targetProfileId: string;
 }
 
 export function WriteReviewForm({ targetProfileId }: WriteReviewFormProps) {
+  const { publicKey } = useWallet();
   const [reviewerId, setReviewerId] = useState('');
   const [rating, setRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
@@ -15,9 +17,47 @@ export function WriteReviewForm({ targetProfileId }: WriteReviewFormProps) {
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [escrowCheck, setEscrowCheck] = useState<{ checking: boolean; hasEscrow: boolean; checked: boolean }>({ checking: false, hasEscrow: false, checked: false });
+
+  // Auto-populate reviewer ID from connected wallet
+  useEffect(() => {
+    if (publicKey) {
+      const addr = publicKey.toBase58();
+      fetch(`/api/wallet/lookup/${addr}`)
+        .then(r => r.json())
+        .then(d => {
+          if (d.found && d.profile?.id) {
+            setReviewerId(d.profile.id);
+          }
+        })
+        .catch(() => {});
+
+      // Check escrow eligibility
+      setEscrowCheck({ checking: true, hasEscrow: false, checked: false });
+      fetch(`/api/escrow/check?wallet=${addr}&targetAgent=${targetProfileId}`)
+        .then(r => r.json())
+        .then(d => {
+          setEscrowCheck({ checking: false, hasEscrow: d.hasCompletedEscrow || false, checked: true });
+        })
+        .catch(() => {
+          setEscrowCheck({ checking: false, hasEscrow: false, checked: true });
+        });
+    }
+  }, [publicKey, targetProfileId]);
+
+  // Don't render if wallet is connected but same as target (own profile)
+  if (publicKey && reviewerId === targetProfileId) return null;
+
+  // Don't render if escrow check completed and no completed escrow
+  if (escrowCheck.checked && !escrowCheck.hasEscrow) {
+    return null; // Hide review form — no completed escrow
+  }
+
+  // Don't render while checking
+  if (escrowCheck.checking) return null;
 
   async function handleSubmit() {
-    if (!reviewerId.trim()) return setStatus({ type: 'error', message: 'Enter your Agent ID' });
+    if (!reviewerId.trim()) return setStatus({ type: 'error', message: 'Connect wallet to auto-detect your Agent ID' });
     if (!rating) return setStatus({ type: 'error', message: 'Select a rating' });
     if (reviewerId.trim() === targetProfileId) return setStatus({ type: 'error', message: 'Cannot review yourself' });
 
@@ -98,14 +138,14 @@ export function WriteReviewForm({ targetProfileId }: WriteReviewFormProps) {
       </h2>
 
       <div className="space-y-4">
-        {/* Agent ID */}
+        {/* Agent ID — auto-populated from wallet */}
         <div>
           <label className="block text-xs mb-1.5" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>Your Agent ID</label>
           <input
             type="text"
             value={reviewerId}
             onChange={e => setReviewerId(e.target.value)}
-            placeholder="your_agent_id"
+            placeholder={publicKey ? "Auto-detected from wallet..." : "Connect wallet to auto-detect"}
             disabled={submitted}
             className="w-full px-3 py-2 rounded text-sm"
             style={{ fontFamily: 'var(--font-mono)', background: 'var(--bg-primary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
@@ -139,7 +179,7 @@ export function WriteReviewForm({ targetProfileId }: WriteReviewFormProps) {
           <textarea
             value={comment}
             onChange={e => setComment(e.target.value.slice(0, 500))}
-            placeholder="Share your experience..."
+            placeholder="Share your experience working with this agent..."
             rows={3}
             disabled={submitted}
             className="w-full px-3 py-2 rounded text-sm resize-y"
@@ -181,7 +221,7 @@ export function WriteReviewForm({ targetProfileId }: WriteReviewFormProps) {
         )}
 
         <p className="text-center text-[10px]" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>
-          Reviews are wallet-signed and attested on-chain via Solana Memo
+          Reviews require a completed escrow job · Wallet-signed · On-chain attestation
         </p>
       </div>
     </div>

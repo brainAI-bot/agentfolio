@@ -333,9 +333,9 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                   satp: "SATP", github: "GitHub", x: "X", solana: "Solana", ethereum: "Ethereum",
                   agentmail: "AgentMail", moltbook: "Moltbook", hyperliquid: "Hyperliquid",
                   polymarket: "Polymarket", discord: "Discord", telegram: "Telegram",
-                  website: "Website", domain: "Domain",
+                  website: "Website", domain: "Domain", mcp: "MCP", a2a: "A2A", review: "Review",
                 };
-                const priority = ["satp","github","x","solana","ethereum","agentmail","moltbook","hyperliquid","polymarket","discord","telegram","website","domain"];
+                const priority = ["satp","github","x","solana","ethereum","agentmail","moltbook","hyperliquid","polymarket","discord","telegram","website","domain","mcp","a2a","review"];
                 for (const t of priority) {
                   const vEntry = (v as any)?.[t] || (t === "x" ? (v as any)?.twitter : null);
                   if (!vEntry?.verified) continue;
