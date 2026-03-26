@@ -480,6 +480,43 @@ class SATPSDK {
   }
 
   /**
+   * Build a resolveDispute transaction.
+   * Only the client (arbiter in V1) can resolve. Decides: release to agent or refund to client.
+   * @param {PublicKey|string} clientWallet - Client/arbiter (signer)
+   * @param {PublicKey|string} agentWallet - Agent account
+   * @param {PublicKey|string} escrowPDA - Escrow account PDA
+   * @param {boolean} releaseToAgent - true = release to agent, false = refund to client
+   * @returns {{ transaction: Transaction }}
+   */
+  async buildResolveDispute(clientWallet, agentWallet, escrowPDA, releaseToAgent) {
+    const clientKey = new PublicKey(clientWallet);
+    const agentKey = new PublicKey(agentWallet);
+    const escrowKey = new PublicKey(escrowPDA);
+
+    const disc = anchorDiscriminator('resolve_dispute');
+    const data = Buffer.alloc(8 + 1);
+    disc.copy(data, 0);
+    data.writeUInt8(releaseToAgent ? 1 : 0, 8);
+
+    const ix = new TransactionInstruction({
+      programId: this.programIds.ESCROW,
+      keys: [
+        { pubkey: escrowKey, isSigner: false, isWritable: true },
+        { pubkey: clientKey, isSigner: true, isWritable: false },  // arbiter
+        { pubkey: agentKey, isSigner: false, isWritable: true },   // agent
+        { pubkey: clientKey, isSigner: false, isWritable: true },  // client_wallet
+      ],
+      data,
+    });
+
+    const tx = new Transaction().add(ix);
+    tx.feePayer = clientKey;
+    tx.recentBlockhash = (await this.connection.getLatestBlockhash()).blockhash;
+
+    return { transaction: tx };
+  }
+
+  /**
    * Fetch escrow state from on-chain account.
    * @param {PublicKey|string} escrowPDA
    * @returns {object|null} Escrow state or null if not found
