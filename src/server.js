@@ -881,7 +881,7 @@ app.get('/api/profile/:id/export', async (req, res) => {
   const { id } = req.params;
   try {
     const profileStore = require('./profile-store');
-    const { getV3Score } = require('../v3-score-service');
+const { getV3Score } = require('../v3-score-service');
     const db = profileStore.getDb();
     
     const profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(id);
@@ -1009,7 +1009,7 @@ app.get('/api/profile/:id/export', async (req, res) => {
 app.get('/api/stats', async (req, res) => {
   try {
     const profileStore = require('./profile-store');
-    const { getV3Score } = require('../v3-score-service');
+const { getV3Score } = require('../v3-score-service');
     const db = profileStore.getDb();
     const path = require('path');
     
@@ -1089,7 +1089,7 @@ app.get('/api/leaderboard', async (req, res) => {
   
   try {
     const profileStore = require('./profile-store');
-    const { getV3Score } = require('../v3-score-service');
+const { getV3Score } = require('../v3-score-service');
     const db = profileStore.getDb();
     
     const profiles = db.prepare(
@@ -1164,7 +1164,7 @@ app.get('/api/compare', async (req, res) => {
   
   try {
     const profileStore = require('./profile-store');
-    const { getV3Score } = require('../v3-score-service');
+const { getV3Score } = require('../v3-score-service');
     const db = profileStore.getDb();
     
     const agents = [];
@@ -2576,13 +2576,35 @@ app.get("/api/satp/explorer/agents", async (req, res) => {
       var { Connection: Conn2, PublicKey: PK2 } = require('@solana/web3.js');
       var nftConn = new Conn2(process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=HELIUS_API_KEY_REDACTED', 'confirmed');
       var TOKEN_2022_PID = new PK2('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
-      var authCount = {}; combined.forEach(function(c) { authCount[c.authority] = (authCount[c.authority] || 0) + 1; }); var needsNft = combined.filter(function(c) { return !c.nftImage && c.authority && authCount[c.authority] === 1; });
+      var needsNft = combined.filter(function(c) { return !c.nftImage && c.nftMint && c.nftMint !== "11111111111111111111111111111111"; });
       if (needsNft.length > 0) {
-        await Promise.all(needsNft.map(function(ag) {
-          return nftConn.getParsedTokenAccountsByOwner(new PK2(ag.authority), {programId: TOKEN_2022_PID}).then(function(r) {
-            var nft = r.value.find(function(ta) { var i = ta.account.data.parsed.info; return i.tokenAmount.uiAmount === 1 && i.tokenAmount.decimals === 0; });
-            if (nft) { ag.nftMint = nft.account.data.parsed.info.mint; return nftConn.getParsedAccountInfo(new PK2(ag.nftMint)).then(function(mi) { var exts = (mi.value && mi.value.data && mi.value.data.parsed && mi.value.data.parsed.info && mi.value.data.parsed.info.extensions) || []; for (var x = 0; x < exts.length; x++) { if (exts[x].extension === 'tokenMetadata' && exts[x].state && exts[x].state.uri) { ag.nftImage = exts[x].state.uri; break; } } }).catch(function(){}); }
-          }).catch(function(){});
+        await Promise.all(needsNft.map(async function(ag) {
+          try {
+            // Fetch Token-2022 mint metadata for the faceMint from Genesis Record
+            var mi = await nftConn.getParsedAccountInfo(new PK2(ag.nftMint));
+            var exts = (mi.value && mi.value.data && mi.value.data.parsed && mi.value.data.parsed.info && mi.value.data.parsed.info.extensions) || [];
+            var metadataUri = null;
+            for (var x = 0; x < exts.length; x++) {
+              if (exts[x].extension === 'tokenMetadata' && exts[x].state && exts[x].state.uri) {
+                metadataUri = exts[x].state.uri;
+                break;
+              }
+            }
+            if (metadataUri) {
+              // Resolve metadata URI to get actual image URL
+              try {
+                var metaRes = await fetch(metadataUri);
+                if (metaRes.ok) {
+                  var metaJson = await metaRes.json();
+                  ag.nftImage = metaJson.image || metadataUri;
+                } else {
+                  ag.nftImage = metadataUri; // fallback to URI itself
+                }
+              } catch(fetchErr) {
+                ag.nftImage = metadataUri; // fallback to URI itself
+              }
+            }
+          } catch(e) { /* skip */ }
         }));
       }
     } catch(nftErr) { console.warn('[Explorer] NFT fallback error:', nftErr.message); }

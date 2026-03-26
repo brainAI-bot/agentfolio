@@ -27,6 +27,7 @@ interface AgentCard {
   programId: string;
   profileId: string | null;
   isBorn: boolean;
+  attestationMemos: Array<{ platform: string; txSignature: string | null; timestamp: string | null; solscanUrl: string | null }>;
 }
 
 const TIER_COLORS: Record<string, string> = {
@@ -162,6 +163,7 @@ export default function SATPExplorerPage() {
               nftMint: nftAvatar?.soulboundMint || nftAvatar?.identifier || agent.nftMint || null,
               soulbound: !!nftAvatar?.soulboundMint || !!agent.soulbound,
               isBorn: !!agent.isBorn,
+              attestationMemos: agent.attestationMemos || [],
               description: agent.description || profile?.tagline || "",
               programId: agent.programId,
               profileId,
@@ -419,7 +421,7 @@ export default function SATPExplorerPage() {
               {/* Stats row */}
               <div className="flex gap-4 text-[10px]" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
                 <span>L{agent.verificationLevel}</span>
-                <span>{agent.platforms.length} attestations</span>
+                <span>{agent.attestationMemos.length || agent.platforms.length} attestations</span>
                 {agent.reviewCount > 0 && <span>★{agent.reviewAvg.toFixed(1)} ({agent.reviewCount})</span>}
                 <span>{formatDate(agent.registeredAt)}</span>
               </div>
@@ -428,7 +430,8 @@ export default function SATPExplorerPage() {
               {expanded === agent.id && (() => {
                 const detail = agent.profileId ? detailData[agent.profileId] : null;
                 const isLoading = agent.profileId ? detailLoading[agent.profileId] : false;
-                const attestations = detail?.attestations || [];
+                // Use attestation memos from explorer API (already loaded), fallback to detail fetch
+                const attestations = agent.attestationMemos.length > 0 ? agent.attestationMemos : (detail?.attestations || []);
                 const v3 = detail?.explorer?.v3 || {};
 
                 return (
@@ -456,7 +459,7 @@ export default function SATPExplorerPage() {
                     </div>
                     <div className="flex justify-between">
                       <span style={{ color: "var(--text-tertiary)" }}>Verification Level</span>
-                      <span style={{ color: TIER_COLORS[agent.tier] || "var(--text-primary)" }}>L{agent.verificationLevel} — {(TIER_LABELS[agent.tier] || agent.tier)}</span>
+                      <span style={{ color: TIER_COLORS[agent.tier] || "var(--text-primary)" }}>{TIER_LABELS[agent.tier] || `L${agent.verificationLevel} · ${agent.tier}`}</span>
                     </div>
                     <div className="flex justify-between">
                       <span style={{ color: "var(--text-tertiary)" }}>Born (Soulbound)</span>
