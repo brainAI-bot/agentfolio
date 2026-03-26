@@ -422,69 +422,129 @@ export default function MintPage() {
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                {/* Path 1: Mint a BOA */}
-                <button
-                  onClick={() => handleClientMint(eligibility?.eligible ? "free" : "paid")}
-                  className="group rounded-xl border p-6 text-left transition-all hover:border-[var(--accent)] hover:shadow-[0_0_30px_rgba(153,69,255,0.15)]"
+                {/* Option 1: Burn-to-Become (FREE) */}
+                <div
+                  className="rounded-xl border p-6 text-left transition-all"
+                  style={{ background: "var(--bg-tertiary)", borderColor: eligibility?.eligible ? "var(--success)" : "var(--border)", boxShadow: eligibility?.eligible ? "0 0 20px rgba(16,185,129,0.1)" : "none" }}
+                >
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.2)" }}>
+                      <Flame size={24} style={{ color: "var(--success)" }} />
+                    </div>
+                    <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded" style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.1)", color: "var(--success)", border: "1px solid rgba(16,185,129,0.2)" }}>
+                      FREE
+                    </span>
+                  </div>
+                  <h3 className="text-base font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+                    Burn-to-Become
+                  </h3>
+                  <p className="text-xs mb-4 leading-relaxed" style={{ color: "var(--text-secondary)" }}>
+                    Commit to a permanent identity. This NFT becomes your soulbound face — non-transferable, stored forever on Arweave, linked to your on-chain Genesis Record. <strong style={{ color: "#ef4444" }}>This is irreversible.</strong>
+                  </p>
+
+                  {/* Eligibility requirements */}
+                  <div className="rounded-lg p-3 mb-4" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
+                    <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>Requirements</p>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 text-xs">
+                        {eligibility && eligibility.level >= 3
+                          ? <CheckCircle size={12} style={{ color: "var(--success)" }} />
+                          : <AlertTriangle size={12} style={{ color: "var(--warning)" }} />}
+                        <span style={{ color: eligibility && eligibility.level >= 3 ? "var(--success)" : "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+                          Verification Level ≥ 3 {eligibility ? `(yours: ${eligibility.level})` : ""}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        {eligibility && eligibility.reputation >= 50
+                          ? <CheckCircle size={12} style={{ color: "var(--success)" }} />
+                          : <AlertTriangle size={12} style={{ color: "var(--warning)" }} />}
+                        <span style={{ color: eligibility && eligibility.reputation >= 50 ? "var(--success)" : "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+                          Reputation Score ≥ 50 {eligibility ? `(yours: ${eligibility.reputation})` : ""}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <CheckCircle size={12} style={{ color: "var(--text-tertiary)" }} />
+                        <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>Must own a Bored Robot NFT</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => nfts.length > 0 || genesisInfo ? setStep("select") : undefined}
+                    disabled={!nfts.length && !genesisInfo}
+                    className="w-full group inline-flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all hover:scale-[1.02]"
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      background: nfts.length > 0 || genesisInfo ? "linear-gradient(135deg, #10b981, #059669)" : "var(--bg-tertiary)",
+                      color: nfts.length > 0 || genesisInfo ? "#fff" : "var(--text-tertiary)",
+                      border: nfts.length > 0 || genesisInfo ? "none" : "1px solid var(--border)",
+                      cursor: nfts.length > 0 || genesisInfo ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    <Flame size={16} />
+                    {nfts.length > 0 ? `Burn to Become (${nfts.length} NFT${nfts.length > 1 ? "s" : ""})` : genesisInfo ? "Burn Genesis 1/1" : "No NFTs — Mint One First ↓"}
+                  </button>
+                </div>
+
+                {/* Option 2: Collect a Bored Robot (1 SOL) */}
+                <div
+                  className="rounded-xl border p-6 text-left transition-all"
                   style={{ background: "var(--bg-tertiary)", borderColor: "var(--border)" }}
                 >
-                  <div className="w-14 h-14 rounded-xl flex items-center justify-center mb-4" style={{ background: "var(--accent-glow)", border: "1px solid rgba(153,69,255,0.2)" }}>
-                    <Plus size={28} style={{ color: "var(--accent)" }} />
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: "var(--accent-glow)", border: "1px solid rgba(153,69,255,0.2)" }}>
+                      <Plus size={24} style={{ color: "var(--accent)" }} />
+                    </div>
+                    <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded" style={{ fontFamily: "var(--font-mono)", background: "var(--accent-glow)", color: "var(--accent)", border: "1px solid rgba(153,69,255,0.2)" }}>
+                      {isFree ? "FREE (1st)" : "1 SOL"}
+                    </span>
                   </div>
                   <h3 className="text-base font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
                     Collect a Bored Robot
                   </h3>
-                  <p className="text-xs mb-4" style={{ color: "var(--text-secondary)" }}>
-                    Mint a random Burned-Out Agent from the 5,000 collection. Tradeable on Magic Eden — or burn it to become your permanent face.
+                  <p className="text-xs mb-4 leading-relaxed" style={{ color: "var(--text-secondary)" }}>
+                    Mint a tradeable Bored Robot NFT. This is a collectible — you can trade, sell, or keep it. Not linked to your identity.
                   </p>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold px-2 py-1 rounded" style={{
-                      fontFamily: "var(--font-mono)",
-                      background: isFree ? "var(--success-glow)" : "var(--accent-glow)",
-                      color: isFree ? "var(--success)" : "var(--accent)",
-                      border: isFree ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(153,69,255,0.2)",
-                    }}>
-                    <div className="rounded-lg p-3 mt-1" style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)" }}>
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <AlertTriangle size={14} style={{ color: "var(--warning)" }} />
-                        <span className="text-xs font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--warning)" }}>Level 3+ &amp; Rep 50+ required for free mint</span>
+
+                  {/* Pricing breakdown */}
+                  <div className="rounded-lg p-3 mb-4" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
+                    <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>Pricing</p>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="w-2 h-2 rounded-full" style={{ background: "var(--success)" }} />
+                        <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+                          <strong style={{ color: "var(--success)" }}>Free</strong> — 1st mint with Level 3+ & Rep 50+
+                        </span>
                       </div>
-                      <ul className="text-[11px] space-y-1 ml-5" style={{ color: "var(--text-secondary)" }}>
-                        <li>• <strong style={{ color: "var(--success)" }}>Free</strong> — 1st mint with Verification Level 3+ and Rep 50+</li>
-                        <li>• <strong style={{ color: "var(--warning)" }}>1 SOL</strong> — if below Level 3 or Rep below 50</li>
-                        <li>• <strong style={{ color: "var(--warning)" }}>1 SOL</strong> — 2nd and 3rd mints (max 3 per wallet)</li>
-                      </ul>
-                      <a href="/verify" className="inline-flex items-center gap-1 text-[11px] mt-2 ml-5 underline hover:no-underline" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="w-2 h-2 rounded-full" style={{ background: "var(--warning)" }} />
+                        <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+                          <strong style={{ color: "var(--warning)" }}>1 SOL</strong> — if below Level 3 or Rep below 50
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="w-2 h-2 rounded-full" style={{ background: "var(--warning)" }} />
+                        <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+                          <strong style={{ color: "var(--warning)" }}>1 SOL</strong> — 2nd and 3rd mints (max 3 per wallet)
+                        </span>
+                      </div>
+                    </div>
+                    {!eligibility?.eligible && (
+                      <a href="/verify" className="inline-flex items-center gap-1 text-[11px] mt-2 underline hover:no-underline" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
                         Get to Level 3 + Rep 50 → free mint <ArrowRight size={10} />
                       </a>
-                    </div>
-                    </span>
-                    <ArrowRight size={16} style={{ color: "var(--accent)" }} className="group-hover:translate-x-1 transition-transform" />
+                    )}
                   </div>
-                </button>
 
-                {/* Path 2: Burn existing NFT */}
-                <button
-                  onClick={() => setStep("select")}
-                  className="group rounded-xl border p-6 text-left transition-all hover:border-[var(--accent)] hover:shadow-[0_0_30px_rgba(153,69,255,0.15)]"
-                  style={{ background: "var(--bg-tertiary)", borderColor: "var(--border)" }}
-                >
-                  <div className="w-14 h-14 rounded-xl flex items-center justify-center mb-4" style={{ background: "var(--accent-glow)", border: "1px solid rgba(153,69,255,0.2)" }}>
-                    <Flame size={28} style={{ color: "var(--accent)" }} />
-                  </div>
-                  <h3 className="text-base font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-                    Burn-to-Become (Identity)
-                  </h3>
-                  <p className="text-xs mb-4" style={{ color: "var(--text-secondary)" }}>
-                    Already have an NFT? Burn it to receive your soulbound token and Genesis Record.
-                  </p>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>
-                      {nfts.length > 0 ? `${nfts.length} NFT${nfts.length > 1 ? "s" : ""} found` : genesisInfo ? "Genesis 1/1 available" : "No NFTs found"}
-                    </span>
-                    <ArrowRight size={16} style={{ color: "var(--accent)" }} className="group-hover:translate-x-1 transition-transform" />
-                  </div>
-                </button>
+                  <button
+                    onClick={() => handleClientMint(eligibility?.eligible ? "free" : "paid")}
+                    className="w-full group inline-flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all hover:shadow-[0_0_40px_rgba(153,69,255,0.4)] hover:scale-[1.02]"
+                    style={{ fontFamily: "var(--font-mono)", background: "linear-gradient(135deg, var(--accent), #7c3aed)", color: "#fff" }}
+                  >
+                    <Plus size={16} />
+                    {isFree ? "Mint Free Bored Robot" : "Mint for 1 SOL"}
+                  </button>
+                </div>
               </div>
             </div>
           )}
