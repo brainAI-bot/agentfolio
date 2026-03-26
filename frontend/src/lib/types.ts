@@ -56,5 +56,11 @@ export interface Job {
   proposals: number;
   deadline: string;
   assignee?: string;
+  assigneeId?: string;
+  clientId?: string;
+  deliverableId?: string;
+  deliverableDescription?: string;
+  deliverableStatus?: string;
+  deliverableSubmittedAt?: string;
   createdAt: string;
 }
