@@ -1,7 +1,7 @@
 {
   "name": "@brainai/satp-client",
-  "version": "2.0.0",
-  "description": "SATP v2 Client SDK — Solana Agent Token Protocol (Identity, Reviews, Reputation, Attestations, Validation)",
+  "version": "2.1.0",
+  "description": "SATP v2.1 Client SDK \u2014 Solana Agent Token Protocol (Identity, Reviews, Reputation, Attestations, Validation, Escrow)",
   "main": "src/index.js",
   "files": [
     "src/",
