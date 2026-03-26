@@ -42,7 +42,7 @@ export default function MintPage() {
   const [error, setError] = useState("");
   const [genesisInfo, setGenesisInfo] = useState<typeof GENESIS_REGISTRY[string] | null>(null);
   const [satpScore, setSatpScore] = useState<number | null>(null);
-  const [eligibility, setEligibility] = useState<{found:boolean;level:number;levelName:string;badge:string;reputation:number;eligible:boolean;agent?:string;name?:string;message?:string} | null>(null);
+  const [eligibility, setEligibility] = useState<{found:boolean;level:number;levelName:string;badge:string;reputation:number;eligible:boolean;isBorn?:boolean;freeFirstMint?:boolean;agent?:string;name?:string;message?:string} | null>(null);
 
   useEffect(() => {
     if (wallet.connected && wallet.publicKey && !MINTING_PAUSED) {
@@ -104,7 +104,7 @@ export default function MintPage() {
         });
       } catch (e) { console.warn("confirm-mint failed (non-critical):", e); }
       setBurnTx(sig);
-      setMintedNft({ image: prepData.imageUri || "", name: prepData.boaName || "Bored Robot", number: prepData.boaId || 0, mint: prepData.asset || "" });
+      setMintedNft({ image: prepData.imageUri || "", name: prepData.boaName || "Burned-Out Agent", number: prepData.boaId || 0, mint: prepData.asset || "" });
       await loadWalletData(walletAddr);
       setStep("complete");
     } catch (e: any) {
@@ -421,22 +421,76 @@ export default function MintPage() {
                 Your agent’s face, permanently on-chain. Choose your path.
               </p>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                {/* Option 1: Burn-to-Become (FREE) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {/* Card 1: Free Mint + Soulbound (ONE TX) — PRIMARY CTA */}
                 <div
                   className="rounded-xl border p-6 text-left transition-all"
-                  style={{ background: "var(--bg-tertiary)", borderColor: eligibility?.eligible ? "var(--success)" : "var(--border)", boxShadow: eligibility?.eligible ? "0 0 20px rgba(16,185,129,0.1)" : "none" }}
+                  style={{ background: "var(--bg-tertiary)", borderColor: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "var(--success)" : "var(--accent)", borderWidth: "2px", boxShadow: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "0 0 30px rgba(16,185,129,0.15)" : "0 0 20px rgba(153,69,255,0.1)" }}
+                >
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.2)" }}>
+                      <Zap size={24} style={{ color: "var(--success)" }} />
+                    </div>
+                    <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded" style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.1)", color: "var(--success)", border: "1px solid rgba(16,185,129,0.2)" }}>
+                      SOULBOUND
+                    </span>
+                  </div>
+                  <h3 className="text-base font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+                    Mint + Become (One Step)
+                  </h3>
+                  <p className="text-xs mb-4 leading-relaxed" style={{ color: "var(--text-secondary)" }}>
+                    Mint a Burned-Out Agent AND commit it as your permanent soulbound identity — in a single transaction. Non-transferable, linked to your Genesis Record forever.
+                  </p>
+                  <div className="rounded-lg p-3 mb-4" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
+                    <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>Requirements</p>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 text-xs">
+                        {eligibility && eligibility.level >= 3 ? <CheckCircle size={12} style={{ color: "var(--success)" }} /> : <AlertTriangle size={12} style={{ color: "var(--warning)" }} />}
+                        <span style={{ color: eligibility && eligibility.level >= 3 ? "var(--success)" : "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>Level ≥ 3 {eligibility ? "(" + eligibility.level + ")" : ""}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        {eligibility && eligibility.reputation >= 50 ? <CheckCircle size={12} style={{ color: "var(--success)" }} /> : <AlertTriangle size={12} style={{ color: "var(--warning)" }} />}
+                        <span style={{ color: eligibility && eligibility.reputation >= 50 ? "var(--success)" : "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>Rep ≥ 50 {eligibility ? "(" + eligibility.reputation + ")" : ""}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        {(eligibility && eligibility.isBorn) ? <AlertTriangle size={12} style={{ color: "var(--warning)" }} /> : <CheckCircle size={12} style={{ color: "var(--text-tertiary)" }} />}
+                        <span style={{ color: eligibility?.isBorn ? "var(--warning)" : "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>{(eligibility && eligibility.isBorn) ? "Already committed (isBorn)" : "Not yet committed"}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleClientMint("free")}
+                    disabled={!(eligibility && eligibility.eligible) || (eligibility && eligibility.isBorn)}
+                    className="w-full group inline-flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all hover:scale-[1.02]"
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      background: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "linear-gradient(135deg, #10b981, #059669)" : "var(--bg-tertiary)",
+                      color: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "#fff" : "var(--text-tertiary)",
+                      border: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "none" : "1px solid var(--border)",
+                      cursor: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    <Zap size={16} />
+                    {(eligibility && eligibility.isBorn) ? "Already Committed" : (eligibility && eligibility.eligible) ? "Mint & Become (Free)" : "Not Eligible Yet"}
+                  </button>
+                </div>
+
+                
+                {/* Card 3: Burn Any NFT from Wallet */}
+                <div
+                  className="rounded-xl border p-6 text-left transition-all"
+                  style={{ background: "var(--bg-tertiary)", borderColor: "var(--border)", opacity: (eligibility && eligibility.isBorn) ? 0.6 : 0.85 }}
                 >
                   <div className="flex items-center gap-2 mb-4">
                     <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.2)" }}>
                       <Flame size={24} style={{ color: "var(--success)" }} />
                     </div>
                     <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded" style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.1)", color: "var(--success)", border: "1px solid rgba(16,185,129,0.2)" }}>
-                      FREE
+                      SOULBOUND
                     </span>
                   </div>
                   <h3 className="text-base font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-                    Burn-to-Become
+                    Burn Existing NFT
                   </h3>
                   <p className="text-xs mb-4 leading-relaxed" style={{ color: "var(--text-secondary)" }}>
                     Commit to a permanent identity. This NFT becomes your soulbound face — non-transferable, stored forever on Arweave, linked to your on-chain Genesis Record. <strong style={{ color: "#ef4444" }}>This is irreversible.</strong>
@@ -464,29 +518,29 @@ export default function MintPage() {
                       </div>
                       <div className="flex items-center gap-2 text-xs">
                         <CheckCircle size={12} style={{ color: "var(--text-tertiary)" }} />
-                        <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>Must own a Bored Robot NFT</span>
+                        <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>Any NFT in your wallet can be used</span>
                       </div>
                     </div>
                   </div>
 
                   <button
                     onClick={() => nfts.length > 0 || genesisInfo ? setStep("select") : undefined}
-                    disabled={!nfts.length && !genesisInfo}
+                    disabled={(!nfts.length && !genesisInfo) || !!(eligibility && eligibility.isBorn)}
                     className="w-full group inline-flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all hover:scale-[1.02]"
                     style={{
                       fontFamily: "var(--font-mono)",
-                      background: nfts.length > 0 || genesisInfo ? "linear-gradient(135deg, #10b981, #059669)" : "var(--bg-tertiary)",
-                      color: nfts.length > 0 || genesisInfo ? "#fff" : "var(--text-tertiary)",
-                      border: nfts.length > 0 || genesisInfo ? "none" : "1px solid var(--border)",
-                      cursor: nfts.length > 0 || genesisInfo ? "pointer" : "not-allowed",
+                      background: (eligibility && eligibility.isBorn) ? "var(--bg-tertiary)" : (nfts.length > 0 || genesisInfo) ? "linear-gradient(135deg, #10b981, #059669)" : "var(--bg-tertiary)",
+                      color: (eligibility && eligibility.isBorn) ? "var(--text-tertiary)" : (nfts.length > 0 || genesisInfo) ? "#fff" : "var(--text-tertiary)",
+                      border: (eligibility && eligibility.isBorn) || !(nfts.length > 0 || genesisInfo) ? "1px solid var(--border)" : "none",
+                      cursor: (eligibility && eligibility.isBorn) || !(nfts.length > 0 || genesisInfo) ? "not-allowed" : "pointer",
                     }}
                   >
                     <Flame size={16} />
-                    {nfts.length > 0 ? `Burn to Become (${nfts.length} NFT${nfts.length > 1 ? "s" : ""})` : genesisInfo ? "Burn Genesis 1/1" : "No NFTs — Mint One First ↓"}
+                    {(eligibility && eligibility.isBorn) ? "Already Committed" : nfts.length > 0 ? "Select NFT to Burn" : genesisInfo ? "Burn Genesis 1/1" : "No NFTs — Collect One First ↓"}
                   </button>
                 </div>
 
-                {/* Option 2: Collect a Bored Robot (1 SOL) */}
+                {/* Card 2: Collect a Burned-Out Agent (1 SOL) */}
                 <div
                   className="rounded-xl border p-6 text-left transition-all"
                   style={{ background: "var(--bg-tertiary)", borderColor: "var(--border)" }}
@@ -496,14 +550,14 @@ export default function MintPage() {
                       <Plus size={24} style={{ color: "var(--accent)" }} />
                     </div>
                     <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded" style={{ fontFamily: "var(--font-mono)", background: "var(--accent-glow)", color: "var(--accent)", border: "1px solid rgba(153,69,255,0.2)" }}>
-                      {isFree ? "FREE (1st)" : "1 SOL"}
+                      1 SOL
                     </span>
                   </div>
                   <h3 className="text-base font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-                    Collect a Bored Robot
+                    Collect a Burned-Out Agent
                   </h3>
                   <p className="text-xs mb-4 leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                    Mint a tradeable Bored Robot NFT. This is a collectible — you can trade, sell, or keep it. Not linked to your identity.
+                    Mint a tradeable Burned-Out Agent NFT. This is a collectible — you can trade, sell, or keep it. Not linked to your identity.
                   </p>
 
                   {/* Pricing breakdown */}
@@ -511,38 +565,33 @@ export default function MintPage() {
                     <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>Pricing</p>
                     <div className="space-y-1.5">
                       <div className="flex items-center gap-2 text-xs">
-                        <span className="w-2 h-2 rounded-full" style={{ background: "var(--success)" }} />
+                        <span className="w-2 h-2 rounded-full" style={{ background: "var(--accent)" }} />
                         <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
-                          <strong style={{ color: "var(--success)" }}>Free</strong> — 1st mint with Level 3+ & Rep 50+
+                          <strong style={{ color: "var(--accent)" }}>1 SOL</strong> per mint
                         </span>
                       </div>
                       <div className="flex items-center gap-2 text-xs">
-                        <span className="w-2 h-2 rounded-full" style={{ background: "var(--warning)" }} />
+                        <span className="w-2 h-2 rounded-full" style={{ background: "var(--text-tertiary)" }} />
                         <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
-                          <strong style={{ color: "var(--warning)" }}>1 SOL</strong> — if below Level 3 or Rep below 50
+                          Max 3 per wallet
                         </span>
                       </div>
                       <div className="flex items-center gap-2 text-xs">
-                        <span className="w-2 h-2 rounded-full" style={{ background: "var(--warning)" }} />
+                        <span className="w-2 h-2 rounded-full" style={{ background: "var(--text-tertiary)" }} />
                         <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
-                          <strong style={{ color: "var(--warning)" }}>1 SOL</strong> — 2nd and 3rd mints (max 3 per wallet)
+                          Tradeable — not linked to identity
                         </span>
                       </div>
                     </div>
-                    {!eligibility?.eligible && (
-                      <a href="/verify" className="inline-flex items-center gap-1 text-[11px] mt-2 underline hover:no-underline" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
-                        Get to Level 3 + Rep 50 → free mint <ArrowRight size={10} />
-                      </a>
-                    )}
                   </div>
 
                   <button
-                    onClick={() => handleClientMint(eligibility?.eligible ? "free" : "paid")}
+                    onClick={() => handleClientMint("paid")}
                     className="w-full group inline-flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all hover:shadow-[0_0_40px_rgba(153,69,255,0.4)] hover:scale-[1.02]"
                     style={{ fontFamily: "var(--font-mono)", background: "linear-gradient(135deg, var(--accent), #7c3aed)", color: "#fff" }}
                   >
                     <Plus size={16} />
-                    {isFree ? "Mint Free Bored Robot" : "Mint for 1 SOL"}
+                    Mint Burned-Out Agent (1 SOL)
                   </button>
                 </div>
               </div>
@@ -577,7 +626,7 @@ export default function MintPage() {
                     <Flame size={28} style={{ color: "var(--text-tertiary)" }} />
                   </div>
                   <p className="font-semibold" style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>No eligible NFTs found</p>
-                  <p className="text-sm mt-2 mb-6" style={{ color: "var(--text-tertiary)" }}>Collect a Bored Robot first, then come back to burn it.</p>
+                  <p className="text-sm mt-2 mb-6" style={{ color: "var(--text-tertiary)" }}>Collect a Burned-Out Agent first, then come back to burn it.</p>
                   <button onClick={() => setStep("choose")} className="px-6 py-3 rounded-lg text-sm font-semibold uppercase tracking-wider"
                     style={{ fontFamily: "var(--font-mono)", background: "var(--accent-glow)", color: "var(--accent)", border: "1px solid rgba(153,69,255,0.2)" }}>
                     ← Go Back

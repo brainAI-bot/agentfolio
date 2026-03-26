@@ -7,6 +7,7 @@
  *   POST /api/escrow/release   — Build unsigned release TX
  *   POST /api/escrow/cancel    — Build unsigned cancel TX
  *   POST /api/escrow/dispute   — Build unsigned raiseDispute TX
+ *   POST /api/escrow/resolve   — Build unsigned resolveDispute TX
  *   POST /api/escrow/close     — Build unsigned closeEscrow TX
  *   GET  /api/escrow/:pda      — Fetch escrow state from chain
  *   GET  /api/escrow/pda/derive — Derive escrow PDA from client + description
@@ -232,6 +233,43 @@ router.post('/dispute', requireSDK, async (req, res) => {
     });
   } catch (err) {
     console.error('[Escrow] dispute error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/escrow/resolve
+ * Build an unsigned resolveDispute transaction (arbiter resolves disputed escrow).
+ * 
+ * Body: {
+ *   clientWallet: string,    // Client/arbiter wallet (signer)
+ *   agentWallet: string,     // Agent wallet
+ *   escrowPDA: string,       // Escrow account PDA
+ *   releaseToAgent: boolean  // true = pay agent, false = refund client
+ * }
+ */
+router.post('/resolve', requireSDK, async (req, res) => {
+  try {
+    const { clientWallet, agentWallet, escrowPDA, releaseToAgent } = req.body;
+
+    if (!clientWallet || !agentWallet || !escrowPDA || releaseToAgent === undefined) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['clientWallet', 'agentWallet', 'escrowPDA', 'releaseToAgent']
+      });
+    }
+
+    const result = await sdk.buildResolveDispute(clientWallet, agentWallet, escrowPDA, releaseToAgent);
+
+    res.json({
+      transaction: serializeTransaction(result.transaction),
+      network: NETWORK,
+      message: releaseToAgent
+        ? 'Arbiter: sign to release escrowed funds to the agent'
+        : 'Arbiter: sign to refund escrowed funds to the client'
+    });
+  } catch (err) {
+    console.error('[Escrow] resolve error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
