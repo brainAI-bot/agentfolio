@@ -53,6 +53,11 @@ function registerSATPRoutes(app) {
    * These are trustlessly computed by the Reputation and Validation programs
    */
   app.get('/api/satp/scores/:wallet', async (req, res) => {
+      // Input validation: reject non-base58 wallet strings early
+      const walletParam = req.params.wallet;
+      if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(walletParam)) {
+        return res.status(400).json({ error: "Invalid wallet address", detail: "Must be a valid base58 Solana address (32-44 chars)" });
+      }
     try {
       var wallet = req.params.wallet;
       var network = req.query.network || 'mainnet';
