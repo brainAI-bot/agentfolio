@@ -87,8 +87,28 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   const [applyBid, setApplyBid] = useState("");
   const [resolvedProfileId, setResolvedProfileId] = useState<string | null>(null);
   const [resolvingProfile, setResolvingProfile] = useState(false);
+  const [myProfileId, setMyProfileId] = useState<string | null>(null);
 
-  const filtered = filter === "all" ? jobs : jobs.filter((j) => j.status === filter);
+  // Auto-resolve wallet → profile for My Jobs filter
+  useEffect(() => {
+    if (connected && publicKey) {
+      fetch(`${API_BASE}/api/profile-by-wallet?wallet=${publicKey.toBase58()}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d?.profileId) setMyProfileId(d.profileId); })
+        .catch(() => {});
+    } else {
+      setMyProfileId(null);
+    }
+  }, [connected, publicKey]);
+
+  const filtered = filter === "all"
+    ? jobs
+    : filter === "my_jobs"
+      ? jobs.filter((j) =>
+          (connected && publicKey && j.poster === publicKey.toBase58()) ||
+          (myProfileId && (j.assigneeId === myProfileId || j.clientId === myProfileId))
+        )
+      : jobs.filter((j) => j.status === filter);
 
   const showMessage = (type: "success" | "error", text: string) => {
     setMessage({ type, text });
@@ -359,7 +379,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
 
       {/* Filters */}
       <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-        {["all", "open", "in_progress", "completed", "disputed"].map((f) => (
+        {[...(connected ? ["my_jobs"] : []), "all", "open", "in_progress", "completed", "disputed"].map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f)}
@@ -371,7 +391,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
               border: filter === f ? "1px solid var(--border-bright)" : "1px solid var(--border)",
             }}
           >
-            {f === "all" ? "All" : f.replace("_", " ")}
+            {f === "my_jobs" ? "🧳 My Jobs" : f === "all" ? "All" : f.replace("_", " ")}
           </button>
         ))}
       </div>
@@ -384,6 +404,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           const StatusIcon = sc.icon;
           const EscrowIcon = ec.icon;
           const isMyJob = connected && publicKey && job.poster === publicKey.toBase58();
+          const isMyAssignment = myProfileId && (job.assigneeId === myProfileId);
 
           return (
             <div
@@ -402,6 +423,11 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                     {isMyJob && (
                       <span className="text-[10px] px-2 py-0.5 rounded" style={{ background: "rgba(153,69,255,0.15)", color: "var(--solana)", fontFamily: "var(--font-mono)" }}>
                         YOUR JOB
+                      </span>
+                    )}
+                    {isMyAssignment && !isMyJob && (
+                      <span className="text-[10px] px-2 py-0.5 rounded" style={{ background: "rgba(16,185,129,0.15)", color: "var(--success)", fontFamily: "var(--font-mono)" }}>
+                        ASSIGNED TO YOU
                       </span>
                     )}
                   </div>
@@ -438,6 +464,14 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                         <span style={{ color: "var(--text-tertiary)" }}>·</span>
                         <span style={{ color: "var(--text-secondary)" }}>
                           Assigned: <span style={{ color: "var(--text-primary)" }}>{job.assignee.length > 20 ? `${job.assignee.slice(0, 6)}...${job.assignee.slice(-4)}` : job.assignee}</span>
+                        </span>
+                      </>
+                    )}
+                    {job.deliverableStatus && (
+                      <>
+                        <span style={{ color: "var(--text-tertiary)" }}>·</span>
+                        <span style={{ color: job.deliverableStatus === "submitted" ? "var(--warning)" : job.deliverableStatus === "approved" ? "var(--success)" : "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+                          {job.deliverableStatus === "submitted" ? "📦 Deliverable Submitted" : job.deliverableStatus === "approved" ? "✅ Approved" : job.deliverableStatus === "revision_requested" ? "🔄 Revision Requested" : job.deliverableStatus}
                         </span>
                       </>
                     )}

@@ -355,6 +355,50 @@ function registerRoutes(app) {
     res.json({ message: 'Escrow refunded', escrow });
   });
 
+  
+  // POST /api/marketplace/jobs/:id/complete — Approve work and release payment
+  app.post('/api/marketplace/jobs/:id/complete', (req, res) => {
+    const jobPath = path.join(DATA_DIR, 'jobs', req.params.id + '.json');
+    const job = readJSON(jobPath);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (job.status === 'completed') return res.json({ message: 'Already completed', job });
+    
+    const { approvedBy, completionNote } = req.body;
+    
+    // Mark as completed
+    job.status = 'completed';
+    job.completedAt = new Date().toISOString();
+    job.approvedBy = approvedBy || 'unknown';
+    job.completionNote = completionNote || '';
+    job.fundsReleased = true;
+    writeJSON(jobPath, job);
+    
+    res.json({ success: true, message: 'Work approved! Payment released.', job });
+  });
+
+  // POST /api/marketplace/jobs/:id/request-changes — Request revisions
+  app.post('/api/marketplace/jobs/:id/request-changes', (req, res) => {
+    const jobPath = path.join(DATA_DIR, 'jobs', req.params.id + '.json');
+    const job = readJSON(jobPath);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    
+    const { requestedBy, note } = req.body;
+    if (!note) return res.status(400).json({ error: 'Change note required' });
+    
+    // Add change request to job history
+    if (!job.changeRequests) job.changeRequests = [];
+    job.changeRequests.push({
+      requestedBy: requestedBy || 'unknown',
+      note,
+      requestedAt: new Date().toISOString(),
+    });
+    job.status = 'in_progress'; // Back to in_progress for revisions
+    job.deliverableId = null; // Clear deliverable so worker can resubmit
+    writeJSON(jobPath, job);
+    
+    res.json({ success: true, message: 'Changes requested', changeRequests: job.changeRequests });
+  });
+
   // POST /api/marketplace/jobs/:id/confirm-deposit — Confirm on-chain escrow deposit
   app.post('/api/marketplace/jobs/:id/confirm-deposit', (req, res) => {
     const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
