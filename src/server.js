@@ -405,6 +405,12 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       tags,
       skills,
       onChainRegistered: v3Data ? true : (scoreResult.onChainRegistered || parsed.metadata?.registeredOnChain || parsed.verifications?.some(v => v.platform === 'satp' && v.verified) || false),
+      // Top-level convenience fields (consistent with /api/satp/explorer/agents)
+      level: v3Data ? v3Data.verificationLevel : 0,
+      tierLabel: v3Data ? `L${v3Data.verificationLevel} · ${v3Data.verificationLabel}` : 'L0 · Unclaimed',
+      nftImage: v3Data?.faceImage || null,
+      onChainAttestations: (() => { try { const cc = require('./lib/chain-cache'); return cc.getVerifications(agentId).length; } catch { return verifications.filter(v => v.verified !== false).length || 0; } })(),
+      attestationMemos: (() => { try { const cc = require('./lib/chain-cache'); const atts = cc.getVerifications(agentId); const seen = {}; return atts.filter(a => a.platform && !seen[a.platform] && (seen[a.platform] = true)).map(a => ({ platform: a.platform, txSignature: a.txSignature || null, timestamp: a.timestamp || null, solscanUrl: a.txSignature ? 'https://solscan.io/tx/' + a.txSignature : null })); } catch { return []; } })(),
       ...(v3Data ? {
         v3: {
           reputationScore: v3Data.reputationScore,
