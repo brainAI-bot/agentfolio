@@ -17,6 +17,7 @@ const {
   getReviewPDA,
   getReviewAttestationPDA,
   getEscrowPDA,
+  getReviewV3PDA,
 } = require('./pda');
 const {
   IdentityAccount, IDENTITY_SCHEMA,
@@ -564,6 +565,190 @@ class SATPSDK {
     }
   }
 
+  // ─── Reviews V3 (Job-Scoped) ─────────────────────────────
+
+  /**
+   * Build a submitReview transaction (Reviews V3 — job-scoped).
+   * Reviewer must be a party to the completed/resolved job (poster or accepted_agent).
+   * Requires reviewer to have a registered SATP Identity.
+   *
+   * @param {PublicKey|string} reviewerWallet - Reviewer (signer, must be job party)
+   * @param {PublicKey|string} reviewerIdentityPDA - Reviewer's SATP Identity PDA
+   * @param {PublicKey|string} jobPDA - Job/Escrow account PDA
+   * @param {object} ratings - { rating, quality, reliability, communication } (all 1-5)
+   * @param {string} commentUri - URI to off-chain comment (IPFS, Arweave, etc.)
+   * @param {Buffer|string} commentHash - 32-byte SHA256 hash of comment content
+   * @returns {{ transaction: Transaction, reviewPDA: PublicKey }}
+   */
+  async buildSubmitReview(reviewerWallet, reviewerIdentityPDA, jobPDA, ratings, commentUri, commentHash) {
+    const reviewerKey = new PublicKey(reviewerWallet);
+    const identityPDA = new PublicKey(reviewerIdentityPDA);
+    const jobKey = new PublicKey(jobPDA);
+    const [reviewPDA] = getReviewV3PDA(jobKey, reviewerKey, this.network);
+
+    const hashBuf = Buffer.isBuffer(commentHash)
+      ? commentHash
+      : crypto.createHash('sha256').update(commentHash).digest();
+
+    const disc = anchorDiscriminator('submit_review');
+    const uriBytes = Buffer.from(commentUri, 'utf8');
+
+    // Serialize: rating (u8) + quality (u8) + reliability (u8) + communication (u8)
+    //   + uri_len (u32 LE) + uri_bytes + hash (32 bytes)
+    const data = Buffer.concat([
+      disc,
+      Buffer.from([ratings.rating]),
+      Buffer.from([ratings.quality]),
+      Buffer.from([ratings.reliability]),
+      Buffer.from([ratings.communication]),
+      Buffer.from(new Uint32Array([uriBytes.length]).buffer),
+      uriBytes,
+      hashBuf,
+    ]);
+
+    // Identity program ID (hardcoded in Reviews V3 program)
+    const IDENTITY_PROGRAM = new PublicKey('EJtQh4Gyg88zXvSmFpxYkkeZsPwTsjfm4LvjmPQX1FD3');
+    // Escrow program ID
+    const ESCROW_PROGRAM = this.programIds.ESCROW;
+
+    const ix = new TransactionInstruction({
+      programId: this.programIds.REVIEWS,
+      keys: [
+        { pubkey: reviewerKey, isSigner: true, isWritable: true },
+        { pubkey: identityPDA, isSigner: false, isWritable: false },
+        { pubkey: jobKey, isSigner: false, isWritable: false },
+        { pubkey: reviewPDA, isSigner: false, isWritable: true },
+        { pubkey: IDENTITY_PROGRAM, isSigner: false, isWritable: false },
+        { pubkey: ESCROW_PROGRAM, isSigner: false, isWritable: false },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data,
+    });
+
+    const tx = new Transaction().add(ix);
+    tx.feePayer = reviewerKey;
+    tx.recentBlockhash = (await this.connection.getLatestBlockhash()).blockhash;
+
+    return { transaction: tx, reviewPDA };
+  }
+
+  /**
+   * Build a respondToReview transaction (Reviews V3).
+   * Only the reviewed party can respond, and only once.
+   *
+   * @param {PublicKey|string} responderWallet - Reviewed party (signer)
+   * @param {PublicKey|string} reviewPDA - Review account PDA
+   * @param {string} responseUri - URI to off-chain response content
+   * @param {Buffer|string} responseHash - 32-byte SHA256 hash of response content
+   * @returns {{ transaction: Transaction }}
+   */
+  async buildRespondToReview(responderWallet, reviewPDA, responseUri, responseHash) {
+    const responderKey = new PublicKey(responderWallet);
+    const reviewKey = new PublicKey(reviewPDA);
+
+    const hashBuf = Buffer.isBuffer(responseHash)
+      ? responseHash
+      : crypto.createHash('sha256').update(responseHash).digest();
+
+    const disc = anchorDiscriminator('respond_to_review');
+    const uriBytes = Buffer.from(responseUri, 'utf8');
+
+    const data = Buffer.concat([
+      disc,
+      Buffer.from(new Uint32Array([uriBytes.length]).buffer),
+      uriBytes,
+      hashBuf,
+    ]);
+
+    const ix = new TransactionInstruction({
+      programId: this.programIds.REVIEWS,
+      keys: [
+        { pubkey: responderKey, isSigner: true, isWritable: true },
+        { pubkey: reviewKey, isSigner: false, isWritable: true },
+      ],
+      data,
+    });
+
+    const tx = new Transaction().add(ix);
+    tx.feePayer = responderKey;
+    tx.recentBlockhash = (await this.connection.getLatestBlockhash()).blockhash;
+
+    return { transaction: tx };
+  }
+
+  /**
+   * Fetch a review from on-chain.
+   * @param {PublicKey|string} reviewPDA
+   * @returns {object|null} Review data or null if not found
+   */
+  async getReview(reviewPDA) {
+    const reviewKey = new PublicKey(reviewPDA);
+    const acct = await this.connection.getAccountInfo(reviewKey);
+    if (!acct) return null;
+
+    try {
+      const data = acct.data.slice(8); // skip Anchor discriminator
+      let offset = 0;
+
+      const reviewer = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
+      const reviewed = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
+      const jobId = Number(data.readBigUInt64LE(offset)); offset += 8;
+      const jobRef = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
+      const rating = data[offset]; offset += 1;
+      const categoryQuality = data[offset]; offset += 1;
+      const categoryReliability = data[offset]; offset += 1;
+      const categoryCommunication = data[offset]; offset += 1;
+
+      // String: 4-byte length prefix + bytes
+      const uriLen = data.readUInt32LE(offset); offset += 4;
+      const commentUri = data.slice(offset, offset + uriLen).toString('utf8'); offset += uriLen;
+
+      const commentHash = data.slice(offset, offset + 32).toString('hex'); offset += 32;
+      const timestamp = Number(data.readBigInt64LE(offset)); offset += 8;
+      const hasResponse = data[offset] === 1; offset += 1;
+
+      // Response string
+      const resUriLen = data.readUInt32LE(offset); offset += 4;
+      const responseUri = data.slice(offset, offset + resUriLen).toString('utf8'); offset += resUriLen;
+
+      const responseHash = data.slice(offset, offset + 32).toString('hex'); offset += 32;
+      const responseTimestamp = Number(data.readBigInt64LE(offset)); offset += 8;
+      const bump = data[offset]; offset += 1;
+
+      return {
+        reviewer: reviewer.toBase58(),
+        reviewed: reviewed.toBase58(),
+        jobId,
+        jobRef: jobRef.toBase58(),
+        rating,
+        categoryQuality,
+        categoryReliability,
+        categoryCommunication,
+        commentUri,
+        commentHash,
+        timestamp,
+        hasResponse,
+        responseUri: hasResponse ? responseUri : null,
+        responseHash: hasResponse ? responseHash : null,
+        responseTimestamp: hasResponse ? responseTimestamp : null,
+        bump,
+        pda: reviewKey.toBase58(),
+      };
+    } catch (e) {
+      return { pda: reviewKey.toBase58(), raw: acct.data.toString('hex'), error: e.message };
+    }
+  }
+
+  /**
+   * Derive Review V3 PDA (job-scoped).
+   * @param {PublicKey|string} jobPDA
+   * @param {PublicKey|string} reviewer
+   * @returns {[PublicKey, number]} [pda, bump]
+   */
+  getReviewV3PDA(jobPDA, reviewer) {
+    return getReviewV3PDA(jobPDA, reviewer, this.network);
+  }
+
   // ─── Utility ───────────────────────────────────────────
 
   /**
@@ -599,5 +784,6 @@ module.exports = {
   getReviewPDA,
   getReviewAttestationPDA,
   getEscrowPDA,
+  getReviewV3PDA,
   anchorDiscriminator,
 };
