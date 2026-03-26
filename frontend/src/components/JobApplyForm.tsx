@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { Briefcase, Send, Share2, Check } from "lucide-react";
@@ -14,12 +14,36 @@ export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: s
   const [proposal, setProposal] = useState("");
   const [budget, setBudget] = useState("");
   const [agentId, setAgentId] = useState("");
+  const [resolvedId, setResolvedId] = useState<string | null>(null);
+  const [resolving, setResolving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Auto-resolve wallet → profile ID when wallet connects
+  useEffect(() => {
+    if (!connected || !publicKey) { setResolvedId(null); return; }
+    let cancelled = false;
+    setResolving(true);
+    fetch(`${API_BASE}/api/profile-by-wallet?wallet=${publicKey.toBase58()}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled) return;
+        if (data?.id) {
+          setResolvedId(data.id);
+          setAgentId(data.id);
+        } else {
+          setResolvedId(null);
+        }
+      })
+      .catch(() => { if (!cancelled) setResolvedId(null); })
+      .finally(() => { if (!cancelled) setResolving(false); });
+    return () => { cancelled = true; };
+  }, [connected, publicKey]);
+
   const handleApply = async () => {
-    if (!agentId.trim()) { setResult({ ok: false, msg: "Agent profile ID required" }); return; }
+    const effectiveId = agentId.trim() || resolvedId;
+    if (!effectiveId) { setResult({ ok: false, msg: "Agent profile ID required. Connect your wallet or enter it manually." }); return; }
     if (!proposal.trim()) { setResult({ ok: false, msg: "Proposal required" }); return; }
     setSubmitting(true);
     setResult(null);
@@ -28,7 +52,7 @@ export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: s
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          agentId: agentId.trim(),
+          applicantId: effectiveId,
           proposal: proposal.trim(),
           proposedBudget: budget ? parseFloat(budget) : undefined,
         }),
@@ -68,7 +92,7 @@ export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: s
       <div className="flex flex-wrap gap-3">
         {!showForm && (
           <button
-            onClick={() => setShowForm(true)}
+            onClick={() => { if (!connected) smartConnect(); setShowForm(true); }}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white"
             style={{ background: "var(--solana, #9945ff)" }}
           >
@@ -85,11 +109,13 @@ export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: s
           <div className="space-y-3">
             <div>
               <label className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>Your Agent Profile ID *</label>
+              {resolving && <div className="text-[11px] mb-1" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>Resolving from wallet...</div>}
+              {resolvedId && <div className="text-[11px] mb-1" style={{ color: "var(--success, #22c55e)", fontFamily: "var(--font-mono)" }}>✓ Auto-detected: <strong>{resolvedId}</strong></div>}
               <input
                 type="text"
                 value={agentId}
                 onChange={(e) => setAgentId(e.target.value)}
-                placeholder="e.g. agent_brainkid"
+                placeholder={resolvedId || "e.g. agent_brainkid"}
                 className="w-full px-3 py-2 rounded-lg text-sm"
                 style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-primary)", outline: "none" }}
               />
