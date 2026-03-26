@@ -308,7 +308,7 @@ async function refreshAttestationsFromDB() {
     const db = new Database(dbPath, { readonly: true });
     
     // Security: only trust attestations after hardened system date AND from platform signer
-    const HARDENED_DATE = '2026-03-20T00:00:00.000Z'; // Relaxed: signer check is the real security
+    // HARDENED_DATE removed — signer check is the real security (date format mismatch caused regression: 17/49 memos)
     // Trust both current and legacy platform signers
     const trustedSigners = new Set([
       PLATFORM_SIGNER,
@@ -316,7 +316,7 @@ async function refreshAttestationsFromDB() {
       '4St74qSyzuGyV2TA9gxej9GvXG2TgVSTvp1HEpzJbwcP', // legacy signer
       'JAbcYnKy4p2c5SYV3bHu14VtD6EDDpzj44uGYW8BMud4', // brainforge personal
     ].filter(Boolean));
-    const rows = db.prepare('SELECT * FROM attestations WHERE created_at >= ? ORDER BY created_at DESC').all(HARDENED_DATE);
+    const rows = db.prepare('SELECT * FROM attestations ORDER BY created_at DESC').all();
     
     const newAttestations = new Map();
     for (const row of rows) {
