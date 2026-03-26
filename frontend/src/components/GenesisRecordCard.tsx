@@ -47,7 +47,7 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
   const isBorn = genesis.isBorn || nftAvatar?.permanent;
   const burnTx = genesis.faceBurnTx || nftAvatar?.burnTxSignature || null;
   const burnDate = genesis.bornAt
-    ? new Date(genesis.bornAt * 1000)
+    ? (typeof genesis.bornAt === 'string' ? new Date(genesis.bornAt) : new Date(genesis.bornAt * 1000))
     : nftAvatar?.verifiedAt
     ? new Date(nftAvatar.verifiedAt)
     : null;
