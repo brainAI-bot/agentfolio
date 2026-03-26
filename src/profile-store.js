@@ -537,6 +537,23 @@ function enrichProfile(row) {
           };
         }
       }
+      // Merge chain-cache attestations (on-chain source of truth)
+      try {
+        const chainCache = require('./lib/chain-cache');
+        const atts = chainCache.getVerifications(row.id);
+        for (const att of atts) {
+          if (att.platform && !vMap[att.platform]) {
+            vMap[att.platform] = {
+              verified: true,
+              address: att.identifier || '',
+              identifier: att.identifier || '',
+              proof: { txSignature: att.txSignature, timestamp: att.timestamp },
+              verified_at: att.timestamp || null,
+              source: 'chain-cache',
+            };
+          }
+        }
+      } catch (e) { /* chain-cache may not be available */ }
       return vMap;
     })(),
     activity: activity.map(a => ({ ...a, detail: parseJsonField(a.detail) })),
@@ -939,10 +956,10 @@ function registerRoutes(app) {
         LEFT JOIN satp_trust_scores t ON t.agent_id = p.id
         WHERE p.status = ? AND (p.hidden = 0 OR p.hidden IS NULL)
         ORDER BY _trust_score DESC, p.created_at DESC
-        LIMIT ? OFFSET ?
-      `).all(status, limit, offset);
+
+      `).all(status);
     } catch (e) {
-      rows = d.prepare('SELECT * FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL) ORDER BY created_at DESC LIMIT ? OFFSET ?').all(status, limit, offset);
+      rows = d.prepare('SELECT * FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL) ORDER BY created_at DESC').all(status);
     }
 
     // Strip api_key from list responses
@@ -996,7 +1013,9 @@ function registerRoutes(app) {
       }
     }
 
-    res.json({ profiles, total, page, limit, pages: Math.ceil(total / limit) });
+    // P0-13: Paginate after V3 overlay sort
+    const paginatedProfiles = profiles.slice(offset, offset + limit);
+    res.json({ profiles: paginatedProfiles, total, page, limit, pages: Math.ceil(total / limit) });
   });
 
   // ── GET /api/profile/:id ───────────────────────────────────────
