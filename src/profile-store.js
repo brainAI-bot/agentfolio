@@ -1038,6 +1038,32 @@ function registerRoutes(app) {
     }
 
     // P0-13: Paginate after V3 overlay sort
+    // Chain-cache: overlay on-chain verification count + score for all profiles
+    try {
+      const chainCache = require('./lib/chain-cache');
+      for (const p of profiles) {
+        // On-chain verification count (from attestation memos)
+        const ccVerifications = chainCache.getVerifications(p.id);
+        if (ccVerifications && ccVerifications.length > 0) {
+          const ccPlatforms = [...new Set(ccVerifications.map(v => v.platform))];
+          p.onchain_verification_count = ccPlatforms.length;
+          p.onchain_platforms = ccPlatforms;
+        }
+        // On-chain score (from Genesis Record or computed)
+        const ccScore = chainCache.getScore(p.id);
+        if (ccScore) {
+          p.chain_score = ccScore.reputationScore || 0;
+          p.chain_level = ccScore.verificationLevel || 0;
+          // Chain-cache score is authoritative
+          if (ccScore.reputationScore && ccScore.reputationScore > (p.trust_score || 0)) {
+            p.trust_score = ccScore.reputationScore;
+          }
+        }
+      }
+      // Final sort by trust_score after chain-cache overlay
+      profiles.sort((a, b) => (b.trust_score || 0) - (a.trust_score || 0));
+    } catch (e) { /* chain-cache may not be ready yet */ }
+
     const paginatedProfiles = profiles.slice(offset, offset + limit);
     res.json({ profiles: paginatedProfiles, total, page, limit, pages: Math.ceil(total / limit) });
   });

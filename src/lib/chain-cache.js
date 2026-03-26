@@ -578,6 +578,7 @@ function parseGenesisRecord(data, pda) {
 
     return {
       pda: pda.toBase58(),
+      faceImage,
       agentName,
       verificationLevel,
       reputationScore,
