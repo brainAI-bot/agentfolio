@@ -710,6 +710,11 @@ function handleBurnToBecome(req, res, url) {
               const nftData = JSON.parse(existing.nft_avatar);
               if (nftData.permanent === true) {
                 checkDb.close();
+
+        // === HARD GATE: Profile required for ALL mints ===
+        if (!profileId) {
+          return sendJson(403, { error: "No AgentFolio profile linked to this wallet. Register at agentfolio.bot first.", wallet });
+        }
                 console.log('[BurnPublic] BLOCKED: Agent', profileId, 'already has permanent face');
                 return sendJson(403, { 
                   error: 'This agent already has a permanent soulbound face. Burn to Become is a one-time, irreversible process.',
@@ -720,6 +725,11 @@ function handleBurnToBecome(req, res, url) {
             }
           }
           checkDb.close();
+
+        // === HARD GATE: Profile required for ALL mints ===
+        if (!profileId) {
+          return sendJson(403, { error: "No AgentFolio profile linked to this wallet. Register at agentfolio.bot first.", wallet });
+        }
         } catch (checkErr) {
           console.warn('[BurnPublic] DB permanent face check failed (non-blocking — on-chain SATP is authority):', checkErr.message);
         }
@@ -1294,8 +1304,6 @@ try {
                 fs.writeFileSync(recPath, JSON.stringify(rec, null, 2));
               }
             } catch (e) { console.error("[MintBOA] Failed to patch record:", e.message); }
-            // Record used payment TX for replay protection
-            if (paymentTx) saveUsedPayment(paymentTx);
             sendJson(200, {
               success: true,
               boaId: result.boaId,

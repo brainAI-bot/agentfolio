@@ -513,12 +513,12 @@ function enrichProfile(row) {
     endorsements: { items: endorsements, total: endorsements.length },
     verifications: (() => {
       const vMap = {};
-      // === CHAIN-CACHE FIRST (on-chain source of truth) ===
+      // === 3) Chain-cache attestations (supplementary) ===
       try {
         const chainCache = require('./lib/chain-cache');
         const atts = chainCache.getVerifications(row.id);
         for (const att of atts) {
-          if (att.platform) {
+          if (att.platform && !vMap[att.platform]) {
             vMap[att.platform] = {
               verified: true,
               address: att.identifier || '',
@@ -582,34 +582,9 @@ function enrichProfile(row) {
     },
     trust_score,
     // Computed level/tier/score — chain-cache is primary source
-    level: (() => {
-      // Priority: V3 Genesis Record > chain-cache computed > DB trust_score
-      if (v3) return v3.verificationLevel;
-      try {
-        const cc = require('./lib/chain-cache');
-        const s = cc.getScore(row.id);
-        if (s) return s.verificationLevel;
-      } catch {}
-      return trust_score ? trust_score.level : null;
-    })(),
-    tier: (() => {
-      if (v3) return v3.verificationLabel || ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'][v3.verificationLevel] || 'Unclaimed';
-      try {
-        const cc = require('./lib/chain-cache');
-        const s = cc.getScore(row.id);
-        if (s) return ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'][s.verificationLevel] || 'Unclaimed';
-      } catch {}
-      return trust_score ? (trust_score.level >= 4 ? 'Elite' : trust_score.level >= 3 ? 'Established' : trust_score.level >= 2 ? 'Verified' : trust_score.level >= 1 ? 'Basic' : 'Unclaimed') : null;
-    })(),
-    score: (() => {
-      if (v3) return v3.reputationScore;
-      try {
-        const cc = require('./lib/chain-cache');
-        const s = cc.getScore(row.id);
-        if (s) return s.reputationScore;
-      } catch {}
-      return trust_score ? trust_score.overall_score : null;
-    })(),
+    level: v3 ? v3.verificationLevel : (trust_score ? trust_score.level : null),
+    tier: v3 ? (v3.verificationLabel || ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'][v3.verificationLevel] || 'Unclaimed') : (trust_score ? (trust_score.level >= 4 ? 'Elite' : trust_score.level >= 3 ? 'Established' : trust_score.level >= 2 ? 'Verified' : trust_score.level >= 1 ? 'Basic' : 'Unclaimed') : null),
+    score: v3 ? v3.reputationScore : (trust_score ? trust_score.overall_score : null),
     verification_level: v3 ? v3.verificationLevel : (trust_score ? trust_score.level : 0),
     reputation_score: v3 ? v3.reputationScore : (trust_score ? trust_score.overall_score : 0),
   };

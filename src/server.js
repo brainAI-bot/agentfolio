@@ -2904,6 +2904,7 @@ app.use((req, res, next) => {
   next();
 });
 app.use((err, req, res, next) => {
+  if (res.headersSent) { return next(err); }
   console.error(`[ERROR] ${err.message}`, { 
     path: req.path,
     method: req.method,
