@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { JobApplyForm } from "@/components/JobApplyForm";
+import { JobReviewSection } from "@/components/JobReviewSection";
 import { SubmitWorkForm } from "@/components/SubmitWorkForm";
 
 export const dynamic = "force-dynamic";
@@ -111,6 +112,16 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             {job.status === "open" ? "Apply" : "Actions"}
           </h2>
           <JobApplyForm jobId={job.id} jobStatus={job.status} />
+          <JobReviewSection 
+            jobId={job.id} 
+            jobStatus={job.status} 
+            deliverableDescription={(job as any).deliverableDescription}
+            deliverableStatus={(job as any).deliverableStatus}
+            deliverableSubmittedAt={(job as any).deliverableSubmittedAt}
+            assigneeId={(job as any).assigneeId}
+            clientId={(job as any).clientId}
+            escrowStatus={(job as any).escrowStatus}
+          />
 
           <div className="mt-4 text-[11px] px-3 py-2 rounded-lg" style={{ background: "var(--bg-primary)", fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
             API: POST /api/marketplace/jobs/{job.id}/apply
