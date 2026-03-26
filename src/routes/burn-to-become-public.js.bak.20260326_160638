@@ -17,7 +17,6 @@ const { createInitializeInstruction: createInitializeMetadataInstruction, create
 const fs = require('fs');
 const path = require('path');
 const PIPELINE_DIR = "/home/ubuntu/agentfolio/boa-pipeline";
-const { safeBurnToBecome } = require('./safe-burn-to-become');
 
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const connection = new Connection(RPC_URL, 'confirmed');
@@ -776,18 +775,37 @@ function handleBurnToBecome(req, res, url) {
             console.log("[BurnPublic] BOA→SATP link skipped:", linkResult.reason || "no deployer key");
           }
         
-        // V3: Mark agent as "Born" on-chain via burnToBecome (uses safe wrapper)
+        // V3: Mark agent as "Born" on-chain via burnToBecome
         try {
+          const { createSATPClient, agentIdHash, getGenesisPDA } = require("../satp-client/src");
+          const { Keypair } = require("@solana/web3.js");
+          const fs = require("fs");
+          const client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb" });
+          const signerKey = JSON.parse(fs.readFileSync("/home/ubuntu/.config/solana/mainnet-deployer.json", "utf-8"));
+          const signer = Keypair.fromSecretKey(Uint8Array.from(signerKey));
+          
+          // Find profile by wallet to get agent_id
           const profileStore = require("../profile-store");
           const profile = profileStore.getProfileByWallet ? profileStore.getProfileByWallet(wallet) : null;
           const agentId = profile?.id || wallet;
-          const burnResult = await safeBurnToBecome(agentId, artworkUri || "", soulboundResult.soulboundMint || "", burnTx || "");
-          if (burnResult.success) {
-            console.log("[SATP V3] burnToBecome completed for " + agentId + ": tx=" + burnResult.txSignature);
-          } else if (burnResult.needsClientSign) {
-            console.log("[SATP V3] burnToBecome needs client-side signing for " + agentId + " (authority: " + burnResult.authority + ")");
+          
+          const [genesisPda] = getGenesisPDA(agentId);
+          const genesis = await client.getGenesisRecord(agentId);
+          if (genesis && !genesis.isBorn) {
+            const { transaction } = await client.buildBurnToBecome(
+              signer.publicKey,
+              genesisPda.toBase58(),
+              artworkUri || "",
+              soulboundResult.soulboundMint || "",
+              burnTx || ""
+            );
+            transaction.sign(signer);
+            const sig = await client.connection.sendRawTransaction(transaction.serialize());
+            console.log("[SATP V3] burnToBecome completed for " + agentId + ": tx=" + sig);
+          } else if (genesis?.isBorn) {
+            console.log("[SATP V3] Agent already born: " + agentId);
           } else {
-            console.log("[SATP V3] burnToBecome skipped for " + agentId + ": " + burnResult.reason);
+            console.log("[SATP V3] No genesis record for " + agentId + ", skipping burnToBecome");
           }
         } catch (v3Err) {
           console.warn("[SATP V3] burnToBecome failed (non-blocking):", v3Err.message);
@@ -797,8 +815,14 @@ function handleBurnToBecome(req, res, url) {
           console.warn("[BurnPublic] BOA→SATP link failed (non-blocking):", linkErr.message);
         }
         
-                // 3.6. V3 Genesis Record — burnToBecome (on-chain birth) — uses safe wrapper
+                // 3.6. V3 Genesis Record — burnToBecome (on-chain birth)
         try {
+          const { createSATPClient, agentIdHash, getGenesisPDA } = require('../satp-client/src');
+          const { Keypair } = require('@solana/web3.js');
+          const fs = require('fs');
+          const client = createSATPClient({rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb'});
+          
+          // Find agent profile by wallet
           const profileStore = require('../profile-store');
           const db = profileStore.getDb ? profileStore.getDb() : null;
           let agentId = null;
@@ -808,13 +832,23 @@ function handleBurnToBecome(req, res, url) {
           }
           
           if (agentId) {
-            const burnResult = await safeBurnToBecome(agentId, artworkUri || '', soulboundResult.soulboundMint || '', burnTx || '');
-            if (burnResult.success) {
-              console.log('[BurnPublic] V3 burnToBecome confirmed for ' + agentId + ': tx=' + burnResult.txSignature);
-            } else if (burnResult.needsClientSign) {
-              console.log('[BurnPublic] V3 burnToBecome needs client sign for ' + agentId + ' (authority: ' + burnResult.authority + ')');
+            const record = await client.getGenesisRecord(agentId);
+            if (record && !record.error && !record.isBorn) {
+              const signerKey = JSON.parse(fs.readFileSync('/home/ubuntu/.config/solana/mainnet-deployer.json', 'utf-8'));
+              const signer = Keypair.fromSecretKey(Uint8Array.from(signerKey));
+              const [genesisPda] = getGenesisPDA(agentId);
+              const { transaction } = await client.buildBurnToBecome(
+                signer.publicKey,
+                genesisPda.toBase58(),
+                artworkUri || '',
+                soulboundResult.soulboundMint || '',
+                burnTx || ''
+              );
+              transaction.sign(signer);
+              const sig = await client.connection.sendRawTransaction(transaction.serialize());
+              console.log('[BurnPublic] V3 burnToBecome confirmed for ' + agentId + ': tx=' + sig);
             } else {
-              console.log('[BurnPublic] V3 burnToBecome skipped for ' + agentId + ': ' + burnResult.reason);
+              console.log('[BurnPublic] V3 burnToBecome skipped:', agentId, record ? (record.isBorn ? 'already born' : 'error') : 'no genesis record');
             }
           } else {
             console.log('[BurnPublic] V3 burnToBecome skipped: no profile found for wallet', wallet);
@@ -1278,19 +1312,29 @@ try {
                   fs.writeFileSync(profileJsonPath, JSON.stringify(pf, null, 2));
                 }
                 console.log("[MintBOA] Avatar auto-updated for " + profileId);
-                // V3: Record burn-to-become on Genesis Record (uses safe wrapper)
-                if (profileId) {
-                  safeBurnToBecome(profileId, result.imageUri || "", result.mintAddress || "", "")
-                    .then(burnResult => {
-                      if (burnResult.success) {
-                        console.log("[SATP V3] burnToBecome recorded for " + profileId + ": tx=" + burnResult.txSignature);
-                      } else if (burnResult.needsClientSign) {
-                        console.log("[SATP V3] burnToBecome needs client sign for " + profileId + " (authority: " + burnResult.authority + ")");
-                      } else {
-                        console.log("[SATP V3] burnToBecome skipped for " + profileId + ": " + burnResult.reason);
+                // V3: Record burn-to-become on Genesis Record
+                if (satpV3Client && profileId) {
+                  (async () => {
+                    try {
+                      const { agentIdHash, getGenesisPDA } = require("../satp-client/src");
+                      const { Keypair } = require("@solana/web3.js");
+                      const [genesisPda] = getGenesisPDA(profileId);
+                      const acct = await satpV3Client.connection.getAccountInfo(genesisPda);
+                      if (acct) {
+                        const signerKey = JSON.parse(require("fs").readFileSync("/home/ubuntu/.config/solana/mainnet-deployer.json", "utf-8"));
+                        const signer = Keypair.fromSecretKey(Uint8Array.from(signerKey));
+                        const { transaction } = await satpV3Client.buildBurnToBecome(
+                          signer.publicKey, genesisPda,
+                          result.imageUri || "", result.mintAddress || "", ""
+                        );
+                        transaction.sign(signer);
+                        const sig = await satpV3Client.connection.sendRawTransaction(transaction.serialize());
+                        console.log("[SATP V3] burnToBecome recorded for " + profileId + ": tx=" + sig);
                       }
-                    })
-                    .catch(err => console.error("[SATP V3] burnToBecome failed for " + profileId + ":", err.message));
+                    } catch (v3Err) {
+                      console.error("[SATP V3] burnToBecome failed for " + profileId + ":", v3Err.message);
+                    }
+                  })();
                 }
               } catch (avatarErr) {
                 console.error("[MintBOA] Avatar update failed:", avatarErr.message);
@@ -1400,17 +1444,16 @@ try {
         fs.writeFileSync(recordPath, JSON.stringify(record, null, 2));
         console.log('[ConfirmMint] Recorded client-signed mint:', effectiveBoaId, 'agent:', agentId, 'sig:', signature.slice(0, 20));
         
-        // If free flow + agent has Genesis Record, trigger burnToBecome (uses safe wrapper)
+        // If free flow + agent has Genesis Record, trigger burnToBecome
         if (flow === 'free' && agentId && asset) {
           try {
-            const burnResult = await safeBurnToBecome(agentId, asset?.imageUri || '', asset?.mintAddress || '', '');
-            if (burnResult.success) {
-              console.log('[ConfirmMint] V3 burnToBecome recorded:', agentId, 'tx:', burnResult.txSignature);
-              record.burnToBecomeTx = burnResult.txSignature;
-            } else if (burnResult.needsClientSign) {
-              console.log('[ConfirmMint] burnToBecome needs client sign:', agentId, 'authority:', burnResult.authority);
-            } else {
-              console.log('[ConfirmMint] burnToBecome skipped:', agentId, burnResult.reason);
+            const { SatpV3Client } = require('../satp/satp-v3-client');
+            const client = new SatpV3Client();
+            const genesisRecord = await client.getGenesisRecord(agentId);
+            if (genesisRecord && !genesisRecord.error && !genesisRecord.isBorn) {
+              const sig = await client.burnToBecome(agentId, asset);
+              console.log('[ConfirmMint] V3 burnToBecome recorded:', agentId, 'tx:', sig);
+              record.burnToBecomeTx = sig;
             }
           } catch (e) { console.warn('[ConfirmMint] burnToBecome failed:', e.message); }
         }

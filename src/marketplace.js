@@ -378,6 +378,39 @@ function registerRoutes(app) {
     res.json({ message: 'Deposit confirmed', escrow });
   });
 
+
+  // POST /api/marketplace/deliverables/:id/revision — Request changes on a deliverable
+  app.post('/api/marketplace/deliverables/:id/revision', (req, res) => {
+    const dlvPath = path.join(DATA_DIR, 'deliverables', `${req.params.id}.json`);
+    const dlv = readJSON(dlvPath);
+    if (!dlv) return res.status(404).json({ error: 'Deliverable not found' });
+    if (dlv.status !== 'submitted') return res.status(400).json({ error: 'Deliverable not in submitted state' });
+
+    const { requestedBy, reason } = req.body;
+    
+    // Verify requestedBy is the job client
+    const jobPath = path.join(DATA_DIR, 'jobs', `${dlv.jobId}.json`);
+    const job = readJSON(jobPath);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (requestedBy !== job.postedBy && requestedBy !== job.clientId) {
+      return res.status(403).json({ error: 'Only the job poster can request revisions' });
+    }
+
+    dlv.status = 'revision_requested';
+    dlv.revisionRequestedAt = new Date().toISOString();
+    dlv.revisionReason = reason || 'Changes requested';
+    writeJSON(dlvPath, dlv);
+
+    res.json({ message: 'Revision requested', deliverable: dlv });
+  });
+
+  // GET /api/marketplace/deliverables/:id — Get deliverable details
+  app.get('/api/marketplace/deliverables/:id', (req, res) => {
+    const dlv = readJSON(path.join(DATA_DIR, 'deliverables', `${req.params.id}.json`));
+    if (!dlv) return res.status(404).json({ error: 'Deliverable not found' });
+    res.json(dlv);
+  });
+
   console.log('✓ Marketplace routes registered');
 }
 

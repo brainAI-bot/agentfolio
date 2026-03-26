@@ -45,6 +45,7 @@ async function preloadOnChainIdentities(profiles: RawProfile[]) {
 
 const PROFILES_DIR = "/home/ubuntu/agentfolio/data/profiles";
 const JOBS_DIR = "/home/ubuntu/agentfolio/data/marketplace/jobs";
+const DELIVERABLES_DIR = "/home/ubuntu/agentfolio/data/marketplace/deliverables";
 // Pre-warm V3 cache on module load (runs once at server startup)
 if (typeof (globalThis as any).__v3WarmupDone === 'undefined') {
   (globalThis as any).__v3WarmupDone = true;
@@ -117,6 +118,8 @@ interface RawJob {
   completedAt?: string | null;
   completionNote?: string | null;
   fundsReleased?: boolean;
+  deliverableId?: string;
+  acceptedApplicant?: string;
 }
 
 // Cache for performance (revalidates every 60 seconds)
@@ -323,6 +326,22 @@ function loadAllJobs(): Job[] {
           proposals: raw.applicationCount,
           deadline: raw.timeline.replace("_", " "),
           assignee: assigneeName,
+          assigneeId: raw.selectedAgentId || raw.acceptedApplicant || undefined,
+          clientId: raw.clientId,
+          ...(() => {
+            if (raw.deliverableId) {
+              try {
+                const dlv = JSON.parse(fs.readFileSync(path.join(DELIVERABLES_DIR, raw.deliverableId + ".json"), "utf-8"));
+                return {
+                  deliverableId: dlv.id,
+                  deliverableDescription: dlv.description,
+                  deliverableStatus: dlv.status,
+                  deliverableSubmittedAt: dlv.submittedAt,
+                };
+              } catch { return {}; }
+            }
+            return {};
+          })(),
           createdAt: raw.createdAt,
         });
       } catch { /* skip */ }
