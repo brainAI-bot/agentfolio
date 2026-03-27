@@ -587,8 +587,28 @@ class SATPSDK {
   }
 }
 
+/**
+ * Factory function for backwards compatibility
+ * @param {{ rpcUrl: string }} opts
+ * @returns {SATPSDK}
+ */
+function createSATPClient(opts = {}) {
+  return new SATPSDK(opts.rpcUrl || 'https://api.mainnet-beta.solana.com');
+}
+
+/**
+ * Hash an agentId to a 32-byte buffer (used for PDA seeds)
+ * @param {string} agentId
+ * @returns {Buffer}
+ */
+function agentIdHash(agentId) {
+  return crypto.createHash('sha256').update(agentId).digest();
+}
+
 module.exports = {
   SATPSDK,
+  createSATPClient,
+  agentIdHash,
   getProgramIds,
   getIdentityPDA,
   getReputationAuthorityPDA,
