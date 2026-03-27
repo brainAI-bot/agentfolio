@@ -3235,6 +3235,8 @@ console.log(`[${new Date().toISOString()}] info: x402 payment layer initialized`
 });
 
 // Start server
+
+
 app.listen(PORT, () => {
   console.log(`[${new Date().toISOString()}] info: AgentFolio server started`, { 
     service: "agentfolio",
