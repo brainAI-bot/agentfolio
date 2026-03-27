@@ -2895,11 +2895,21 @@ app.get('/api/profile/:id/heatmap', (req, res) => {
   try {
     const Database = require('better-sqlite3');
     const db = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
-    const activities = db.prepare('SELECT DATE(created_at) as day, COUNT(*) as count FROM activity_feed WHERE profile_id = ? GROUP BY DATE(created_at) ORDER BY day DESC LIMIT 365').all(req.params.id);
+    const rawId = req.params.id;
+    // Try multiple ID formats: raw, agent_ prefix, lowercase agent_ prefix
+    const candidates = [rawId, 'agent_' + rawId.toLowerCase(), rawId.toLowerCase()];
+    // Also look up the DB profile to get the stored ID
+    const profile = db.prepare('SELECT id FROM profiles WHERE id = ? OR name = ? OR LOWER(name) = LOWER(?)').get(rawId, rawId, rawId);
+    if (profile) candidates.unshift(profile.id);
+    let activities = [];
+    for (const cid of candidates) {
+      activities = db.prepare('SELECT DATE(created_at) as day, COUNT(*) as count FROM activity_feed WHERE profile_id = ? GROUP BY DATE(created_at) ORDER BY day DESC LIMIT 365').all(cid);
+      if (activities.length > 0) break;
+    }
     db.close();
     const heatmap = {};
     activities.forEach(a => { heatmap[a.day] = a.count; });
-    res.json({ agent: req.params.id, heatmap, totalEvents: activities.reduce((s, a) => s + a.count, 0), activeDays: activities.length, streak: 0 });
+    res.json({ agent: rawId, heatmap, totalEvents: activities.reduce((s, a) => s + a.count, 0), activeDays: activities.length, streak: 0 });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
