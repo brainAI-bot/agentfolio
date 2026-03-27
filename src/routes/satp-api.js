@@ -18,6 +18,12 @@ try {
 }
 
 function registerSATPRoutes(app) {
+  // Wallet address validation helper
+  const { PublicKey } = require('@solana/web3.js');
+  function isValidWallet(addr) {
+    try { new PublicKey(addr); return true; } catch { return false; }
+  }
+
   // Warm cache on startup (non-blocking)
   setTimeout(() => {
     satpIdentity.listRegisteredAgents(1, 0)
@@ -34,6 +40,7 @@ function registerSATPRoutes(app) {
   app.get('/api/satp/identity/:wallet', async (req, res) => {
     try {
       const network = req.query.network || 'mainnet';
+      if (!isValidWallet(req.params.wallet)) return res.status(400).json({ error: 'Invalid wallet address' });
       const identity = await satpIdentity.getAgentIdentity(req.params.wallet, network);
       if (!identity) {
         return res.status(404).json({ error: 'Agent not registered on-chain', wallet: req.params.wallet });
@@ -97,6 +104,7 @@ function registerSATPRoutes(app) {
    */
   app.get('/api/satp/attestations/:wallet', async (req, res) => {
     try {
+      if (!isValidWallet(req.params.wallet)) return res.status(400).json({ error: 'Invalid wallet address' });
       const attestations = await satpIdentity.getAgentAttestations(req.params.wallet);
       res.json({
         ok: true,
@@ -284,6 +292,7 @@ function registerSATPRoutes(app) {
    */
   app.get('/api/satp/reviews/:wallet', async (req, res) => {
     try {
+      if (!isValidWallet(req.params.wallet)) return res.status(400).json({ error: 'Invalid wallet address' });
       const reviews = await satpReviewsOnchain.getReviewsForAgent(req.params.wallet);
       const stats = await satpReviewsOnchain.getReviewStats(req.params.wallet);
       res.json({ ok: true, data: { reviews, stats, source: 'on-chain' } });
@@ -299,6 +308,7 @@ function registerSATPRoutes(app) {
    */
   app.get('/api/satp/reviews/:wallet/given', async (req, res) => {
     try {
+      if (!isValidWallet(req.params.wallet)) return res.status(400).json({ error: 'Invalid wallet address' });
       const reviews = await satpReviewsOnchain.getReviewsByAgent(req.params.wallet);
       res.json({ ok: true, data: { reviews, total: reviews.length, source: 'on-chain' } });
     } catch (err) {
@@ -313,6 +323,7 @@ function registerSATPRoutes(app) {
    */
   app.get('/api/satp/reputation/:wallet', async (req, res) => {
     try {
+      if (!isValidWallet(req.params.wallet)) return res.status(400).json({ error: 'Invalid wallet address' });
       const rep = await satpReviewsOnchain.getReputation(req.params.wallet);
       if (!rep) {
         return res.status(404).json({ error: 'No reputation account found', wallet: req.params.wallet });
