@@ -2909,7 +2909,24 @@ app.get('/api/profile/:id/heatmap', (req, res) => {
     db.close();
     const heatmap = {};
     activities.forEach(a => { heatmap[a.day] = a.count; });
-    res.json({ agent: rawId, heatmap, totalEvents: activities.reduce((s, a) => s + a.count, 0), activeDays: activities.length, streak: 0 });
+    // Calculate streak from sorted dates
+    const sortedDays = activities.map(a => a.day).sort().reverse();
+    let streak = 0;
+    if (sortedDays.length > 0) {
+      const today = new Date().toISOString().slice(0, 10);
+      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      if (sortedDays[0] === today || sortedDays[0] === yesterday) {
+        streak = 1;
+        for (let i = 1; i < sortedDays.length; i++) {
+          const prev = new Date(sortedDays[i - 1] + 'T00:00:00Z');
+          const curr = new Date(sortedDays[i] + 'T00:00:00Z');
+          const diffDays = (prev - curr) / 86400000;
+          if (diffDays === 1) streak++;
+          else break;
+        }
+      }
+    }
+    res.json({ agent: rawId, heatmap, totalEvents: activities.reduce((s, a) => s + a.count, 0), activeDays: activities.length, streak });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
