@@ -17,6 +17,7 @@ const {
   getReviewPDA,
   getReviewAttestationPDA,
   getEscrowPDA,
+  getGenesisPDA,
 } = require('./pda');
 const {
   IdentityAccount, IDENTITY_SCHEMA,
@@ -565,6 +566,104 @@ class SATPSDK {
   }
 
   // ─── Utility ───────────────────────────────────────────
+
+
+  /**
+   * Read a V3 Genesis Record by agent ID (on-chain).
+   * @param {string} agentId - Agent profile ID (e.g. "agent_brainkid")
+   * @returns {object|null} Parsed genesis record or null if not found
+   */
+  async getGenesisRecord(agentId) {
+    const [pda] = getGenesisPDA(agentId);
+    const acct = await this.connection.getAccountInfo(pda);
+    if (!acct) return null;
+
+    try {
+      const data = acct.data;
+      if (!data || data.length < 8) return null;
+      let offset = 8; // skip discriminator
+      const agentIdHashBytes = data.slice(offset, offset + 32);
+      offset += 32;
+
+      const readString = () => {
+        const len = data.readUInt32LE(offset);
+        offset += 4;
+        const str = data.slice(offset, offset + len).toString('utf8');
+        offset += len;
+        return str;
+      };
+      const readVecString = () => {
+        const count = data.readUInt32LE(offset);
+        offset += 4;
+        const arr = [];
+        for (let i = 0; i < count; i++) arr.push(readString());
+        return arr;
+      };
+
+      const agentName = readString();
+      const description = readString();
+      const category = readString();
+      const capabilities = readVecString();
+      const metadataUri = readString();
+      const faceImage = readString();
+      const faceMint = new PublicKey(data.slice(offset, offset + 32));
+      offset += 32;
+      const faceBurnTx = readString();
+      const genesisRecord = Number(data.readBigInt64LE(offset));
+      offset += 8;
+      const authority = new PublicKey(data.slice(offset, offset + 32));
+      offset += 32;
+
+      // Option<Pubkey>
+      let pendingAuthority = null;
+      const hasPending = data[offset];
+      offset += 1;
+      if (hasPending === 1) {
+        pendingAuthority = new PublicKey(data.slice(offset, offset + 32)).toBase58();
+        offset += 32;
+      }
+
+      const reputationScore = Number(data.readBigUInt64LE(offset));
+      offset += 8;
+      const verificationLevel = data[offset];
+      offset += 1;
+      const reputationUpdatedAt = Number(data.readBigInt64LE(offset));
+      offset += 8;
+      const verificationUpdatedAt = Number(data.readBigInt64LE(offset));
+      offset += 8;
+      const createdAt = Number(data.readBigInt64LE(offset));
+      offset += 8;
+      const updatedAt = Number(data.readBigInt64LE(offset));
+      offset += 8;
+
+      return {
+        pda: pda.toBase58(),
+        agentIdHash: agentIdHashBytes.toString('hex'),
+        agentName,
+        description,
+        category,
+        capabilities,
+        metadataUri,
+        faceImage,
+        faceMint: faceMint.toBase58(),
+        faceBurnTx,
+        genesisRecord,
+        isBorn: genesisRecord > 0,
+        bornAt: genesisRecord > 0 ? new Date(genesisRecord * 1000).toISOString() : null,
+        authority: authority.toBase58(),
+        pendingAuthority,
+        reputationScore,
+        verificationLevel,
+        verificationLabel: ['Unverified','Registered','Verified','Established','Trusted','Sovereign'][verificationLevel] || 'Unknown',
+        reputationUpdatedAt,
+        verificationUpdatedAt,
+        createdAt: createdAt > 0 ? new Date(createdAt * 1000).toISOString() : null,
+        updatedAt: updatedAt > 0 ? new Date(updatedAt * 1000).toISOString() : null,
+      };
+    } catch (e) {
+      return { pda: pda.toBase58(), error: e.message };
+    }
+  }
 
   /**
    * Derive all PDAs for a wallet without RPC calls.
