@@ -13,6 +13,26 @@ try { addActivity = require('./profile-store').addActivity; } catch { addActivit
 
 const DATA_DIR = path.join(__dirname, '..', 'data', 'marketplace');
 
+// Helper: resolve wallet address to profile ID
+function resolveApplicantId(applicantId) {
+  if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(applicantId)) {
+    try {
+      const profileStore = require('./profile-store');
+      const db = profileStore.getDb();
+      const profiles = db.prepare('SELECT id, name, verification_data, wallets FROM profiles').all();
+      for (const p of profiles) {
+        try {
+          const vd = JSON.parse(p.verification_data || '{}');
+          if (vd.solana && vd.solana.address === applicantId && vd.solana.verified) return p.id;
+          const w = JSON.parse(p.wallets || '{}');
+          if (w.solana === applicantId) return p.id;
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+  return applicantId;
+}
+
 // Ensure data dirs exist
 ['jobs', 'applications', 'escrow', 'deliverables'].forEach(dir => {
   const p = path.join(DATA_DIR, dir);
@@ -132,8 +152,9 @@ function registerRoutes(app) {
     if (!job) return res.status(404).json({ error: 'Job not found' });
     if (job.status !== 'open') return res.status(400).json({ error: 'Job is not open for applications' });
 
-    const { applicantId, proposal, bidAmount } = req.body;
+    let { applicantId, proposal, bidAmount } = req.body;
     if (!applicantId || !proposal) return res.status(400).json({ error: 'applicantId and proposal required' });
+    applicantId = resolveApplicantId(applicantId);  // resolve wallet -> profile ID
     if (applicantId === job.postedBy || applicantId === job.clientId) return res.status(400).json({ error: 'Cannot apply to your own job' });
 
     // Bug fix: Prevent duplicate applications from same agent

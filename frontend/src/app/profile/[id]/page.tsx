@@ -15,7 +15,6 @@ import { Github, Wallet, Globe, Shield, ExternalLink, Star } from "lucide-react"
 import { ActivityHeatmap } from "@/components/ActivityHeatmap";
 import BurnToBecomeSection from "@/components/BurnToBecomeSection";
 import BirthCertificate from "@/components/BirthCertificate";
-import { SATPOnChainSection } from "@/components/SATPOnChainSection";
 import { GenesisRecordCard } from "@/components/GenesisRecordCard";
 import { OnChainAvatar } from "@/components/OnChainAvatar";
 import Link from "next/link";
@@ -551,8 +550,6 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
           </div>}
 
           {!agent.unclaimed && (<WriteReviewForm targetProfileId={agent.id} />)}
-          {/* SATP On-Chain Data (live from Solana) */}
-          <SATPOnChainSection walletAddress={agent.verifications?.solana?.address || agent.walletAddress} />
           
         </div>
       </div>
