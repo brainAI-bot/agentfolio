@@ -889,7 +889,22 @@ function registerRoutes(app) {
   app.get('/api/profile/:id/genesis', async (req, res) => {
     if (!satpV3) return res.json({ error: 'SATP V3 SDK not available', genesis: null });
     try {
-      const record = await satpV3.client.getGenesisRecord(req.params.id);
+      const rawId = req.params.id;
+      // Try the raw ID first (e.g. "brainKID")
+      let record = await satpV3.client.getGenesisRecord(rawId);
+      if (!record) {
+        // If DB-style ID (e.g. "agent_brainkid"), look up the profile name and try that
+        const d = getDb();
+        const row = d.prepare('SELECT name FROM profiles WHERE id = ?').get(rawId);
+        if (row && row.name && row.name !== rawId) {
+          record = await satpV3.client.getGenesisRecord(row.name);
+        }
+        // Also try stripping "agent_" prefix and capitalizing
+        if (!record && rawId.startsWith('agent_')) {
+          const stripped = rawId.replace('agent_', '');
+          record = await satpV3.client.getGenesisRecord(stripped);
+        }
+      }
       res.json({ genesis: record });
     } catch (e) {
       res.json({ genesis: null, error: e.message });
@@ -1005,22 +1020,58 @@ function registerRoutes(app) {
     // V3 on-chain score overlay — authoritative
     if (v3ScoreService) {
       try {
-        const ids = profiles.map(p => p.id);
-        const v3Scores = await v3ScoreService.getV3Scores(ids);
+        // P0 FIX: Use display names for V3 lookup (chain records use names, not DB IDs)
+        const nameIds = profiles.map(p => p.name);
+        const dbIds = profiles.map(p => p.id);
+        const v3ByName = await v3ScoreService.getV3Scores(nameIds);
+        const v3ById = await v3ScoreService.getV3Scores(dbIds);
         for (const p of profiles) {
-          const v3 = v3Scores.get(p.id);
-          if (v3) {
+          // Try name first (chain uses display names), then DB ID
+          const v3 = v3ByName.get(p.name) || v3ById.get(p.id);
+          if (v3 && v3.verificationLevel > 0) {
             p.v3 = {
+              level: v3.verificationLevel,
+              score: v3.reputationScore,
               reputationScore: v3.reputationScore,
               reputationPct: v3.reputationPct,
               verificationLevel: v3.verificationLevel,
               verificationLabel: v3.verificationLabel,
               isBorn: v3.isBorn,
             };
-            // V3 on-chain is authoritative — override DB trust_score
             if (v3.reputationScore > p.trust_score) {
               p.trust_score = v3.reputationScore;
             }
+          }
+        }
+        // DB enrichment fallback for agents with chain defaults (level=0)
+        const levelMap = { 'NEW': 0, 'UNVERIFIED': 0, 'REGISTERED': 1, 'BASIC': 2, 'VERIFIED': 2, 'ESTABLISHED': 3, 'TRUSTED': 4, 'SOVEREIGN': 5 };
+        for (const p of profiles) {
+          if (!p.v3 || !p.v3.level) {
+            try {
+              const d = getDb();
+              let row = d.prepare('SELECT verification FROM profiles WHERE id = ?').get(p.id);
+              if (row && row.verification) {
+                const vData = typeof row.verification === 'string' ? JSON.parse(row.verification) : row.verification;
+                // level can be a string label ("SOVEREIGN") or number
+                const numLevel = typeof vData.level === 'number' ? vData.level : (levelMap[(vData.level || '').toUpperCase()] ?? 0);
+                const numScore = vData.score || vData.reputationScore || 0;
+                if (numLevel > 0 || numScore > 0) {
+                  const labels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
+                  p.v3 = {
+                    level: numLevel,
+                    score: numScore,
+                    reputationScore: numScore,
+                    reputationPct: (numScore / 100).toFixed(2),
+                    verificationLevel: numLevel,
+                    verificationLabel: labels[numLevel] || 'Unknown',
+                    isBorn: vData.isBorn || false,
+                  };
+                  if (numScore > (p.trust_score || 0)) {
+                    p.trust_score = numScore;
+                  }
+                }
+              }
+            } catch (_) {}
           }
         }
         // Re-sort by trust_score DESC after V3 overlay (DB sort may be stale)

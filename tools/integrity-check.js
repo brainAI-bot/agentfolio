@@ -29,7 +29,7 @@ const TEAM_AGENTS = [
   'agent_brainforge',
   'agent_suppi',
   'agent_aremes',
-  'braintest',
+  'agent_braintest',
 ];
 
 const LEVEL_LABELS = ['Unverified', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];

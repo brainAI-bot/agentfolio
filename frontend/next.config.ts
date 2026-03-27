@@ -12,6 +12,17 @@ const nextConfig: NextConfig = {
     ];
   },
   
+  // Redirects
+  async redirects() {
+    return [
+      {
+        source: '/explorer',
+        destination: '/satp/explorer',
+        permanent: true,
+      },
+    ];
+  },
+
   // Environment variables exposed to browser
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || '',

@@ -354,6 +354,10 @@ app.get('/.well-known/did.json', (req, res) => {
   res.json(didDocument);
 });
 
+// ─── Explorer API Routes (chain-cache data) ─────────────
+const explorerApiRouter = require("./routes/explorer-api");
+app.use("/api/explorer", explorerApiRouter);
+
 // ─── API Explorer (agent profile deep-link) ─────────────
 app.get('/api/explorer/:agentId', async (req, res) => {
   const { agentId } = req.params;
@@ -2939,17 +2943,49 @@ app.get('/api/x402/info', (req, res) => {
 app.get('/api/profile/:id/trust-score', async (req, res) => {
   try {
     const profileId = req.params.id;
-    // Use chain-cache score if available, fallback to V3
+    // 1. Try V3 on-chain score service
     let score = null;
     try {
       const { getV3Score } = require('./v3-score-service');
       score = await getV3Score(profileId);
     } catch {}
+    // 2. Fallback to chain-cache
     if (!score) {
       try {
         const cc = require('./lib/chain-cache');
         score = cc.getScore(profileId);
       } catch {}
+    }
+    // 3. If chain score shows defaults (level=0, repScore=500000), enrich with DB verification data
+    if (score && score.verificationLevel === 0) {
+      try {
+        const db = require('./profile-store').getDb();
+        // Resolve profile ID — try direct, then name lookup, then agent_ prefix
+        let row = db.prepare('SELECT verification FROM profiles WHERE id = ?').get(profileId);
+        if (!row && !profileId.startsWith('agent_')) {
+          row = db.prepare('SELECT verification FROM profiles WHERE name = ?').get(profileId);
+        }
+        if (!row && !profileId.startsWith('agent_')) {
+          row = db.prepare('SELECT verification FROM profiles WHERE id = ?').get('agent_' + profileId.toLowerCase());
+        }
+        if (row && row.verification) {
+          const v = typeof row.verification === 'string' ? JSON.parse(row.verification) : row.verification;
+          if (v && (v.score > 0 || v.level)) {
+            const levelMap = {'NEW':0,'REGISTERED':1,'VERIFIED':2,'ESTABLISHED':3,'TRUSTED':4,'SOVEREIGN':5};
+            const lvl = typeof v.level === 'number' ? v.level : (levelMap[(v.level||'').toUpperCase()] || 0);
+            const labelMap = {0:'Unverified',1:'Registered',2:'Verified',3:'Established',4:'Trusted',5:'Sovereign'};
+            score = {
+              ...score,
+              reputationScore: v.score || score.reputationScore,
+              verificationLevel: lvl,
+              verificationLabel: labelMap[lvl] || score.verificationLabel,
+              isBorn: score.isBorn,
+              _source: 'db-enriched',
+              _chainRaw: { reputationScore: score.reputationScore, verificationLevel: 0 }
+            };
+          }
+        }
+      } catch (dbErr) { /* DB enrichment optional */ }
     }
     if (score) {
       res.json({ ok: true, agent: profileId, trustScore: score.reputationScore, level: score.verificationLevel, data: score });
