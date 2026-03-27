@@ -3033,9 +3033,15 @@ process.on('SIGINT', () => {
 // ============================================================
 
 // Initialize x402 facilitator and resource server
-const x402Facilitator = new HTTPFacilitatorClient({ url: X402_FACILITATOR });
-const x402Server = new x402ResourceServer(x402Facilitator);
-x402Server.register('solana:*', new ExactSvmScheme());
+let x402Facilitator, x402Server;
+try {
+  x402Facilitator = new HTTPFacilitatorClient({ url: X402_FACILITATOR });
+  x402Server = new x402ResourceServer(x402Facilitator);
+  x402Server.register('solana:*', new ExactSvmScheme());
+  console.log('[x402] Payment middleware initialized (Solana mainnet)');
+} catch (e) {
+  console.warn('[x402] Init failed:', e.message, '— paid endpoints will work without payment gate');
+}
 
 // Free: SATP-integrated score (reads on-chain + off-chain)
 app.get('/api/satp/score/:id', async (req, res) => {
@@ -3082,6 +3088,7 @@ app.get('/api/satp/score/:id', async (req, res) => {
 
 // x402 payment middleware — protects paid routes
 // NOTE: x402 middleware doesn't support Express :param routes, so paid endpoints use query params
+try {
 app.use(
   paymentMiddleware(
     {
@@ -3109,6 +3116,9 @@ app.use(
     x402Server,
   ),
 );
+} catch (e) {
+  console.warn('[x402] paymentMiddleware registration failed:', e.message, '— paid routes unprotected');
+}
 
 // Paid: Individual agent score (x402-protected)
 // Usage: GET /api/score?id=<profileId>&wallet=<optional>
