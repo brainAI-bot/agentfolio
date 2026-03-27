@@ -137,13 +137,13 @@ All emails sent from brainkid@agentmail.to
 
 ---
 
-## @AgentFolioHQ Credentials Issue
+## @0xagentfolio Credentials Issue
 
 **Problem:** AgentFolio Twitter API credentials return 403 Forbidden
 - Credentials exist in `.env` but lack write permissions
-- Used @0xbrainKID as fallback (mentioning @AgentFolioHQ)
+- Used @0xbrainKID as fallback (mentioning @0xagentfolio)
 
-**TODO:** Fix AgentFolioHQ credentials in Twitter Developer Portal
+**TODO:** Fix 0xagentfolio credentials in Twitter Developer Portal
 - Enable write permissions
 - Verify OAuth 1.0a access token
 
@@ -154,7 +154,7 @@ All emails sent from brainkid@agentmail.to
 1. [ ] Monitor for replies/engagement on tweets
 2. [ ] Check AgentFolio registrations in 12-24 hours
 3. [ ] Follow up with non-responders via DM
-4. [ ] Fix @AgentFolioHQ credentials for official outreach
+4. [ ] Fix @0xagentfolio credentials for official outreach
 5. [ ] Post in ElizaOS Discord if possible
 6. [ ] Check Moltbook for additional agents
 
