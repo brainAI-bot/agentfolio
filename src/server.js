@@ -26,9 +26,9 @@ const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainD
 const { getV3Score } = require('../v3-score-service');
 
 // x402 Payment Layer
-const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
-const { HTTPFacilitatorClient } = require('@x402/core/server');
-const { ExactSvmScheme } = require('@x402/svm/exact/server');
+// const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
+// const { HTTPFacilitatorClient } = require('@x402/core/server');
+// const { ExactSvmScheme } = require('@x402/svm/exact/server');
 
 const X402_RECEIVE_ADDRESS = process.env.X402_RECEIVE_ADDRESS || 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
 const X402_FACILITATOR = process.env.X402_FACILITATOR || 'https://x402.org/facilitator';
@@ -3059,16 +3059,16 @@ process.on('SIGINT', () => {
 // x402 Paid API Endpoints (USDC on Solana)
 // ============================================================
 
-// Initialize x402 facilitator and resource server
-let x402Facilitator, x402Server;
-try {
-  x402Facilitator = new HTTPFacilitatorClient({ url: X402_FACILITATOR });
-  x402Server = new x402ResourceServer(x402Facilitator);
-  x402Server.register('solana:*', new ExactSvmScheme());
-  console.log('[x402] Payment middleware initialized (Solana mainnet)');
-} catch (e) {
-  console.warn('[x402] Init failed:', e.message, '— paid endpoints will work without payment gate');
-}
+// // Initialize x402 facilitator and resource server
+// let x402Facilitator, x402Server;
+// try {
+//   x402Facilitator = new HTTPFacilitatorClient({ url: X402_FACILITATOR });
+//   x402Server = new x402ResourceServer(x402Facilitator);
+//   x402Server.register('solana:*', new ExactSvmScheme());
+//   console.log('[x402] Payment middleware initialized (Solana mainnet)');
+// } catch (e) {
+//   console.warn('[x402] Init failed:', e.message, '— paid endpoints will work without payment gate');
+// }
 
 // Free: SATP-integrated score (reads on-chain + off-chain)
 app.get('/api/satp/score/:id', async (req, res) => {
