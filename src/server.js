@@ -442,6 +442,8 @@ app.get('/api/explorer/:agentId', async (req, res) => {
 // ─── DID Resolution for Solana Wallets ──────────────────
 app.get('/api/did/satp/sol/:address', async (req, res) => {
   const { address } = req.params;
+  // Validate Solana address before RPC calls
+  try { new (require('@solana/web3.js').PublicKey)(address); } catch { return res.status(400).json({ error: 'Invalid Solana address', address }); }
   const satpIdentity = require('./satp-identity-client');
   try {
     const identity = await satpIdentity.getAgentIdentity(address, req.query.network || 'mainnet');
@@ -2172,7 +2174,7 @@ const { handleBurnToBecome } = require('./routes/burn-to-become-public');
 let handleBirthEndpoints;try { handleBirthEndpoints = require('./routes/burn-to-become-public-birth').handleBirthEndpoints; } catch(e) { console.warn('[Birth] Handler not loaded:', e.message); }
 app.use((req, res, next) => {
   try {
-    if (req.path.startsWith('/api/burn-to-become/')) {
+    if (req.path.startsWith('/api/burn-to-become/') && !res.headersSent) {
       const parsedUrl = new URL(req.url, 'http://localhost');
       const handled = handleBurnToBecome(req, res, parsedUrl);
       if (!handled && handleBirthEndpoints) { const birthHandled = handleBirthEndpoints(req, res, parsedUrl); if (!birthHandled) next(); } else if (!handled) { next(); }
