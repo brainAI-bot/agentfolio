@@ -3113,39 +3113,14 @@ app.get('/api/satp/score/:id', async (req, res) => {
   }
 });
 
-// x402 payment middleware — protects paid routes
-// NOTE: x402 middleware doesn't support Express :param routes, so paid endpoints use query params
-try {
-app.use(
-  paymentMiddleware(
-    {
-      'GET /api/score': {
-        accepts: [{
-          scheme: 'exact',
-          price: '$0.01',
-          network: X402_NETWORK,
-          payTo: X402_RECEIVE_ADDRESS,
-        }],
-        description: 'Agent reputation score lookup (Level + breakdown). Pass ?id=<profileId>',
-        mimeType: 'application/json',
-      },
-      'GET /api/leaderboard/scores': {
-        accepts: [{
-          scheme: 'exact',
-          price: '$0.05',
-          network: X402_NETWORK,
-          payTo: X402_RECEIVE_ADDRESS,
-        }],
-        description: 'Full agent reputation leaderboard with scores',
-        mimeType: 'application/json',
-      },
-    },
-    x402Server,
-  ),
-);
-} catch (e) {
-  console.warn('[x402] paymentMiddleware registration failed:', e.message, '— paid routes unprotected');
-}
+// x402 payment middleware — DISABLED until public facilitator supports solana:mainnet exact scheme
+// The x402.org facilitator throws RouteConfigurationError for solana:mainnet "exact" scheme,
+// causing unhandled async errors on every startup. Paid routes remain accessible without payment gate.
+// TODO: Re-enable when x402 Solana facilitator is available or self-hosted.
+// try {
+//   app.use(paymentMiddleware({ ... }, x402Server));
+// } catch (e) { ... }
+console.log('[x402] Payment middleware DISABLED — Solana facilitator not yet supported. Endpoints unprotected.');
 
 // Paid: Individual agent score (x402-protected)
 // Usage: GET /api/score?id=<profileId>&wallet=<optional>
