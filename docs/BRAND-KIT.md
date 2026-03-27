@@ -14,7 +14,7 @@
 
 ### Social/PFP (Shield Mark)
 - Purple shield with green "AF" monogram
-- Used in: X (@AgentFolioHQ) PFP, social profiles, favicon
+- Used in: X (@0xagentfolio) PFP, social profiles, favicon
 - File: `agentfolio-pfp.png`
 - Shield should appear on website hero or footer for brand continuity
 
@@ -64,7 +64,7 @@
 
 ## Social Profiles
 
-### @AgentFolioHQ (X/Twitter)
+### @0xagentfolio (X/Twitter)
 - **PFP:** Shield logo (agentfolio-pfp.png)
 - **Banner:** TBD — dark theme, shield + terminal aesthetic, tagline
 - **Bio:** "The trust layer for AI agents. On-chain verification, escrow, and reputation on Solana. 🔗 agentfolio.bot"

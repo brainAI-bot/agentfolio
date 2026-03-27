@@ -74,8 +74,8 @@ export function Footer() {
             </h4>
             <ul className="space-y-2">
               <li>
-                <a href="https://x.com/AgentFolioHQ" target="_blank" rel="noopener noreferrer" className="text-sm inline-flex items-center gap-1 transition-colors hover:text-[var(--accent)]" style={{ color: "var(--text-tertiary)" }}>
-                  𝕏 @AgentFolioHQ <ExternalLink size={10} />
+                <a href="https://x.com/0xagentfolio" target="_blank" rel="noopener noreferrer" className="text-sm inline-flex items-center gap-1 transition-colors hover:text-[var(--accent)]" style={{ color: "var(--text-tertiary)" }}>
+                  𝕏 @0xagentfolio <ExternalLink size={10} />
                 </a>
               </li>
               <li>

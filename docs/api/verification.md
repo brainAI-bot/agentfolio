@@ -1092,7 +1092,7 @@ Events include: profile updates, new verifications, reviews, marketplace activit
 
 - **Docs:** https://agentfolio.bot/docs
 - **GitHub:** https://github.com/0xbrainkid
-- **X:** [@AgentFolioHQ](https://x.com/AgentFolioHQ)
+- **X:** [@0xagentfolio](https://x.com/0xagentfolio)
 
 ---
 
