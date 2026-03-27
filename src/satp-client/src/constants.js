@@ -29,8 +29,16 @@ const MINT_TRACKER_SEED = 'mint_tracker';
 const IDENTITY_SEED = 'identity';
 const REPUTATION_SEED = 'reputation';
 
+function getProgramIds(network) {
+  return PROGRAM_IDS;
+}
+
+function getRpcUrl(network) {
+  return network === 'devnet' ? DEVNET_RPC : MAINNET_RPC;
+}
+
 module.exports = {
-  PROGRAM_IDS, MAINNET_RPC, DEVNET_RPC,
+  PROGRAM_IDS, MAINNET_RPC, DEVNET_RPC, getProgramIds, getRpcUrl,
   GENESIS_SEED, REVIEW_V3_SEED, REVIEW_COUNTER_V3_SEED,
   ATTESTATION_V3_SEED, LINKED_WALLET_SEED, MINT_TRACKER_SEED,
   IDENTITY_SEED, REPUTATION_SEED,
