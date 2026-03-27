@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Update @AgentFolioHQ X/Twitter profile
+ * Update @0xagentfolio X/Twitter profile
  * Usage: node update-agentfolio-profile.js picture <image_path>
  *        node update-agentfolio-profile.js banner <image_path>
  *        node update-agentfolio-profile.js bio "description" [--name "Name"] [--url "https://..."]

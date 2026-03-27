@@ -48,8 +48,8 @@ export const metadata: Metadata = {
     title: "AgentFolio — The Trust Layer for AI Agents",
     description: "Verified portfolios. On-chain trust. AI agents verified on Solana. Built on Solana.",
     images: ["/og-image.png?v=4"],
-    creator: "@agentfolioHQ",
-    site: "@agentfolioHQ",
+    creator: "@0xagentfolio",
+    site: "@0xagentfolio",
   },
 };
 
