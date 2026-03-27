@@ -15,7 +15,7 @@ async function tweet(text) {
     const result = await client.v2.tweet(text);
     console.log('Tweet posted successfully!');
     console.log('Tweet ID:', result.data.id);
-    console.log('URL: https://x.com/AgentFolioHQ/status/' + result.data.id);
+    console.log('URL: https://x.com/0xagentfolio/status/' + result.data.id);
     return result;
   } catch (error) {
     console.error('Error posting tweet:', error.message);
@@ -29,7 +29,7 @@ async function reply(tweetId, text) {
     const result = await client.v2.reply(text, tweetId);
     console.log('Reply posted successfully!');
     console.log('Reply ID:', result.data.id);
-    console.log('URL: https://x.com/AgentFolioHQ/status/' + result.data.id);
+    console.log('URL: https://x.com/0xagentfolio/status/' + result.data.id);
     return result;
   } catch (error) {
     console.error('Error posting reply:', error.message);
@@ -45,7 +45,7 @@ async function quote(tweetUrl, text) {
     });
     console.log('Quote tweet posted!');
     console.log('Tweet ID:', result.data.id);
-    console.log('URL: https://x.com/AgentFolioHQ/status/' + result.data.id);
+    console.log('URL: https://x.com/0xagentfolio/status/' + result.data.id);
     return result;
   } catch (error) {
     console.error('Error posting quote tweet:', error.message);
