@@ -30,6 +30,7 @@ import Link from "next/link";
 import { JobApplyForm } from "@/components/JobApplyForm";
 import { JobReviewSection } from "@/components/JobReviewSection";
 import { SubmitWorkForm } from "@/components/SubmitWorkForm";
+import { ApplicationsList } from "@/components/ApplicationsList";
 
 export const dynamic = "force-dynamic";
 
@@ -128,6 +129,14 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           <div className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: "var(--text-secondary)" }}>
             {job.description}
           </div>
+        </div>
+
+        {/* Applications with trust scores */}
+        <div className="rounded-xl p-6 mb-6" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
+          <h2 className="text-sm font-bold uppercase tracking-widest mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
+            Applications ({job.proposals})
+          </h2>
+          <ApplicationsList jobId={job.id} />
         </div>
 
         {/* Submit Work / Review Deliverables (in_progress only) */}
