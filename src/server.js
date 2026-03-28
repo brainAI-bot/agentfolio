@@ -1518,6 +1518,7 @@ app.post('/api/claims/self-verify', async (req, res) => {
     
     // Add Solana verification
     profileStore.addVerification(profileId, 'solana', walletAddress, { method: 'claim_self_verify', claimChallengeId: challengeId });
+    profileStore.addActivity(profileId, 'claim', { wallet: walletAddress });
     
     // Clean up challenge
     _claimChallenges.delete(challengeId);
