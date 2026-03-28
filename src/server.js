@@ -3152,21 +3152,40 @@ app.get('/api/score', async (req, res) => {
 });
 
 // Paid: Leaderboard with scores
-app.get('/api/leaderboard/scores', (req, res) => {
+app.get('/api/leaderboard/scores', async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 100);
-
-  // For now, return computed scores for known profiles
-  // In production this would query a real profile database
-  const profiles = [];
-  const leaderboard = computeLeaderboard(profiles, limit);
-
-  res.json({
-    leaderboard,
-    total: leaderboard.length,
-    limit,
-    computedAt: new Date().toISOString(),
-    payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.05' },
-  });
+  try {
+    // Load all profiles from DB, enrich with trust scores
+    const db = require('./profile-store').getDb();
+    const rows = db.prepare('SELECT id, name, avatar, verification FROM profiles ORDER BY name').all();
+    const results = [];
+    for (const row of rows) {
+      let score = null;
+      try { const { getV3Score } = require('./v3-score-service'); score = await getV3Score(row.name || row.id); } catch {}
+      if (!score) try { const cc = require('./lib/chain-cache'); score = cc.getScore(row.name || row.id); } catch {}
+      // DB enrichment when chain shows defaults
+      if (score && score.verificationLevel === 0 && row.verification) {
+        try {
+          const v = typeof row.verification === 'string' ? JSON.parse(row.verification) : row.verification;
+          if (v && (v.score > 0 || v.level)) {
+            const levelMap = {'NEW':0,'REGISTERED':1,'VERIFIED':2,'ESTABLISHED':3,'TRUSTED':4,'SOVEREIGN':5};
+            const lvl = typeof v.level === 'number' ? v.level : (levelMap[(v.level||'').toUpperCase()] || 0);
+            const labelMap = {0:'Unverified',1:'Registered',2:'Verified',3:'Established',4:'Trusted',5:'Sovereign'};
+            score = { ...score, reputationScore: v.score || score.reputationScore, verificationLevel: lvl, verificationLabel: labelMap[lvl] || score.verificationLabel };
+          }
+        } catch {}
+      }
+      if (score) {
+        results.push({ id: row.id, name: row.name, avatar: row.avatar, trustScore: score.reputationScore, level: score.verificationLevel, levelName: score.verificationLabel });
+      }
+    }
+    // Sort by level desc, then by trustScore desc
+    results.sort((a, b) => b.level - a.level || b.trustScore - a.trustScore);
+    const leaderboard = results.slice(0, limit);
+    res.json({ leaderboard, total: results.length, limit, computedAt: new Date().toISOString(), payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.05' } });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Free: x402 pricing info endpoint
