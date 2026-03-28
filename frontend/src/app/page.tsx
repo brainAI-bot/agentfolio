@@ -6,7 +6,7 @@ export async function generateMetadata(): Promise<Metadata> {
   let count = 50;
   try {
     const stats = await fetch("http://localhost:3333/api/ecosystem/stats", { next: { revalidate: 300 } }).then(r => r.json());
-    count = stats?.agents?.total || stats?.totalAgents || stats?.total || 50;
+    count = stats?.agents?.total || stats?.agents || stats?.totalAgents || stats?.total || 50;
   } catch {}
   return {
     title: "AgentFolio — Build Your AI Agent's Trust Score",
@@ -17,7 +17,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-import { getAllAgents, getActivityFeed, getStats, getTopVerifiedAgents } from "@/lib/data";
+import { getAllAgents, getActivityFeed, getStats, getTopVerifiedAgents, getRecentlyVerified } from "@/lib/data";
 import dynamicImport from "next/dynamic";
 const LeaderboardTable = dynamicImport(() => import("@/components/LeaderboardTable").then(m => m.LeaderboardTable), { loading: () => <div style={{height: 400, display: "flex", alignItems: "center", justifyContent: "center", color: "#666"}}>Loading agents...</div> });
 import { Activity, Users, Shield, Link as LinkIcon, Zap, Code, Globe, ArrowRight, CheckCircle, Lock, TrendingUp, Star, Award } from "lucide-react";
@@ -42,6 +42,7 @@ export default async function HomePage() {
   const activityFeed = await getActivityFeed();
   const platformStats = await getStats();
   const topAgents = await getTopVerifiedAgents(6);
+  const recentlyVerified = await getRecentlyVerified(5);
 
   return (
     <div style={{ background: "var(--bg-primary)", minHeight: "calc(100vh - 56px)" }}>
@@ -416,6 +417,89 @@ export default async function HomePage() {
       </section>
 
       {/* Bottom CTA */}
+
+      {/* Recently Verified */}
+      {recentlyVerified.length > 0 && (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: "#22c55e" }} />
+            <h2
+              className="text-lg font-semibold uppercase tracking-wider"
+              style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)", letterSpacing: "0.05em" }}
+            >
+              Recently Verified
+            </h2>
+          </div>
+          <div className="grid gap-3">
+            {recentlyVerified.map((v, i) => {
+              const platformLabels: Record<string, string> = {
+                solana: "◎ Solana wallet",
+                github: "💻 GitHub",
+                x: "🐦 X (Twitter)",
+                twitter: "🐦 X (Twitter)",
+                satp: "⛓️ SATP on-chain",
+                ethereum: "Ξ Ethereum",
+                agentmail: "✉️ AgentMail",
+                moltbook: "📖 Moltbook",
+                wallet: "💳 Wallet",
+                polymarket: "📊 Polymarket",
+                discord: "💬 Discord",
+                a2a: "🤖 A2A Protocol",
+                mcp: "🔌 MCP Protocol",
+                website: "🌐 Website",
+              };
+              const platformLabel = platformLabels[v.platform] || v.platform;
+              const date = new Date(v.date);
+              const now = Date.now();
+              const diff = now - date.getTime();
+              const hours = Math.floor(diff / 3600000);
+              const days = Math.floor(hours / 24);
+              const timeStr = days > 0 ? `${days}d ago` : hours > 0 ? `${hours}h ago` : "recently";
+              
+              return (
+                <Link
+                  key={`${v.id}-${i}`}
+                  href={`/profile/${v.id}`}
+                  className="flex items-center gap-4 px-4 py-3 rounded-lg transition-all hover:border-[var(--accent)]"
+                  style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
+                >
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 overflow-hidden"
+                    style={{ background: "rgba(153,69,255,0.1)", color: "var(--accent)" }}
+                  >
+                    {v.avatar ? (
+                      <Image src={v.avatar} alt={v.name} width={32} height={32} className="w-full h-full object-cover" unoptimized />
+                    ) : (
+                      v.name.charAt(0).toUpperCase()
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-semibold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+                      {v.name}
+                    </span>
+                    <span className="text-xs ml-2" style={{ color: "var(--text-tertiary)" }}>
+                      verified {platformLabel}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span
+                      className="text-[10px] px-2 py-0.5 rounded-full"
+                      style={{ fontFamily: "var(--font-mono)", background: "rgba(153,69,255,0.1)", color: "var(--accent)" }}
+                    >
+                      {v.verificationLevelName}
+                    </span>
+                    <span className="text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
+                      {timeStr}
+                    </span>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
         <div
           className="text-center px-8 py-12 rounded-xl"

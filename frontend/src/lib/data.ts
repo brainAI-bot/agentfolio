@@ -432,3 +432,40 @@ export function getActivityFeed() {
 
   return activities.slice(0, 6);
 }
+
+export function getRecentlyVerified(limit = 5): Array<{ name: string; id: string; avatar: string | null; platform: string; date: string; trustScore: number; verificationLevel: number; verificationLevelName: string }> {
+  const agents = loadAllProfiles();
+  const results: Array<{ name: string; id: string; avatar: string | null; platform: string; date: string; trustScore: number; verificationLevel: number; verificationLevelName: string; ts: number }> = [];
+  
+  for (const a of agents) {
+    // Check all verification activities
+    for (const act of (a.activity || [])) {
+      if (act.type?.startsWith('verification_') && act.createdAt) {
+        const platform = act.type.replace('verification_', '');
+        if (['profile_created', 'profile_updated'].includes(act.type)) continue;
+        results.push({
+          name: a.name,
+          id: a.id,
+          avatar: a.avatar || null,
+          platform,
+          date: act.createdAt,
+          trustScore: a.trustScore,
+          verificationLevel: a.verificationLevel ?? 0,
+          verificationLevelName: a.verificationLevelName ?? 'Unclaimed',
+          ts: new Date(act.createdAt).getTime(),
+        });
+      }
+    }
+  }
+  
+  // Sort by most recent, dedupe by agent (show only latest verification per agent)
+  results.sort((a, b) => b.ts - a.ts);
+  const seen = new Set<string>();
+  const deduped = results.filter(r => {
+    if (seen.has(r.id)) return false;
+    seen.add(r.id);
+    return true;
+  });
+  
+  return deduped.slice(0, limit).map(({ ts, ...rest }) => rest);
+}

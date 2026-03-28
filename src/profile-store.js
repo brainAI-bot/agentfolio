@@ -716,7 +716,6 @@ function registerRoutes(app) {
       }
 
       d.prepare(`INSERT INTO profiles (${insertCols.join(', ')}) VALUES (${insertPlaceholders.join(', ')})`).run(...insertVals);
-      addActivity(id, 'registration', { name: body.name || body.handle || id });
 
       // ── Write JSON profile file so Next.js frontend can find it ──
       const profilesDir = path.join(__dirname, '..', 'data', 'profiles');
@@ -976,7 +975,7 @@ function registerRoutes(app) {
   app.get('/api/profiles', async (req, res) => {
     const d = getDb();
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
     const status = req.query.status || 'active';
 
@@ -1183,6 +1182,17 @@ function registerRoutes(app) {
           enriched.trust_score = { source: 'error', message: e.message };
         }
       }
+      // P0 FIX: Add levelName to individual profile (matches /api/profiles list format)
+      if (enriched) {
+        const levelLabels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
+        const v = enriched.v3 || {};
+        const ts = enriched.trust_score || {};
+        const level = v.verificationLevel || v.level || ts.verificationLevel || 0;
+        const score = v.reputationScore || v.score || ts.reputationScore || enriched.trust_score_num || 0;
+        enriched.level = level;
+        enriched.score = score;
+        enriched.levelName = v.verificationLabel || ts.verificationLabel || levelLabels[level] || 'Unknown';
+      }
       res.json(enriched);
   });
 
@@ -1235,7 +1245,6 @@ function registerRoutes(app) {
     sets.push("updated_at = datetime('now')");
     vals.push(req.params.id);
     d.prepare(`UPDATE profiles SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
-    addActivity(req.params.id, 'profile_update', { fields: Object.keys(req.body).filter(k => k !== 'walletAddress' && k !== 'signature') });
 
     // Return enriched profile so frontend can update state
     const updated = d.prepare('SELECT * FROM profiles WHERE id = ?').get(req.params.id);
