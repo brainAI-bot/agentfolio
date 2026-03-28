@@ -88,6 +88,16 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     genesis.faceImage = trustScoreData.faceImage || genesis.faceImage;
   }
 
+  // Fetch chain-cache attestations (on-chain verified platforms)
+  let chainAttestations: Array<{ platform: string; txSignature?: string; timestamp?: string; solscanUrl?: string }> = [];
+  try {
+    const explorerRes = await fetch(`https://agentfolio.bot/api/explorer/${id}`, { next: { revalidate: 120 } });
+    if (explorerRes.ok) {
+      const explorerData = await explorerRes.json();
+      chainAttestations = explorerData.attestationMemos || [];
+    }
+  } catch {}
+
   // Fetch SATP V2 on-chain identity status
   let satpIdentity: any = null;
   const solWallet = agent.verifications?.solana?.address || agent.walletAddress;
@@ -359,26 +369,37 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                   website: "Website", domain: "Domain", mcp: "MCP", a2a: "A2A", review: "Review",
                 };
                 const priority = ["satp","github","x","solana","ethereum","agentmail","moltbook","hyperliquid","polymarket","discord","telegram","website","domain","mcp","a2a","review"];
+                // Chain attestation platforms (on-chain source of truth)
+                const chainPlatforms = new Set(chainAttestations.map(a => a.platform));
+                const chainTxMap = new Map(chainAttestations.map(a => [a.platform, a]));
+                
                 for (const t of priority) {
+                  // Use chain-cache attestations as source of truth, fallback to DB
                   const vEntry = (v as any)?.[t] || (t === "x" ? (v as any)?.twitter : null);
-                  if (!vEntry?.verified) continue;
-                  let detail = "Verified";
-                  if (t === "github") detail = `@${githubStats?.username || vEntry.username || "?"} — ${githubStats?.repos ?? vEntry.repos ?? 0} repos, ${(githubStats?.stars ?? vEntry.stars ?? 0).toLocaleString()}⭐`;
-                  else if (t === "solana" && vEntry.address) detail = `${vEntry.address.slice(0, 8)}...${vEntry.address.slice(-4)}`;
-                  else if (t === "ethereum" && vEntry.address) detail = `${vEntry.address.slice(0, 8)}...${vEntry.address.slice(-4)}`;
-                  else if (t === "hyperliquid" && vEntry.address) detail = vEntry.volume && vEntry.volume !== "$0" ? `${vEntry.address.slice(0, 8)}...${vEntry.address.slice(-4)} · ${vEntry.volume} vol` : `${vEntry.address.slice(0, 8)}...${vEntry.address.slice(-4)} · Verified ✅`;
-                  else if (t === "satp" && vEntry.did) detail = `${vEntry.did.slice(0, 24)}...`;
-                  else if (t === "x" && vEntry.handle) detail = `@${vEntry.handle.replace("@","")}`;
-                  else if (t === "agentmail" && vEntry.email) detail = vEntry.email;
-                  else if (t === "moltbook" && vEntry.username) detail = `@${vEntry.username}`;
-                  else if (t === "polymarket" && vEntry.address) detail = `${vEntry.address.slice(0, 8)}...${vEntry.address.slice(-4)}`;
-                  else if (t === "discord" && vEntry.username) detail = `@${vEntry.username}`;
-                  else if (t === "telegram" && vEntry.username) detail = `@${vEntry.username}`;
-                  else if (t === "website" && vEntry.url) detail = vEntry.url;
-                  else if (t === "domain" && vEntry.domain) detail = vEntry.domain;
+                  const hasChainAttestation = chainPlatforms.has(t) || (t === "x" && chainPlatforms.has("twitter"));
+                  if (!hasChainAttestation && !vEntry?.verified) continue;
+                  const chainTx = chainTxMap.get(t) || (t === "x" ? chainTxMap.get("twitter") : null);
+                  let detail = hasChainAttestation ? "On-Chain ⛓️" : "Verified";
+                  if (t === "github") detail = `@${githubStats?.username || vEntry?.username || "?"} — ${githubStats?.repos ?? vEntry?.repos ?? 0} repos, ${(githubStats?.stars ?? vEntry?.stars ?? 0).toLocaleString()}⭐`;
+                  else if (t === "solana" && vEntry?.address) detail = `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)}`;
+                  else if (t === "ethereum" && vEntry?.address) detail = `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)}`;
+                  else if (t === "hyperliquid" && vEntry?.address) detail = vEntry?.volume && vEntry?.volume !== "$0" ? `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)} · ${vEntry?.volume} vol` : `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)} · Verified ✅`;
+                  else if (t === "satp" && vEntry?.did) detail = `${vEntry?.did.slice(0, 24)}...`;
+                  else if (t === "x" && vEntry?.handle) detail = `@${vEntry?.handle.replace("@","")}`;
+                  else if (t === "agentmail" && vEntry?.email) detail = vEntry?.email;
+                  else if (t === "moltbook" && vEntry?.username) detail = `@${vEntry?.username}`;
+                  else if (t === "polymarket" && vEntry?.address) detail = `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)}`;
+                  else if (t === "discord" && vEntry?.username) detail = `@${vEntry?.username}`;
+                  else if (t === "telegram" && vEntry?.username) detail = `@${vEntry?.username}`;
+                  else if (t === "website" && vEntry?.url) detail = vEntry?.url;
+                  else if (t === "domain" && vEntry?.domain) detail = vEntry?.domain;
                   else if (t === "mcp") detail = "MCP Protocol";
                   else if (t === "a2a") detail = "A2A Protocol";
                   else if (t === "review") detail = "Peer Review";
+                  // For chain-attested platforms with no DB detail, show on-chain proof
+                  if (hasChainAttestation && detail === "On-Chain ⛓️" && chainTx?.timestamp) {
+                    detail = `On-Chain · ${chainTx.timestamp.split(" ")[0]}`;
+                  }
                   rows.push(
                     <VerificationRow
                       key={t}
@@ -388,14 +409,15 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                       verified
                       color={colorMap[t]}
                       href={
+                        chainTx?.solscanUrl ? chainTx.solscanUrl :
                         t === "satp" && (v as any)?.solana?.address ? `https://explorer.solana.com/address/${(v as any).solana.address}` :
-                        t === "x" && vEntry.handle ? `https://x.com/${vEntry.handle.replace("@","")}` :
-                        t === "moltbook" && vEntry.username ? `https://moltbook.com/u/${vEntry.username}` :
-                        t === "website" && vEntry.url ? vEntry.url :
-                        t === "github" && vEntry.username ? `https://github.com/${vEntry.username}` :
-                        t === "solana" && vEntry.address ? `https://explorer.solana.com/address/${vEntry.address}` :
-                        t === "ethereum" && vEntry.address ? `https://etherscan.io/address/${vEntry.address}` :
-                        t === "domain" && vEntry.domain ? `https://${vEntry.domain}` :
+                        t === "x" && vEntry?.handle ? `https://x.com/${vEntry?.handle.replace("@","")}` :
+                        t === "moltbook" && vEntry?.username ? `https://moltbook.com/u/${vEntry?.username}` :
+                        t === "website" && vEntry?.url ? vEntry?.url :
+                        t === "github" && vEntry?.username ? `https://github.com/${vEntry?.username}` :
+                        t === "solana" && vEntry?.address ? `https://explorer.solana.com/address/${vEntry?.address}` :
+                        t === "ethereum" && vEntry?.address ? `https://etherscan.io/address/${vEntry?.address}` :
+                        t === "domain" && vEntry?.domain ? `https://${vEntry?.domain}` :
                         undefined
                       }
                     />
