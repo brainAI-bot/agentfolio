@@ -3025,30 +3025,6 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
   }
 });
 
-app.use((req, res, next) => {
-  if (req.path.startsWith("/api/")) {
-    return res.status(404).json({
-      error: "Endpoint not found",
-      path: req.path,
-      method: req.method,
-      hint: "Check /docs for available API endpoints"
-    });
-  }
-  next();
-});
-app.use((err, req, res, next) => {
-  if (res.headersSent) { return next(err); }
-  console.error(`[ERROR] ${err.message}`, { 
-    path: req.path,
-    method: req.method,
-    stack: NODE_ENV === 'development' ? err.stack : undefined
-  });
-  
-  res.status(500).json({
-    error: NODE_ENV === 'production' ? 'Internal server error' : err.message
-  });
-});
-
 // Graceful shutdown
 process.on('SIGINT', () => {
   console.log(`[${new Date().toISOString()}] info: SIGINT received, shutting down gracefully...`, {service: "agentfolio"});
@@ -3245,6 +3221,30 @@ console.log(`[${new Date().toISOString()}] info: x402 payment layer initialized`
   network: X402_NETWORK,
   receivingAddress: X402_RECEIVE_ADDRESS,
   paidEndpoints: ['GET /api/score?id=<profileId> ($0.01)', 'GET /api/leaderboard/scores ($0.05)'],
+});
+
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/")) {
+    return res.status(404).json({
+      error: "Endpoint not found",
+      path: req.path,
+      method: req.method,
+      hint: "Check /docs for available API endpoints"
+    });
+  }
+  next();
+});
+app.use((err, req, res, next) => {
+  if (res.headersSent) { return next(err); }
+  console.error(`[ERROR] ${err.message}`, { 
+    path: req.path,
+    method: req.method,
+    stack: NODE_ENV === 'development' ? err.stack : undefined
+  });
+  
+  res.status(500).json({
+    error: NODE_ENV === 'production' ? 'Internal server error' : err.message
+  });
 });
 
 // Start server
