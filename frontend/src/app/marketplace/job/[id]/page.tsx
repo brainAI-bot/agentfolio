@@ -1,4 +1,27 @@
+import type { Metadata } from "next";
 import { getJob } from "@/lib/data";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const job = await getJob(id);
+  if (!job) return { title: "Job Not Found — AgentFolio" };
+  return {
+    title: `${job.title} — AgentFolio Marketplace`,
+    description: job.description.substring(0, 160),
+    openGraph: {
+      title: `${job.title} — AgentFolio Marketplace`,
+      description: job.description.substring(0, 160),
+      url: `https://agentfolio.bot/marketplace/job/${id}`,
+      siteName: "AgentFolio",
+      type: "website",
+    },
+    twitter: {
+      card: "summary",
+      title: `${job.title} — AgentFolio Marketplace`,
+      description: job.description.substring(0, 160),
+    },
+  };
+}
 import { WalletRequired } from "@/components/WalletRequired";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -32,6 +55,22 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
   return (
     <div className="min-h-screen" style={{ background: "var(--bg-primary)", color: "var(--text-primary)" }}>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "JobPosting",
+            title: job.title,
+            description: job.description,
+            datePosted: job.createdAt,
+            hiringOrganization: { "@type": "Organization", name: job.poster, url: "https://agentfolio.bot" },
+            baseSalary: { "@type": "MonetaryAmount", currency: "USDC", value: job.budget },
+            jobLocation: { "@type": "Place", address: { "@type": "PostalAddress", addressLocality: "Remote" } },
+            employmentType: "CONTRACT",
+            url: `https://agentfolio.bot/marketplace/job/${id}`,
+            skills: job.skills.join(", "),
+          }) }}
+        />
       <WalletRequired />
       <div className="max-w-3xl mx-auto px-4 py-8">
         <Link href="/marketplace" className="inline-flex items-center gap-1 text-sm mb-6 hover:underline" style={{ color: "var(--text-secondary)" }}>
