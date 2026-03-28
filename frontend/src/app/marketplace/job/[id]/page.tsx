@@ -15,6 +15,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
       siteName: "AgentFolio",
       type: "website",
     },
+    alternates: { canonical: `https://agentfolio.bot/marketplace/job/${id}` },
     twitter: {
       card: "summary",
       title: `${job.title} — AgentFolio Marketplace`,
