@@ -364,10 +364,13 @@ app.get('/api/explorer/:agentId', async (req, res) => {
   const profileStore = require('./profile-store');
   try {
     const db = profileStore.getDb();
-    const profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId);
+    let profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId);
+    if (!profile) profile = db.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(agentId);
+    if (!profile) profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + agentId.toLowerCase());
     if (!profile) {
       return res.status(404).json({ error: 'Agent not found', agentId });
     }
+    const resolvedId = profile.id;
     
     let verifications = [], wallets = {}, tags = [], skills = [];
     try {
@@ -387,7 +390,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     // V3: Fetch authoritative on-chain Genesis Record score
     let v3Data = null;
     try {
-      v3Data = await getV3Score(agentId);
+      v3Data = await getV3Score(resolvedId || agentId);
     } catch (e) {
       console.warn('[Explorer] V3 score fetch failed for', agentId, e.message);
     }
@@ -414,8 +417,8 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       level: v3Data ? v3Data.verificationLevel : 0,
       tierLabel: v3Data ? `L${v3Data.verificationLevel} · ${v3Data.verificationLabel}` : 'L0 · Unclaimed',
       nftImage: v3Data?.faceImage || null,
-      onChainAttestations: (() => { try { const cc = require('./lib/chain-cache'); return cc.getVerifications(agentId).length; } catch { return verifications.filter(v => v.verified !== false).length || 0; } })(),
-      attestationMemos: (() => { try { const cc = require('./lib/chain-cache'); const atts = cc.getVerifications(agentId); const seen = {}; return atts.filter(a => a.platform && !seen[a.platform] && (seen[a.platform] = true)).map(a => ({ platform: a.platform, txSignature: a.txSignature || null, timestamp: a.timestamp || null, solscanUrl: a.txSignature ? 'https://solscan.io/tx/' + a.txSignature : null })); } catch { return []; } })(),
+      onChainAttestations: (() => { try { const cc = require('./lib/chain-cache'); return cc.getVerifications(resolvedId || agentId).length; } catch { return verifications.filter(v => v.verified !== false).length || 0; } })(),
+      attestationMemos: (() => { try { const cc = require('./lib/chain-cache'); const atts = cc.getVerifications(resolvedId || agentId); const seen = {}; return atts.filter(a => a.platform && !seen[a.platform] && (seen[a.platform] = true)).map(a => ({ platform: a.platform, txSignature: a.txSignature || null, timestamp: a.timestamp || null, solscanUrl: a.txSignature ? 'https://solscan.io/tx/' + a.txSignature : null })); } catch { return []; } })(),
       ...(v3Data ? {
         v3: {
           reputationScore: v3Data.reputationScore,
