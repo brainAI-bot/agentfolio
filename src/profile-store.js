@@ -716,6 +716,7 @@ function registerRoutes(app) {
       }
 
       d.prepare(`INSERT INTO profiles (${insertCols.join(', ')}) VALUES (${insertPlaceholders.join(', ')})`).run(...insertVals);
+      addActivity(id, 'registration', { name: body.name || body.handle || id });
 
       // ── Write JSON profile file so Next.js frontend can find it ──
       const profilesDir = path.join(__dirname, '..', 'data', 'profiles');
@@ -1223,6 +1224,7 @@ function registerRoutes(app) {
     sets.push("updated_at = datetime('now')");
     vals.push(req.params.id);
     d.prepare(`UPDATE profiles SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+    addActivity(req.params.id, 'profile_update', { fields: Object.keys(req.body).filter(k => k !== 'walletAddress' && k !== 'signature') });
 
     // Return enriched profile so frontend can update state
     const updated = d.prepare('SELECT * FROM profiles WHERE id = ?').get(req.params.id);
