@@ -34,11 +34,12 @@ router.get('/health', (req, res) => {
     version: 'v3',
     network: process.env.SATP_NETWORK || process.env.SOLANA_NETWORK || 'mainnet',
     endpoints: {
+      identity: 4,
       escrow: 11,
       reviews: 7,
       reputation: 2,
       validation: 2,
-      total: 22,
+      total: 26,
     },
     programs: {
       identity_v3: 'GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG',
@@ -46,13 +47,21 @@ router.get('/health', (req, res) => {
       attestations_v3: '6Xd1dAQJPvQRJ4Ntr6LtPTjDjPUZ8nfnmYLZaZ2DtrdD',
       reputation_v3: '2Lz7KzMvKdrGeAuS8WPHu7jK2yScrnKVgacpYVEuDjkJ',
       validation_v3: '6rYRiCYidJYV7QvKrzKGgNu4oMh6BAvynked69R7xMbV',
-      escrow_v3: 'EscV3111111111111111111111111111111111111111',
+      escrow_v3: 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C',
     },
     timestamp: new Date().toISOString(),
   });
 });
 
 // ── Mount sub-routers ──────────────────────────────────────────────────────────
+try {
+  const identityRoutes = require('./identity-v3-routes');
+  router.use('/identity', identityRoutes);
+  console.log('[SATP V3 API] ✅ Identity V3 routes mounted at /api/v3/identity/*');
+} catch (e) {
+  console.warn('[SATP V3 API] ⚠️ Identity V3 routes failed to load:', e.message);
+}
+
 try {
   const escrowRoutes = require('./escrow-v3-routes');
   router.use('/escrow', escrowRoutes);
@@ -85,6 +94,12 @@ router.get('/', (req, res) => {
     docs: 'https://agentfolio.bot/docs/api/v3',
     endpoints: {
       health: 'GET /api/v3/health',
+      identity: {
+        get: 'GET /api/v3/identity/:agentId',
+        getByAddress: 'GET /api/v3/identity/address/:pda',
+        check: 'GET /api/v3/identity/check/:agentId',
+        nameAvailability: 'GET /api/v3/identity/name/:name',
+      },
       escrow: {
         create: 'POST /api/v3/escrow/create',
         submitWork: 'POST /api/v3/escrow/submit-work',
