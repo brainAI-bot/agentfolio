@@ -587,6 +587,8 @@ function enrichProfile(row) {
     score: v3 ? v3.reputationScore : (trust_score ? trust_score.overall_score : null),
     verification_level: v3 ? v3.verificationLevel : (trust_score ? trust_score.level : 0),
     reputation_score: v3 ? v3.reputationScore : (trust_score ? trust_score.overall_score : 0),
+    // Top-level unclaimed flag for frontend (from metadata)
+    unclaimed: (() => { try { const m = typeof row.metadata === 'string' ? JSON.parse(row.metadata || '{}') : (row.metadata || {}); return m.unclaimed === true || m.isPlaceholder === true || m.placeholder === true; } catch { return false; } })(),
   };
 }
 
