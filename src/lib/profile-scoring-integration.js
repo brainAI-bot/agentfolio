@@ -137,7 +137,7 @@ function generateProfileDisplay(profile) {
       score: scoring.reputationScore.score,
       text: scoring.reputationScore.rank,
       color: scoring.reputationScore.color,
-      maxScore: 1000
+      maxScore: 800
     },
     
     // Progress indicator (what's needed for next level)
