@@ -234,7 +234,7 @@ function hasHumanVerification(profile) {
 }
 
 /**
- * Calculate Reputation Score (0-1000) - behavioral signals
+ * Calculate Reputation Score (0-800) - behavioral signals
  */
 function calculateReputationScore(profile) {
   if (!profile) return 0;
@@ -261,8 +261,8 @@ function calculateReputationScore(profile) {
   const activityMultiplier = calculateActivityMultiplier(profile);
   score = Math.floor(score * activityMultiplier);
   
-  // Soft cap at 1000
-  return Math.min(score, 1000);
+  // Soft cap at 800
+  return Math.min(score, 800);
 }
 
 /**
@@ -474,7 +474,7 @@ function generateScoreSummary(level, reputation) {
   const levelName = VERIFICATION_LEVELS[level].name;
   const repRank = getReputationRank(reputation);
   
-  return `${levelName} agent with ${repRank} reputation (${reputation}/1000)`;
+  return `${levelName} agent with ${repRank} reputation (${reputation}/800)`;
 }
 
 module.exports = {
