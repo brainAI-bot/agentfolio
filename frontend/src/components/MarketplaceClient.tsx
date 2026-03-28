@@ -74,6 +74,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   const signTransaction = wallet.signTransaction;
   const sendTransaction = wallet.sendTransaction;
   const [filter, setFilter] = useState<string>("all");
+  const [skillFilter, setSkillFilter] = useState<string>("");
   const [modal, setModal] = useState<ModalType>(null);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [jobs, setJobs] = useState<Job[]>(initialJobs);
@@ -105,7 +106,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     }
   }, [connected, publicKey]);
 
-  const filtered = filter === "all"
+  const statusFiltered = filter === "all"
     ? jobs
     : filter === "my_jobs"
       ? jobs.filter((j) =>
@@ -113,6 +114,10 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           (myProfileId && (j.assigneeId === myProfileId || j.clientId === myProfileId))
         )
       : jobs.filter((j) => j.status === filter);
+  const filtered = skillFilter
+    ? statusFiltered.filter((j) => j.skills.some(s => s.toLowerCase().includes(skillFilter.toLowerCase())))
+    : statusFiltered;
+  const allSkills = [...new Set(jobs.flatMap(j => j.skills))].sort();
 
   const showMessage = (type: "success" | "error", text: string) => {
     setMessage({ type, text });
@@ -453,6 +458,26 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           </button>
         ))}
       </div>
+
+      {/* Skill Filter */}
+      {allSkills.length > 0 && (
+        <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1 flex-wrap">
+          {skillFilter && (
+            <button onClick={() => setSkillFilter("")}
+              className="px-2 py-1 rounded text-[10px] font-semibold"
+              style={{ fontFamily: "var(--font-mono)", background: "var(--accent)", color: "#fff" }}>
+              ✕ {skillFilter}
+            </button>
+          )}
+          {allSkills.filter(s => s !== skillFilter).slice(0, 12).map(s => (
+            <button key={s} onClick={() => setSkillFilter(s === skillFilter ? "" : s)}
+              className="px-2 py-1 rounded text-[10px] transition-all hover:border-[var(--accent)]"
+              style={{ fontFamily: "var(--font-mono)", background: "var(--bg-tertiary)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}>
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Job List */}
       <div className="space-y-3">
