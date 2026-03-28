@@ -1150,7 +1150,14 @@ function registerRoutes(app) {
   // ── GET /api/profile/:id ───────────────────────────────────────
   app.get('/api/profile/:id', async (req, res) => {
     const d = getDb();
-    const row = d.prepare('SELECT * FROM profiles WHERE id = ?').get(req.params.id);
+    let row = d.prepare('SELECT * FROM profiles WHERE id = ?').get(req.params.id);
+    // Fallback: try matching by name (case-insensitive) or agent_ prefix
+    if (!row) {
+      row = d.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(req.params.id);
+    }
+    if (!row) {
+      row = d.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + req.params.id.toLowerCase());
+    }
     if (!row) return res.status(404).json({ error: 'Profile not found' });
 
     const { api_key, ...safe } = row;
@@ -1182,16 +1189,44 @@ function registerRoutes(app) {
           enriched.trust_score = { source: 'error', message: e.message };
         }
       }
-      // P0 FIX: Add levelName to individual profile (matches /api/profiles list format)
+      // P0 FIX: Add levelName — DB-enriched when chain shows defaults
       if (enriched) {
         const levelLabels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
         const v = enriched.v3 || {};
         const ts = enriched.trust_score || {};
-        const level = v.verificationLevel || v.level || ts.verificationLevel || 0;
-        const score = v.reputationScore || v.score || ts.reputationScore || enriched.trust_score_num || 0;
+        let level = v.verificationLevel || v.level || ts.verificationLevel || 0;
+        let score = v.reputationScore || v.score || ts.reputationScore || enriched.trust_score_num || 0;
+        let label = v.verificationLabel || ts.verificationLabel || '';
+        
+        // If chain data shows defaults (level=0 or score=500000), use DB verification data
+        if (level === 0 || score === 500000) {
+          try {
+            const vd = typeof row.verification === 'string' ? JSON.parse(row.verification || '{}') : (row.verification || {});
+            const dbLevelMap = { SOVEREIGN: 5, TRUSTED: 4, ESTABLISHED: 3, VERIFIED: 2, REGISTERED: 1, NEW: 0 };
+            if (vd.level && typeof vd.level === 'string' && dbLevelMap[vd.level.toUpperCase()] !== undefined) {
+              level = dbLevelMap[vd.level.toUpperCase()];
+              label = levelLabels[level] || label;
+            } else if (vd.level && typeof vd.level === 'number' && vd.level > 0) {
+              level = vd.level;
+              label = levelLabels[level] || label;
+            }
+            if (vd.score && typeof vd.score === 'number' && vd.score < 10000) {
+              score = vd.score;
+            }
+          } catch {}
+        }
+        
         enriched.level = level;
         enriched.score = score;
-        enriched.levelName = v.verificationLabel || ts.verificationLabel || levelLabels[level] || 'Unknown';
+        enriched.levelName = label || levelLabels[level] || 'Unknown';
+        enriched.verificationLevel = level;
+        
+        // Also enrich trust_score for frontend consumption
+        if (enriched.trust_score && (enriched.trust_score.verificationLevel === 0 || enriched.trust_score.reputationScore === 500000)) {
+          enriched.trust_score.verificationLevel = level;
+          enriched.trust_score.verificationLabel = label || levelLabels[level];
+          enriched.trust_score.reputationScore = score;
+        }
       }
       res.json(enriched);
   });
@@ -1203,7 +1238,9 @@ function registerRoutes(app) {
     const walletSig = req.headers['x-wallet-signature'];
     const walletAddr = req.headers['x-wallet-address'];
 
-    const row = d.prepare('SELECT * FROM profiles WHERE id = ?').get(req.params.id);
+    let row = d.prepare('SELECT * FROM profiles WHERE id = ?').get(req.params.id);
+    if (!row) row = d.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(req.params.id);
+    if (!row) row = d.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + req.params.id.toLowerCase());
     if (!row) return res.status(404).json({ error: 'Profile not found' });
 
     // Auth: API key OR wallet signature
