@@ -1133,6 +1133,17 @@ function registerRoutes(app) {
       profiles.sort((a, b) => (b.trust_score || 0) - (a.trust_score || 0));
     } catch (e) { /* chain-cache may not be ready yet */ }
 
+    // P0 FIX: Promote v3/chain-cache level+score to top-level fields for directory consumption
+    const levelLabels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
+    for (const p of profiles) {
+      const v = p.v3 || {};
+      const cl = p.chain_level || 0;
+      const cs = p.chain_score || 0;
+      p.level = v.verificationLevel || v.level || cl || 0;
+      p.score = v.reputationScore || v.score || cs || p.trust_score || 0;
+      p.levelName = v.verificationLabel || levelLabels[p.level] || 'Unknown';
+    }
+
     const paginatedProfiles = profiles.slice(offset, offset + limit);
     res.json({ profiles: paginatedProfiles, total, page, limit, pages: Math.ceil(total / limit) });
   });
