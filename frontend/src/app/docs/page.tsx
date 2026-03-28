@@ -173,6 +173,34 @@ export default async function DocsPage() {
     { method: "POST", path: "/api/satp/authority/accept", desc: "Accept a pending SATP authority transfer", body: '{ "agentId" }', returns: "Acceptance result + TX signature" },
     // === Badge ===
     { method: "GET", path: "/api/badge/:id.svg", desc: "Dynamic SVG trust badge for embedding in READMEs, websites", body: null, returns: "SVG image with live trust score" },
+    // ═══ SATP V3 API ═══
+    // Escrow V3 (Identity-Verified)
+    { method: "GET", path: "/api/v3/health", desc: "V3 API health check — programs, endpoint counts", body: null, returns: "{ status, version, endpoints, programs }" },
+    { method: "POST", path: "/api/v3/escrow/create", desc: "Create identity-verified escrow (unsigned TX)", body: '{ "clientWallet", "agentWallet", "amount", "deadline", "signerWallet" }', returns: "{ transaction (base64), escrowPDA }" },
+    { method: "POST", path: "/api/v3/escrow/submit-work", desc: "Agent submits work proof", body: '{ "escrowPDA", "workProof", "signerWallet" }', returns: "{ transaction (base64) }" },
+    { method: "POST", path: "/api/v3/escrow/release", desc: "Client releases escrow funds", body: '{ "escrowPDA", "agentWallet", "signerWallet" }', returns: "{ transaction (base64) }" },
+    { method: "POST", path: "/api/v3/escrow/partial-release", desc: "Partial milestone payment", body: '{ "escrowPDA", "agentWallet", "amount", "signerWallet" }', returns: "{ transaction (base64) }" },
+    { method: "POST", path: "/api/v3/escrow/cancel", desc: "Cancel escrow (before work)", body: '{ "escrowPDA", "signerWallet" }', returns: "{ transaction (base64) }" },
+    { method: "POST", path: "/api/v3/escrow/dispute", desc: "Open dispute with reason hash", body: '{ "escrowPDA", "reasonHash", "signerWallet" }', returns: "{ transaction (base64) }" },
+    { method: "POST", path: "/api/v3/escrow/resolve", desc: "Resolve dispute (authority)", body: '{ "escrowPDA", "resolution", "signerWallet" }', returns: "{ transaction (base64) }" },
+    { method: "POST", path: "/api/v3/escrow/close", desc: "Close settled escrow account", body: '{ "escrowPDA", "signerWallet" }', returns: "{ transaction (base64) }" },
+    { method: "POST", path: "/api/v3/escrow/extend-deadline", desc: "Extend escrow deadline", body: '{ "escrowPDA", "newDeadline", "signerWallet" }', returns: "{ transaction (base64) }" },
+    { method: "GET", path: "/api/v3/escrow/:pda", desc: "Get escrow state from chain", body: null, returns: "{ client, agent, amount, status, deadline }" },
+    { method: "GET", path: "/api/v3/escrow/pda/derive", desc: "Derive escrow PDA address", body: null, returns: "{ pda, bump }" },
+    // Reviews V3 (On-Chain)
+    { method: "POST", path: "/api/v3/reviews/init-counter", desc: "Initialize review counter for agent", body: '{ "agentId", "signerWallet" }', returns: "{ transaction (base64) }" },
+    { method: "POST", path: "/api/v3/reviews/create", desc: "Create on-chain review (user-signed)", body: '{ "reviewerWallet", "agentId", "rating", "comment" }', returns: "{ transaction (base64) }" },
+    { method: "POST", path: "/api/v3/reviews/create-safe", desc: "Create review with self-review prevention", body: '{ "reviewerWallet", "agentId", "rating", "comment" }', returns: "{ transaction (base64) }" },
+    { method: "POST", path: "/api/v3/reviews/update", desc: "Update existing review", body: '{ "reviewerWallet", "agentId", "rating", "comment" }', returns: "{ transaction (base64) }" },
+    { method: "POST", path: "/api/v3/reviews/delete", desc: "Delete review", body: '{ "reviewerWallet", "agentId" }', returns: "{ transaction (base64) }" },
+    { method: "GET", path: "/api/v3/reviews/:agentId/:reviewer", desc: "Get specific review", body: null, returns: "{ rating, comment, timestamp }" },
+    { method: "GET", path: "/api/v3/reviews/count/:agentId", desc: "Get review count for agent", body: null, returns: "{ count }" },
+    // Reputation V3
+    { method: "POST", path: "/api/v3/reputation/recompute", desc: "Trigger permissionless reputation recompute", body: '{ "agentId", "signerWallet" }', returns: "{ transaction (base64) }" },
+    { method: "GET", path: "/api/v3/reputation/:agentId", desc: "Get on-chain reputation score", body: null, returns: "{ reputationScore, level, lastUpdated }" },
+    // Validation V3
+    { method: "POST", path: "/api/v3/validation/recompute", desc: "Trigger permissionless validation recompute", body: '{ "agentId", "signerWallet" }', returns: "{ transaction (base64) }" },
+    { method: "GET", path: "/api/v3/validation/:agentId", desc: "Get on-chain validation status", body: null, returns: "{ validationScore, level, lastUpdated }" },
   ];
 
   return (

@@ -77,7 +77,7 @@ export function transformProfile(p: APIProfile) {
 
 export async function fetchProfiles(): Promise<ReturnType<typeof transformProfile>[]> {
   try {
-    const res = await fetch(`${API_BASE}/api/profiles`, {
+    const res = await fetch(`${API_BASE}/api/profiles?limit=500`, {
       next: { revalidate: 60 } // Cache for 60 seconds
     });
     if (!res.ok) throw new Error('Failed to fetch profiles');

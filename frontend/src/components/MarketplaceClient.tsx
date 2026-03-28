@@ -6,17 +6,20 @@ import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { useDemoMode } from "@/lib/demo-mode";
-import { Connection as SolConnection, PublicKey, Transaction, TransactionInstruction, SystemProgram, LAMPORTS_PER_SOL } from "@solana/web3.js";
-// Re-alias to avoid conflict with wallet adapter's useConnection
+import { Connection as SolConnection, PublicKey, Transaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
 const Connection = SolConnection;
-import { getAssociatedTokenAddress, createTransferInstruction, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import type { Job } from "@/lib/types";
-import { Briefcase, Lock, Unlock, CheckCircle, AlertTriangle, Clock, X, Send, DollarSign, UserCheck, Link2 } from "lucide-react";
+import { Briefcase, Lock, Unlock, CheckCircle, AlertTriangle, Clock, X, Send, DollarSign, UserCheck, Link2, Shield } from "lucide-react";
 import { buildUpdateAgentTransaction, fetchAgentProfile, SOLANA_RPC } from "@/lib/identity-registry";
+import {
+  buildV3EscrowCreate,
+  buildV3Release,
+  signAndSendV3Tx,
+  resolveAgentWallet,
+  getV3EscrowState,
+} from "@/lib/v3-escrow";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
-const ESCROW_PROGRAM_ID = new PublicKey("4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a");
-const USDC_MINT = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 
 const statusConfig: Record<string, { label: string; color: string; icon: React.ElementType }> = {
   open: { label: "OPEN", color: "var(--success)", icon: CheckCircle },
@@ -27,7 +30,8 @@ const statusConfig: Record<string, { label: string; color: string; icon: React.E
 
 const escrowConfig: Record<string, { label: string; icon: React.ElementType }> = {
   ready: { label: "Escrow Ready", icon: Unlock },
-  locked: { label: "Escrow Locked 🔒", icon: Lock },
+  locked: { label: "V3 Escrow Locked 🔒", icon: Lock },
+  funded: { label: "V3 Escrow Funded 🔒", icon: Shield },
   released: { label: "Escrow Released", icon: CheckCircle },
   disputed: { label: "Escrow Disputed", icon: AlertTriangle },
 };
@@ -148,12 +152,16 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           budget: `${j.budgetAmount || 0} ${j.budgetCurrency || "USDC"}`,
           skills: j.skills || [],
           status: j.status === "in_progress" ? "in_progress" : j.status || "open",
-          escrowStatus: j.fundsReleased ? "released" : j.escrowFunded ? "locked" : "ready",
-          escrowTx: j.escrowTx || j.escrow_tx || null,
+          escrowStatus: j.fundsReleased ? "released" : j.v3EscrowPDA ? "funded" : j.escrowFunded ? "locked" : "ready",
+          escrowTx: j.v3EscrowTx || j.escrowTx || j.escrow_tx || null,
+          v3EscrowPDA: j.v3EscrowPDA || null,
           proposals: j.applicationCount || 0,
           deadline: (j.timeline || "").replace("_", " "),
-          assignee: j.selectedAgentId || undefined,
+          assignee: j.selectedAgentId || j.acceptedApplicant || undefined,
+          assigneeId: j.selectedAgentId || j.acceptedApplicant || undefined,
+          clientId: j.clientId || j.postedBy || undefined,
           createdAt: j.createdAt || new Date().toISOString(),
+          deliverableStatus: j.deliverableStatus || undefined,
         })));
       }
     } catch (e) { console.error("Failed to refresh jobs:", e); }
@@ -222,95 +230,145 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     } finally { setLoading(false); }
   };
 
-  // ─── FUND ESCROW (On-chain USDC transfer to program PDA) ───
+  // ─── FUND ESCROW (V3 On-chain Identity-Verified Escrow) ───
   const handleFundEscrow = async () => {
-    if (!connected || !publicKey || !signTransaction || !selectedJob) return;
+    if (!connected || !publicKey || !sendTransaction || !selectedJob) return;
     setLoading(true);
     try {
-      // Parse budget amount
+      // Parse budget amount — V3 escrow uses SOL (lamports)
       const budgetStr = selectedJob.budget.split(" ")[0];
       const amount = parseFloat(budgetStr);
       if (!amount || amount <= 0) throw new Error("Invalid budget amount");
 
-      // USDC has 6 decimals
-      const usdcAmount = Math.round(amount * 1_000_000);
+      // V3 escrow uses SOL lamports
+      const amountLamports = Math.round(amount * LAMPORTS_PER_SOL);
 
-      // Derive escrow PDA from program
-      const [escrowPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from("escrow"), new PublicKey(publicKey).toBuffer(), Buffer.from(selectedJob.id)],
-        ESCROW_PROGRAM_ID
-      );
+      // Resolve agent's wallet from their profile ID
+      const agentId = selectedJob.assignee || selectedJob.assigneeId;
+      if (!agentId) throw new Error("No agent assigned to this job yet. Accept an application first.");
 
-      // Get token accounts
-      const senderATA = await getAssociatedTokenAddress(USDC_MINT, publicKey);
-      const escrowATA = await getAssociatedTokenAddress(USDC_MINT, escrowPDA, true);
+      const agentWallet = await resolveAgentWallet(agentId);
+      if (!agentWallet) throw new Error(`Could not resolve wallet for agent "${agentId}". Agent must have a verified Solana wallet.`);
 
-      // Build transfer instruction
-      const transferIx = createTransferInstruction(
-        senderATA, escrowATA, publicKey, usdcAmount, [], TOKEN_PROGRAM_ID
-      );
+      // Calculate deadline (job timeline → unix timestamp)
+      const timelineMap: Record<string, number> = {
+        "1 day": 1, "1_day": 1, "3 days": 3, "3_days": 3,
+        "1 week": 7, "1_week": 7, "2 weeks": 14, "2_weeks": 14,
+        "1 month": 30, "1_month": 30,
+      };
+      const daysFromNow = timelineMap[selectedJob.deadline] || 7;
+      const deadlineUnix = Math.floor(Date.now() / 1000) + (daysFromNow * 86400);
 
-      const tx = new Transaction().add(transferIx);
-      tx.feePayer = publicKey;
-      tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+      // Build unsigned V3 escrow creation TX
+      const { tx, escrowPDA } = await buildV3EscrowCreate({
+        clientWallet: publicKey.toBase58(),
+        agentWallet,
+        agentId,
+        amountLamports,
+        description: selectedJob.title,
+        deadlineUnix,
+        minVerificationLevel: 2, // Require at least "Verified" level
+      });
 
-      const signedTx = await signTransaction(tx);
-      const sig = await connection.sendRawTransaction(signedTx.serialize());
-      await connection.confirmTransaction(sig, "confirmed");
+      // User signs and sends via Phantom
+      const sig = await signAndSendV3Tx(tx, connection, publicKey, sendTransaction);
 
-      // Notify backend
-      await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/confirm-deposit`, {
+      // Notify backend — store V3 escrow PDA on the job
+      await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/v3-escrow-funded`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           clientId: resolvedProfileId || publicKey.toBase58(),
+          escrowPDA,
           txSignature: sig,
           amount,
-          currency: "USDC",
+          agentWallet,
+          agentId,
         }),
       });
 
-      showMessage("success", `Escrow funded! TX: ${sig.slice(0, 16)}...`);
+      showMessage("success", `V3 Escrow funded on-chain! TX: ${sig.slice(0, 16)}... | PDA: ${escrowPDA.slice(0, 12)}...`);
       setModal(null);
       await refreshJobs();
     } catch (e: any) {
+      console.error("V3 Escrow funding error:", e);
       showMessage("error", e.message || "Escrow funding failed");
     } finally { setLoading(false); }
   };
 
-  // ─── RELEASE FUNDS ───
+  // ─── RELEASE FUNDS (V3 On-chain Release) ───
   const handleRelease = async () => {
-    if (!connected || !publicKey || !selectedJob) return;
+    if (!connected || !publicKey || !sendTransaction || !selectedJob) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientId: resolvedProfileId || publicKey.toBase58(),
-          completionNote: "Work completed and approved.",
-        }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      // Record job completion on-chain via update_agent (bumps updated_at)
-      try {
-        const conn = new Connection(SOLANA_RPC, "confirmed");
-        const profile = await fetchAgentProfile(conn, publicKey);
-        if (profile) {
-          const tx = await buildUpdateAgentTransaction(conn, publicKey, null, null, null, null);
-          const sig = await sendTransaction(tx, conn);
-          await conn.confirmTransaction(sig, "confirmed");
-          showMessage("success", `Funds released! On-chain record: ${sig.slice(0, 12)}...`);
-        } else {
-          showMessage("success", "Funds released! Job completed.");
+      const agentId = selectedJob.assignee || selectedJob.assigneeId;
+
+      // Check if this job has a V3 escrow PDA — if so, do on-chain release
+      if (selectedJob.v3EscrowPDA) {
+        const escrowPDA = selectedJob.v3EscrowPDA;
+
+        // Resolve agent wallet
+        if (!agentId) throw new Error("No agent assigned to this job");
+        const agentWallet = await resolveAgentWallet(agentId);
+        if (!agentWallet) throw new Error(`Could not resolve wallet for agent "${agentId}"`);
+
+        // Build unsigned V3 release TX
+        const tx = await buildV3Release({
+          escrowPDA,
+          clientWallet: publicKey.toBase58(),
+          agentWallet,
+        });
+
+        // User signs on-chain release
+        const sig = await signAndSendV3Tx(tx, connection, publicKey, sendTransaction);
+
+        // Notify backend
+        await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/complete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clientId: resolvedProfileId || publicKey.toBase58(),
+            completionNote: "Work approved. V3 escrow released on-chain.",
+            releaseTxSignature: sig,
+            v3Release: true,
+          }),
+        });
+
+        showMessage("success", `Funds released on-chain! TX: ${sig.slice(0, 16)}...`);
+      } else {
+        // Fallback: legacy release (no V3 escrow)
+        const res = await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/complete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clientId: resolvedProfileId || publicKey.toBase58(),
+            completionNote: "Work completed and approved.",
+          }),
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        // Optional: record completion on-chain via identity registry
+        try {
+          const conn = new Connection(SOLANA_RPC, "confirmed");
+          const profile = await fetchAgentProfile(conn, publicKey);
+          if (profile) {
+            const tx = await buildUpdateAgentTransaction(conn, publicKey, null, null, null, null);
+            const sig = await sendTransaction(tx, conn);
+            await conn.confirmTransaction(sig, "confirmed");
+            showMessage("success", `Funds released! On-chain record: ${sig.slice(0, 12)}...`);
+          } else {
+            showMessage("success", "Funds released! Job completed.");
+          }
+        } catch {
+          showMessage("success", "Funds released! Job completed. (On-chain record skipped)");
         }
-      } catch {
-        showMessage("success", "Funds released! Job completed. (On-chain record skipped)");
       }
+
       setModal(null);
       await refreshJobs();
     } catch (e: any) {
+      console.error("Release error:", e);
       showMessage("error", e.message || "Failed to release funds");
     } finally { setLoading(false); }
   };
@@ -357,7 +415,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
             Marketplace
           </h1>
           <p className="text-sm mt-1" style={{ color: "var(--text-tertiary)" }}>
-            {jobs.length} jobs · Escrow-backed execution
+            {jobs.length} jobs · V3 Identity-Verified Escrow
           </p>
         </div>
         <button
@@ -405,6 +463,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           const EscrowIcon = ec.icon;
           const isMyJob = connected && publicKey && job.poster === publicKey.toBase58();
           const isMyAssignment = myProfileId && (job.assigneeId === myProfileId);
+          const hasV3Escrow = !!job.v3EscrowPDA;
 
           return (
             <div
@@ -420,6 +479,11 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                       <StatusIcon size={12} />
                       {sc.label}
                     </span>
+                    {hasV3Escrow && (
+                      <span className="text-[10px] px-2 py-0.5 rounded" style={{ background: "rgba(16,185,129,0.15)", color: "var(--success)", fontFamily: "var(--font-mono)" }}>
+                        <Shield size={10} className="inline mr-0.5" /> V3 ESCROW
+                      </span>
+                    )}
                     {isMyJob && (
                       <span className="text-[10px] px-2 py-0.5 rounded" style={{ background: "rgba(153,69,255,0.15)", color: "var(--solana)", fontFamily: "var(--font-mono)" }}>
                         YOUR JOB
@@ -508,21 +572,21 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                       Connect to Apply
                     </button>
                   )}
-                  {isMyJob && job.status === "in_progress" && job.escrowStatus === "ready" && (
+                  {isMyJob && job.status === "in_progress" && !hasV3Escrow && job.escrowStatus === "ready" && (
                     <button onClick={() => openJobAction(job, "fund-escrow")}
                       className="px-3 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wider"
                       style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.15)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}>
-                      <DollarSign size={12} className="inline mr-1" /> Fund Escrow
+                      <Shield size={12} className="inline mr-1" /> Fund V3 Escrow
                     </button>
                   )}
                   {isMyJob && job.status === "open" && job.escrowStatus === "ready" && (
                     <button onClick={() => openJobAction(job, "fund-escrow")}
                       className="px-3 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wider"
                       style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.15)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}>
-                      <DollarSign size={12} className="inline mr-1" /> Fund Escrow
+                      <Shield size={12} className="inline mr-1" /> Fund V3 Escrow
                     </button>
                   )}
-                  {isMyJob && job.escrowStatus === "locked" && job.status === "in_progress" && (
+                  {isMyJob && (hasV3Escrow || job.escrowStatus === "locked" || job.escrowStatus === "funded") && job.status === "in_progress" && (
                     <button onClick={() => openJobAction(job, "release")}
                       className="px-3 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wider"
                       style={{ fontFamily: "var(--font-mono)", background: "rgba(59,130,246,0.15)", color: "#3b82f6", border: "1px solid rgba(59,130,246,0.3)" }}>
@@ -553,7 +617,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
               <h2 className="text-lg font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
                 {modal === "post-job" && "Post a Job"}
                 {modal === "apply" && `Apply: ${selectedJob?.title}`}
-                {modal === "fund-escrow" && `Fund Escrow: ${selectedJob?.title}`}
+                {modal === "fund-escrow" && `Fund V3 Escrow: ${selectedJob?.title}`}
                 {modal === "release" && `Release Funds: ${selectedJob?.title}`}
               </h2>
               <button onClick={() => !loading && setModal(null)} style={{ color: "var(--text-tertiary)" }}>
@@ -585,9 +649,12 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                       { value: "1_month", label: "1 Month" },
                     ]} />
                 </div>
-                <Input label="Budget (USDC)" value={postForm.budgetAmount} onChange={(v) => setPostForm(p => ({ ...p, budgetAmount: v }))} placeholder="100" type="number" />
+                <Input label="Budget (SOL)" value={postForm.budgetAmount} onChange={(v) => setPostForm(p => ({ ...p, budgetAmount: v }))} placeholder="1.0" type="number" />
                 <Input label="Skills (comma separated)" value={postForm.skills} onChange={(v) => setPostForm(p => ({ ...p, skills: v }))} placeholder="Solana, Rust, TypeScript" />
                 <Textarea label="Requirements (optional)" value={postForm.requirements} onChange={(v) => setPostForm(p => ({ ...p, requirements: v }))} placeholder="Must have experience with..." />
+                <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", color: "#10b981" }}>
+                  <Shield size={12} className="inline mr-1" /> Jobs use V3 identity-verified escrow. Agent must have SATP Genesis Record. Funds are held on-chain until you approve.
+                </div>
                 <button onClick={handlePostJob} disabled={loading}
                   className="w-full py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-50"
                   style={{ fontFamily: "var(--font-mono)", background: "var(--accent)", color: "#fff" }}>
@@ -606,7 +673,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                 {resolvedProfileId && <div className="text-[11px]" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>Applying as: <strong>{resolvedProfileId}</strong></div>}
                 {!resolvingProfile && !resolvedProfileId && publicKey && <div className="text-[11px]" style={{ color: "var(--warning, #f59e0b)", fontFamily: "var(--font-mono)" }}>⚠️ No profile found for this wallet. Create a profile first.</div>}
                 <Textarea label="Your Proposal" value={applyMessage} onChange={setApplyMessage} placeholder="Why are you the best fit for this job?" />
-                <Input label="Your Bid (USDC, optional)" value={applyBid} onChange={setApplyBid} placeholder="Leave empty to match budget" type="number" />
+                <Input label="Your Bid (SOL, optional)" value={applyBid} onChange={setApplyBid} placeholder="Leave empty to match budget" type="number" />
                 <button onClick={handleApply} disabled={loading}
                   className="w-full py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-50"
                   style={{ fontFamily: "var(--font-mono)", background: "var(--accent)", color: "#fff" }}>
@@ -615,29 +682,40 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
               </div>
             )}
 
-            {/* FUND ESCROW */}
+            {/* FUND ESCROW — V3 Identity-Verified */}
             {modal === "fund-escrow" && selectedJob && (
               <div className="space-y-4">
                 <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
                   <div className="text-sm mb-2" style={{ color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>
                     💰 Amount: <strong>{selectedJob.budget}</strong>
                   </div>
-                  <div className="text-xs" style={{ color: "var(--text-tertiary)" }}>
-                    Funds will be sent to the escrow program ({ESCROW_PROGRAM_ID.toBase58().slice(0, 8)}...) and held until you release them on completion.
-                  </div>
+                  {selectedJob.assignee ? (
+                    <div className="text-xs" style={{ color: "var(--success)" }}>
+                      Agent: <strong>{selectedJob.assignee.length > 20 ? `${selectedJob.assignee.slice(0, 6)}...${selectedJob.assignee.slice(-4)}` : selectedJob.assignee}</strong>
+                    </div>
+                  ) : (
+                    <div className="text-xs" style={{ color: "var(--warning, #f59e0b)" }}>
+                      ⚠️ No agent assigned yet. Accept an application first.
+                    </div>
+                  )}
+                </div>
+                <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", color: "#10b981" }}>
+                  <Shield size={12} className="inline mr-1" /> <strong>V3 Identity-Verified Escrow</strong>
+                  <br />
+                  Your funds are locked in an on-chain escrow program with SATP identity verification. The agent must have a verified Genesis Record. You control release.
                 </div>
                 <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)", color: "#f59e0b" }}>
-                  ⚠️ This will initiate a Solana transaction from your connected wallet. Make sure you have enough USDC.
+                  ⚠️ This will open your wallet (Phantom) to sign a Solana transaction. The funds go to the escrow program — not directly to the agent.
                 </div>
-                <button onClick={handleFundEscrow} disabled={loading}
+                <button onClick={handleFundEscrow} disabled={loading || !selectedJob.assignee}
                   className="w-full py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-50"
                   style={{ fontFamily: "var(--font-mono)", background: "#10b981", color: "#fff" }}>
-                  {loading ? "Processing..." : `Fund Escrow — ${selectedJob.budget}`}
+                  {loading ? "Signing Transaction..." : `Fund V3 Escrow — ${selectedJob.budget}`}
                 </button>
               </div>
             )}
 
-            {/* RELEASE FUNDS */}
+            {/* RELEASE FUNDS — V3 On-chain or Legacy */}
             {modal === "release" && selectedJob && (
               <div className="space-y-4">
                 <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
@@ -648,13 +726,23 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                     {selectedJob.assignee ? `Agent: ${selectedJob.assignee.length > 20 ? `${selectedJob.assignee.slice(0, 6)}...${selectedJob.assignee.slice(-4)}` : selectedJob.assignee}` : "No agent assigned yet"}
                   </div>
                 </div>
-                <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.2)", color: "#3b82f6" }}>
-                  This will mark the job as completed and release escrowed funds to the agent.
-                </div>
+                {selectedJob.v3EscrowPDA ? (
+                  <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", color: "#10b981" }}>
+                    <Shield size={12} className="inline mr-1" /> <strong>V3 On-Chain Release</strong>
+                    <br />
+                    This will release the escrowed funds directly to the agent's wallet via the SATP V3 escrow program. You'll sign the release transaction in your wallet.
+                    <br />
+                    <span className="opacity-70">Escrow: {selectedJob.v3EscrowPDA.slice(0, 12)}...</span>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.2)", color: "#3b82f6" }}>
+                    This will mark the job as completed and release escrowed funds to the agent.
+                  </div>
+                )}
                 <button onClick={handleRelease} disabled={loading}
                   className="w-full py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-50"
                   style={{ fontFamily: "var(--font-mono)", background: "#3b82f6", color: "#fff" }}>
-                  {loading ? "Releasing..." : "Confirm Release"}
+                  {loading ? "Signing Release..." : "Confirm Release"}
                 </button>
               </div>
             )}

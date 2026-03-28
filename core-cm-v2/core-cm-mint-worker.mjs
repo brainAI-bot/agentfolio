@@ -1,5 +1,13 @@
 /**
- * Core CM Mint Worker — called by the backend API
+ * Core CM Mint Worker — FIXED (6006 guard error)
+ * 
+ * The original code called mintV1 WITHOUT specifying a guard group.
+ * But the CM has guards configured (paid + free groups), so the default
+ * guard check fails → Metaplex error 6006 (guard evaluation failed).
+ * 
+ * FIX: Use the "free" guard group with thirdPartySigner (deployer co-signs).
+ * The deployer is already loaded as keypairIdentity, so it signs automatically.
+ * 
  * Usage: node core-cm-mint-worker.mjs <recipient_wallet>
  * Must be run from ~/agentfolio/core-cm-v2/ (correct node_modules)
  */
@@ -8,6 +16,7 @@ import {
   mplCandyMachine as mplCoreCandyMachine,
   fetchCandyMachine,
   mintV1,
+  findCandyGuardPda,
 } from '@metaplex-foundation/mpl-core-candy-machine';
 import { setComputeUnitLimit } from '@metaplex-foundation/mpl-toolbox';
 import {
@@ -15,6 +24,7 @@ import {
   keypairIdentity,
   publicKey,
   transactionBuilder,
+  some,
 } from '@metaplex-foundation/umi';
 import fs from 'fs';
 import path from 'path';
@@ -70,6 +80,17 @@ async function run() {
 
   const asset = generateSigner(umi);
 
+  // FIX: Include guard group "free" with thirdPartySigner
+  // The deployer (keypairIdentity) automatically signs as the thirdPartySigner
+  // since it's set as the UMI identity.
+  //
+  // NOTE: We set minter to the deployer's identity (default behavior).
+  // The mintLimit(id:2, limit:1) in "free" group tracks per-minter.
+  // Since server controls eligibility, the mintLimit is redundant for server-side mints.
+  // If mintLimit blocks after 1st mint, CEO should run update-cm-guards.mjs to remove
+  // the mintLimit from the "free" group (or increase the limit).
+  //
+  // owner = recipient → NFT goes to the recipient's wallet.
   await transactionBuilder()
     .add(setComputeUnitLimit(umi, { units: 800_000 }))
     .add(
@@ -77,6 +98,11 @@ async function run() {
         candyMachine: cmPk,
         asset,
         collection: collPk,
+        owner: publicKey(recipient),
+        group: some('free'),  // ← FIX: specify the "free" guard group
+        mintArgs: {
+          thirdPartySigner: some({ signer: umi.identity }),  // ← FIX: deployer co-signs
+        },
       })
     )
     .sendAndConfirm(umi, options);

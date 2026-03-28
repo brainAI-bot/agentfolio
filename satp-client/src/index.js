@@ -772,7 +772,12 @@ class SATPSDK {
   }
 }
 
+// V3 SDK + PDA exports
+const { SATPV3SDK } = require('./v3-sdk');
+const v3pda = require('./v3-pda');
+
 module.exports = {
+  // V2 SDK (backward compatible)
   SATPSDK,
   getProgramIds,
   getIdentityPDA,
@@ -786,4 +791,22 @@ module.exports = {
   getEscrowPDA,
   getReviewV3PDA,
   anchorDiscriminator,
+
+  // V3 SDK
+  SATPV3SDK,
+
+  // V3 PDA derivation
+  getV3ProgramIds: v3pda.getV3ProgramIds,
+  hashAgentId: v3pda.hashAgentId,
+  hashName: v3pda.hashName,
+  getGenesisPDA: v3pda.getGenesisPDA,
+  getV3ReputationAuthorityPDA: v3pda.getV3ReputationAuthorityPDA,
+  getV3ValidationAuthorityPDA: v3pda.getV3ValidationAuthorityPDA,
+  getV3MintTrackerPDA: v3pda.getV3MintTrackerPDA,
+  getNameRegistryPDA: v3pda.getNameRegistryPDA,
+  getLinkedWalletPDA: v3pda.getLinkedWalletPDA,
+  getV3ReviewPDA: v3pda.getV3ReviewPDA,
+  getV3ReviewCounterPDA: v3pda.getV3ReviewCounterPDA,
+  getV3AttestationPDA: v3pda.getV3AttestationPDA,
+  getV3EscrowPDA: v3pda.getV3EscrowPDA,
 };
