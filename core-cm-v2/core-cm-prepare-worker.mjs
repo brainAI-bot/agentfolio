@@ -1,14 +1,16 @@
 /**
- * Core CM Prepare Worker — builds partially-signed mint TX for client-side signing
+ * Core CM Prepare Worker — FIXED (6006 guard error)
+ * 
+ * Bug: mintV1 was called without thirdPartySigner in mintArgs.
+ * The deployer's partialSign on the TX is not enough — the instruction itself
+ * must reference the thirdPartySigner signer in mintArgs.
+ * 
+ * Fix: Pass group: some('free') and mintArgs: { thirdPartySigner: some({ signer }) }
+ * 
  * Usage: node core-cm-prepare-worker.mjs <recipient_wallet> <flow>
  * flow: "free" (thirdPartySigner group, deployer co-signs) or "paid" (solPayment group)
  * 
  * Returns JSON: { transaction: base64, asset: pubkey, boaId, ... }
- * 
- * For "free" flow: deployer signs as thirdPartySigner + asset signer signs.
- *   User must sign as minter/payer.
- * For "paid" flow: asset signer signs.
- *   User must sign as minter/payer (SOL payment guard enforced on-chain).
  */
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults';
 import {
@@ -16,17 +18,17 @@ import {
   fetchCandyMachine,
   mintV1,
 } from '@metaplex-foundation/mpl-core-candy-machine';
-import { setComputeUnitLimit } from '@metaplex-foundation/mpl-toolbox';
+import { setComputeUnitLimit, setComputeUnitPrice } from '@metaplex-foundation/mpl-toolbox';
 import {
   generateSigner,
   keypairIdentity,
   publicKey,
   transactionBuilder,
-  signerIdentity,
   createNoopSigner,
+  some,
 } from '@metaplex-foundation/umi';
 import { toWeb3JsLegacyTransaction } from '@metaplex-foundation/umi-web3js-adapters';
-import { Connection, Transaction, PublicKey } from '@solana/web3.js';
+import { Connection, Transaction, PublicKey, Keypair } from '@solana/web3.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -43,6 +45,8 @@ const DEPLOYER_PATH = process.env.HOME + '/.config/solana/mainnet-deployer.json'
 const DATA_DIR = process.env.HOME + '/agentfolio/boa-pipeline/candy-machine-data';
 const CM_STATE_PATH = path.join(DATA_DIR, 'core-cm-state.json');
 const UPLOADED_PATH = path.join(DATA_DIR, 'uploaded-assets.json');
+
+const PRIORITY_FEE = 50_000; // microLamports
 
 async function run() {
   const cmState = JSON.parse(fs.readFileSync(CM_STATE_PATH, 'utf-8'));
@@ -68,13 +72,13 @@ async function run() {
 
   const item = cm.items[nextIndex];
   if (!item) {
-    console.log(JSON.stringify({ error: `No item at index ${nextIndex}` }));
+    console.log(JSON.stringify({ error: 'No item at index ' + nextIndex }));
     process.exit(1);
   }
 
   const nameMatch = item.name.match(/(\d+)/);
   const boaId = nameMatch ? parseInt(nameMatch[1]) : nextIndex + 1;
-  console.error(`[Prepare] Building TX for index ${nextIndex} → BOA #${boaId} → ${recipient} (${flow})`);
+  console.error('[Prepare] Building TX for index ' + nextIndex + ' -> BOA #' + boaId + ' -> ' + recipient + ' (' + flow + ')');
 
   // Generate new asset signer (the NFT address)
   const asset = generateSigner(umi);
@@ -83,27 +87,34 @@ async function run() {
   const ownerPk = publicKey(recipient);
   const ownerSigner = createNoopSigner(ownerPk);
 
-  // Build the mint instruction
-  const mintArgs = {
-    candyMachine: cmPk,
-    asset,
-    collection: collPk,
-    owner: ownerPk, // NFT goes to user's wallet
-    mintArgs: {},
-  };
-
-  if (flow === 'free') {
-    mintArgs.group = 'free';
-    // thirdPartySigner guard: deployer will co-sign below
-  } else {
-    mintArgs.group = 'paid';
-    // solPayment guard: user pays 1 SOL (enforced on-chain)
-  }
+  // Build the mint instruction with CORRECT guard args
+  const mintInstruction = flow === 'free'
+    ? mintV1(umi, {
+        candyMachine: cmPk,
+        asset,
+        collection: collPk,
+        owner: ownerPk,
+        group: some('free'),
+        mintArgs: {
+          thirdPartySigner: some({ signer: umi.identity }),
+        },
+      })
+    : mintV1(umi, {
+        candyMachine: cmPk,
+        asset,
+        collection: collPk,
+        owner: ownerPk,
+        group: some('paid'),
+        mintArgs: {
+          solPayment: some({ destination: publicKey('FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be') }),
+        },
+      });
 
   // Build transaction with recipient as payer (they pay gas)
   const builder = transactionBuilder()
     .add(setComputeUnitLimit(umi, { units: 800_000 }))
-    .add(mintV1(umi, mintArgs));
+    .add(setComputeUnitPrice(umi, { microLamports: PRIORITY_FEE }))
+    .add(mintInstruction);
 
   // Set the recipient as the payer for the transaction
   const tx = await builder.setFeePayer(ownerSigner).buildWithLatestBlockhash(umi);
@@ -114,7 +125,6 @@ async function run() {
   // Server-side partial signing:
   // 1. Asset signer MUST sign (it's a generated keypair for the NFT)
   // 2. For "free" flow: deployer signs as thirdPartySigner
-  const { Keypair } = await import('@solana/web3.js');
   const assetWeb3Kp = Keypair.fromSecretKey(Uint8Array.from(asset.secretKey));
   web3Tx.partialSign(assetWeb3Kp);
   
@@ -124,7 +134,7 @@ async function run() {
     console.error('[Prepare] Deployer co-signed for free flow (thirdPartySigner guard)');
   }
 
-  // Serialize (user still needs to sign as payer/owner)
+  // Serialize (user still needs to sign as payer)
   const serialized = web3Tx.serialize({ requireAllSignatures: false });
   const base64Tx = Buffer.from(serialized).toString('base64');
 
@@ -135,7 +145,7 @@ async function run() {
     transaction: base64Tx,
     asset: asset.publicKey.toString(),
     boaId,
-    boaName: `Burned-Out Agent #${boaId}`,
+    boaName: 'Burned-Out Agent #' + boaId,
     metadataUri: item.uri,
     imageUri: assetData.imageUri || '',
     collection: cmState.collection,
@@ -148,7 +158,7 @@ async function run() {
 }
 
 run().catch(e => {
-  console.error(`[Prepare] Fatal: ${e.message}`);
+  console.error('[Prepare] Fatal: ' + e.message);
   console.log(JSON.stringify({ error: e.message }));
   process.exit(1);
 });
