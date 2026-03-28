@@ -235,7 +235,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     if (!connected || !publicKey || !sendTransaction || !selectedJob) return;
     setLoading(true);
     try {
-      // Parse budget amount — V3 escrow uses SOL (lamports)
+      // Parse budget amount — V3 escrow uses USDC
       const budgetStr = selectedJob.budget.split(" ")[0];
       const amount = parseFloat(budgetStr);
       if (!amount || amount <= 0) throw new Error("Invalid budget amount");
@@ -649,7 +649,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                       { value: "1_month", label: "1 Month" },
                     ]} />
                 </div>
-                <Input label="Budget (SOL)" value={postForm.budgetAmount} onChange={(v) => setPostForm(p => ({ ...p, budgetAmount: v }))} placeholder="1.0" type="number" />
+                <Input label="Budget (USDC)" value={postForm.budgetAmount} onChange={(v) => setPostForm(p => ({ ...p, budgetAmount: v }))} placeholder="1.0" type="number" />
                 <Input label="Skills (comma separated)" value={postForm.skills} onChange={(v) => setPostForm(p => ({ ...p, skills: v }))} placeholder="Solana, Rust, TypeScript" />
                 <Textarea label="Requirements (optional)" value={postForm.requirements} onChange={(v) => setPostForm(p => ({ ...p, requirements: v }))} placeholder="Must have experience with..." />
                 <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", color: "#10b981" }}>
