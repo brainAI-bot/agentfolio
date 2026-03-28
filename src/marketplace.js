@@ -47,6 +47,75 @@ function readJSON(filepath) {
   try { return JSON.parse(fs.readFileSync(filepath, 'utf8')); } catch { return null; }
 }
 
+// Enrich application with profile trust/verification data
+function enrichApplication(app) {
+  if (!app || !app.applicantId) return app;
+  try {
+    const profileStore = require('./profile-store');
+    const db = profileStore.getDb();
+    
+    // Try exact match, then lowercase with agent_ prefix, then case-insensitive name
+    let row = db.prepare('SELECT id, name, avatar, nft_avatar, verification_data FROM profiles WHERE id = ?').get(app.applicantId);
+    if (!row) {
+      row = db.prepare('SELECT id, name, avatar, nft_avatar, verification_data FROM profiles WHERE id = ?').get('agent_' + app.applicantId.toLowerCase());
+    }
+    if (!row) {
+      row = db.prepare('SELECT id, name, avatar, nft_avatar, verification_data FROM profiles WHERE LOWER(name) = ?').get(app.applicantId.toLowerCase());
+    }
+    
+    if (row) {
+      const levelNames = ['Unverified', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
+      const vd = JSON.parse(row.verification_data || '{}');
+      const badges = [];
+      if (vd.solana?.verified) badges.push('solana');
+      if (vd.github?.verified) badges.push('github');
+      if (vd.x?.verified) badges.push('x');
+      if (vd.satp?.verified) badges.push('satp');
+      if (vd.agentmail?.verified) badges.push('agentmail');
+      
+      // Resolve avatar (nft_avatar.image takes priority)
+      let resolvedAvatar = row.avatar;
+      if (row.nft_avatar) {
+        try {
+          const nft = JSON.parse(row.nft_avatar);
+          if (nft.image || nft.arweaveUrl) resolvedAvatar = (nft.image || nft.arweaveUrl).replace('node1.irys.xyz', 'gateway.irys.xyz');
+        } catch {}
+      }
+      
+      // Get trust score from satp_trust_scores table
+      let trustScore = 0;
+      let verificationLevel = 0;
+      let verificationLevelName = 'Unverified';
+      try {
+        const trustRow = db.prepare('SELECT overall_score, level FROM satp_trust_scores WHERE agent_id = ?').get(row.id);
+        if (trustRow) {
+          trustScore = trustRow.overall_score || 0;
+          // level can be a number or a string label
+          const lvl = trustRow.level;
+          if (typeof lvl === 'number') {
+            verificationLevel = lvl;
+            verificationLevelName = levelNames[lvl] || 'Unverified';
+          } else if (typeof lvl === 'string') {
+            // Map string labels to numbers
+            const labelMap = { 'UNVERIFIED': 0, 'REGISTERED': 1, 'VERIFIED': 2, 'ESTABLISHED': 3, 'TRUSTED': 4, 'SOVEREIGN': 5 };
+            verificationLevel = labelMap[lvl.toUpperCase()] ?? 0;
+            verificationLevelName = levelNames[verificationLevel] || lvl;
+          }
+        }
+      } catch {}
+      
+      app.applicantName = row.name;
+      app.applicantAvatar = resolvedAvatar;
+      app.applicantProfileId = row.id;
+      app.trustScore = trustScore;
+      app.verificationLevel = verificationLevel;
+      app.verificationLevelName = verificationLevelName;
+      app.verificationBadges = badges;
+    }
+  } catch (e) { console.error('[Marketplace] enrichApplication error:', e.message); }
+  return app;
+}
+
 // Normalize job.applications to always be an array
 function readJob(filepath) {
   const job = readJSON(filepath);
@@ -115,15 +184,15 @@ function registerRoutes(app) {
     const jobs = getAllFiles(path.join(DATA_DIR, 'jobs'));
     const status = req.query.status;
     const filtered = status ? jobs.filter(j => j.status === status) : jobs;
-    // Hydrate application IDs into full application objects for each job
+    // Hydrate application IDs into full application objects (with profile enrichment)
     const hydrated = filtered.map(job => {
       if (Array.isArray(job.applications)) {
         job.applications = job.applications.map(appId => {
           if (typeof appId === 'string') {
             const app = readJSON(path.join(DATA_DIR, 'applications', `${appId}.json`));
-            return app || { id: appId, error: 'not_found' };
+            return enrichApplication(app) || { id: appId, error: 'not_found' };
           }
-          return appId; // already hydrated
+          return enrichApplication(appId); // already hydrated object
         });
       }
       return job;
@@ -131,15 +200,15 @@ function registerRoutes(app) {
     res.json({ jobs: hydrated, total: hydrated.length });
   });
 
-  // GET /api/marketplace/jobs/:id — Get single job (with hydrated applications)
+  // GET /api/marketplace/jobs/:id — Get single job (with hydrated applications + profile data)
   app.get('/api/marketplace/jobs/:id', (req, res) => {
     const job = readJob(path.join(DATA_DIR, 'jobs', `${req.params.id}.json`));
     if (!job) return res.status(404).json({ error: 'Job not found' });
-    // Hydrate application IDs into full application objects
+    // Hydrate application IDs into full application objects with trust/verification data
     if (Array.isArray(job.applications)) {
       job.applications = job.applications.map(appId => {
         const app = readJSON(path.join(DATA_DIR, 'applications', `${appId}.json`));
-        return app || { id: appId, error: 'not_found' };
+        return enrichApplication(app) || { id: appId, error: 'not_found' };
       });
     }
     res.json(job);
