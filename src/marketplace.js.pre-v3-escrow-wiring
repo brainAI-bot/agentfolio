@@ -384,18 +384,14 @@ function registerRoutes(app) {
     if (!job) return res.status(404).json({ error: 'Job not found' });
     if (job.status === 'completed') return res.json({ message: 'Already completed', job });
     
-    const { approvedBy, completionNote, clientId, releaseTxSignature, v3Release } = req.body;
+    const { approvedBy, completionNote } = req.body;
     
     // Mark as completed
     job.status = 'completed';
     job.completedAt = new Date().toISOString();
-    job.approvedBy = approvedBy || clientId || 'unknown';
+    job.approvedBy = approvedBy || 'unknown';
     job.completionNote = completionNote || '';
     job.fundsReleased = true;
-    if (v3Release && releaseTxSignature) {
-      job.v3ReleaseTx = releaseTxSignature;
-      job.v3ReleasedAt = new Date().toISOString();
-    }
     writeJSON(jobPath, job);
     
     res.json({ success: true, message: 'Work approved! Payment released.', job });
@@ -445,40 +441,6 @@ function registerRoutes(app) {
     writeJSON(escrowPath, escrow);
 
     res.json({ message: 'Deposit confirmed', escrow });
-  });
-
-  // POST /api/marketplace/jobs/:id/v3-escrow-funded — Record V3 on-chain escrow creation
-  app.post("/api/marketplace/jobs/:id/v3-escrow-funded", (req, res) => {
-    const jobPath = path.join(DATA_DIR, "jobs", `${req.params.id}.json`);
-    const job = readJSON(jobPath);
-    if (!job) return res.status(404).json({ error: "Job not found" });
-
-    const { clientId, escrowPDA, txSignature, amount, agentWallet, agentId } = req.body;
-    if (!escrowPDA || !txSignature) {
-      return res.status(400).json({ error: "escrowPDA and txSignature required" });
-    }
-
-    // Store V3 escrow data on the job
-    job.v3EscrowPDA = escrowPDA;
-    job.v3EscrowTx = txSignature;
-    job.v3EscrowAmount = amount || null;
-    job.v3EscrowAgentWallet = agentWallet || null;
-    job.v3EscrowAgentId = agentId || null;
-    job.v3EscrowFundedAt = new Date().toISOString();
-    job.v3EscrowFundedBy = clientId || null;
-    job.escrowFunded = true;
-    job.updatedAt = new Date().toISOString();
-
-    writeJSON(jobPath, job);
-
-    try { addActivity(clientId || "system", "v3_escrow_funded", { jobId: job.id, escrowPDA, txSignature, amount }); } catch(e) {}
-
-    res.json({
-      message: "V3 escrow recorded on job",
-      jobId: job.id,
-      escrowPDA,
-      txSignature,
-    });
   });
 
 
