@@ -69,6 +69,25 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     }
   } catch {}
 
+  // Fetch trust-score (DB-enriched, normalized values)
+  let trustScoreData: any = null;
+  try {
+    const tsRes = await fetch(`https://agentfolio.bot/api/profile/${id}/trust-score`, { next: { revalidate: 120 } });
+    if (tsRes.ok) {
+      const tsData = await tsRes.json();
+      trustScoreData = tsData.data;
+    }
+  } catch {}
+
+  // Override genesis raw values with trust-score normalized values
+  if (genesis && trustScoreData) {
+    genesis.reputationScore = trustScoreData.reputationScore ?? genesis.reputationScore;
+    genesis.verificationLevel = trustScoreData.verificationLevel ?? genesis.verificationLevel;
+    genesis.verificationLabel = trustScoreData.verificationLabel || genesis.verificationLabel;
+    genesis.isBorn = trustScoreData.isBorn ?? genesis.isBorn;
+    genesis.faceImage = trustScoreData.faceImage || genesis.faceImage;
+  }
+
   // Fetch SATP V2 on-chain identity status
   let satpIdentity: any = null;
   const solWallet = agent.verifications?.solana?.address || agent.walletAddress;
@@ -323,11 +342,15 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                   moltbook: <Globe size={16} />, hyperliquid: <Globe size={16} />, polymarket: <Globe size={16} />,
                   discord: <Globe size={16} />, telegram: <Globe size={16} />, website: <Globe size={16} />,
                   domain: <Globe size={16} />,
+                  mcp: <Shield size={16} />,
+                  a2a: <Shield size={16} />,
+                  review: <Star size={16} />,
                 };
                 const colorMap: Record<string, string> = {
                   satp: "var(--success)", solana: "var(--solana)", ethereum: "#627EEA",
                   hyperliquid: "var(--info)", polymarket: "#F59E0B", discord: "#5865F2",
                   telegram: "#26A5E4", moltbook: "#EC4899", website: "#06B6D4", domain: "#06B6D4",
+                  mcp: "#8B5CF6", a2a: "#3B82F6", review: "#F59E0B",
                 };
                 const labelMap: Record<string, string> = {
                   satp: "SATP", github: "GitHub", x: "X", solana: "Solana", ethereum: "Ethereum",
@@ -339,7 +362,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                 for (const t of priority) {
                   const vEntry = (v as any)?.[t] || (t === "x" ? (v as any)?.twitter : null);
                   if (!vEntry?.verified) continue;
-                  let detail = "Verified ✅";
+                  let detail = "Verified";
                   if (t === "github") detail = `@${githubStats?.username || vEntry.username || "?"} — ${githubStats?.repos ?? vEntry.repos ?? 0} repos, ${(githubStats?.stars ?? vEntry.stars ?? 0).toLocaleString()}⭐`;
                   else if (t === "solana" && vEntry.address) detail = `${vEntry.address.slice(0, 8)}...${vEntry.address.slice(-4)}`;
                   else if (t === "ethereum" && vEntry.address) detail = `${vEntry.address.slice(0, 8)}...${vEntry.address.slice(-4)}`;
@@ -353,6 +376,9 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                   else if (t === "telegram" && vEntry.username) detail = `@${vEntry.username}`;
                   else if (t === "website" && vEntry.url) detail = vEntry.url;
                   else if (t === "domain" && vEntry.domain) detail = vEntry.domain;
+                  else if (t === "mcp") detail = "MCP Protocol";
+                  else if (t === "a2a") detail = "A2A Protocol";
+                  else if (t === "review") detail = "Peer Review";
                   rows.push(
                     <VerificationRow
                       key={t}
