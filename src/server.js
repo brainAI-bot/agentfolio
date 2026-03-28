@@ -2587,6 +2587,15 @@ try {
 } catch (e) {
   console.warn("[Reviews] Routes not loaded:", e.message);
 }
+
+// ── SATP V3 API (21 endpoints — escrow, reviews, reputation, validation) ──
+try {
+  const v3ApiRouter = require('./routes/v3-api-index');
+  app.use('/api/v3', v3ApiRouter);
+  console.log('[SATP V3 API] ✅ All V3 routes mounted at /api/v3/* (21 endpoints)');
+} catch (e) {
+  console.warn('[SATP V3 API] ⚠️ V3 routes not loaded:', e.message);
+}
 // SATP Explorer API (on-chain agent data for explorer.satp.bot)
 const chainCache = require("./lib/chain-cache");
 chainCache.start();
