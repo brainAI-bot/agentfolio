@@ -3100,78 +3100,55 @@ app.get('/api/satp/score/:id', async (req, res) => {
 console.log('[x402] Payment middleware DISABLED — Solana facilitator not yet supported. Endpoints unprotected.');
 
 // Paid: Individual agent score (x402-protected)
-// Usage: GET /api/score?id=<profileId>&wallet=<optional>
+// Usage: GET /api/score?id=<profileId>
 app.get('/api/score', async (req, res) => {
   const profileId = req.query.id;
   if (!profileId) return res.status(400).json({ error: 'Missing ?id=<profileId> query parameter' });
 
-  // Load profile from database (direct access to avoid schema conflicts)
-  const Database = require('better-sqlite3');
-  const scoreDb = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
-  const row = scoreDb.prepare('SELECT * FROM profiles WHERE id = ? OR handle = ?').get(profileId, profileId);
-  scoreDb.close();
-  
-  const profile = row ? {
-    id: row.id,
-    name: row.name,
-    description: row.bio,
-    avatar: row.avatar,
-    wallets: row.wallets,
-    skills: row.skills,
-    verifications: [],
-    created_at: row.created_at,
-    last_active_at: row.last_active_at,
-    links: row.links,
-  } : {
-    id: profileId,
-    name: `Agent ${profileId}`,
-    description: 'AI Agent Profile',
-    verifications: [],
-    created_at: new Date().toISOString(),
-  };
-  
-  // Parse verification_data for off-chain verifications
-  if (row?.verification_data) {
-    try {
-      const vd = JSON.parse(row.verification_data);
-      for (const [type, data] of Object.entries(vd)) {
-        if (data && (data.verified || data.linked || data.success)) profile.verifications.push({ type, ...data });
-      }
-    } catch (e) { /* skip */ }
-  }
-  
-  const wallet = req.query.wallet || (() => {
-    try { const w = JSON.parse(profile.wallets || '{}'); return w.solana || null; } catch { return null; }
-  })();
-
-  // Enrich with SATP reviews if wallet-like
-  if (wallet) {
-    try {
-      const { PublicKey } = require('@solana/web3.js');
-      new PublicKey(wallet);
-      const Database = require('better-sqlite3');
-      const reviewsDb = new Database(path.join(__dirname, '..', 'data', 'satp-reviews.db'), { readonly: true });
-      const receivedStats = reviewsDb.prepare('SELECT COUNT(*) as total_reviews, ROUND(AVG(rating),2) as avg_rating FROM reviews WHERE reviewee_id = ?').get(wallet);
-      reviewsDb.close();
-      profile.reviews = { received: receivedStats };
-    } catch (e) {
-      profile.reviews = { received: { total_reviews: 0, avg_rating: null } };
-    }
-  }
-
-  // Fetch on-chain SATP data if profile has a Solana wallet
-  let solWallet = null;
   try {
-    const w = typeof profile.wallets === 'string' ? JSON.parse(profile.wallets) : profile.wallets;
-    solWallet = w?.solana || null;
-  } catch (e) { /* no wallet */ }
-  
-  const onChainData = solWallet ? await fetchOnChainData(solWallet) : null;
-  const score = computeScore(profile, onChainData);
-  res.json({
-    ...score,
-    payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.01' },
-  });
+    // Use same enrichment pattern as /api/profile/:id/trust-score
+    let score = null;
+    try {
+      const { getV3Score } = require('./v3-score-service');
+      score = await getV3Score(profileId);
+    } catch {}
+    if (!score) {
+      try { const cc = require('./lib/chain-cache'); score = cc.getScore(profileId); } catch {}
+    }
+    // DB enrichment when chain shows defaults
+    if (score && score.verificationLevel === 0) {
+      try {
+        const db = require('./profile-store').getDb();
+        let row = db.prepare('SELECT verification FROM profiles WHERE id = ?').get(profileId);
+        if (!row && !profileId.startsWith('agent_')) row = db.prepare('SELECT verification FROM profiles WHERE name = ?').get(profileId);
+        if (!row && !profileId.startsWith('agent_')) row = db.prepare('SELECT verification FROM profiles WHERE id = ?').get('agent_' + profileId.toLowerCase());
+        if (row && row.verification) {
+          const v = typeof row.verification === 'string' ? JSON.parse(row.verification) : row.verification;
+          if (v && (v.score > 0 || v.level)) {
+            const levelMap = {'NEW':0,'REGISTERED':1,'VERIFIED':2,'ESTABLISHED':3,'TRUSTED':4,'SOVEREIGN':5};
+            const lvl = typeof v.level === 'number' ? v.level : (levelMap[(v.level||'').toUpperCase()] || 0);
+            const labelMap = {0:'Unverified',1:'Registered',2:'Verified',3:'Established',4:'Trusted',5:'Sovereign'};
+            score = { ...score, reputationScore: v.score || score.reputationScore, verificationLevel: lvl, verificationLabel: labelMap[lvl] || score.verificationLabel, _source: 'db-enriched' };
+          }
+        }
+      } catch {}
+    }
+    if (score) {
+      res.json({
+        ok: true,
+        agent: profileId,
+        trustScore: score.reputationScore,
+        level: score.verificationLevel,
+        levelName: score.verificationLabel,
+        data: score,
+        payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.01' },
+      });
+    } else {
+      res.status(404).json({ error: 'No score found', agent: profileId, payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.01' } });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Paid: Leaderboard with scores
