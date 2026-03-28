@@ -34,10 +34,24 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
   const [genesis, setGenesis] = useState<GenesisData | null>(null);
 
   useEffect(() => {
-    fetch(`/api/profile/${agentId}/genesis`)
-      .then(r => r.json())
-      .then(d => { if (d.genesis && !d.genesis.error) setGenesis(d.genesis); })
-      .catch(() => {});
+    Promise.all([
+        fetch(`/api/profile/${agentId}/genesis`).then(r => r.json()).catch(() => ({})),
+        fetch(`/api/profile/${agentId}/trust-score`).then(r => r.json()).catch(() => ({})),
+      ]).then(([gRes, tsRes]) => {
+        const g = gRes.genesis;
+        if (!g || g.error) return;
+        // Merge trust-score DB-enriched data for face/born
+        if (tsRes.data) {
+          g.isBorn = tsRes.data.isBorn ?? g.isBorn;
+          g.bornAt = tsRes.data.bornAt ?? g.bornAt;
+          g.faceImage = tsRes.data.faceImage || g.faceImage || "";
+          g.faceMint = tsRes.data.faceMint || g.faceMint || "";
+          g.verificationLevel = tsRes.data.verificationLevel ?? g.verificationLevel;
+          g.verificationLabel = tsRes.data.verificationLabel || g.verificationLabel;
+          g.reputationScore = tsRes.data.reputationScore ?? g.reputationScore;
+        }
+        setGenesis(g);
+      }).catch(() => {});
   }, [agentId]);
 
   if (!genesis) return null;

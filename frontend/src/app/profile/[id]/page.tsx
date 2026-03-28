@@ -17,6 +17,7 @@ import BurnToBecomeSection from "@/components/BurnToBecomeSection";
 import BirthCertificate from "@/components/BirthCertificate";
 import { GenesisRecordCard } from "@/components/GenesisRecordCard";
 import { OnChainAvatar } from "@/components/OnChainAvatar";
+import { SATPOnChainSection } from "@/components/SATPOnChainSection";
 import Link from "next/link";
 import { ClaimButton } from "@/components/ClaimButton";
 import { WriteReviewForm } from "./WriteReviewForm";
@@ -381,6 +382,8 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
           </div>
 
           <GenesisRecordCard agentId={agent.id} nftAvatar={(agent as any).nftAvatar || (agent as any).nft_avatar} />
+
+          <SATPOnChainSection walletAddress={solWallet} />
 
           {/* Skills */}
           <div className="rounded-lg p-5" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
