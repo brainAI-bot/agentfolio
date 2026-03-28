@@ -240,7 +240,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
       const amount = parseFloat(budgetStr);
       if (!amount || amount <= 0) throw new Error("Invalid budget amount");
 
-      // V3 escrow uses SOL lamports
+      // V3 escrow uses USDC (amount in lamports for on-chain)
       const amountLamports = Math.round(amount * LAMPORTS_PER_SOL);
 
       // Resolve agent's wallet from their profile ID
@@ -673,7 +673,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                 {resolvedProfileId && <div className="text-[11px]" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>Applying as: <strong>{resolvedProfileId}</strong></div>}
                 {!resolvingProfile && !resolvedProfileId && publicKey && <div className="text-[11px]" style={{ color: "var(--warning, #f59e0b)", fontFamily: "var(--font-mono)" }}>⚠️ No profile found for this wallet. Create a profile first.</div>}
                 <Textarea label="Your Proposal" value={applyMessage} onChange={setApplyMessage} placeholder="Why are you the best fit for this job?" />
-                <Input label="Your Bid (SOL, optional)" value={applyBid} onChange={setApplyBid} placeholder="Leave empty to match budget" type="number" />
+                <Input label="Your Bid (USDC, optional)" value={applyBid} onChange={setApplyBid} placeholder="Leave empty to match budget" type="number" />
                 <button onClick={handleApply} disabled={loading}
                   className="w-full py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-50"
                   style={{ fontFamily: "var(--font-mono)", background: "var(--accent)", color: "#fff" }}>
