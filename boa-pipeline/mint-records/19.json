@@ -1,0 +1,14 @@
+{
+  "cluster": "mainnet",
+  "nftNumber": 19,
+  "mint": "7k9j8369DBNXGSArYNcQXoYiMEUR5fML6WuhmMky3Tgv",
+  "collection": "CCw8NjAS3QpfDU4fBYkJ2kD4znNy468e3wqAJQKoJCFk",
+  "recipient": "ADrid6hLYjxDbkz48ET15SCUqGxcFDfYegYbuseJGGsr",
+  "agentId": "agent_braintest",
+  "flow": "free",
+  "signature": "4k4ekLiaTfHmNF5nexmExnSq7Ad3QeJdCGZgSqRFYGdDYNFpRwzJk1CFAQ4c6dXyQZqWsSQewcP55JeYZHRZJnJo",
+  "clientSigned": true,
+  "imageUri": "https://gateway.irys.xyz/Dsr3shmfWovMFjrbpYBmZs8oYUZrnFQgo5PJgW4BJ2nU",
+  "boaName": "Burned-Out Agent #19",
+  "timestamp": "2026-03-29T17:22:25.465Z"
+}
