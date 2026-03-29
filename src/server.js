@@ -353,6 +353,26 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       }
     }
 
+    // Enrich face data from DB nft_avatar if on-chain is empty
+    if (v3Data && (!v3Data.faceImage || v3Data.faceImage === '')) {
+      try {
+        const Database = require('better-sqlite3');
+        const path = require('path');
+        const faceDb = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
+        const faceRow = faceDb.prepare('SELECT nft_avatar FROM profiles WHERE id = ?').get(profile.id);
+        faceDb.close();
+        if (faceRow && faceRow.nft_avatar) {
+          try {
+            const nftData = JSON.parse(faceRow.nft_avatar);
+            if (nftData.image) v3Data.faceImage = nftData.image;
+            if (nftData.soulboundMint) v3Data.faceMint = nftData.soulboundMint;
+            if (nftData.permanent) v3Data.isBorn = true;
+            if (nftData.burnedAt) v3Data.bornAt = nftData.burnedAt;
+          } catch (e) {}
+        }
+      } catch (e) {}
+    }
+
     // Use V3 on-chain score if available, otherwise fall back to V2
     const trustScore = v3Data ? v3Data.reputationScore : scoreResult.score;
     const tier = v3Data

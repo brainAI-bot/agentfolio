@@ -192,6 +192,27 @@ const LEVEL_LABELS = ['Unverified','Registered','Verified','Established','Truste
 
 function enrichFromDB(record) {
   if (!record || record.error) return record;
+  
+  // Enrich face data from DB nft_avatar if on-chain is empty
+  if (!record.faceImage || record.faceImage === '' || record.faceImage === null) {
+    try {
+      const db2 = new Database(pathMod.join(__dirname, '..', '..', 'data', 'agentfolio.db'), { readonly: true });
+      const agentId2 = 'agent_' + record.agentName.toLowerCase();
+      const profileRow = db2.prepare('SELECT nft_avatar FROM profiles WHERE id = ?').get(agentId2);
+      db2.close();
+      if (profileRow && profileRow.nft_avatar) {
+        try {
+          const nftData = JSON.parse(profileRow.nft_avatar);
+          if (nftData.image) record.faceImage = nftData.image;
+          if (nftData.soulboundMint) record.faceMint = nftData.soulboundMint;
+          if (nftData.burnTxSignature) record.faceBurnTx = nftData.burnTxSignature;
+          if (nftData.permanent) record.isBorn = true;
+          record._faceEnrichedFromDB = true;
+        } catch (e) {}
+      }
+    } catch (e) {}
+  }
+  
   if (record.reputationScore !== 500000 || record.verificationLevel !== 0) return record;
   try {
     const db = new Database(pathMod.join(__dirname, '..', '..', 'data', 'agentfolio.db'), { readonly: true });
