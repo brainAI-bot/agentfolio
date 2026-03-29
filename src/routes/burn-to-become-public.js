@@ -716,20 +716,7 @@ function handleBurnToBecome(req, res, url) {
           const v3Data = await getV3Score(matchedProfile.id);
           if (v3Data && v3Data.isBorn) isBorn = true;
         } catch {}
-        sendJson(200, { found: true, agent: matchedProfile.id, name: matchedProfile.name, level, levelName: LEVEL_NAMES[level] || 'Unknown', badge: LEVEL_BADGES[level] || '⚪', reputation, eligible, freeFirstMint: (() => {
-          if (!eligible || isBorn) return false;
-          const fs = require('fs');
-          try {
-            const files = fs.readdirSync('/home/ubuntu/agentfolio/boa-pipeline/mint-records').filter(f => f.endsWith('.json'));
-            for (const file of files) {
-              try {
-                const rec = JSON.parse(fs.readFileSync('/home/ubuntu/agentfolio/boa-pipeline/mint-records/' + file, 'utf8'));
-                if (rec.wallet === wallet || rec.recipient === wallet) return false;
-              } catch {}
-            }
-          } catch {}
-          return true;
-        })(), isBorn });
+        sendJson(200, { found: true, agent: matchedProfile.id, name: matchedProfile.name, level, levelName: LEVEL_NAMES[level] || 'Unknown', badge: LEVEL_BADGES[level] || '⚪', reputation, eligible, freeFirstMint: eligible && !isBorn, isBorn });
       } catch (e) { console.error('[BurnPublic] eligibility error:', e); sendJson(500, { error: e.message }); }
     })();
     return true;
@@ -1470,6 +1457,19 @@ try {
           db.close();
         } catch {}
         
+        // Resolve actual BOA image from uploaded assets
+        let imageUri = '';
+        let boaName = '';
+        if (boaId) {
+          try {
+            const uploadedPath = require('path').join('/home/ubuntu/agentfolio/boa-pipeline/candy-machine-data', 'uploaded-assets.json');
+            const uploaded = JSON.parse(fs.readFileSync(uploadedPath, 'utf8'));
+            const assetData = uploaded[boaId] || uploaded[String(boaId)] || {};
+            imageUri = assetData.imageUri || '';
+            boaName = assetData.name || ('Burned-Out Agent #' + boaId);
+          } catch (e) { console.warn('[ConfirmMint] Could not resolve BOA image:', e.message); }
+        }
+
         const record = {
           cluster: 'mainnet',
           nftNumber: boaId || null,
@@ -1480,6 +1480,8 @@ try {
           flow: flow || 'unknown',
           signature,
           clientSigned: true,
+          imageUri,
+          boaName,
           timestamp: new Date().toISOString(),
         };
         

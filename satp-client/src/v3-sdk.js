@@ -920,7 +920,7 @@ class SATPV3SDK {
         metadata,
         createdAt,
         updatedAt,
-        isActive,
+        
         bump,
       };
     } catch (e) {
@@ -1601,8 +1601,6 @@ class SATPV3SDK {
       const faceMint = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
       const faceBurnTx = readString();
       const genesisRecord = Number(data.readBigInt64LE(offset)); offset += 8;
-      // NOTE: No isActive field in on-chain GenesisRecord struct.
-      // Struct goes: genesis_record(i64) -> authority(Pubkey) -> pending_authority(Option<Pubkey>)
       const authority = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
 
       // Option<Pubkey> — Borsh: 0x00 = None (1 byte), 0x01 + 32 bytes = Some
@@ -1625,6 +1623,7 @@ class SATPV3SDK {
 
       return {
         pda: pda.toBase58(),
+        
         agentIdHash: Buffer.from(agentIdHash).toString('hex'),
         agentName,
         description,
