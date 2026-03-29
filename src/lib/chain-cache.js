@@ -11,6 +11,18 @@
 
 const { Connection, PublicKey } = require('@solana/web3.js');
 const crypto = require('crypto');
+const {
+  SatpV3Client,
+  deriveGenesisPda,
+  agentIdHash: sdkAgentIdHash,
+  deserializeGenesis,
+  deserializeAttestation,
+  trustTier,
+  verificationLabel: sdkVerificationLabel,
+  reputationPct,
+  isBorn: sdkIsBorn,
+  PROGRAM_IDS: V3_PROGRAM_IDS,
+} = require('@brainai/satp-v3');
 
 // Program IDs
 const SATP_IDENTITY_PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq');
@@ -546,72 +558,34 @@ async function forceRefresh() {
 
 // ═══════════════════════════════════════════════════════════
 // V3 Genesis Record On-Chain Scores (source of truth)
+// Uses @brainai/satp-v3 SDK — no more manual Borsh parsing
 // ═══════════════════════════════════════════════════════════
-const IDENTITY_V3 = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
 
+// Re-export SDK functions under legacy names for any callers
 function agentIdHash(agentId) {
-  return crypto.createHash('sha256').update(agentId).digest();
+  return sdkAgentIdHash(agentId);
 }
 
 function getGenesisPDA(agentId) {
-  const hash = agentIdHash(agentId);
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from('genesis'), hash],
-    IDENTITY_V3
-  );
+  return deriveGenesisPda(agentId);
 }
 
 function parseGenesisRecord(data, pda) {
   if (!data || data.length < 8) return null;
   try {
-    let offset = 8; // skip discriminator
-    offset += 32; // agent_id_hash
-
-    const readString = () => {
-      const len = data.readUInt32LE(offset);
-      offset += 4;
-      const str = data.slice(offset, offset + len).toString('utf8');
-      offset += len;
-      return str;
-    };
-    const readVecString = () => {
-      const count = data.readUInt32LE(offset);
-      offset += 4;
-      const arr = [];
-      for (let i = 0; i < count; i++) arr.push(readString());
-      return arr;
-    };
-
-    const agentName = readString();
-    const description = readString();
-    const category = readString();
-    const capabilities = readVecString();
-    const metadataUri = readString();
-    const faceImage = readString();
-    offset += 32; // faceMint
-    const faceBurnTx = readString();
-    const genesisRecord = Number(data.readBigInt64LE(offset));
-    offset += 8;
-    offset += 32; // authority
-    const hasPending = data[offset];
-    offset += 1;
-    if (hasPending === 1) offset += 32;
-    const reputationScore = Number(data.readBigUInt64LE(offset));
-    offset += 8;
-    const verificationLevel = data[offset];
-    offset += 1;
-
+    const record = deserializeGenesis(Buffer.isBuffer(data) ? data : Buffer.from(data));
     return {
       pda: pda.toBase58(),
-      faceImage,
-      agentName,
-      verificationLevel,
-      reputationScore,
-      reputationPct: reputationScore / 10000,
-      isBorn: genesisRecord > 0,
+      faceImage: record.faceImage || '',
+      agentName: record.agentName || '',
+      verificationLevel: record.verificationLevel,
+      reputationScore: record.reputationScore,
+      reputationPct: record.reputationScore / 10000,
+      isBorn: sdkIsBorn(record),
       source: 'v3-genesis',
     };
   } catch (e) {
+    console.error('[ChainCache V3] SDK deserializeGenesis failed:', e.message);
     return null;
   }
 }

@@ -40,14 +40,16 @@ let SATPV3SDK;
 let sdkInstance = null;
 
 try {
-  // Try relative path (deployed in AgentFolio src/routes/)
   const mod = require('../../satp-client/src/index');
-  SATPV3SDK = mod.SATPV3SDK || mod.SATPSDK;
+  SATPV3SDK = mod.SATPV3SDK;
+  if (!SATPV3SDK) throw new Error('SATPV3SDK not exported');
+  console.log('[Escrow V3 Routes] V3 SDK loaded (SATPV3SDK)');
 } catch (e1) {
   try {
-    // Try npm package
     const mod = require('satp-client');
-    SATPV3SDK = mod.SATPV3SDK || mod.SATPSDK;
+    SATPV3SDK = mod.SATPV3SDK;
+    if (!SATPV3SDK) throw new Error('SATPV3SDK not exported from satp-client');
+    console.log('[Escrow V3 Routes] V3 SDK loaded from npm (SATPV3SDK)');
   } catch (e2) {
     console.warn('[Escrow V3 Routes] SATP V3 SDK not found. Escrow V3 endpoints disabled.');
     console.warn('  Tried: ../../satp-client/src/index, satp-client');

@@ -9,12 +9,24 @@ const crypto = require('crypto');
 
 // SATP Program IDs
 const { getReviewsForProfile: getOnChainReviews } = require('./onchain-reviews');
+
+// V2 Program IDs (kept for backward compat)
 const PROGRAM_IDS = {
   reviews: new PublicKey('8b2jb9U9whNjRWrCbBVR26AqhkPzXZL3yjBuAzauPYBy'),
   identity: new PublicKey('BY4jzmnrui1K5gZ5z5xRQkVfEEMXYHYugtH1Ua867eyr'),
   reputation: new PublicKey('TQ4P9R2Y5FRyw1TZfwoWQ2Mf6XeohbGdhYNcDxh6YYh'),
   escrow: new PublicKey('STyY8w4ZHws3X1AMoocWuDYBoogVDwvymPy8Wifx5TH'),
 };
+
+// V3 Program IDs
+let V3_PROGRAM_IDS;
+try {
+  const { getV3ProgramIds } = require('./satp-client/src/v3-pda');
+  V3_PROGRAM_IDS = getV3ProgramIds('mainnet');
+  console.log('[SATP Reviews] V3 program IDs loaded');
+} catch (e) {
+  console.warn('[SATP Reviews] V3 program IDs not available:', e.message);
+}
 
 // --- SQLite Setup ---
 const DB_PATH = path.join(__dirname, '..', 'data', 'satp-reviews.db');

@@ -33,8 +33,8 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
     // Merge: for each platform in vChain, if vdRaw doesn't have it or it's not verified, use vChain entry
     const vd: Record<string, any> = { ...vdRaw };
     for (const [platform, entry] of Object.entries(vChain)) {
-      if (entry && typeof entry === 'object' && (entry as any).verified && !vd[platform]?.verified) {
-        vd[platform] = entry;
+      if (entry && typeof entry === "object" && (entry as any).verified) {
+        vd[platform] = { ...(vd[platform] || {}), ...entry };
       }
     }
 

@@ -163,9 +163,6 @@ function parseReputationAccount(data) {
  * Get all on-chain reviews for an agent (by reviewed_did wallet)
  */
 async function getReviewsForAgent(walletPubkey) {
-  // Validate wallet address
-  if (!walletPubkey || typeof walletPubkey !== 'string') return [];
-  try { new PublicKey(walletPubkey); } catch { return []; }
   const connection = new Connection(RPC_URL, 'confirmed');
   const wallet = new PublicKey(walletPubkey);
   
@@ -190,9 +187,6 @@ async function getReviewsForAgent(walletPubkey) {
  * Get all on-chain reviews BY an agent (as reviewer)
  */
 async function getReviewsByAgent(walletPubkey) {
-  // Validate wallet address
-  if (!walletPubkey || typeof walletPubkey !== 'string') return [];
-  try { new PublicKey(walletPubkey); } catch { return []; }
   const connection = new Connection(RPC_URL, 'confirmed');
   const wallet = new PublicKey(walletPubkey);
   
@@ -241,11 +235,6 @@ async function getAllReviews(limit = 50, offset = 0) {
  * Get on-chain reputation account for a wallet
  */
 async function getReputation(walletPubkey) {
-  // Validate wallet address before creating PublicKey
-  if (!walletPubkey || typeof walletPubkey !== 'string' || walletPubkey.length < 32 || walletPubkey.length > 44) {
-    return null;
-  }
-  try { new PublicKey(walletPubkey); } catch { return null; }
   const connection = new Connection(RPC_URL, 'confirmed');
   const wallet = new PublicKey(walletPubkey);
   
