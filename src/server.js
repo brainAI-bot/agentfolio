@@ -321,7 +321,69 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       trustScore,
       tier,
       scoreVersion: v3Data ? 'v3' : 'v2',
-      verifications: verifications.filter(v => v.verified !== false).map(v => ({ platform: v.platform, verified: true })),
+      verifications: (() => {
+        // Merge DB verification_data (has identifiers) with chain-cache attestations (has TX proofs)
+        const cid = profile.id.startsWith('agent_') ? profile.id : ('agent_' + profile.id);
+        const chainVerifs = chainCache.getVerifications(cid) || chainCache.getVerifications(profile.id) || [];
+        const chainByPlatform = {};
+        chainVerifs.forEach(cv => { chainByPlatform[cv.platform] = cv; });
+        
+        // Identifier extraction from DB verification_data + profile wallets/links
+        const identifierMap = {};
+        // Parse links for fallback identifiers
+        let profileLinks = {};
+        try { profileLinks = typeof profile.links === 'string' ? JSON.parse(profile.links || '{}') : (profile.links || {}); } catch(_) {}
+        
+        verifications.forEach(v => {
+          if (v.verified === false) return;
+          const p = v.platform || v.type;
+          if (!p || p === 'review') return; // Filter out review
+          let identifier = null;
+          if (p === 'github') identifier = v.username || (v.proof && v.proof.username) || (v.stats && v.stats.username);
+          else if (p === 'x' || p === 'twitter') identifier = v.handle || v.username;
+          else if (p === 'agentmail') identifier = v.email || (v.proof && v.proof.email);
+          else if (p === 'solana') identifier = v.address;
+          else if (p === 'ethereum' || p === 'hyperliquid') identifier = v.address || v.wallet;
+          else if (p === 'polymarket') identifier = v.address;
+          else if (p === 'satp') identifier = v.identityPDA || ('did:satp:sol:' + (v.address || '').slice(0, 8));
+          else if (p === 'moltbook') identifier = v.username;
+          else if (p === 'mcp') identifier = v.url;
+          else if (p === 'a2a') identifier = v.url || v.agentName;
+          else if (p === 'website') identifier = v.url;
+          else if (p === 'domain') identifier = v.domain || v.url;
+          identifierMap[p] = identifier;
+        });
+        
+        // Fallback: fill missing identifiers from wallets and links
+        if (!identifierMap['x'] && !identifierMap['twitter'] && profileLinks.x) identifierMap['twitter'] = '@' + profileLinks.x;
+        if (!identifierMap['x'] && !identifierMap['twitter'] && profileLinks.twitter) identifierMap['twitter'] = '@' + profileLinks.twitter;
+        if (!identifierMap['website'] && profileLinks.website) identifierMap['website'] = profileLinks.website;
+        if (!identifierMap['domain'] && profileLinks.domain) identifierMap['domain'] = profileLinks.domain;
+        if (!identifierMap['domain'] && profileLinks.website) identifierMap['domain'] = profileLinks.website;
+        if (!identifierMap['hyperliquid'] && wallets.hyperliquid) identifierMap['hyperliquid'] = wallets.hyperliquid;
+        if (!identifierMap['ethereum'] && wallets.ethereum) identifierMap['ethereum'] = wallets.ethereum;
+        if (!identifierMap['ethereum'] && wallets.hyperliquid) identifierMap['ethereum'] = wallets.hyperliquid;
+
+        // Build merged list: all platforms from both DB and chain-cache, no 'review'
+        const allPlatforms = new Set([
+          ...verifications.filter(v => v.verified !== false && v.platform !== 'review' && v.type !== 'review').map(v => v.platform || v.type),
+          ...Object.keys(chainByPlatform).filter(p => p !== 'review')
+        ]);
+
+        return [...allPlatforms].map(platform => {
+          const chain = chainByPlatform[platform];
+          return {
+            platform,
+            verified: true,
+            identifier: identifierMap[platform] || null,
+            ...(chain ? {
+              source: 'on-chain',
+              txSignature: chain.txSignature,
+              solscanUrl: chain.solscanUrl,
+            } : { source: 'off-chain' }),
+          };
+        });
+      })(),
       wallets,
       tags,
       skills,
