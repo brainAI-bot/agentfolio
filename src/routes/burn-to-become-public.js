@@ -80,6 +80,43 @@ async function checkSatpOnChain(wallet) {
 const TOKEN_METADATA_PROGRAM = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 const MINT_PRICE_LAMPORTS = 1_000_000_000; // 1 SOL
 const FREE_SCORE_THRESHOLD = 100;
+/**
+ * Check if wallet owns any Metaplex Core NFTs from our BOA candy machine collection.
+ * Uses Helius DAS API (getAssetsByOwner with grouping filter).
+ * Returns: { hasMinted: boolean, count: number, assets: [] }
+ */
+async function checkOnChainMints(wallet) {
+  const COLLECTION = 'CCw8NjAS3QpfDU4fBYkJ2kD4znNy468e3wqAJQKoJCFk';
+  const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY';
+  
+  try {
+    const resp = await fetch(HELIUS_RPC, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'boa-check',
+        method: 'getAssetsByOwner',
+        params: {
+          ownerAddress: wallet,
+          page: 1,
+          limit: 10,
+          displayOptions: { showCollectionMetadata: false },
+        },
+      }),
+    });
+    const data = await resp.json();
+    const assets = (data?.result?.items || []).filter(a => {
+      // Match Core NFTs from our collection
+      const grouping = a.grouping || [];
+      return grouping.some(g => g.group_key === 'collection' && g.group_value === COLLECTION);
+    });
+    return { hasMinted: assets.length > 0, count: assets.length, assets: assets.map(a => ({ id: a.id, name: a.content?.metadata?.name })) };
+  } catch (e) {
+    console.error('[OnChainMintCheck] DAS API error:', e.message);
+    return { hasMinted: false, count: 0, assets: [], error: e.message };
+  }
+}
 
 // Genesis 1/1 registry
 const GENESIS_REGISTRY = {
@@ -242,13 +279,44 @@ function fetchJson(url) {
 async function buildBurnTransaction(walletAddress, nftMint) {
   const wallet = new PublicKey(walletAddress);
   const mint = new PublicKey(nftMint);
+  
+  // Detect asset type: Core NFT or SPL Token
+  const accountInfo = await connection.getAccountInfo(mint);
+  if (!accountInfo) throw new Error('NFT account not found: ' + nftMint);
+  
+  const METAPLEX_CORE_PROGRAM = new PublicKey('CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d');
+  
+  if (accountInfo.owner.equals(METAPLEX_CORE_PROGRAM)) {
+    // ═══ CORE NFT: Use Core burn worker (returns unsigned TX) ═══
+    console.log('[BurnPublic] Detected Core NFT, using Metaplex Core burn');
+    const { execFile } = require('child_process');
+    return new Promise((resolve, reject) => {
+      execFile('node', ['/home/ubuntu/agentfolio/core-cm-v2/core-burn-worker.mjs', nftMint, walletAddress, 'prepare'], {
+        timeout: 30000,
+        cwd: '/home/ubuntu/agentfolio/core-cm-v2',
+        env: { ...process.env, HOME: process.env.HOME },
+      }, (err, stdout, stderr) => {
+        if (err) return reject(new Error('Core burn prepare failed: ' + err.message));
+        try {
+          const lines = stdout.trim().split('\n');
+          const result = JSON.parse(lines[lines.length - 1]);
+          if (result.error) return reject(new Error(result.error));
+          // Return the pre-built TX from the worker
+          const txBuf = Buffer.from(result.transaction, 'base64');
+          const tx = Transaction.from(txBuf);
+          resolve(tx);
+        } catch (e) { reject(new Error('Core burn parse failed')); }
+      });
+    });
+  }
+  
+  // ═══ SPL TOKEN NFT: Original burn flow ═══
+  console.log('[BurnPublic] Detected SPL Token NFT, using SPL Token burn');
   const ata = await getAssociatedTokenAddress(mint, wallet, false, TOKEN_PROGRAM_ID);
   
   const tx = new Transaction();
   tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 }));
-  // Burn the 1 NFT token
   tx.add(createBurnInstruction(ata, mint, wallet, 1, [], TOKEN_PROGRAM_ID));
-  // Close the empty token account to reclaim rent
   tx.add(createCloseAccountInstruction(ata, wallet, wallet, [], TOKEN_PROGRAM_ID));
   
   tx.feePayer = wallet;
@@ -648,7 +716,20 @@ function handleBurnToBecome(req, res, url) {
           const v3Data = await getV3Score(matchedProfile.id);
           if (v3Data && v3Data.isBorn) isBorn = true;
         } catch {}
-        sendJson(200, { found: true, agent: matchedProfile.id, name: matchedProfile.name, level, levelName: LEVEL_NAMES[level] || 'Unknown', badge: LEVEL_BADGES[level] || '⚪', reputation, eligible, freeFirstMint: eligible && !isBorn, isBorn });
+        sendJson(200, { found: true, agent: matchedProfile.id, name: matchedProfile.name, level, levelName: LEVEL_NAMES[level] || 'Unknown', badge: LEVEL_BADGES[level] || '⚪', reputation, eligible, freeFirstMint: (() => {
+          if (!eligible || isBorn) return false;
+          const fs = require('fs');
+          try {
+            const files = fs.readdirSync('/home/ubuntu/agentfolio/boa-pipeline/mint-records').filter(f => f.endsWith('.json'));
+            for (const file of files) {
+              try {
+                const rec = JSON.parse(fs.readFileSync('/home/ubuntu/agentfolio/boa-pipeline/mint-records/' + file, 'utf8'));
+                if (rec.wallet === wallet || rec.recipient === wallet) return false;
+              } catch {}
+            }
+          } catch {}
+          return true;
+        })(), isBorn });
       } catch (e) { console.error('[BurnPublic] eligibility error:', e); sendJson(500, { error: e.message }); }
     })();
     return true;
@@ -1010,7 +1091,7 @@ function handleBurnToBecome(req, res, url) {
 
         // Build unsigned TX via worker
         const { execFile } = require("child_process");
-        execFile("node", ["/home/ubuntu/agentfolio/core-cm-v2/core-cm-prepare-worker.mjs", wallet, flow], {
+        execFile("node", ["/home/ubuntu/agentfolio/core-cm-v2/atomic-prepare-worker.mjs", wallet, flow], {
           timeout: 30000, cwd: "/home/ubuntu/agentfolio/core-cm-v2",
           env: { ...process.env, HOME: process.env.HOME },
         }, (err, stdout, stderr) => {
@@ -1087,22 +1168,15 @@ function handleBurnToBecome(req, res, url) {
           } catch (e) { console.warn("[MintBOA] V3 check failed:", e.message); }
         }
         
-        // Mint count: prefer on-chain isBorn, fallback to JSON records for legacy
-        const MINT_RECORDS_DIR = "/home/ubuntu/agentfolio/boa-pipeline/mint-records";
-        let walletMintCount = 0;
-        let agentMintCount = 0;
-        if (fs.existsSync(MINT_RECORDS_DIR)) {
-          fs.readdirSync(MINT_RECORDS_DIR).filter(f => f.endsWith(".json")).forEach(f => {
-            try {
-              const rec = JSON.parse(fs.readFileSync(require("path").join(MINT_RECORDS_DIR, f), "utf-8"));
-              if (rec.recipient === wallet || rec.wallet === wallet) walletMintCount++;
-              if (agentIdForCount && rec.agentId === agentIdForCount) agentMintCount++;
-            } catch {}
-          });
-        }
+        // Mint count: on-chain Core NFT check (replaces disk records)
+        let onChainCount = 0;
+        try {
+          const onChainResult = await checkOnChainMints(wallet);
+          onChainCount = onChainResult.count || 0;
+        } catch (e) { console.warn("[MintBOA] On-chain mint check failed:", e.message); }
         // On-chain isBorn overrides: if born on-chain, count is at least 1
-        const effectiveMintCount = Math.max(walletMintCount, agentMintCount, v3IsBorn ? 1 : 0);
-        console.log("[MintBOA] Effective mint count:", effectiveMintCount, "(wallet:", walletMintCount, "agent:", agentMintCount, "v3IsBorn:", v3IsBorn, ")");
+        const effectiveMintCount = Math.max(onChainCount, v3IsBorn ? 1 : 0);
+        console.log("[MintBOA] Effective mint count:", effectiveMintCount, "(onChain:", onChainCount, "v3IsBorn:", v3IsBorn, ")");
 
         // === HARD CAP: Max 3 mints per agent ===
         if (effectiveMintCount >= 3) {
@@ -1170,7 +1244,16 @@ function handleBurnToBecome(req, res, url) {
         }
 
         // === 3. Determine pricing ===
-        const isFirstMint = effectiveMintCount === 0;
+        // On-chain check: does wallet already own Core NFTs from our collection?
+        let onChainMintCount = 0;
+        try {
+          const onChainResult = await checkOnChainMints(wallet);
+          onChainMintCount = onChainResult.count || 0;
+          console.log('[BURN] On-chain mint check for', wallet, ':', onChainMintCount, 'NFTs from collection');
+        } catch (e) {
+          console.error('[BURN] On-chain mint check failed, falling back to DB count:', e.message);
+        }
+        const isFirstMint = effectiveMintCount === 0 && onChainMintCount === 0;
         const isFree = isFirstMint && isEligibleFree;
         // Override: if already has soulbound attestation, no free mint
         const actuallyFree = isFree && !satpCheck.hasBoaSoulbound && !v3IsBorn;
@@ -1244,7 +1327,7 @@ try {
   console.warn("[BurnToBecome] SATP V3 SDK not available:", e.message);
 }
         // Use Core Candy Machine worker (separate node_modules in core-cm-v2)
-        const workerPath = "/home/ubuntu/agentfolio/core-cm-v2/core-cm-mint-worker.mjs";
+        const workerPath = "/home/ubuntu/agentfolio/core-cm-v2/atomic-mint-burn-worker.mjs";
 
         execFile("node", [workerPath, wallet], {
           timeout: 120000,
