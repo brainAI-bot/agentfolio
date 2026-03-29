@@ -1931,3 +1931,57 @@ app.listen(PORT, () => {
 });
 
 module.exports = app;
+// ─── Stub endpoints for frontend requests (eliminate 404s) ─── 2026-03-29
+
+// Reviews V2 - returns empty list until review system wired
+app.get('/api/reviews/v2', (req, res) => {
+  res.json({ reviews: [], total: 0, agent: req.query.agent || null });
+});
+
+// Profile heatmap - returns empty heatmap until activity tracking wired
+app.get('/api/profile/:id/heatmap', (req, res) => {
+  res.json({ profileId: req.params.id, heatmap: {}, period: '90d' });
+});
+
+// Token stats - returns zeros until token launch
+app.get('/api/tokens/stats', (req, res) => {
+  res.json({ totalSupply: 0, circulatingSupply: 0, holders: 0, price: null, marketCap: null });
+});
+
+// GitHub verification stats
+app.get('/api/verify/github/stats', async (req, res) => {
+  const { username } = req.query;
+  if (!username) return res.status(400).json({ error: 'username required' });
+  res.json({ username, repos: null, followers: null, contributions: null, verified: false });
+});
+
+// Dynamic SVG trust badge
+app.get('/api/badge/:id.svg', async (req, res) => {
+  const id = req.params.id.replace(/\.svg$/, '');
+  let score = 0;
+  try {
+    const db = profileStore.getDb();
+    const row = db.prepare('SELECT id FROM profiles WHERE id = ?').get(id);
+    if (row) {
+      const vfs = chainCache.getVerifications(id);
+      score = Math.min(100, (vfs ? vfs.length : 0) * 8);
+    }
+  } catch(e) { /* fallback to 0 */ }
+  const tier = score >= 80 ? 'Elite' : score >= 60 ? 'Established' : score >= 40 ? 'Verified' : score >= 20 ? 'Registered' : 'Unverified';
+  const color = score >= 80 ? '#FFD700' : score >= 60 ? '#4CAF50' : score >= 40 ? '#2196F3' : score >= 20 ? '#9E9E9E' : '#616161';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="28">
+    <rect rx="4" width="200" height="28" fill="#1a1a2e"/>
+    <rect rx="4" x="110" width="90" height="28" fill="${color}"/>
+    <text x="8" y="19" fill="#fff" font-family="sans-serif" font-size="12" font-weight="bold">AgentFolio</text>
+    <text x="155" y="19" fill="#fff" font-family="sans-serif" font-size="11" text-anchor="middle">${tier} ${score}</text>
+  </svg>`;
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.send(svg);
+});
+
+// Profile endorsements (stub if not already defined)
+app.get('/api/profile/:id/endorsements', (req, res) => {
+  // Already defined earlier — this is a safety fallback
+  res.json({ endorsements: [], total: 0 });
+});
