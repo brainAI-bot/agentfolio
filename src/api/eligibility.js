@@ -39,7 +39,7 @@ async function resolveAgentScore(agentId, profile) {
       if (!v3 && !agentId.startsWith('agent_')) {
         v3 = await v3ScoreService.getV3Score('agent_' + agentId.toLowerCase());
       }
-      if (v3 && v3.verificationLevel != null) {
+      if (v3 && v3.verificationLevel != null && v3.verificationLevel > 0) {
         return {
           level: v3.verificationLevel,
           reputation: v3.reputationScore,

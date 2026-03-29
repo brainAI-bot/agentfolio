@@ -41,7 +41,7 @@ function hashName(name) {
 
 function getGenesisPDA(agentIdHash) {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from('genesis_record'), agentIdHash],
+    [Buffer.from('genesis'), agentIdHash],
     IDENTITY_PROGRAM_ID
   );
 }
@@ -128,13 +128,31 @@ function parseGenesisRecord(data, pda) {
     const faceBurnTx = readString();
     const genesisRecord = readI64();
 
-    const isBorn = readBool();
-    const isActive = readBool();
-    const authority = readPubkey();
-    const pendingAuthority = readOptionPubkey();
+    // Layout detection: old accounts don't have is_active between genesis_record and authority
+    let isActive, authority, pendingAuthority;
+    const peekByte = data[offset];
+    if (peekByte !== 0 && peekByte !== 1) {
+      // Old layout — no is_active field
+      isActive = true;
+      authority = readPubkey();
+      pendingAuthority = readOptionPubkey();
+    } else {
+      const optionPos = offset + 1 + 32;
+      if (optionPos < data.length && (data[optionPos] === 0 || data[optionPos] === 1)) {
+        isActive = readBool();
+        authority = readPubkey();
+        pendingAuthority = readOptionPubkey();
+      } else {
+        isActive = true;
+        authority = readPubkey();
+        pendingAuthority = readOptionPubkey();
+      }
+    }
 
-    const reputationScore = readU32();
-    const validationLevel = readU32();
+    const reputationScore = Number(data.readBigUInt64LE(offset)); offset += 8;
+    const verificationLevel = data[offset]; offset += 1;
+    const reputationUpdatedAt = readI64();
+    const verificationUpdatedAt = readI64();
 
     const createdAt = readI64();
     const updatedAt = readI64();
@@ -151,12 +169,12 @@ function parseGenesisRecord(data, pda) {
       faceMint,
       faceBurnTx,
       genesisRecord: genesisRecord > 0 ? new Date(genesisRecord * 1000).toISOString() : null,
-      isBorn,
+      isBorn: genesisRecord > 0,
       isActive,
       authority,
       pendingAuthority,
       reputationScore,
-      validationLevel,
+      verificationLevel,
       createdAt: new Date(createdAt * 1000).toISOString(),
       updatedAt: new Date(updatedAt * 1000).toISOString(),
     };
