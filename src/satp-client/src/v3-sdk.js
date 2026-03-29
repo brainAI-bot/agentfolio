@@ -920,7 +920,6 @@ class SATPV3SDK {
         metadata,
         createdAt,
         updatedAt,
-        isActive,
         bump,
       };
     } catch (e) {
@@ -1601,16 +1600,16 @@ class SATPV3SDK {
       const faceMint = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
       const faceBurnTx = readString();
       const genesisRecord = Number(data.readBigInt64LE(offset)); offset += 8;
-      const isActive = data[offset] === 1; offset += 1;
+      // No isActive on current deployed program GTppU4E44BqXTQg...
       const authority = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
 
-      // Option<Pubkey>
+      // Option<Pubkey> — Borsh: 0x00 = None (1 byte only), 0x01 + 32 bytes = Some
       const hasPending = data[offset] === 1; offset += 1;
       let pendingAuthority = null;
       if (hasPending) {
         pendingAuthority = new PublicKey(data.slice(offset, offset + 32)).toBase58();
+        offset += 32;
       }
-      offset += 32;
 
       const reputationScore = Number(data.readBigUInt64LE(offset)); offset += 8;
       const verificationLevel = data[offset]; offset += 1;
@@ -1635,7 +1634,6 @@ class SATPV3SDK {
         faceBurnTx: faceBurnTx || null,
         genesisRecord,
         isBorn,
-        isActive,
         authority: authority.toBase58(),
         pendingAuthority,
         reputationScore,
