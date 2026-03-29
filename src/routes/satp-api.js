@@ -215,7 +215,7 @@ function registerSATPRoutes(app) {
 
       // 2. Partial match across all on-chain agents
       try {
-        const result = await satpIdentity.listRegisteredAgents(200, 0);
+        const result = await satpIdentity.listRegisteredAgents(500, 0);
         const allAgents = Array.isArray(result) ? result : (result?.agents || result?.page || []);
         if (allAgents.length) {
           const partial = allAgents.find(a =>

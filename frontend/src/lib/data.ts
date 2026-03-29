@@ -378,11 +378,28 @@ export function getStats() {
   const totalSkills = new Set(agents.flatMap(a => a.skills)).size;
   const verified = agents.filter(a => (a.verificationLevel ?? a.tier ?? 0) >= 1).length;
   const onChain = agents.filter(a => a.verifications.satp?.verified || a.verifications.solana?.verified).length;
+  // Count born agents from V3 cache
+  let bornAgents = 0;
+  const v3Cache = (globalThis as any).__v3ScoresCache as Map<string, any> | undefined;
+  if (v3Cache) {
+    for (const v3 of v3Cache.values()) {
+      if (v3.isBorn) bornAgents++;
+    }
+  }
+  // Count distinct verification types across all agents
+  const verificationTypes = new Set<string>();
+  for (const a of agents) {
+    for (const [key, val] of Object.entries(a.verifications)) {
+      if (val && (val as any).verified) verificationTypes.add(key);
+    }
+  }
   return {
     totalAgents: agents.length,
     totalSkills,
     verified,
     onChain,
+    bornAgents,
+    verificationTypes: verificationTypes.size || 10, // fallback to known count
   };
 }
 

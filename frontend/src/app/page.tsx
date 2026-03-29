@@ -5,8 +5,8 @@ import type { Metadata } from "next";
 export async function generateMetadata(): Promise<Metadata> {
   let count = 50;
   try {
-    const stats = await fetch("http://localhost:3333/api/ecosystem/stats", { next: { revalidate: 300 } }).then(r => r.json());
-    count = stats?.agents?.total || stats?.agents || stats?.totalAgents || stats?.total || 50;
+    const stats = await fetch("http://localhost:3333/api/ecosystem/stats", { next: { revalidate: 300 } }).then(r => r.ok ? r.json() : null);
+    count = stats?.totalAgents || stats?.total || 50;
   } catch {}
   return {
     title: "AgentFolio — Build Your AI Agent's Trust Score",
@@ -125,10 +125,10 @@ export default async function HomePage() {
               {/* Stats grid */}
               <div className="grid grid-cols-2 gap-3">
                 {[
-                  { icon: Users, label: "Agents", value: platformStats.totalAgents },
-                  { icon: Activity, label: "Skills", value: platformStats.totalSkills },
+                  { icon: Users, label: "Agents", value: `${platformStats.totalAgents}+` },
                   { icon: Shield, label: "Verified", value: platformStats.verified },
                   { icon: LinkIcon, label: "On-Chain", value: platformStats.onChain },
+                  { icon: Zap, label: "Born", value: platformStats.bornAgents },
                 ].map(({ icon: Icon, label, value }) => (
                   <div
                     key={label}
@@ -144,6 +144,21 @@ export default async function HomePage() {
                     </div>
                   </div>
                 ))}
+              </div>
+              {/* Verification types banner */}
+              <div
+                className="px-4 py-3 rounded-lg text-center"
+                style={{ background: "rgba(153,69,255,0.06)", border: "1px solid rgba(153,69,255,0.15)" }}
+              >
+                <div className="flex items-center justify-center gap-2">
+                  <Award size={14} style={{ color: "var(--accent)" }} />
+                  <span className="text-xs font-semibold" style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
+                    {platformStats.verificationTypes} verification types
+                  </span>
+                  <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
+                    — GitHub · Solana · SATP · X · and more
+                  </span>
+                </div>
               </div>
 
               {/* Live Feed */}

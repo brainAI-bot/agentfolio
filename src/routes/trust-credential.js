@@ -188,7 +188,20 @@ function registerTrustCredentialRoutes(app) {
         maxScore: v3Data ? 800 : scoreResult.maxScore,
         tier: v3Data ? v3Data.verificationLabel.toUpperCase() : (scoreResult.level || scoreTier(scoreResult.score)),
         scoreVersion: v3Data ? 'v3' : 'v2',
-        verificationCount: parsed.verifications.filter(v => v.verified !== false).length,
+        verificationCount: (() => {
+          // Merge DB verifications with chain-cache verifications for full count
+          const dbCount = parsed.verifications.filter(v => v.verified !== false).length;
+          try {
+            const chainCache = require('../lib/chain-cache');
+            const chainPlatforms = chainCache.getVerifiedPlatforms(agentId) || [];
+            // Union of DB verified platforms + chain-cache platforms
+            const allPlatforms = new Set([
+              ...parsed.verifications.filter(v => v.verified !== false).map(v => v.platform),
+              ...chainPlatforms
+            ]);
+            return Math.max(dbCount, allPlatforms.size);
+          } catch { return dbCount; }
+        })(),
         onChainRegistered: v3Data ? true : (scoreResult.onChainRegistered || parsed.metadata?.registeredOnChain || parsed.verifications?.some(v => v.platform === 'satp' && v.verified) || false),
         breakdown: (() => {
           // V3 scoring uses different category structure than V2
