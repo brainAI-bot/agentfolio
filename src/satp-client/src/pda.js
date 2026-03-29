@@ -1,132 +1,188 @@
 const { PublicKey } = require('@solana/web3.js');
-const crypto = require('crypto');
 const {
-  PROGRAM_IDS, GENESIS_SEED, REVIEW_V3_SEED, REVIEW_COUNTER_V3_SEED,
-  ATTESTATION_V3_SEED, LINKED_WALLET_SEED, MINT_TRACKER_SEED,
-  IDENTITY_SEED, REPUTATION_SEED,
+  getProgramIds,
+  IDENTITY_SEED,
+  REPUTATION_AUTHORITY_SEED,
+  VALIDATION_AUTHORITY_SEED,
+  REVIEW_COUNTER_SEED,
+  MINT_TRACKER_SEED,
+  REVIEWS_AUTHORITY_SEED,
+  ATTESTATION_SEED,
+  REVIEW_SEED,
+  ESCROW_SEED,
 } = require('./constants');
 
-// ═══ V3 HELPERS ═══
-
-/** SHA-256 hash of agent_id string → 32-byte Buffer. Matches on-chain agent_id_hash(). */
-function agentIdHash(agentId) {
-  return crypto.createHash('sha256').update(agentId).digest();
-}
-
-/** Derive Genesis Record PDA: [b"genesis", sha256(agent_id)] */
-function getGenesisPDA(agentId) {
+/**
+ * Derive the Identity PDA for a wallet.
+ * Seeds: ["identity", wallet_pubkey]
+ * @param {PublicKey|string} wallet
+ * @param {'mainnet'|'devnet'} network
+ */
+function getIdentityPDA(wallet, network = 'devnet') {
+  const walletKey = new PublicKey(wallet);
+  const programIds = getProgramIds(network);
   return PublicKey.findProgramAddressSync(
-    [Buffer.from(GENESIS_SEED), agentIdHash(agentId)],
-    PROGRAM_IDS.IDENTITY_V3
+    [Buffer.from(IDENTITY_SEED), walletKey.toBuffer()],
+    programIds.IDENTITY
   );
 }
 
-/** Derive Linked Wallet PDA: [b"linked_wallet", genesis_pda, wallet] */
-function getLinkedWalletPDA(genesisPda, wallet) {
+/**
+ * Derive the Reputation Authority PDA (program signer for CPI).
+ * Seeds: ["reputation_authority"]
+ * @param {'mainnet'|'devnet'} network
+ */
+function getReputationAuthorityPDA(network = 'devnet') {
+  const programIds = getProgramIds(network);
   return PublicKey.findProgramAddressSync(
-    [Buffer.from(LINKED_WALLET_SEED), new PublicKey(genesisPda).toBuffer(), new PublicKey(wallet).toBuffer()],
-    PROGRAM_IDS.IDENTITY_V3
+    [Buffer.from(REPUTATION_AUTHORITY_SEED)],
+    programIds.REPUTATION
   );
 }
 
-/** Derive Mint Tracker PDA: [b"mint_tracker", genesis_pda] */
-function getMintTrackerPDA(genesisPda) {
+/**
+ * Derive the Validation Authority PDA (program signer for CPI).
+ * Seeds: ["validation_authority"]
+ * @param {'mainnet'|'devnet'} network
+ */
+function getValidationAuthorityPDA(network = 'devnet') {
+  const programIds = getProgramIds(network);
   return PublicKey.findProgramAddressSync(
-    [Buffer.from(MINT_TRACKER_SEED), new PublicKey(genesisPda).toBuffer()],
-    PROGRAM_IDS.IDENTITY_V3
+    [Buffer.from(VALIDATION_AUTHORITY_SEED)],
+    programIds.VALIDATION
   );
 }
 
-/** Derive Review V3 PDA: [b"review_v3", sha256(agent_id), reviewer] */
-function getReviewPDA(agentId, reviewer) {
+/**
+ * Derive the Review Counter PDA for an agent.
+ * Seeds: ["review_counter", agent_id]
+ * @param {PublicKey|string} agentId
+ * @param {'mainnet'|'devnet'} network
+ */
+function getReviewCounterPDA(agentId, network = 'devnet') {
+  const agentKey = new PublicKey(agentId);
+  const programIds = getProgramIds(network);
   return PublicKey.findProgramAddressSync(
-    [Buffer.from(REVIEW_V3_SEED), agentIdHash(agentId), new PublicKey(reviewer).toBuffer()],
-    PROGRAM_IDS.REVIEWS_V3
+    [Buffer.from(REVIEW_COUNTER_SEED), agentKey.toBuffer()],
+    programIds.REVIEWS
   );
 }
 
-/** Derive Review Counter V3 PDA: [b"review_counter_v3", sha256(agent_id)] */
-function getReviewCounterPDA(agentId) {
+/**
+ * Derive the MintTracker PDA for an identity.
+ * Seeds: ["mint_tracker", identity_pda]
+ * @param {PublicKey|string} identityPDA
+ * @param {'mainnet'|'devnet'} network
+ */
+function getMintTrackerPDA(identityPDA, network = 'devnet') {
+  const identityKey = new PublicKey(identityPDA);
+  const programIds = getProgramIds(network);
   return PublicKey.findProgramAddressSync(
-    [Buffer.from(REVIEW_COUNTER_V3_SEED), agentIdHash(agentId)],
-    PROGRAM_IDS.REVIEWS_V3
+    [Buffer.from(MINT_TRACKER_SEED), identityKey.toBuffer()],
+    programIds.IDENTITY
   );
 }
 
-/** Derive Attestation V3 PDA: [b"attestation_v3", sha256(agent_id), issuer, type] */
-function getAttestationPDA(agentId, issuer, attestationType) {
+/**
+ * Derive the Reviews Authority PDA (program signer for CPI into Attestations).
+ * Seeds: ["reviews_authority"]
+ * @param {'mainnet'|'devnet'} network
+ */
+function getReviewsAuthorityPDA(network = 'devnet') {
+  const programIds = getProgramIds(network);
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from(REVIEWS_AUTHORITY_SEED)],
+    programIds.REVIEWS
+  );
+}
+
+/**
+ * Derive the Review PDA for a specific reviewer + agent pair.
+ * Seeds: ["review", agent_id, reviewer]
+ * @param {PublicKey|string} agentId
+ * @param {PublicKey|string} reviewer
+ * @param {'mainnet'|'devnet'} network
+ */
+function getReviewPDA(agentId, reviewer, network = 'devnet') {
+  const agentKey = new PublicKey(agentId);
+  const reviewerKey = new PublicKey(reviewer);
+  const programIds = getProgramIds(network);
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from(REVIEW_SEED), agentKey.toBuffer(), reviewerKey.toBuffer()],
+    programIds.REVIEWS
+  );
+}
+
+/**
+ * Derive the Review Attestation PDA (auto-created via CPI when a review is submitted).
+ * Seeds: ["attestation", agent_id, reviews_authority, "review", reviewer]
+ * @param {PublicKey|string} agentId
+ * @param {PublicKey} reviewsAuthority - Use getReviewsAuthorityPDA() to derive
+ * @param {PublicKey|string} reviewer
+ * @param {'mainnet'|'devnet'} network
+ */
+function getReviewAttestationPDA(agentId, reviewsAuthority, reviewer, network = 'devnet') {
+  const agentKey = new PublicKey(agentId);
+  const reviewerKey = new PublicKey(reviewer);
+  const programIds = getProgramIds(network);
   return PublicKey.findProgramAddressSync(
     [
-      Buffer.from(ATTESTATION_V3_SEED),
-      agentIdHash(agentId),
-      new PublicKey(issuer).toBuffer(),
-      Buffer.from(attestationType),
+      Buffer.from(ATTESTATION_SEED),
+      agentKey.toBuffer(),
+      reviewsAuthority.toBuffer(),
+      Buffer.from(REVIEW_SEED),
+      reviewerKey.toBuffer(),
     ],
-    PROGRAM_IDS.ATTESTATIONS_V3
+    programIds.ATTESTATIONS
   );
 }
 
-/** Derive Reputation V3 Authority PDA */
-function getReputationAuthorityPDA() {
+/**
+ * Derive the Escrow PDA for a client + description_hash pair.
+ * Seeds: ["escrow", client_pubkey, description_hash]
+ * @param {PublicKey|string} client - Client wallet
+ * @param {Buffer|number[]} descriptionHash - 32-byte SHA256 hash of job description
+ * @param {'mainnet'|'devnet'} network
+ */
+function getEscrowPDA(client, descriptionHash, network = 'devnet') {
+  const clientKey = new PublicKey(client);
+  const hashBuf = Buffer.isBuffer(descriptionHash)
+    ? descriptionHash
+    : Buffer.from(descriptionHash);
+  const programIds = getProgramIds(network);
   return PublicKey.findProgramAddressSync(
-    [Buffer.from('reputation_v3_authority')],
-    PROGRAM_IDS.REPUTATION_V3
+    [Buffer.from(ESCROW_SEED), clientKey.toBuffer(), hashBuf],
+    programIds.ESCROW
   );
 }
 
-/** Derive Validation V3 Authority PDA */
-function getValidationAuthorityPDA() {
+/**
+ * Derive the Review V3 PDA (job-scoped reviews).
+ * Seeds: ["review", job_pubkey, reviewer_pubkey]
+ * @param {PublicKey|string} jobPDA - Job/Escrow account pubkey
+ * @param {PublicKey|string} reviewer - Reviewer wallet
+ * @param {'mainnet'|'devnet'} network
+ */
+function getReviewV3PDA(jobPDA, reviewer, network = 'devnet') {
+  const jobKey = new PublicKey(jobPDA);
+  const reviewerKey = new PublicKey(reviewer);
+  const programIds = getProgramIds(network);
+  // Reviews V3 uses the same REVIEWS program ID
   return PublicKey.findProgramAddressSync(
-    [Buffer.from('validation_v3_authority')],
-    PROGRAM_IDS.VALIDATION_V3
-  );
-}
-
-/** Resolve agent_id → Genesis PDA address (zero-trust lookup) */
-function resolveAgent(agentId) {
-  const [pda] = getGenesisPDA(agentId);
-  return pda;
-}
-
-// ═══ LEGACY V1 HELPERS (backward compat) ═══
-
-function getIdentityPDA(wallet) {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from(IDENTITY_SEED), new PublicKey(wallet).toBuffer()],
-    PROGRAM_IDS.IDENTITY
-  );
-}
-
-function getReputationPDA(wallet) {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from(REPUTATION_SEED), new PublicKey(wallet).toBuffer()],
-    PROGRAM_IDS.REPUTATION
+    [Buffer.from(REVIEW_SEED), jobKey.toBuffer(), reviewerKey.toBuffer()],
+    programIds.REVIEWS
   );
 }
 
 module.exports = {
-  // V3
-  agentIdHash, getGenesisPDA, getLinkedWalletPDA, getMintTrackerPDA,
-  getReviewPDA, getReviewCounterPDA, getAttestationPDA,
-  getReputationAuthorityPDA, getValidationAuthorityPDA, resolveAgent,
-  // Legacy
-  getIdentityPDA, getReputationPDA,
+  getIdentityPDA,
+  getReputationAuthorityPDA,
+  getValidationAuthorityPDA,
+  getReviewCounterPDA,
+  getMintTrackerPDA,
+  getReviewsAuthorityPDA,
+  getReviewPDA,
+  getReviewAttestationPDA,
+  getEscrowPDA,
+  getReviewV3PDA,
 };
-
-// ═══ NAME REGISTRY (added 2026-03-22) ═══
-
-/** Compute name hash: SHA-256(lowercase(name)) */
-function nameHash(name) {
-  return crypto.createHash('sha256').update(name.toLowerCase()).digest();
-}
-
-/** Derive Name Registry PDA: [b"name_registry", sha256(lowercase(name))] */
-function getNameRegistryPDA(name) {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from('name_registry'), nameHash(name)],
-    PROGRAM_IDS.IDENTITY_V3
-  );
-}
-
-module.exports.nameHash = nameHash;
-module.exports.getNameRegistryPDA = getNameRegistryPDA;

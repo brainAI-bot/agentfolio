@@ -22,9 +22,6 @@ const profileStore = require('./profile-store');
 // Scoring module
 const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainData } = require('./scoring');
 
-// Chain Cache — on-chain data layer (identities + attestations refresh loop)
-const chainCache = require('./lib/chain-cache');
-
 // V3 on-chain score service (Genesis Records — authoritative)
 let getV3Score;
 try {
@@ -259,28 +256,13 @@ app.get('/.well-known/did.json', (req, res) => {
   res.json(didDocument);
 });
 
-// Explorer API — /api/explorer/agents, /stats, /leaderboard, /search (MUST be before :agentId catch-all)
-try {
-  const explorerApi = require("./routes/explorer-api");
-  app.use("/api/explorer", explorerApi);
-  console.log("[Explorer API] Mounted at /api/explorer — agents, stats, leaderboard, search");
-} catch (e) {
-  console.warn("[Explorer API] Failed to mount:", e.message);
-}
-
 // ─── API Explorer (agent profile deep-link) ─────────────
 app.get('/api/explorer/:agentId', async (req, res) => {
   const { agentId } = req.params;
   const profileStore = require('./profile-store');
   try {
     const db = profileStore.getDb();
-    let profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId);
-    if (!profile && !agentId.startsWith('agent_')) {
-      profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + agentId);
-    }
-    if (!profile && agentId.startsWith('agent_')) {
-      profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId.replace(/^agent_/, ''));
-    }
+    const profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId);
     if (!profile) {
       return res.status(404).json({ error: 'Agent not found', agentId });
     }
@@ -350,67 +332,6 @@ app.get('/api/explorer/:agentId', async (req, res) => {
   } catch (err) {
     console.error('[Explorer] Error:', err);
     res.status(500).json({ error: 'Failed to load agent', details: err.message });
-  }
-});
-
-
-// ─── Trust Score API (dedicated endpoint) ────────────────
-app.get('/api/profile/:id/trust-score', async (req, res) => {
-  const profileId = req.params.id;
-  const profileStore = require('./profile-store');
-  try {
-    const db = profileStore.getDb();
-    const row = db.prepare('SELECT id FROM profiles WHERE id = ? OR id = ?').get(profileId, 'agent_' + profileId);
-    if (!row) {
-      return res.status(404).json({ error: 'Agent not found', agentId: profileId });
-    }
-    const resolvedId = row.id;
-    
-    // V3 on-chain score (authoritative)
-    let v3Data = null;
-    try {
-      v3Data = await getV3Score(resolvedId);
-      if (!v3Data && !resolvedId.startsWith('agent_')) {
-        v3Data = await getV3Score('agent_' + resolvedId);
-      }
-    } catch (e) { /* skip */ }
-    
-    if (v3Data) {
-      const levelLabels = ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'];
-      return res.json({
-        agentId: resolvedId,
-        score: v3Data.reputationScore,
-        level: v3Data.verificationLevel,
-        levelName: levelLabels[v3Data.verificationLevel] || 'Unclaimed',
-        tier: v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || 'Unclaimed',
-        isBorn: v3Data.isBorn,
-        source: 'v3-onchain',
-      });
-    }
-    
-    // Fallback to DB trust score
-    const Database = require('better-sqlite3');
-    const path = require('path');
-    const mainDb = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
-    const trustRow = mainDb.prepare('SELECT overall_score, level, score_breakdown FROM satp_trust_scores WHERE agent_id = ?').get(resolvedId);
-    mainDb.close();
-    
-    if (trustRow) {
-      return res.json({
-        agentId: resolvedId,
-        score: trustRow.overall_score,
-        level: trustRow.level,
-        levelName: ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'][trustRow.level] || 'Unclaimed',
-        tier: trustRow.level >= 4 ? 'Elite' : trustRow.level >= 3 ? 'Established' : trustRow.level >= 2 ? 'Verified' : trustRow.level >= 1 ? 'Basic' : 'Unclaimed',
-        breakdown: JSON.parse(trustRow.score_breakdown || '{}'),
-        source: 'db',
-      });
-    }
-    
-    res.json({ agentId: resolvedId, score: 0, level: 0, levelName: 'Unclaimed', tier: 'Unclaimed', source: 'none' });
-  } catch (err) {
-    console.error('[Trust Score] Error:', err);
-    res.status(500).json({ error: 'Failed to compute trust score', details: err.message });
   }
 });
 
@@ -700,67 +621,6 @@ app.get('/docs', (req, res) => {
   </div>
 </body>
 </html>`);
-});
-
-// Ecosystem stats endpoint - for homepage hero stats
-app.get('/api/ecosystem/stats', (req, res) => {
-  try {
-    const d = profileStore.getDb();
-    const total = d.prepare('SELECT COUNT(*) as c FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL)').get('active').c;
-    
-    // Count verified agents (those with at least one verification in verification_data)
-    const rows = d.prepare('SELECT verification_data FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL)').all('active');
-    let verified = 0;
-    let onChain = 0;
-    const allSkills = new Set();
-    const verificationTypes = new Set();
-    
-    // Also count from JSON files for skills
-    const fs = require('fs');
-    const path = require('path');
-    const profilesDir = '/home/ubuntu/agentfolio/data/profiles';
-    const jsonFiles = fs.readdirSync(profilesDir).filter(f => f.endsWith('.json'));
-    
-    for (const file of jsonFiles) {
-      try {
-        const p = JSON.parse(fs.readFileSync(path.join(profilesDir, file), 'utf-8'));
-        if (p.skills) {
-          for (const s of p.skills) {
-            const name = typeof s === 'string' ? s : s.name;
-            if (name) allSkills.add(name);
-          }
-        }
-      } catch {}
-    }
-    
-    for (const row of rows) {
-      try {
-        const vd = typeof row.verification_data === 'string' ? JSON.parse(row.verification_data) : (row.verification_data || {});
-        const platforms = Object.keys(vd);
-        let hasVerification = false;
-        for (const platform of platforms) {
-          if (vd[platform] && vd[platform].verified) {
-            hasVerification = true;
-            verificationTypes.add(platform);
-          }
-        }
-        if (hasVerification) verified++;
-        if (vd.satp?.verified || vd.solana?.verified) onChain++;
-      } catch {}
-    }
-    
-    res.json({
-      total,
-      totalAgents: Math.max(total, jsonFiles.length),
-      totalSkills: allSkills.size,
-      verified,
-      onChain,
-      verificationTypes: verificationTypes.size,
-      verificationPlatforms: [...verificationTypes].sort(),
-    });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to compute stats' });
-  }
 });
 
 // Health check endpoint
@@ -1549,67 +1409,9 @@ try {
   const v3Api = require("./routes/v3-api-index");
   app.use("/api/v3", v3Api);
   console.log("[V3 API] Mounted at /api/v3 — 22 endpoints");
-
 } catch (e) {
-  console.warn('[V3 API] Failed to mount:', e.message);
+  console.warn("[V3 API] Failed to mount:", e.message);
 }
-
-// Explorer API routes (agents list, stats, leaderboard, search)
-try {
-  const explorerRouter = require('./routes/explorer-api');
-  app.use('/api/explorer', explorerRouter);
-  console.log('[Explorer API] Mounted at /api/explorer');
-} catch (e) {
-  console.warn('[Explorer API] Failed to mount:', e.message);
-}
-
-
-// Mint/BOA Eligibility — /api/mint/eligibility, /api/boa/eligibility
-try {
-  const { registerEligibilityRoutes } = require("./api/eligibility");
-  registerEligibilityRoutes(app);
-  console.log("[Eligibility API] Mounted — /api/mint/eligibility, /api/boa/eligibility");
-} catch (e) {
-  console.warn("[Eligibility API] Failed to mount:", e.message);
-}
-
-
-// Route aliases (CEO-tested paths) — added 2026-03-29 by brainChain
-// Alias for frontend compatibility
-app.get('/api/satp/explorer/agents', async (req, res) => {
-  try {
-    const fetch = (await import('node-fetch')).default || globalThis.fetch;
-    const r = await fetch('http://localhost:3333/api/explorer/agents');
-    const data = await r.json();
-    res.json(data);
-  } catch(e) { res.status(500).json({error: e.message}); }
-});
-app.get('/api/satp/explorer', (req, res) => {
-  res.redirect(301, '/api/explorer/agents' + (req.url.includes('?') ? '?' + req.url.split('?')[1] : ''));
-});
-app.get('/api/x402/trust-score', (req, res) => {
-  const agentId = req.query.agent_id || req.query.agentId || req.query.id;
-  if (!agentId) return res.status(400).json({ error: 'agent_id required' });
-  res.redirect(301, '/api/profile/' + encodeURIComponent(agentId) + '/trust-score');
-});
-app.get('/api/satp/mint-eligibility', (req, res) => {
-  const agentId = req.query.agent_id || req.query.agentId || req.query.id;
-  if (!agentId) return res.status(400).json({ error: 'agent_id required' });
-  res.redirect(301, '/api/mint/eligibility/' + encodeURIComponent(agentId));
-});
-app.get('/api/v3/profile/:id', async (req, res) => {
-  try {
-    const http = require('http');
-    const proxyReq = http.get('http://127.0.0.1:3333/api/satp/v3/agent/' + encodeURIComponent(req.params.id), (proxyRes) => {
-      res.status(proxyRes.statusCode);
-      proxyRes.pipe(res);
-    });
-    proxyReq.on('error', (e) => res.status(500).json({ error: e.message }));
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-console.log('[Route Aliases] Mounted: /api/satp/explorer, /api/x402/trust-score, /api/satp/mint-eligibility, /api/v3/profile/:id');
 
 app.use((err, req, res, next) => {
   console.error(`[ERROR] ${err.message}`, { 
@@ -1862,10 +1664,6 @@ app.listen(PORT, () => {
   
   console.log(`[${new Date().toISOString()}] info: 🔧 DISCORD VERIFICATION FIX ACTIVE`, {service: "agentfolio"});
   console.log(`[${new Date().toISOString()}] info: ✓ Line 68 updated to hardened version`, {service: "agentfolio"});
-  
-  // Start chain-cache refresh loop (identities + attestations from Solana)
-  chainCache.start();
-  console.log(`[${new Date().toISOString()}] info: ⛓️ Chain-cache refresh loop started`, {service: "agentfolio"});
 });
 
 module.exports = app;

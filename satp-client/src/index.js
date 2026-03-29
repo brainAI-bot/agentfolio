@@ -773,7 +773,7 @@ class SATPSDK {
 }
 
 // V3 SDK + PDA exports
-const { SATPV3SDK } = require('./v3-sdk');
+const { SATPV3SDK, createSATPClient } = require('./v3-sdk');
 const v3pda = require('./v3-pda');
 
 module.exports = {
@@ -794,6 +794,7 @@ module.exports = {
 
   // V3 SDK
   SATPV3SDK,
+  createSATPClient,
 
   // V3 PDA derivation
   getV3ProgramIds: v3pda.getV3ProgramIds,

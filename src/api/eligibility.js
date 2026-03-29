@@ -1,38 +1,60 @@
 /**
  * BOA & Mint Eligibility Endpoints
- * Sprint 4: /api/boa/eligibility and /api/mint/eligibility
+ * Uses V3 on-chain data (v3-score-service) as primary source.
+ * Falls back to scoring-engine-v2 for agents without on-chain records.
  */
 
 const Database = require('better-sqlite3');
 const path = require('path');
-const { getCompleteScore } = require('../lib/scoring-engine-v2'); const fs = require('fs');
+const fs = require('fs');
+
+let v3ScoreService;
+try {
+  v3ScoreService = require('../v3-score-service');
+} catch (e) {
+  console.warn('[Eligibility] V3 score service not available:', e.message);
+}
+
+let getCompleteScore;
+try {
+  ({ getCompleteScore } = require('../lib/scoring-engine-v2'));
+} catch (e) {
+  console.warn('[Eligibility] Scoring engine V2 not available:', e.message);
+}
 
 function getDb() {
   return new Database(path.join(__dirname, '..', '..', 'data', 'agentfolio.db'), { readonly: true });
 }
 
-// BOA Mint Level 3 Gate requirements:
-// - verification_level >= 3
-// - reputation >= 50
-// - max 3 mints per agent
-// - Pricing: 1st free, 2nd-3rd = 1 SOL
-
-function registerEligibilityRoutes(app) {
-
-  // GET /api/boa/eligibility?agent=<agent_id>
-  app.get('/api/boa/eligibility', (req, res) => {
-    const agentId = req.query.agent;
-    if (!agentId) return res.status(400).json({ error: 'Missing agent query parameter' });
-
+/**
+ * Resolve agent level + reputation from V3 on-chain data first,
+ * then fall back to scoring-engine-v2 if no on-chain record.
+ */
+async function resolveAgentScore(agentId, profile) {
+  // Try V3 on-chain data first (correct deserialization)
+  if (v3ScoreService) {
     try {
-      const db = getDb();
-      const profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId);
-      if (!profile) {
-        db.close();
-        return res.status(404).json({ error: 'Agent not found', eligible: false });
+      // Try multiple ID formats
+      let v3 = await v3ScoreService.getV3Score(agentId);
+      if (!v3 && !agentId.startsWith('agent_')) {
+        v3 = await v3ScoreService.getV3Score('agent_' + agentId.toLowerCase());
       }
+      if (v3 && v3.verificationLevel != null) {
+        return {
+          level: v3.verificationLevel,
+          reputation: v3.reputationScore,
+          source: 'v3_onchain',
+          label: v3.verificationLabel,
+        };
+      }
+    } catch (e) {
+      console.warn('[Eligibility] V3 lookup failed for', agentId, e.message);
+    }
+  }
 
-      db.close();
+  // Fallback to scoring-engine-v2
+  if (getCompleteScore && profile) {
+    try {
       const profileObj = {
         id: profile.id, name: profile.name, handle: profile.handle,
         bio: profile.bio, avatar: profile.avatar,
@@ -42,28 +64,58 @@ function registerEligibilityRoutes(app) {
         portfolio: JSON.parse(profile.portfolio || '[]'),
         track_record: JSON.parse(profile.track_record || '{}'),
       };
+      // Try to enrich from JSON file
       try {
-        const pPath = require('path').join(__dirname, '..', '..', 'data', 'profiles', profile.id + '.json');
+        const pPath = path.join(__dirname, '..', '..', 'data', 'profiles', profile.id + '.json');
         if (fs.existsSync(pPath)) {
           const pf = JSON.parse(fs.readFileSync(pPath, 'utf8'));
           profileObj.verificationData = pf.verificationData || {};
           profileObj.stats = pf.stats || {};
           profileObj.endorsements = pf.endorsements || profileObj.endorsements || [];
           profileObj.moltbookStats = pf.moltbookStats || {};
-          profileObj.stats = pf.stats || {};
-          profileObj.endorsements = pf.endorsements || profileObj.endorsements || [];
-          profileObj.moltbookStats = pf.moltbookStats || {};
         }
       } catch (e) {}
       const scoreResult = getCompleteScore(profileObj);
-      const level = scoreResult.verificationLevel ? scoreResult.verificationLevel.level : 0;
-      const reputation = scoreResult.reputationScore ? scoreResult.reputationScore.score : 0;
+      return {
+        level: scoreResult.verificationLevel ? scoreResult.verificationLevel.level : 0,
+        reputation: scoreResult.reputationScore ? scoreResult.reputationScore.score : 0,
+        source: 'scoring_engine_v2',
+        label: scoreResult.verificationLevel ? scoreResult.verificationLevel.name : 'Unknown',
+      };
+    } catch (e) {
+      console.warn('[Eligibility] Scoring engine fallback failed for', agentId, e.message);
+    }
+  }
+
+  return { level: 0, reputation: 0, source: 'none', label: 'Unknown' };
+}
+
+function resolveProfile(db, agentId) {
+  let profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId);
+  if (!profile) profile = db.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(agentId);
+  if (!profile) profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + agentId.toLowerCase());
+  return profile;
+}
+
+function registerEligibilityRoutes(app) {
+
+  // GET /api/boa/eligibility?agent=<agent_id>
+  app.get('/api/boa/eligibility', async (req, res) => {
+    const agentId = req.query.agent;
+    if (!agentId) return res.status(400).json({ error: 'Missing agent query parameter' });
+
+    try {
+      const db = getDb();
+      const profile = resolveProfile(db, agentId);
+      db.close();
+      if (!profile) return res.status(404).json({ error: 'Agent not found', eligible: false });
+
+      const { level, reputation } = await resolveAgentScore(agentId, profile);
 
       const meetsLevel = level >= 3;
       const meetsReputation = reputation >= 50;
       const eligible = meetsLevel && meetsReputation;
 
-      // Pricing: 1st free, 2nd-3rd = 1 SOL, max 3
       const pricing = {
         maxMints: 3,
         schedule: [
@@ -92,48 +144,46 @@ function registerEligibilityRoutes(app) {
     }
   });
 
+  // GET /api/mint/eligibility/:agentId
+  app.get('/api/mint/eligibility/:agentId', async (req, res) => {
+    const agentId = req.params.agentId;
+    if (!agentId) return res.status(400).json({ error: 'Missing agent parameter' });
+
+    try {
+      const db = getDb();
+      const profile = resolveProfile(db, agentId);
+      db.close();
+      if (!profile) return res.status(404).json({ error: 'Agent not found', eligible: false });
+
+      const { level, reputation, source } = await resolveAgentScore(agentId, profile);
+
+      res.json({
+        agent: agentId,
+        eligible: level >= 3 && reputation >= 50,
+        level,
+        reputation,
+        source,
+        requirements: { minLevel: 3, minReputation: 50 },
+        reason: level < 3 ? 'Verification level too low (need L3+)' : reputation < 50 ? 'Reputation too low (need 50+)' : 'Eligible to mint',
+      });
+    } catch (err) {
+      res.status(500).json({ error: 'Eligibility check failed', detail: err.message });
+    }
+  });
+
   // GET /api/mint/eligibility?agent=<agent_id>
-  // General mint eligibility — checks if agent can mint any NFT/token
-  app.get('/api/mint/eligibility', (req, res) => {
+  app.get('/api/mint/eligibility', async (req, res) => {
     const agentId = req.query.agent;
     if (!agentId) return res.status(400).json({ error: 'Missing agent query parameter' });
 
     try {
       const db = getDb();
-      const profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId);
-      if (!profile) {
-        db.close();
-        return res.status(404).json({ error: 'Agent not found', eligible: false });
-      }
-
+      const profile = resolveProfile(db, agentId);
       db.close();
-      const profileObj = {
-        id: profile.id, name: profile.name, handle: profile.handle,
-        bio: profile.bio, avatar: profile.avatar,
-        skills: JSON.parse(profile.skills || '[]'),
-        verification: JSON.parse(profile.verification || '{}'),
-        endorsements: JSON.parse(profile.endorsements || '[]'),
-        portfolio: JSON.parse(profile.portfolio || '[]'),
-        track_record: JSON.parse(profile.track_record || '{}'),
-      };
-      try {
-        const pPath = require('path').join(__dirname, '..', '..', 'data', 'profiles', profile.id + '.json');
-        if (fs.existsSync(pPath)) {
-          const pf = JSON.parse(fs.readFileSync(pPath, 'utf8'));
-          profileObj.verificationData = pf.verificationData || {};
-          profileObj.stats = pf.stats || {};
-          profileObj.endorsements = pf.endorsements || profileObj.endorsements || [];
-          profileObj.moltbookStats = pf.moltbookStats || {};
-          profileObj.stats = pf.stats || {};
-          profileObj.endorsements = pf.endorsements || profileObj.endorsements || [];
-          profileObj.moltbookStats = pf.moltbookStats || {};
-        }
-      } catch (e) {}
-      const scoreResult = getCompleteScore(profileObj);
-      const level = scoreResult.verificationLevel ? scoreResult.verificationLevel.level : 0;
-      const reputation = scoreResult.reputationScore ? scoreResult.reputationScore.score : 0;
+      if (!profile) return res.status(404).json({ error: 'Agent not found', eligible: false });
 
-      // Mint types available
+      const { level, reputation, source } = await resolveAgentScore(agentId, profile);
+
       const mintTypes = [];
 
       // BOA mint (Level 3 gate)
@@ -164,6 +214,7 @@ function registerEligibilityRoutes(app) {
         agent: agentId,
         verification_level: level,
         reputation,
+        source,
         mint_types: mintTypes,
         any_eligible: mintTypes.some(m => m.eligible),
       });

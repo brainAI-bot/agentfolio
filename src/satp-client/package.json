@@ -1,28 +1,32 @@
 {
-  "name": "@brainai/satp-v3",
-  "version": "3.0.0",
-  "description": "SATP V3 Genesis Record SDK — on-chain agent identity for Solana",
+  "name": "@brainai/satp-client",
+  "version": "3.6.0",
+  "description": "SATP v3 Client SDK \u2014 Solana Agent Token Protocol (Genesis Identity, Reviews, Reputation, Attestations, Validation, Escrow, Name Registry)",
   "main": "src/index.js",
-  "exports": {
-    ".": "./src/index.js",
-    "./constants": "./src/constants.js",
-    "./pda": "./src/pda.js",
-    "./schema": "./src/schema.js"
-  },
+  "types": "src/index.d.ts",
+  "files": [
+    "src/",
+    "README.md"
+  ],
   "scripts": {
-    "test": "node test.js",
-    "test:mainnet": "SATP_RPC=mainnet node test.js"
+    "test": "node test.js"
   },
-  "keywords": ["solana", "satp", "agent", "identity", "genesis-record", "on-chain"],
-  "author": "brainAI (brainChain)",
+  "keywords": [
+    "solana",
+    "satp",
+    "agent",
+    "identity",
+    "reputation",
+    "blockchain",
+    "web3"
+  ],
+  "author": "brainAI",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/brainai/satp-v3"
+    "url": "https://github.com/brainai-dev/satp-client"
   },
-  "engines": {
-    "node": ">=18"
-  },
+  "homepage": "https://agentfolio.bot",
   "dependencies": {
     "@solana/web3.js": "^1.98.4",
     "borsh": "^2.0.0",
