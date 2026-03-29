@@ -97,14 +97,21 @@ export default function MintPage() {
       await connection.confirmTransaction(sig, "confirmed");
       // Record the mint server-side
       try {
-        await fetch(API + "/api/burn-to-become/confirm-mint", {
+        const confirmRes = await fetch(API + "/api/burn-to-become/confirm-mint", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet: walletAddr, signature: sig, asset: prepData.asset, boaId: prepData.boaId, flow }),
         });
+        const confirmData = await confirmRes.json().catch(() => ({}));
+        // Use actual mint response if available, fall back to prepData
+        setMintedNft({
+          image: confirmData.imageUri || confirmData.image_uri || prepData.imageUri || "",
+          name: confirmData.boaName || confirmData.name || prepData.boaName || "Burned-Out Agent",
+          number: confirmData.boaId || confirmData.nft_number || prepData.boaId || 0,
+          mint: confirmData.mintAddress || confirmData.mint || prepData.asset || "",
+        });
       } catch (e) { console.warn("confirm-mint failed (non-critical):", e); }
       setBurnTx(sig);
-      setMintedNft({ image: prepData.imageUri || "", name: prepData.boaName || "Burned-Out Agent", number: prepData.boaId || 0, mint: prepData.asset || "" });
       await loadWalletData(walletAddr);
       setStep("complete");
     } catch (e: any) {
@@ -131,7 +138,7 @@ export default function MintPage() {
         });
         if (!res.ok) { const err = await res.json(); throw new Error(err.error || err.message || "Mint failed"); }
         const data = await res.json();
-        setSoulboundMint(data.mintAddress || data.mint || "");
+        // Don't set soulboundMint — this is a regular Core NFT mint, not soulbound
         setBurnTx(data.signature || data.tx || "");
         setMintedNft({ image: data.imageUri || data.image_uri || "", name: data.boaName || data.name || `BOA #${data.boaId || data.nft_number || 1}`, number: data.boaId || data.nft_number || 1, mint: data.mintAddress || data.mint || "" });
         await loadWalletData(walletAddr);
@@ -158,7 +165,7 @@ export default function MintPage() {
         });
         if (!mintRes.ok) { const err = await mintRes.json(); throw new Error(err.error || err.message || "Mint failed after payment"); }
         const mintData = await mintRes.json();
-        setSoulboundMint(mintData.mint || "");
+        // Don't set soulboundMint — this is a regular Core NFT mint, not soulbound
         setMintedNft({ image: mintData.imageUri || mintData.image_uri || "", name: mintData.boaName || mintData.name || `BOA #${mintData.boaId || mintData.nft_number || 1}`, number: mintData.boaId || mintData.nft_number || 1, mint: mintData.mintAddress || mintData.mint || "" });
         await loadWalletData(walletAddr);
         setStep("complete");
@@ -772,12 +779,18 @@ export default function MintPage() {
                   <div className="rounded-xl border-2 aspect-square flex items-center justify-center" style={{ borderColor: "var(--success)", background: "var(--bg-tertiary)" }}>
                     <div className="text-center p-4 space-y-3">
                       <Shield size={32} className="mx-auto" style={{ color: "var(--success)" }} />
-                      <p className="text-xs font-bold" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>Verified On-Chain</p>
+                      <p className="text-xs font-bold" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>{soulboundMint ? "Verified On-Chain" : "NFT Minted"}</p>
                       <div className="space-y-1 text-[10px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
-                        <p>Token-2022 Soulbound</p>
-                        <p>Non-Transferable</p>
-                        <p>Arweave Permanent Storage</p>
-                        <p>SATP Identity Linked</p>
+                        {soulboundMint ? (<>
+                          <p>Token-2022 Soulbound</p>
+                          <p>Non-Transferable</p>
+                          <p>Arweave Permanent Storage</p>
+                          <p>SATP Identity Linked</p>
+                        </>) : (<>
+                          <p>Metaplex Core NFT</p>
+                          <p>Burned-Out Agents Collection</p>
+                          <p>Burn to create soulbound identity</p>
+                        </>)}
                       </div>
                     </div>
                   </div>

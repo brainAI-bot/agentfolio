@@ -26,13 +26,30 @@ const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainD
 const chainCache = require('./lib/chain-cache');
 
 // V3 on-chain score service (Genesis Records — authoritative)
-let getV3Score;
+let _rawGetV3Score;
 try {
-  getV3Score = require('../v3-score-service').getV3Score;
+  _rawGetV3Score = require('../v3-score-service').getV3Score;
 } catch (_) {
-  try { getV3Score = require('./v3-score-service').getV3Score; } catch (_2) {
-    getV3Score = async () => null; // Graceful fallback if module missing
+  try { _rawGetV3Score = require('./v3-score-service').getV3Score; } catch (_2) {
+    _rawGetV3Score = async () => null;
   }
+}
+// Wrapper: resolve DB id (agent_brainkid) to profile name (brainKID) for correct PDA
+async function getV3Score(agentIdOrName) {
+  // Try profile name first (canonical PDA)
+  if (agentIdOrName && agentIdOrName.startsWith('agent_')) {
+    try {
+      const d = require('./profile-store').getDb ? require('./profile-store').getDb() : null;
+      if (d) {
+        const row = d.prepare('SELECT name FROM profiles WHERE id = ?').get(agentIdOrName);
+        if (row && row.name) {
+          const result = await _rawGetV3Score(row.name);
+          if (result) return result;
+        }
+      }
+    } catch (e) { /* fall through */ }
+  }
+  return _rawGetV3Score(agentIdOrName);
 }
 
 // x402 Payment Layer
@@ -278,6 +295,12 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     if (!profile && !agentId.startsWith('agent_')) {
       profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + agentId);
     }
+    if (!profile && !agentId.startsWith('agent_')) {
+      profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + agentId.toLowerCase());
+    }
+    if (!profile) {
+      profile = db.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(agentId);
+    }
     if (!profile && agentId.startsWith('agent_')) {
       profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId.replace(/^agent_/, ''));
     }
@@ -303,11 +326,33 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     // V3: Fetch authoritative on-chain Genesis Record score
     let v3Data = null;
     try {
-      v3Data = await getV3Score(agentId);
+      v3Data = await getV3Score(profile.id);
     } catch (e) {
-      console.warn('[Explorer] V3 score fetch failed for', agentId, e.message);
+      console.warn('[Explorer] V3 score fetch failed for', profile.id, e.message);
     }
     
+    // DB enrichment: when V3 on-chain shows defaults, use DB trust scores
+    if (v3Data && (v3Data.verificationLevel === 0 || v3Data.reputationScore === 500000)) {
+      try {
+        const Database = require('better-sqlite3');
+        const path = require('path');
+        const mainDb = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
+        const trustRow = mainDb.prepare('SELECT overall_score, level FROM satp_trust_scores WHERE agent_id = ?').get(profile.id);
+        mainDb.close();
+        if (trustRow) {
+          const levelMap = { UNCLAIMED: 0, REGISTERED: 1, VERIFIED: 2, ESTABLISHED: 3, TRUSTED: 4, SOVEREIGN: 5 };
+          const numLevel = typeof trustRow.level === 'number' ? trustRow.level : (levelMap[String(trustRow.level).toUpperCase()] || 0);
+          const levelLabels = ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'];
+          v3Data.verificationLevel = numLevel;
+          v3Data.verificationLabel = levelLabels[numLevel] || 'Unclaimed';
+          v3Data.reputationScore = trustRow.overall_score || v3Data.reputationScore;
+          v3Data._enrichedFromDB = true;
+        }
+      } catch (enrichErr) {
+        console.warn('[Explorer] DB enrichment failed:', enrichErr.message);
+      }
+    }
+
     // Use V3 on-chain score if available, otherwise fall back to V2
     const trustScore = v3Data ? v3Data.reputationScore : scoreResult.score;
     const tier = v3Data
@@ -826,6 +871,38 @@ app.get('/api/ecosystem/stats', (req, res) => {
 });
 
 // Health check endpoint
+
+// Wallet lookup — resolve wallet address to profile ID (for navbar My Profile link)
+app.get('/api/wallet/lookup/:address', (req, res) => {
+  try {
+    const addr = req.params.address;
+    const d = profileStore.getDb();
+    // Check wallets JSON column for matching Solana address
+    const rows = d.prepare('SELECT id, name, wallets, verification_data, wallet FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL)').all('active');
+    for (const row of rows) {
+      try {
+        // Check wallets JSON column
+        const wallets = JSON.parse(row.wallets || '{}');
+        if (wallets.solana === addr || wallets.ethereum === addr || wallets.hyperliquid === addr) {
+          return res.json({ found: true, profile: { id: row.id, name: row.name } });
+        }
+        // Check verification_data for Solana address
+        const vd = JSON.parse(row.verification_data || '{}');
+        if (vd.solana && vd.solana.address === addr) {
+          return res.json({ found: true, profile: { id: row.id, name: row.name } });
+        }
+        // Check legacy wallet column
+        if (row.wallet === addr) {
+          return res.json({ found: true, profile: { id: row.id, name: row.name } });
+        }
+      } catch {}
+    }
+    res.json({ found: false, profile: null });
+  } catch (err) {
+    res.status(500).json({ found: false, error: 'Lookup failed' });
+  }
+});
+
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',

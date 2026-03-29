@@ -892,19 +892,45 @@ function registerRoutes(app) {
     if (!satpV3) return res.json({ error: 'SATP V3 SDK not available', genesis: null });
     try {
       const rawId = req.params.id;
-      // Try the raw ID first (e.g. "brainKID")
-      let record = await satpV3.client.getGenesisRecord(rawId);
-      if (!record) {
-        // If DB-style ID (e.g. "agent_brainkid"), look up the profile name and try that
+      let record = null;
+      // For DB-style IDs (e.g. "agent_brainkid"), look up the profile NAME first
+      // The canonical Genesis Record PDA is derived from the agent's display name
+      if (rawId.startsWith('agent_')) {
         const d = getDb();
         const row = d.prepare('SELECT name FROM profiles WHERE id = ?').get(rawId);
-        if (row && row.name && row.name !== rawId) {
+        if (row && row.name) {
           record = await satpV3.client.getGenesisRecord(row.name);
         }
-        // Also try stripping "agent_" prefix and capitalizing
-        if (!record && rawId.startsWith('agent_')) {
-          const stripped = rawId.replace('agent_', '');
-          record = await satpV3.client.getGenesisRecord(stripped);
+      }
+      // Fallback: try the raw ID directly
+      if (!record) {
+        record = await satpV3.client.getGenesisRecord(rawId);
+      }
+      // DB enrichment: if on-chain shows defaults, enrich from DB trust scores
+      if (record) {
+        try {
+          const rawId = req.params.id;
+          const d = getDb();
+          // Resolve profile ID
+          let dbRow = d.prepare('SELECT id FROM profiles WHERE id = ? OR LOWER(name) = LOWER(?)').get(rawId, rawId);
+          if (!dbRow && !rawId.startsWith('agent_')) {
+            dbRow = d.prepare('SELECT id FROM profiles WHERE id = ?').get('agent_' + rawId.toLowerCase());
+          }
+          if (dbRow) {
+            const trustRow = require('better-sqlite3')(require('path').join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true })
+              .prepare('SELECT overall_score, level, score_breakdown FROM satp_trust_scores WHERE agent_id = ?').get(dbRow.id);
+            if (trustRow && (record.verificationLevel === 0 || record.reputationScore === 500000)) {
+              const levelMap = { UNCLAIMED: 0, REGISTERED: 1, VERIFIED: 2, ESTABLISHED: 3, TRUSTED: 4, SOVEREIGN: 5 };
+              const levelLabels = ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'];
+              const numLevel = typeof trustRow.level === 'number' ? trustRow.level : (levelMap[String(trustRow.level).toUpperCase()] || 0);
+              record.verificationLevel = numLevel;
+              record.verificationLabel = levelLabels[numLevel] || 'Unclaimed';
+              record.reputationScore = trustRow.overall_score || record.reputationScore;
+              record._enrichedFromDB = true;
+            }
+          }
+        } catch (enrichErr) {
+          console.warn('[Genesis] DB enrichment failed:', enrichErr.message);
         }
       }
       res.json({ genesis: record });
