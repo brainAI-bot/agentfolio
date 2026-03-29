@@ -183,6 +183,33 @@ function parseGenesisRecord(data, pda) {
   }
 }
 
+
+// Enrich from satp_trust_scores when V3 on-chain level is default (0)
+const Database = require('better-sqlite3');
+const pathMod = require('path');
+const LEVEL_MAP = { UNCLAIMED: 0, NEW: 0, REGISTERED: 1, VERIFIED: 2, ESTABLISHED: 3, TRUSTED: 4, SOVEREIGN: 5 };
+const LEVEL_LABELS = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
+
+function enrichFromDB(record) {
+  if (!record || record.error) return record;
+  if (record.reputationScore !== 500000 || record.verificationLevel !== 0) return record;
+  try {
+    const db = new Database(pathMod.join(__dirname, '..', '..', 'data', 'agentfolio.db'), { readonly: true });
+    const agentId = 'agent_' + record.agentName.toLowerCase();
+    let row = db.prepare('SELECT overall_score, level FROM satp_trust_scores WHERE agent_id = ?').get(agentId);
+    if (!row) row = db.prepare('SELECT overall_score, level FROM satp_trust_scores WHERE agent_id = ?').get(record.agentName);
+    db.close();
+    if (row) {
+      const numLevel = typeof row.level === 'number' ? row.level : (LEVEL_MAP[String(row.level).toUpperCase()] || 0);
+      record.reputationScore = row.overall_score || record.reputationScore;
+      record.verificationLevel = numLevel;
+      record.verificationLabel = LEVEL_LABELS[numLevel] || 'Unknown';
+      record._enrichedFromDB = true;
+    }
+  } catch (e) { /* silently continue with on-chain defaults */ }
+  return record;
+}
+
 // ── Routes ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -204,7 +231,7 @@ router.get('/:agentId', async (req, res) => {
       });
     }
 
-    const record = parseGenesisRecord(info.data, pda.toBase58());
+    const record = enrichFromDB(parseGenesisRecord(info.data, pda.toBase58()));
     res.json({ agentId, network: NETWORK, ...record });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -222,7 +249,7 @@ router.get('/address/:pda', async (req, res) => {
       return res.status(404).json({ error: 'Account not found', pda: req.params.pda });
     }
 
-    const record = parseGenesisRecord(info.data, req.params.pda);
+    const record = enrichFromDB(parseGenesisRecord(info.data, req.params.pda));
     res.json({ network: NETWORK, ...record });
   } catch (e) {
     res.status(500).json({ error: e.message });
