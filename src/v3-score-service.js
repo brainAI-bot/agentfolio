@@ -69,10 +69,12 @@ function parseGenesisRecord(data) {
     const faceBurnTx = readString();
     const genesisRecord = Number(data.readBigInt64LE(offset));
     offset += 8;
+    // NOTE: No isActive field on-chain. Struct goes straight to authority.
+    // See brainChain SDK 3.5.0 TypeScript types (GenesisRecord interface).
     const authority = new PublicKey(data.slice(offset, offset + 32));
     offset += 32;
 
-    // Option<Pubkey>
+    // Option<Pubkey> — Borsh: 1 byte tag + 32 bytes only if Some
     const hasPending = data[offset];
     offset += 1;
     if (hasPending === 1) offset += 32;
@@ -81,6 +83,13 @@ function parseGenesisRecord(data) {
     offset += 8;
     const verificationLevel = data[offset];
     offset += 1;
+
+    // Timestamps (SDK 3.5.0 struct)
+    const reputationUpdatedAt = Number(data.readBigInt64LE(offset)); offset += 8;
+    const verificationUpdatedAt = Number(data.readBigInt64LE(offset)); offset += 8;
+    const createdAt = Number(data.readBigInt64LE(offset)); offset += 8;
+    const updatedAt = Number(data.readBigInt64LE(offset)); offset += 8;
+    const bump = data[offset]; offset += 1;
 
     return {
       agentName,
@@ -92,6 +101,11 @@ function parseGenesisRecord(data) {
       bornAt: genesisRecord > 0 ? new Date(genesisRecord * 1000).toISOString() : null,
       faceImage,
       faceMint: faceMint.toBase58(),
+      authority: authority.toBase58(),
+      reputationUpdatedAt,
+      verificationUpdatedAt,
+      createdAt: createdAt > 0 ? new Date(createdAt * 1000).toISOString() : null,
+      updatedAt: updatedAt > 0 ? new Date(updatedAt * 1000).toISOString() : null,
     };
   } catch (e) {
     return null;
@@ -167,8 +181,12 @@ function clearV3Cache() {
   _cacheTime = 0;
 }
 
-// Sync cache accessor for enrichProfile
+/**
+ * Synchronous cache read — used by enrichProfile to avoid async in sync context.
+ * Returns cached V3 data or null if not cached / expired.
+ */
 function _getFromCache(agentId) {
+  if (Date.now() - _cacheTime > CACHE_TTL_MS) return null;
   return _cache.get(agentId) || null;
 }
 

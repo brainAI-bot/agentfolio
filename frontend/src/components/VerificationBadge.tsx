@@ -1,6 +1,6 @@
 import { Github, Wallet, X, Shield, Globe, Mail, MessageCircle, Send, Bookmark, BarChart3, Link2 } from "lucide-react";
 
-type VerificationType = "github" | "solana" | "hyperliquid" | "x" | "satp" | "ethereum" | "agentmail" | "moltbook" | "website" | "domain" | "polymarket" | "discord" | "telegram";
+type VerificationType = "github" | "solana" | "hyperliquid" | "x" | "satp" | "ethereum" | "agentmail" | "moltbook" | "website" | "domain" | "polymarket" | "discord" | "telegram" | "mcp" | "a2a" | "review" | "twitter";
 
 interface VerificationBadgeProps {
   type: VerificationType;
@@ -22,6 +22,10 @@ const config: Record<VerificationType, { icon: React.ElementType; label: string;
   telegram:    { icon: Send,         label: "Telegram",  color: "#26A5E4", bg: "rgba(38, 165, 228, 0.2)",  priority: 11 },
   website:     { icon: Globe,        label: "Website",   color: "#06B6D4", bg: "rgba(6, 182, 212, 0.2)",   priority: 12 },
   domain:      { icon: Link2,        label: "Domain",    color: "#06B6D4", bg: "rgba(6, 182, 212, 0.2)",   priority: 13 },
+  mcp:         { icon: Shield,       label: "MCP",       color: "#8B5CF6", bg: "rgba(139, 92, 246, 0.2)",  priority: 14 },
+  a2a:         { icon: Shield,       label: "A2A",       color: "#3B82F6", bg: "rgba(59, 130, 246, 0.2)",  priority: 15 },
+  review:      { icon: Globe,        label: "Review",    color: "#F59E0B", bg: "rgba(245, 158, 11, 0.2)",  priority: 16 },
+  twitter:     { icon: X,            label: "X",         color: "#E2E8F0", bg: "#1E293B",                  priority: 17 },
 };
 
 export function VerificationBadge({ type, verified, compact }: VerificationBadgeProps) {
@@ -65,5 +69,6 @@ export function VerificationBadge({ type, verified, compact }: VerificationBadge
 export const VERIFICATION_PRIORITY: VerificationType[] = [
   "satp", "github", "x", "solana", "ethereum",
   "agentmail", "moltbook", "hyperliquid", "polymarket",
+  "mcp", "a2a", "review",
   "discord", "telegram", "website", "domain"
 ];

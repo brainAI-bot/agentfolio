@@ -18,7 +18,6 @@ import BirthCertificate from "@/components/BirthCertificate";
 import { GenesisRecordCard } from "@/components/GenesisRecordCard";
 import { OnChainAvatar } from "@/components/OnChainAvatar";
 import { SATPOnChainSection } from "@/components/SATPOnChainSection";
-import { V3ReputationCard } from "@/components/V3ReputationCard";
 import Link from "next/link";
 import { ClaimButton } from "@/components/ClaimButton";
 import { WriteReviewForm } from "./WriteReviewForm";
@@ -109,26 +108,6 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     } catch {}
   }
 
-
-  // Fetch V3 on-chain reputation (from SATP V3 SDK — deserialization fixed 2026-03-29)
-  let v3Reputation: any = null;
-  try {
-    const v3RepRes = await fetch(`https://agentfolio.bot/api/v3/reputation/${id}`, { next: { revalidate: 120 } });
-    if (v3RepRes.ok) {
-      const v3Data = await v3RepRes.json();
-      if (v3Data && v3Data.reputationScore !== undefined) {
-        v3Reputation = v3Data;
-      }
-    }
-  } catch {}
-
-  // V3 reputation (freshly deserialized) overrides genesis values for TrustBadge/sidebar
-  if (v3Reputation && genesis) {
-    genesis.reputationScore = v3Reputation.reputationScore;
-    genesis.verificationLevel = v3Reputation.verificationLevel;
-    genesis.verificationLabel = ["Unverified","Registered","Verified","Established","Trusted","Sovereign"][v3Reputation.verificationLevel] || genesis.verificationLabel;
-    genesis.isBorn = v3Reputation.isBorn ?? genesis.isBorn;
-  }
   let githubStats: any = null;
   if (v?.github?.verified && v.github.username) {
     try {
@@ -452,8 +431,6 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
 
           <GenesisRecordCard agentId={agent.id} nftAvatar={(agent as any).nftAvatar || (agent as any).nft_avatar} />
 
-
-          {v3Reputation && <V3ReputationCard data={v3Reputation} />}
           <SATPOnChainSection walletAddress={solWallet} />
 
           {/* Skills */}

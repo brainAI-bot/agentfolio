@@ -1433,3 +1433,18 @@ try {
 }
 
 module.exports = { handleBurnToBecome };
+
+// Register as Express middleware  
+module.exports.registerRoutes = function(app) {
+  const { URL } = require('url');
+  app.use('/api/burn-to-become', (req, res, next) => {
+    try {
+      const url = new URL(req.originalUrl || req.url, 'http://localhost');
+      const handled = handleBurnToBecome(req, res, url);
+      if (!handled) next();
+    } catch (e) {
+      next(e);
+    }
+  });
+  console.log('[BurnToBecome] Routes registered via Express middleware');
+};
