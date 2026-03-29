@@ -1,4 +1,4 @@
-const { createSATPClient } = require("/home/ubuntu/agentfolio/src/satp-client/src/index.js");
+const { createSATPClient, SATPV3SDK } = require("./satp-client/src/index.js");
 const { Keypair, Connection } = require("@solana/web3.js");
 const fs = require("fs");
 
