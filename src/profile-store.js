@@ -445,7 +445,7 @@ function enrichProfile(row) {
   if (!row) return null;
   const d = getDb();
   const endorsements = d.prepare('SELECT * FROM endorsements WHERE profile_id = ? ORDER BY created_at DESC').all(row.id);
-  const verifications = d.prepare('SELECT * FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
+  // [P0 FIX] DB verifications query REMOVED — chain-cache is sole source of truth
   const activity = d.prepare('SELECT * FROM activity_feed WHERE profile_id = ? ORDER BY created_at DESC LIMIT 20').all(row.id);
   const rfk = module.exports._reviewFk || 'profile_id';
   const reviewStats = d.prepare(`
@@ -505,7 +505,21 @@ function enrichProfile(row) {
     links: parseJsonField(row.links, {}),
     wallets: parseJsonField(row.wallets, {}),
     skills: parseJsonField(row.skills),
-    verification_data: parseJsonField(row.verification_data, {}),
+    // [P0 FIX] verification_data derived from chain-cache, NOT from DB
+    verification_data: (() => {
+      const vd = {};
+      try {
+        const _cc = require('./lib/chain-cache');
+        const _atts = _cc.getVerifications(row.id);
+        for (const att of _atts) {
+          if (!att.platform || att.platform === 'review') continue;
+          const plat = att.platform === 'twitter' ? 'x' : att.platform;
+          if (vd[plat]) continue;
+          vd[plat] = { verified: true, address: att.identifier || '', linked: true, verifiedAt: att.timestamp || null, source: 'on-chain' };
+        }
+      } catch (_) {}
+      return vd;
+    })(),
     portfolio: parseJsonField(row.portfolio),
     endorsements_given: parseJsonField(row.endorsements_given),
     custom_badges: parseJsonField(row.custom_badges),
@@ -514,69 +528,26 @@ function enrichProfile(row) {
     endorsements: { items: endorsements, total: endorsements.length },
     verifications: (() => {
       const vMap = {};
-      // === Chain-cache attestations ONLY (on-chain source of truth) ===
+      // === Chain-cache attestations ONLY — ZERO DB reads ===
       try {
         const chainCache = require('./lib/chain-cache');
         const atts = chainCache.getVerifications(row.id);
-        // Build identifier lookup from profile wallets + links + verifications table
-        const wallets = parseJsonField(row.wallets, {});
-        const links = parseJsonField(row.links, {});
-        // Also pull identifiers from verifications table (has ethereum, etc.)
-        const verifIdentifiers = {};
-        for (const v of verifications) {
-          if (v.platform && v.identifier) verifIdentifiers[v.platform] = v.identifier;
-        }
-        const identifierMap = {
-          solana: wallets.solana || verifIdentifiers.solana || "",
-          ethereum: wallets.ethereum || verifIdentifiers.ethereum || "",
-          hyperliquid: wallets.hyperliquid || verifIdentifiers.hyperliquid || "",
-          polymarket: wallets.polymarket || links.polymarket || verifIdentifiers.polymarket || "",
-          github: links.github || verifIdentifiers.github || "",
-          x: links.x || links.twitter || verifIdentifiers.x || verifIdentifiers.twitter || "",
-          twitter: links.x || links.twitter || verifIdentifiers.x || verifIdentifiers.twitter || "",
-          website: links.website || verifIdentifiers.website || "",
-          domain: links.website ? links.website.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : (verifIdentifiers.domain || ""),
-          agentmail: links.agentmail || verifIdentifiers.agentmail || "",
-          moltbook: links.moltbook || verifIdentifiers.moltbook || "",
-          mcp: links.mcp || verifIdentifiers.mcp || "MCP Protocol",
-          a2a: links.a2a || verifIdentifiers.a2a || "A2A Protocol",
-          satp: wallets.solana ? ("did:satp:sol:" + wallets.solana) : (verifIdentifiers.satp || ""),
-        };
         for (const att of atts) {
-          // Skip 'review' — reviews are attestations, not platform verifications
           if (!att.platform || att.platform === 'review') continue;
-          // Normalize twitter → x
           const platform = att.platform === 'twitter' ? 'x' : att.platform;
-          if (vMap[platform]) continue; // first attestation wins (dedup twitter/x)
-          const identifier = identifierMap[att.platform] || identifierMap[platform] || '';
+          if (vMap[platform]) continue;
+          const solscanUrl = att.solscanUrl || ('https://solscan.io/tx/' + att.txSignature);
           vMap[platform] = {
             verified: true,
-            address: identifier,
-            identifier: identifier,
+            address: solscanUrl,
+            identifier: solscanUrl,
             proof: { txSignature: att.txSignature, timestamp: att.timestamp },
             verified_at: att.timestamp || null,
-            solscanUrl: att.solscanUrl || ('https://solscan.io/tx/' + att.txSignature),
+            solscanUrl: solscanUrl,
             source: 'on-chain',
           };
-          // Add platform-specific fields for frontend compatibility
-          const entry = vMap[platform];
-          if (platform === 'x' || platform === 'twitter') entry.handle = identifier;
-          else if (platform === 'github') entry.username = identifier;
-          else if (platform === 'agentmail') entry.email = identifier;
-          else if (platform === 'moltbook') entry.username = identifier;
-          else if (platform === 'website') entry.url = identifier;
-          else if (platform === 'domain') entry.domain = identifier;
-          else if (platform === 'satp') entry.did = identifier;
-          else if (platform === 'discord') entry.username = identifier;
-          else if (platform === 'telegram') entry.username = identifier;
         }
       } catch (e) { /* chain-cache not available */ }
-      // Filter out verifications with empty/null identifiers (e.g. moltbook with no username)
-      for (const [platform, entry] of Object.entries(vMap)) {
-        if (!entry.identifier && !entry.address && platform !== 'mcp' && platform !== 'a2a') {
-          delete vMap[platform];
-        }
-      }
       return vMap;
     })(),
     activity: activity.map(a => ({ ...a, detail: parseJsonField(a.detail) })),
@@ -1060,14 +1031,15 @@ function registerRoutes(app) {
           }
         } catch {}
       }
-      // P1: Determine claimed status (has at least one verified platform)
+      // P1: Determine claimed status from chain-cache (NOT DB verification_data)
       let claimed = false;
       try {
-        const vd = typeof rest.verification_data === 'string' ? JSON.parse(rest.verification_data || '{}') : (rest.verification_data || {});
-        claimed = Object.values(vd).some(v => v && v.verified === true);
+        const _ccCl = require("./lib/chain-cache");
+        const _ccPl = _ccCl.getVerifiedPlatforms(rest.id);
+        claimed = _ccPl.length > 0;
       } catch (_) {}
       const { _trust_score: ts, ...cleanRest } = rest;
-      return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: parseJsonField(cleanRest.verification_data), portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: parseJsonField(cleanRest.metadata), nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, claimed };
+      return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: {}  /* [P0] chain-cache only, no DB reads */, portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: parseJsonField(cleanRest.metadata), nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, claimed };
     });
 
     // V3 on-chain score overlay — authoritative
@@ -1427,13 +1399,10 @@ function registerRoutes(app) {
     if (!wallet) return res.status(400).json({ error: 'wallet required' });
     try {
       const db = getDb();
-      const profiles = db.prepare('SELECT id, name, verification_data, wallets FROM profiles').all();
+      const profiles = db.prepare('SELECT id, name, wallets FROM profiles').all();
       for (const p of profiles) {
         try {
-          const vd = JSON.parse(p.verification_data || '{}');
-          if (vd.solana && vd.solana.address === wallet && vd.solana.verified) {
-            return res.json({ id: p.id, name: p.name });
-          }
+          // [P0 FIX] Check wallets column only — no DB verification_data
           const w = JSON.parse(p.wallets || '{}');
           if (w.solana === wallet) {
             return res.json({ id: p.id, name: p.name });
