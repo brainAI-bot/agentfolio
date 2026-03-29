@@ -28,12 +28,13 @@ try {
   console.warn('[ProfileStore] satp-write-client not available, on-chain registration disabled');
 }
 
-// SATP V3 SDK — Genesis Record creation
+// SATP V3 SDK — Genesis Record creation + V3 identity reads
 let satpV3;
 try {
-  const { createSATPClient, agentIdHash } = require('./satp-client/src');
-  satpV3 = { client: createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY' }), agentIdHash };
-  console.log('[SATP V3] SDK loaded successfully');
+  const { createSATPClient, SATPV3SDK, hashAgentId, getGenesisPDA } = require('./satp-client/src');
+  const v3Client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY' });
+  satpV3 = { client: v3Client, SATPV3SDK, hashAgentId, getGenesisPDA };
+  console.log('[SATP V3] SDK loaded successfully (SATPV3SDK + createSATPClient + PDA helpers)');
 } catch (e) {
   console.warn('[SATP V3] SDK not available:', e.message);
 }
@@ -513,64 +514,63 @@ function enrichProfile(row) {
     endorsements: { items: endorsements, total: endorsements.length },
     verifications: (() => {
       const vMap = {};
-      // === 3) Chain-cache attestations (supplementary) ===
+      // === Chain-cache attestations ONLY (on-chain source of truth) ===
       try {
         const chainCache = require('./lib/chain-cache');
         const atts = chainCache.getVerifications(row.id);
+        // Build identifier lookup from profile wallets + links + verifications table
+        const wallets = parseJsonField(row.wallets, {});
+        const links = parseJsonField(row.links, {});
+        // Also pull identifiers from verifications table (has ethereum, etc.)
+        const verifIdentifiers = {};
+        for (const v of verifications) {
+          if (v.platform && v.identifier) verifIdentifiers[v.platform] = v.identifier;
+        }
+        const identifierMap = {
+          solana: wallets.solana || verifIdentifiers.solana || "",
+          ethereum: wallets.ethereum || verifIdentifiers.ethereum || "",
+          hyperliquid: wallets.hyperliquid || verifIdentifiers.hyperliquid || "",
+          polymarket: wallets.polymarket || links.polymarket || verifIdentifiers.polymarket || "",
+          github: links.github || verifIdentifiers.github || "",
+          x: links.x || links.twitter || verifIdentifiers.x || verifIdentifiers.twitter || "",
+          twitter: links.x || links.twitter || verifIdentifiers.x || verifIdentifiers.twitter || "",
+          website: links.website || verifIdentifiers.website || "",
+          domain: links.website ? links.website.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : (verifIdentifiers.domain || ""),
+          agentmail: links.agentmail || verifIdentifiers.agentmail || "",
+          moltbook: links.moltbook || verifIdentifiers.moltbook || "",
+          mcp: links.mcp || verifIdentifiers.mcp || "MCP Protocol",
+          a2a: links.a2a || verifIdentifiers.a2a || "A2A Protocol",
+          satp: wallets.solana ? ("did:satp:sol:" + wallets.solana) : (verifIdentifiers.satp || ""),
+        };
         for (const att of atts) {
-          if (att.platform && !vMap[att.platform]) {
-            vMap[att.platform] = {
-              verified: true,
-              address: att.identifier || '',
-              identifier: att.identifier || '',
-              proof: { txSignature: att.txSignature, timestamp: att.timestamp },
-              verified_at: att.timestamp || null,
-              source: 'on-chain',
-            };
-          }
-        }
-      } catch (e) { /* chain-cache not available — fall back to DB */ }
-      
-      // === DB verifications (fill gaps not covered by chain-cache) ===
-      for (const v of verifications) {
-        if (!vMap[v.platform]) {
-          const proof = parseJsonField(v.proof);
-          vMap[v.platform] = {
+          // Skip 'review' — reviews are attestations, not platform verifications
+          if (!att.platform || att.platform === 'review') continue;
+          // Normalize twitter → x
+          const platform = att.platform === 'twitter' ? 'x' : att.platform;
+          if (vMap[platform]) continue; // first attestation wins (dedup twitter/x)
+          const identifier = identifierMap[att.platform] || identifierMap[platform] || '';
+          vMap[platform] = {
             verified: true,
-            address: v.identifier,
-            identifier: v.identifier,
-            proof,
-            verified_at: v.verified_at,
-            source: 'db',
+            address: identifier,
+            identifier: identifier,
+            proof: { txSignature: att.txSignature, timestamp: att.timestamp },
+            verified_at: att.timestamp || null,
+            solscanUrl: att.solscanUrl || ('https://solscan.io/tx/' + att.txSignature),
+            source: 'on-chain',
           };
+          // Add platform-specific fields for frontend compatibility
+          const entry = vMap[platform];
+          if (platform === 'x' || platform === 'twitter') entry.handle = identifier;
+          else if (platform === 'github') entry.username = identifier;
+          else if (platform === 'agentmail') entry.email = identifier;
+          else if (platform === 'moltbook') entry.username = identifier;
+          else if (platform === 'website') entry.url = identifier;
+          else if (platform === 'domain') entry.domain = identifier;
+          else if (platform === 'satp') entry.did = identifier;
+          else if (platform === 'discord') entry.username = identifier;
+          else if (platform === 'telegram') entry.username = identifier;
         }
-      }
-      // === verification_data JSON column (additional metadata) ===
-      const vd = parseJsonField(row.verification_data, {});
-      for (const [platform, data] of Object.entries(vd)) {
-        if (data && data.verified) {
-          if (!vMap[platform]) {
-            vMap[platform] = {
-              verified: true,
-              address: data.address || data.handle || data.username || data.email || data.url || data.did || data.domain || "",
-              identifier: data.address || data.handle || data.username || data.email || data.url || data.did || data.domain || "",
-              proof: { verifiedAt: data.verifiedAt || data.linkedAt || null },
-              verified_at: data.verifiedAt || data.linkedAt || null,
-              source: 'db-json',
-            };
-          } else {
-            // Merge extra metadata from DB into chain-cache entry (handle, username, etc.)
-            const existing = vMap[platform];
-            if (data.handle && !existing.handle) existing.handle = data.handle;
-            if (data.username && !existing.username) existing.username = data.username;
-            if (data.email && !existing.email) existing.email = data.email;
-            if (data.url && !existing.url) existing.url = data.url;
-            if (data.did && !existing.did) existing.did = data.did;
-            if (data.domain && !existing.domain) existing.domain = data.domain;
-            if (data.address && !existing.address) existing.address = data.address;
-          }
-        }
-      }
+      } catch (e) { /* chain-cache not available */ }
       return vMap;
     })(),
     activity: activity.map(a => ({ ...a, detail: parseJsonField(a.detail) })),

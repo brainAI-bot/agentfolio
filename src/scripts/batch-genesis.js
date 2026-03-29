@@ -13,29 +13,19 @@
 const path = require('path');
 const Database = require('better-sqlite3');
 const { Connection, PublicKey, Keypair } = require('@solana/web3.js');
-const { Program, AnchorProvider, Wallet, BN } = require('@coral-xyz/anchor');
-const crypto = require('crypto');
+const { SatpV3Client, SatpV3Builders, agentIdHash, deriveGenesisPda, PROGRAM_IDS } = require('@brainai/satp-v3');
 const fs = require('fs');
 
 // ─── Config ──────────────────────────────────────────────
 const DB_PATH = path.resolve(__dirname, '../../data/agentfolio.db');
-const GENESIS_PROGRAM_ID = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
-const GENESIS_SEED = 'genesis';
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY';
 const SIGNER_PATH = process.env.SATP_SIGNER_PATH || path.join(process.env.HOME, '.config/solana/id.json');
 
 const EXECUTE = process.argv.includes('--execute');
 
-// ─── Helpers ─────────────────────────────────────────────
-function agentIdHash(agentId) {
-  return crypto.createHash('sha256').update(agentId).digest();
-}
-
+// ─── Helpers (SDK-backed) ────────────────────────────────
 function getGenesisPDA(agentId) {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from(GENESIS_SEED), agentIdHash(agentId)],
-    GENESIS_PROGRAM_ID
-  )[0];
+  return deriveGenesisPda(agentId)[0];
 }
 
 function loadKeypair(filePath) {

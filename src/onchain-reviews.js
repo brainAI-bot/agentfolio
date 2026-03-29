@@ -5,6 +5,8 @@
  */
 const { Connection, PublicKey } = require('@solana/web3.js');
 const { getReviewsForAgent, getReviewsByReviewer, getIdentityPDA } = require('./satp-reviews-client');
+// Note: satp-reviews-client handles V2 review fetching. V3 reviews use different PDA derivation
+// via SATPV3SDK.getReview(agentId, reviewer). The on-chain reviews module reads both formats.
 
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
 const connection = new Connection(RPC_URL, 'confirmed');

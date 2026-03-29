@@ -15,8 +15,20 @@ const { Connection, PublicKey, SystemProgram, Transaction, TransactionInstructio
 const crypto = require('crypto');
 const path = require('path');
 
-// SATP v2 Identity Registry — MAINNET
+// SATP v2 Identity Registry — MAINNET (kept for backward compat)
 const SATP_IDENTITY_PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq');
+
+// V3 SDK for Genesis Record creation
+let SATPV3SDK, hashAgentId, getGenesisPDA;
+try {
+  const idx = require('../../satp-client/src/index');
+  SATPV3SDK = idx.SATPV3SDK;
+  hashAgentId = idx.hashAgentId;
+  getGenesisPDA = idx.getGenesisPDA;
+  console.log('[SATP AutoID] V3 SDK loaded — Genesis Record creation available');
+} catch (e) {
+  console.warn('[SATP AutoID] V3 SDK not available:', e.message);
+}
 const NETWORK = process.env.SATP_NETWORK || 'mainnet';
 const RPC_URL = NETWORK === 'devnet' 
   ? 'https://api.devnet.solana.com' 
@@ -65,10 +77,64 @@ function getIdentityPDA(authority) {
 }
 
 /**
- * Build an unsigned create_identity TX
+ * Build an unsigned create_identity TX.
+ * V3 path: creates a Genesis Record using agent_id-based PDA derivation.
+ * V2 fallback: creates V2 identity using wallet-based PDA.
  */
-async function buildCreateIdentityTx(walletAddress, name, description, category, capabilities, metadataUri) {
+async function buildCreateIdentityTx(walletAddress, name, description, category, capabilities, metadataUri, agentId) {
   const wallet = new PublicKey(walletAddress);
+  
+  // V3 path: use SATPV3SDK if available and agentId is provided
+  if (SATPV3SDK && agentId) {
+    try {
+      const sdk = new SATPV3SDK({ network: NETWORK, rpcUrl: RPC_URL });
+      const { transaction, genesisPDA } = await sdk.buildCreateIdentity(
+        wallet, agentId,
+        { name: name.slice(0, 32), description: description.slice(0, 256), category: category.slice(0, 32), capabilities: capabilities.slice(0, 10).map(c => c.slice(0, 32)), metadataUri: metadataUri.slice(0, 200) }
+      );
+      
+      // Check if V3 record already exists
+      const existingV3 = await connection.getAccountInfo(genesisPDA);
+      if (existingV3 && existingV3.data.length > 0) {
+        return {
+          transaction: null,
+          identityPDA: genesisPDA.toBase58(),
+          authority: wallet.toBase58(),
+          network: NETWORK,
+          alreadyExists: true,
+          version: 3,
+        };
+      }
+      
+      // Add priority fee
+      const tx = new Transaction();
+      tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50000 }));
+      // Copy instructions from SDK-built transaction
+      for (const ix of transaction.instructions) {
+        tx.add(ix);
+      }
+      tx.feePayer = wallet;
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+      tx.recentBlockhash = blockhash;
+      tx.lastValidBlockHeight = lastValidBlockHeight;
+      
+      return {
+        transaction: tx.serialize({ requireAllSignatures: false }).toString('base64'),
+        identityPDA: genesisPDA.toBase58(),
+        authority: wallet.toBase58(),
+        network: NETWORK,
+        blockhash,
+        lastValidBlockHeight,
+        alreadyExists: false,
+        version: 3,
+        agentId,
+      };
+    } catch (v3err) {
+      console.warn('[SATP AutoID] V3 create failed, falling back to V2:', v3err.message);
+    }
+  }
+  
+  // V2 fallback path
   const [identityPDA] = getIdentityPDA(wallet);
 
   // Check if already exists
@@ -125,13 +191,25 @@ async function buildCreateIdentityTx(walletAddress, name, description, category,
 }
 
 /**
- * Check if a wallet has an SATP identity
+ * Check if a wallet has an SATP identity (V2 or V3)
  */
 async function hasIdentity(walletAddress) {
   try {
+    // Check V2
     const [pda] = getIdentityPDA(new PublicKey(walletAddress));
     const acct = await connection.getAccountInfo(pda);
-    return acct !== null && acct.data.length > 0;
+    if (acct && acct.data.length > 0) return true;
+    
+    // Check V3 by wallet (try as agent_id)
+    if (hashAgentId && getGenesisPDA) {
+      try {
+        const [v3pda] = getGenesisPDA(walletAddress, NETWORK);
+        const v3acct = await connection.getAccountInfo(v3pda);
+        if (v3acct && v3acct.data.length > 0) return true;
+      } catch { /* not a valid V3 lookup */ }
+    }
+    
+    return false;
   } catch {
     return false;
   }
@@ -179,13 +257,17 @@ function registerSATPAutoIdentityRoutes(app) {
         }
       }
 
+      // Derive agentId from profileId for V3 Genesis Record
+      const derivedAgentId = profileId ? `agent_${profileId.replace(/[^a-zA-Z0-9_-]/g, '')}` : null;
+      
       const result = await buildCreateIdentityTx(
         walletAddress,
         agentName,
         agentDescription,
         agentCategory,
         capabilities,
-        metadataUri
+        metadataUri,
+        req.body.agentId || derivedAgentId
       );
 
       if (result.alreadyExists) {

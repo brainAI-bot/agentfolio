@@ -7,12 +7,14 @@
 const satpIdentity = require('../satp-identity-client');
 const satpReviewsOnchain = require('../satp-reviews-onchain');
 
-// V3 SDK
+// V3 SDK (using SATPV3SDK directly for all V3 operations)
 let satpV3Client;
+let SATPV3SDK_Class;
 try {
-  const { createSATPClient } = require('../satp-client/src');
+  const { createSATPClient, SATPV3SDK } = require('../satp-client/src');
+  SATPV3SDK_Class = SATPV3SDK;
   satpV3Client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY' });
-  console.log('[SATP API] V3 SDK loaded');
+  console.log('[SATP API] V3 SDK loaded (SATPV3SDK + createSATPClient)');
 } catch (e) {
   console.warn('[SATP API] V3 SDK not available:', e.message);
 }

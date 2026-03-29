@@ -9,6 +9,19 @@ const { Program, AnchorProvider, Wallet, BN } = require('@coral-xyz/anchor');
 const fs = require('fs');
 const path = require('path');
 
+// V3 SDK for Genesis Record operations
+let SATPV3SDK, createSATPClient, hashAgentId, getGenesisPDA;
+try {
+  const idx = require('./satp-client/src/index');
+  SATPV3SDK = idx.SATPV3SDK;
+  createSATPClient = idx.createSATPClient;
+  hashAgentId = idx.hashAgentId;
+  getGenesisPDA = idx.getGenesisPDA;
+  console.log('[SATP Write] V3 SDK loaded');
+} catch (e) {
+  console.warn('[SATP Write] V3 SDK not available:', e.message);
+}
+
 // IDLs
 const identityIdl = require('./idl/identity_registry.json');
 const reputationIdl = require('./idl/reputation.json');
@@ -360,6 +373,88 @@ async function createAttestation(params, signerKeypair, network = 'mainnet') {
   };
 }
 
+// ─── V3 Operations ───────────────────────────────────────
+
+/**
+ * Register a V3 Genesis Record on-chain (server-signed)
+ * Uses agent_id string instead of wallet-based PDA derivation
+ */
+async function registerIdentityV3(params, signerKeypair, network = 'mainnet') {
+  if (!SATPV3SDK) throw new Error('V3 SDK not available');
+  
+  const rpcUrl = network === 'devnet' ? DEVNET_RPC : MAINNET_RPC;
+  const sdk = new SATPV3SDK({ network, rpcUrl });
+  
+  const { agentId, name, description, category, capabilities = [], metadataUri = '' } = params;
+  
+  const { transaction, genesisPDA } = await sdk.buildCreateIdentity(
+    signerKeypair.publicKey, agentId,
+    { name, description, category, capabilities, metadataUri }
+  );
+  
+  const connection = new Connection(rpcUrl, 'confirmed');
+  const sig = await connection.sendTransaction(transaction, [signerKeypair]);
+  await connection.confirmTransaction(sig, 'confirmed');
+  
+  return {
+    txSignature: sig,
+    genesisPDA: genesisPDA.toBase58(),
+    agentId,
+    authority: signerKeypair.publicKey.toBase58(),
+    network,
+    version: 3,
+  };
+}
+
+/**
+ * Build unsigned V3 identity creation TX (for client-side signing)
+ */
+async function buildRegisterIdentityV3Tx(params, network = 'mainnet') {
+  if (!SATPV3SDK) throw new Error('V3 SDK not available');
+  
+  const rpcUrl = network === 'devnet' ? DEVNET_RPC : MAINNET_RPC;
+  const sdk = new SATPV3SDK({ network, rpcUrl });
+  
+  const { agentId, name, description, category, capabilities = [], metadataUri = '', walletAddress } = params;
+  const wallet = new PublicKey(walletAddress);
+  
+  const { transaction, genesisPDA } = await sdk.buildCreateIdentity(
+    wallet, agentId,
+    { name, description, category, capabilities, metadataUri }
+  );
+  
+  const serialized = transaction.serialize({ requireAllSignatures: false }).toString('base64');
+  
+  return {
+    transaction: serialized,
+    genesisPDA: genesisPDA.toBase58(),
+    agentId,
+    authority: wallet.toBase58(),
+    network,
+    version: 3,
+  };
+}
+
+/**
+ * Read V3 Genesis Record from on-chain
+ */
+async function readIdentityV3(agentId, network = 'mainnet') {
+  if (!SATPV3SDK) throw new Error('V3 SDK not available');
+  
+  const rpcUrl = network === 'devnet' ? DEVNET_RPC : MAINNET_RPC;
+  const sdk = new SATPV3SDK({ network, rpcUrl });
+  
+  const record = await sdk.getGenesisRecord(agentId);
+  if (!record) return null;
+  
+  return {
+    ...record,
+    onChain: true,
+    network,
+    version: 3,
+  };
+}
+
 module.exports = {
   PROGRAM_IDS,
   loadKeypair,
@@ -377,4 +472,11 @@ module.exports = {
   recomputeReputation,
   readIdentity,
   createAttestation,
+  // V3 operations
+  registerIdentityV3,
+  buildRegisterIdentityV3Tx,
+  readIdentityV3,
+  ...(SATPV3SDK ? { SATPV3SDK } : {}),
+  ...(hashAgentId ? { hashAgentId } : {}),
+  ...(getGenesisPDA ? { getGenesisPDA } : {}),
 };
