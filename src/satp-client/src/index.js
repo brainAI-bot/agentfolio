@@ -772,15 +772,94 @@ class SATPSDK {
   }
 }
 
-// V3 SDK + PDA exports
-const { SATPV3SDK, createSATPClient } = require('./v3-sdk');
-const v3pda = require('./v3-pda');
+// V3 SDK — now delegated to @brainai/satp-v3 (migrated 2026-03-29)
+const v3sdk = require('@brainai/satp-v3');
 
-// Borsh deserialization helpers
+// Legacy V3 SDK wrapper — maps old createSATPClient/SATPV3SDK to new SDK
+class SATPV3SDK {
+  constructor(opts = {}) {
+    this.client = new v3sdk.SatpV3Client(opts);
+  }
+  async getGenesis(agentId) { return this.client.getGenesis ? this.client.getGenesis(agentId) : null; }
+  async getAttestation(pda) { return this.client.getAttestation ? this.client.getAttestation(pda) : null; }
+  async getReview(pda) { return this.client.getReview ? this.client.getReview(pda) : null; }
+}
+
+function createSATPClient(opts = {}) {
+  return new v3sdk.SatpV3Client(opts);
+}
+
+// Legacy borsh reader — keep for any V2 code paths
 const borshReader = require('./borsh-reader');
 
+
+// Fixed genesis deserializer — matches actual on-chain struct (no isActive field)
+function _deserializeGenesisFixed(data) {
+  if (!data || data.length < 8) return null;
+  try {
+    const { PublicKey } = require('@solana/web3.js');
+    let offset = 8; // skip discriminator
+    const agentIdHashBytes = data.slice(offset, offset + 32); offset += 32;
+    const readString = () => {
+      const len = data.readUInt32LE(offset); offset += 4;
+      const str = data.slice(offset, offset + len).toString('utf8'); offset += len;
+      return str;
+    };
+    const readVecString = () => {
+      const count = data.readUInt32LE(offset); offset += 4;
+      const arr = [];
+      for (let i = 0; i < count; i++) arr.push(readString());
+      return arr;
+    };
+    const agentName = readString();
+    const description = readString();
+    const category = readString();
+    const capabilities = readVecString();
+    const metadataUri = readString();
+    const faceImage = readString();
+    const faceMint = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
+    const faceBurnTx = readString();
+    const genesisRecord = Number(data.readBigInt64LE(offset)); offset += 8;
+    // NOTE: No isActive field in deployed program (SDK bug — has phantom isActive)
+    const authority = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
+    const hasPending = data[offset]; offset += 1;
+    let pendingAuthority = null;
+    if (hasPending === 1) {
+      pendingAuthority = new PublicKey(data.slice(offset, offset + 32)).toBase58();
+      offset += 32;
+    }
+    const reputationScore = Number(data.readBigUInt64LE(offset)); offset += 8;
+    const verificationLevel = data[offset]; offset += 1;
+    const reputationUpdatedAt = Number(data.readBigInt64LE(offset)); offset += 8;
+    const verificationUpdatedAt = Number(data.readBigInt64LE(offset)); offset += 8;
+    const createdAt = Number(data.readBigInt64LE(offset)); offset += 8;
+    const updatedAt = Number(data.readBigInt64LE(offset)); offset += 8;
+    const bump = data[offset]; offset += 1;
+    return {
+      agentIdHash: Array.from(agentIdHashBytes),
+      agentName, description, category, capabilities, metadataUri, faceImage,
+      faceMint: faceMint.toBase58(),
+      faceBurnTx,
+      genesisRecord,
+      isBorn: genesisRecord > 0,
+      authority: authority.toBase58(),
+      pendingAuthority,
+      reputationScore,
+      verificationLevel,
+      verificationLabel: ['Unverified','Registered','Verified','Established','Trusted','Sovereign'][verificationLevel] || 'Unknown',
+      reputationPct: (reputationScore / 10000).toFixed(2),
+      reputationUpdatedAt, verificationUpdatedAt,
+      createdAt: createdAt > 0 ? new Date(createdAt * 1000).toISOString() : null,
+      updatedAt: updatedAt > 0 ? new Date(updatedAt * 1000).toISOString() : null,
+      bump,
+    };
+  } catch (e) {
+    return { error: e.message, raw: data.toString('hex').slice(0, 200) };
+  }
+}
+
 module.exports = {
-  // V2 SDK (backward compatible)
+  // V2 SDK (backward compatible — legacy, kept for escrow V2 / old paths)
   SATPSDK,
   getProgramIds,
   getIdentityPDA,
@@ -795,35 +874,69 @@ module.exports = {
   getReviewV3PDA,
   anchorDiscriminator,
 
-  // V3 SDK
+  // V3 SDK (now proxied through @brainai/satp-v3)
   SATPV3SDK,
   createSATPClient,
+  SatpV3Client: v3sdk.SatpV3Client,
+  SatpV3Builders: v3sdk.SatpV3Builders,
 
-  // V3 PDA derivation
-  getV3ProgramIds: v3pda.getV3ProgramIds,
-  hashAgentId: v3pda.hashAgentId,
-  hashName: v3pda.hashName,
-  getGenesisPDA: v3pda.getGenesisPDA,
-  getV3ReputationAuthorityPDA: v3pda.getV3ReputationAuthorityPDA,
-  getV3ValidationAuthorityPDA: v3pda.getV3ValidationAuthorityPDA,
-  getV3MintTrackerPDA: v3pda.getV3MintTrackerPDA,
-  getNameRegistryPDA: v3pda.getNameRegistryPDA,
-  getLinkedWalletPDA: v3pda.getLinkedWalletPDA,
-  getV3ReviewPDA: v3pda.getV3ReviewPDA,
-  getV3ReviewCounterPDA: v3pda.getV3ReviewCounterPDA,
-  getV3AttestationPDA: v3pda.getV3AttestationPDA,
-  getV3EscrowPDA: v3pda.getV3EscrowPDA,
+  // V3 PDA derivation (from @brainai/satp-v3)
+  PROGRAM_IDS: v3sdk.PROGRAM_IDS,
+  getV3ProgramIds: () => v3sdk.PROGRAM_IDS,
+  hashAgentId: v3sdk.agentIdHash,
+  agentIdHash: v3sdk.agentIdHash,
+  hashName: v3sdk.descriptionHash || ((name) => require('crypto').createHash('sha256').update(name).digest()),
+  getGenesisPDA: v3sdk.deriveGenesisPda,
+  deriveGenesisPda: v3sdk.deriveGenesisPda,
+  getV3ReputationAuthorityPDA: v3sdk.deriveReputationAuthorityPda,
+  deriveReputationAuthorityPda: v3sdk.deriveReputationAuthorityPda,
+  getV3ValidationAuthorityPDA: v3sdk.deriveValidationAuthorityPda,
+  deriveValidationAuthorityPda: v3sdk.deriveValidationAuthorityPda,
+  getV3MintTrackerPDA: v3sdk.deriveMintTrackerPda,
+  deriveMintTrackerPda: v3sdk.deriveMintTrackerPda,
+  getNameRegistryPDA: v3sdk.deriveNameRegistryPda,
+  deriveNameRegistryPda: v3sdk.deriveNameRegistryPda,
+  getLinkedWalletPDA: v3sdk.deriveLinkedWalletPda,
+  deriveLinkedWalletPda: v3sdk.deriveLinkedWalletPda,
+  getV3ReviewPDA: v3sdk.deriveReviewPda,
+  deriveReviewPda: v3sdk.deriveReviewPda,
+  getV3ReviewCounterPDA: v3sdk.deriveReviewCounterPda,
+  deriveReviewCounterPda: v3sdk.deriveReviewCounterPda,
+  getV3AttestationPDA: v3sdk.deriveAttestationPda,
+  deriveAttestationPda: v3sdk.deriveAttestationPda,
+  getV3EscrowPDA: v3sdk.deriveEscrowPda,
+  deriveEscrowPda: v3sdk.deriveEscrowPda,
+  deriveReviewAttestationPda: v3sdk.deriveReviewAttestationPda,
 
-  // Borsh deserialization (zero-dependency)
+  // V3 Deserialization (from @brainai/satp-v3)
+  // NOTE: v3sdk.deserializeGenesis has isActive field mismatch with deployed program
+  // Using corrected manual parser until SDK v3.6+ fixes struct alignment
+  deserializeGenesis: _deserializeGenesisFixed,
+  deserializeGenesisRecord: _deserializeGenesisFixed, // alias for old name
+  deserializeLinkedWallet: v3sdk.deserializeLinkedWallet,
+  deserializeMintTracker: v3sdk.deserializeMintTracker,
+  deserializeNameRegistry: v3sdk.deserializeNameRegistry,
+  deserializeReview: v3sdk.deserializeReview,
+  deserializeReviewCounter: v3sdk.deserializeReviewCounter,
+  deserializeAttestation: v3sdk.deserializeAttestation,
+  deserializeEscrowV3: v3sdk.deserializeEscrow,
+  tryDeserialize: v3sdk.tryDeserialize,
+
+  // V3 Utilities
+  isBorn: v3sdk.isBorn,
+  trustTier: v3sdk.trustTier,
+  reputationPct: v3sdk.reputationPct,
+  resolveAgent: v3sdk.resolveAgent,
+  verificationLabel: v3sdk.verificationLabel,
+  attestationTypeLabel: v3sdk.attestationTypeLabel,
+  escrowStatusLabel: v3sdk.escrowStatusLabel,
+  isAttestationValid: v3sdk.isAttestationValid,
+  isEscrowExpired: v3sdk.isEscrowExpired,
+  escrowRemaining: v3sdk.escrowRemaining,
+  EscrowStatus: v3sdk.EscrowStatus,
+
+  // Legacy borsh (V2 compat only — prefer V3 deserializers above)
   BorshReader: borshReader.BorshReader,
-  deserializeGenesisRecord: borshReader.deserializeGenesisRecord,
-  deserializeLinkedWallet: borshReader.deserializeLinkedWallet,
-  deserializeMintTracker: borshReader.deserializeMintTracker,
-  deserializeNameRegistry: borshReader.deserializeNameRegistry,
-  deserializeReview: borshReader.deserializeReview,
-  deserializeReviewCounter: borshReader.deserializeReviewCounter,
-  deserializeAttestation: borshReader.deserializeAttestation,
-  deserializeEscrowV3: borshReader.deserializeEscrowV3,
   deserializeAccount: borshReader.deserializeAccount,
   deserializeBatch: borshReader.deserializeBatch,
   getAccountDiscriminator: borshReader.getAccountDiscriminator,

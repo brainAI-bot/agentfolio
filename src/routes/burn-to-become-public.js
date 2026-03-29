@@ -1504,7 +1504,31 @@ try {
           } catch (e) { console.warn('[ConfirmMint] burnToBecome failed:', e.message); }
         }
         
-        sendJson(200, { success: true, recorded: true, agentId, boaId: effectiveBoaId, ...record });
+        // For atomic flow: mint soulbound Token-2022 (the Core NFT was already burned in the same TX)
+        let soulboundMintAddress = null;
+        if (flow === 'free' || record.flow === 'free') {
+          try {
+            const agentName = agentId ? agentId.replace('agent_', '') : 'Unknown';
+            const metadataUri = record.imageUri || imageUri || '';
+            const artworkUri = metadataUri;
+            const nftMintAddr = asset || '';
+            const burnSig = signature || '';
+            
+            if (artworkUri && wallet) {
+              console.log('[ConfirmMint] Minting soulbound Token-2022 for', agentName);
+              const sbResult = await mintSoulbound(wallet, artworkUri, metadataUri, agentName + ' — Soulbound', nftMintAddr, burnSig);
+              soulboundMintAddress = sbResult.soulboundMint;
+              record.soulboundMint = soulboundMintAddress;
+              record.soulboundTx = sbResult.signature;
+              console.log('[ConfirmMint] Soulbound minted:', soulboundMintAddress, 'tx:', sbResult.signature?.slice(0, 20));
+            }
+          } catch (e) {
+            console.error('[ConfirmMint] Soulbound minting failed:', e.message);
+            record.soulboundError = e.message;
+          }
+        }
+        
+        sendJson(200, { success: true, recorded: true, agentId, boaId: effectiveBoaId, soulboundMint: soulboundMintAddress, ...record });
       } catch (e) {
         console.error('[ConfirmMint] Error:', e.message);
         sendJson(500, { error: e.message });
