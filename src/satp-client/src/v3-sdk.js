@@ -1601,17 +1601,16 @@ class SATPV3SDK {
       const faceMint = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
       const faceBurnTx = readString();
       const genesisRecord = Number(data.readBigInt64LE(offset)); offset += 8;
-      // NOTE: No isActive field in on-chain GenesisRecord struct.
-      // Struct goes: genesis_record(i64) -> authority(Pubkey) -> pending_authority(Option<Pubkey>)
+      const isActive = data[offset] === 1; offset += 1;
       const authority = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
 
-      // Option<Pubkey> — Borsh: 0x00 = None (1 byte), 0x01 + 32 bytes = Some
+      // Option<Pubkey>
       const hasPending = data[offset] === 1; offset += 1;
       let pendingAuthority = null;
       if (hasPending) {
         pendingAuthority = new PublicKey(data.slice(offset, offset + 32)).toBase58();
-        offset += 32;
       }
+      offset += 32;
 
       const reputationScore = Number(data.readBigUInt64LE(offset)); offset += 8;
       const verificationLevel = data[offset]; offset += 1;
@@ -1636,6 +1635,7 @@ class SATPV3SDK {
         faceBurnTx: faceBurnTx || null,
         genesisRecord,
         isBorn,
+        isActive,
         authority: authority.toBase58(),
         pendingAuthority,
         reputationScore,
@@ -1733,23 +1733,16 @@ module.exports = {
 //  createSATPClient — Factory for route compatibility
 // ═══════════════════════════════════════════════
 
-/**
- * Create a high-level SATP V3 client with convenience methods.
- * Used by satp-api.js, burn-to-become-public.js, etc.
- * @param {{ rpcUrl?: string, network?: string }} opts
- */
 function createSATPClient(opts = {}) {
   const network = opts.network || (opts.rpcUrl && opts.rpcUrl.includes('mainnet') ? 'mainnet' : 'devnet');
   const sdk = new SATPV3SDK({ rpcUrl: opts.rpcUrl, network });
 
-  // resolveAgent: derive genesis PDA from agent ID
   sdk.resolveAgent = function(agentId) {
     const agentIdHash = hashAgentId(agentId);
     const [pda] = getGenesisPDA(agentIdHash, sdk.network);
     return pda;
   };
 
-  // getNameRegistry: fetch name registry record
   sdk.getNameRegistry = async function(name) {
     try {
       const nameHash = hashName(name);
@@ -1760,23 +1753,20 @@ function createSATPClient(opts = {}) {
     } catch (e) { return null; }
   };
 
-  // isNameTaken: check if a name is already registered
   sdk.isNameTaken = async function(name) {
     const reg = await sdk.getNameRegistry(name);
     return reg !== null;
   };
 
-  // getLinkedWallets: scan for linked wallet PDAs
   sdk.getLinkedWallets = async function(agentId) {
     try {
       const agentIdHash = hashAgentId(agentId);
       const [genesisPDA] = getGenesisPDA(agentIdHash, sdk.network);
       const identityProgramId = sdk.programIds.identity;
-      // Use getProgramAccounts with memcmp on linked_wallet seed
       const accounts = await sdk.connection.getProgramAccounts(identityProgramId, {
         filters: [
           { memcmp: { offset: 8, bytes: genesisPDA.toBase58() } },
-          { dataSize: 138 } // approximate linked wallet account size
+          { dataSize: 138 }
         ]
       });
       return accounts.map(a => ({

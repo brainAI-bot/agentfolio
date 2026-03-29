@@ -27,7 +27,16 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
 
     // Map backend response to frontend Agent type
     // Use verification_data (snake_case from API) with fallback to verificationData
-    const vd = raw.verification_data || raw.verificationData || {};
+    // Then merge with raw.verifications (chain-cache, has all 14 platforms) for full coverage
+    const vdRaw = raw.verification_data || raw.verificationData || {};
+    const vChain = raw.verifications || {};
+    // Merge: for each platform in vChain, if vdRaw doesn't have it or it's not verified, use vChain entry
+    const vd: Record<string, any> = { ...vdRaw };
+    for (const [platform, entry] of Object.entries(vChain)) {
+      if (entry && typeof entry === 'object' && (entry as any).verified && !vd[platform]?.verified) {
+        vd[platform] = entry;
+      }
+    }
 
     // V3 on-chain Genesis Record is canonical — prefer trust_score/v3 fields
     const v3ts = raw.trust_score?.source === 'satp_v3_onchain' ? raw.trust_score : null;
@@ -68,6 +77,7 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
         twitter: vd.twitter?.verified ? { handle: vd.twitter.handle || "", verified: true } : undefined,
         mcp: vd.mcp?.verified ? { url: vd.mcp.url || "", verified: true } : undefined,
         a2a: vd.a2a?.verified ? { url: vd.a2a.url || "", verified: true } : undefined,
+        review: vd.review?.verified ? { verified: true } : undefined,
       },
       unclaimed: raw.unclaimed || false,
       status: raw.unclaimed ? "unclaimed" : "online",

@@ -93,9 +93,9 @@ export function WriteReviewForm({ targetProfileId }: WriteReviewFormProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           agentId: targetProfileId,
-          reviewer: publicKey.toBase58(),
+          reviewerWallet: publicKey.toBase58(),
           rating,
-          comment: comment.trim().slice(0, 256),
+          reviewText: comment.trim().slice(0, 256),
         }),
       });
       const buildData = await buildRes.json();
