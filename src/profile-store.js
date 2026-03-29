@@ -932,6 +932,25 @@ function registerRoutes(app) {
         } catch (enrichErr) {
           console.warn('[Genesis] DB enrichment failed:', enrichErr.message);
         }
+        // Enrich face from DB nft_avatar if on-chain is empty
+        if (!record.faceImage || record.faceImage === '' || record.faceImage === null) {
+          try {
+            const d = getDb();
+            const rawId2 = req.params.id;
+            let profileId2 = rawId2;
+            if (!rawId2.startsWith('agent_')) profileId2 = 'agent_' + rawId2.toLowerCase();
+            const fRow = d.prepare('SELECT nft_avatar FROM profiles WHERE id = ? OR LOWER(name) = LOWER(?)').get(profileId2, rawId2);
+            if (fRow && fRow.nft_avatar) {
+              const nftData = JSON.parse(fRow.nft_avatar);
+              if (nftData.image) record.faceImage = nftData.image;
+              if (nftData.soulboundMint) record.faceMint = nftData.soulboundMint;
+              if (nftData.permanent) record.isBorn = true;
+              if (nftData.burnedAt) record.bornAt = nftData.burnedAt;
+              if (nftData.burnTxSignature) record.faceBurnTx = nftData.burnTxSignature;
+              record._faceEnrichedFromDB = true;
+            }
+          } catch (e) {}
+        }
       }
       res.json({ genesis: record });
     } catch (e) {
