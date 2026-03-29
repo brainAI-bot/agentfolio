@@ -9,7 +9,10 @@
  */
 
 const { Connection, PublicKey } = require('@solana/web3.js');
-const crypto = require('crypto');
+const crypto = require("crypto");
+let sdkDeriveGenesisPda = null;
+try { sdkDeriveGenesisPda = require("@brainai/satp-v3").deriveGenesisPda; } catch {}
+
 
 const PROGRAM_ID = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
 const GENESIS_SEED = 'genesis';

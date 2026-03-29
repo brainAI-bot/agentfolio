@@ -571,6 +571,12 @@ function enrichProfile(row) {
           else if (platform === 'telegram') entry.username = identifier;
         }
       } catch (e) { /* chain-cache not available */ }
+      // Filter out verifications with empty/null identifiers (e.g. moltbook with no username)
+      for (const [platform, entry] of Object.entries(vMap)) {
+        if (!entry.identifier && !entry.address && platform !== 'mcp' && platform !== 'a2a') {
+          delete vMap[platform];
+        }
+      }
       return vMap;
     })(),
     activity: activity.map(a => ({ ...a, detail: parseJsonField(a.detail) })),

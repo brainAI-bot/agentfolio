@@ -957,18 +957,12 @@ app.get('/api/verification/discord/status', (req, res) => {
 });
 
 app.post('/api/verification/discord/initiate', async (req, res) => {
-  const { profileId, discordUsername } = req.body;
-  
-  if (!profileId || !discordUsername) {
-    return res.status(400).json({ error: 'Missing profileId or discordUsername' });
-  }
-
-  try {
-    const result = await discordVerify.initiateDiscordVerification(profileId, discordUsername);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  // DISABLED: Discord verification requires OAuth, not self-report (CEO P0 directive)
+  return res.status(410).json({ 
+    error: 'Discord verification temporarily disabled',
+    reason: 'Discord verification requires OAuth flow — self-report not accepted',
+    hint: 'Discord OAuth integration coming soon'
+  });
 });
 
 // Telegram verification endpoints
