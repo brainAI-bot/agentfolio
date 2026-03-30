@@ -29,6 +29,7 @@ export function Navbar() {
     myProfileId
       ? { href: `/profile/${myProfileId}`, label: "My Profile", highlight: true }
       : { href: "/register", label: "Register", highlight: true },
+    { href: "/import/github", label: "Import" },
     ...staticNavLinks.slice(1),
   ];
 
