@@ -1314,7 +1314,7 @@ try {
   console.warn("[BurnToBecome] SATP V3 SDK not available:", e.message);
 }
         // Use Core Candy Machine worker (separate node_modules in core-cm-v2)
-        const workerPath = "/home/ubuntu/agentfolio/core-cm-v2/atomic-mint-burn-worker.mjs";
+        const workerPath = "/home/ubuntu/agentfolio/core-cm-v2/core-cm-mint-worker.mjs";
 
         execFile("node", [workerPath, wallet], {
           timeout: 120000,
