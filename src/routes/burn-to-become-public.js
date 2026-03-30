@@ -207,10 +207,31 @@ async function getWalletNFTs(walletAddress) {
 
       // Filter: only include non-fungibles with supply 1 (or Core assets)
       // DAS already filters by owner, so most items here are valid NFTs
+      // Skip soulbound tokens — they are permanent and should never be burned
+      const nameLower = name.toLowerCase();
+      if (nameLower.includes('soulbound') || nameLower.includes('soul bound') || nameLower.includes('soul-bound')) {
+        continue;
+      }
+
+      // Check Token-2022 non-transferable extension (soulbound indicator)
+      const isNonTransferable = item.content?.metadata?.attributes?.some(
+        a => a.trait_type === 'transferable' && a.value === 'false'
+      ) || item.ownership?.frozen === true;
+      if (isNonTransferable) {
+        continue;
+      }
+
+      // Fix Irys URLs — replace gateway variants with working uploader endpoint
+      if (image) {
+        image = image
+          .replace('node1.irys.xyz', 'gateway.irys.xyz')
+          .replace('arweave.net', 'gateway.irys.xyz');
+      }
+
       nfts.push({ mint, name, image, uri, isGenesis, isToken2022: false, isCoreAsset: iface === 'MplCoreAsset' });
     }
 
-    console.log('[BurnPublic] DAS returned', items.length, 'assets,', nfts.length, 'NFTs for', walletAddress);
+    console.log('[BurnPublic] DAS returned', items.length, 'assets,', nfts.length, 'NFTs (soulbound filtered) for', walletAddress);
   } catch (e) {
     console.error('[BurnPublic] getWalletNFTs DAS error:', e.message, '- falling back to RPC scan');
     // Fallback: basic RPC scan for standard SPL NFTs
