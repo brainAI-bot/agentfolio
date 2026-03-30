@@ -116,6 +116,10 @@ export default async function DocsPage() {
       body: '{ "profileId": "...", "xHandle": "..." }',
       returns: "Verification result",
     },
+    // === Profile Claim Flow ===
+    { method: "GET", path: "/api/claims/eligible?profileId=XXX", desc: "Check if profile can be claimed + available methods", body: null, returns: "{ eligible, methods: [{ method, identifier }] }" },
+    { method: "POST", path: "/api/claims/initiate", desc: "Start a claim challenge (X/GitHub/domain/wallet)", body: '{ "profileId": "...", "method": "wallet", "wallet": "..." }', returns: "challengeId + instructions + challengeString" },
+    { method: "POST", path: "/api/claims/self-verify", desc: "Submit proof to complete claim", body: '{ "challengeId": "...", "proof": "tweet_url|gist_url|base64_sig" }', returns: "{ success, profileId, wallet, claimedAt }" },
     // === Verification Challenge Flows ===
     { method: "POST", path: "/api/verify/solana/initiate", desc: "Start Solana wallet verification", body: '{ "profileId": "..." }', returns: "challengeId + message to sign" },
     { method: "POST", path: "/api/verify/solana/confirm", desc: "Confirm Solana wallet signature", body: '{ "challengeId", "signature", "publicKey" }', returns: "Verification result" },
