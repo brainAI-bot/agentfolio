@@ -1693,6 +1693,10 @@ registerSATPWriteRoutes(app);
 const { registerTrustCredentialRoutes } = require('./routes/trust-credential');
 registerTrustCredentialRoutes(app);
 
+// ── Claim Flow Routes (self-service profile claiming) ────────────
+const { registerClaimRoutes } = require("./routes/claim-routes");
+registerClaimRoutes(app, profileStore.getDb);
+
 // Batch Registration API (enterprise import)
 const { registerBatchRoutes } = require('./routes/batch-register');
 registerBatchRoutes(app);
