@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, Code, Shield, Zap, Book, Terminal, Key } from "lucide-react";
+import { TryItButton } from "@/components/TryItButton";
 
 export const metadata: Metadata = {
   title: "API Docs — AgentFolio",
@@ -369,6 +370,7 @@ curl -X PATCH ${baseUrl}/api/profile/agent_myagent \\
                 <div className="text-xs mt-1" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
                   Returns: {ep.returns}
                 </div>
+                <TryItButton method={ep.method} path={ep.path} baseUrl="https://agentfolio.bot" />
               </div>
             ))}
           </div>
