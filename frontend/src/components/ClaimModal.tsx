@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { useDemoMode } from "@/lib/demo-mode";
-import { X, Shield, Github, Globe, MessageSquare, ArrowRight, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { X, Shield, Github, Globe, MessageSquare, Wallet, ArrowRight, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
 
 interface ClaimMethod {
   method: string;
@@ -26,7 +26,7 @@ export function ClaimModal({ profileId, profileName, isOpen, onClose, onClaimed 
   const connected = isDemo ? true : wallet.connected;
   const publicKey = isDemo ? demoPublicKey : wallet.publicKey;
 
-  const [step, setStep] = useState<"methods" | "challenge" | "verify" | "success" | "error">("methods");
+  const [step, setStep] = useState<"methods" | "challenge" | "signing" | "success" | "error">("methods");
   const [methods, setMethods] = useState<ClaimMethod[]>([]);
   const [selectedMethod, setSelectedMethod] = useState<string | null>(null);
   const [challengeId, setChallengeId] = useState("");
@@ -41,6 +41,7 @@ export function ClaimModal({ profileId, profileName, isOpen, onClose, onClaimed 
     if (!isOpen) return;
     setStep("methods");
     setError("");
+    setMethods([]);
     fetch(`/api/claims/eligible?profileId=${encodeURIComponent(profileId)}`)
       .then(r => r.json())
       .then(data => {
@@ -61,12 +62,21 @@ export function ClaimModal({ profileId, profileName, isOpen, onClose, onClaimed 
     x: MessageSquare,
     github: Github,
     domain: Globe,
+    wallet: Wallet,
   };
 
   const methodLabels: Record<string, string> = {
     x: "Verify via X (Twitter)",
     github: "Verify via GitHub",
     domain: "Verify via Domain",
+    wallet: "Sign with Wallet",
+  };
+
+  const methodDescriptions: Record<string, string> = {
+    x: "Tweet a verification code",
+    github: "Create a public gist",
+    domain: "Add DNS TXT or .well-known file",
+    wallet: "Sign a message to prove ownership",
   };
 
   async function handleInitiate(method: string) {
@@ -95,12 +105,59 @@ export function ClaimModal({ profileId, profileName, isOpen, onClose, onClaimed 
         setChallengeId(data.challengeId);
         setInstructions(data.instructions);
         setChallengeString(data.challengeString);
-        setStep("challenge");
+
+        // Wallet method: auto-sign
+        if (method === "wallet") {
+          setStep("signing");
+          await handleWalletSign(data.challengeId, data.challengeString);
+        } else {
+          setStep("challenge");
+        }
       } else {
         setError(data.error || "Failed to initiate claim");
       }
     } catch (e: any) {
       setError(e.message || "Network error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleWalletSign(cId: string, msg: string) {
+    if (!wallet.signMessage) {
+      setError("Wallet does not support message signing. Try a different method.");
+      setStep("methods");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const encoded = new TextEncoder().encode(msg);
+      const signature = await wallet.signMessage(encoded);
+      const sigBase64 = Buffer.from(signature).toString("base64");
+
+      // Submit signature as proof
+      const res = await fetch("/api/claims/self-verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ challengeId: cId, proof: sigBase64 }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setStep("success");
+        onClaimed?.();
+      } else {
+        setError(data.error || "Wallet verification failed");
+        setStep("methods");
+      }
+    } catch (e: any) {
+      if (e.message?.includes("User rejected")) {
+        setError("Signature rejected. Try again or use a different method.");
+      } else {
+        setError(e.message || "Signing failed");
+      }
+      setStep("methods");
     } finally {
       setLoading(false);
     }
@@ -161,7 +218,7 @@ export function ClaimModal({ profileId, profileName, isOpen, onClose, onClaimed 
               Claim {profileName}
             </h2>
             <p className="text-xs" style={{ color: "var(--text-tertiary)" }}>
-              Prove you own this identity
+              Prove you own this identity to take control
             </p>
           </div>
         </div>
@@ -172,26 +229,26 @@ export function ClaimModal({ profileId, profileName, isOpen, onClose, onClaimed 
             className="rounded-lg p-3 mb-4 flex items-center gap-2"
             style={{ background: "rgba(220, 38, 38, 0.1)", border: "1px solid rgba(220, 38, 38, 0.3)" }}
           >
-            <AlertCircle size={16} style={{ color: "var(--accent)" }} />
-            <span className="text-xs flex-1" style={{ color: "var(--accent)" }}>{error}</span>
-            <button onClick={() => setError("")}><X size={14} style={{ color: "var(--accent)" }} /></button>
+            <AlertCircle size={16} style={{ color: "#ef4444" }} />
+            <span className="text-xs flex-1" style={{ color: "#ef4444" }}>{error}</span>
+            <button onClick={() => setError("")}><X size={14} style={{ color: "#ef4444" }} /></button>
           </div>
         )}
 
-        {/* Step 1: Connect wallet */}
+        {/* Step: Connect wallet */}
         {!connected && (
           <div className="text-center py-6">
+            <Wallet size={48} className="mx-auto mb-4 opacity-50" style={{ color: "var(--solana)" }} />
             <p className="text-sm mb-4" style={{ color: "var(--text-secondary)" }}>
-              Connect your Solana wallet to start the claim process.
+              Connect your Solana wallet to start claiming.
             </p>
             <button
               onClick={() => smartConnect()}
-              className="px-6 py-3 rounded-lg text-sm font-semibold"
+              className="px-6 py-3 rounded-lg text-sm font-semibold transition-all hover:shadow-lg"
               style={{
                 fontFamily: "var(--font-mono)",
-                background: "rgba(153, 69, 255, 0.15)",
-                color: "var(--solana)",
-                border: "1px solid rgba(153, 69, 255, 0.3)",
+                background: "linear-gradient(135deg, #9945FF, #14F195)",
+                color: "#fff",
               }}
             >
               Connect Wallet
@@ -199,11 +256,11 @@ export function ClaimModal({ profileId, profileName, isOpen, onClose, onClaimed 
           </div>
         )}
 
-        {/* Step 2: Choose method */}
+        {/* Step: Choose method */}
         {connected && step === "methods" && (
           <div className="space-y-3">
             <p className="text-xs mb-3" style={{ color: "var(--text-secondary)" }}>
-              Choose how to verify your identity:
+              Choose how to prove you own this profile:
             </p>
             {methods.map((m) => {
               const Icon = methodIcons[m.method] || Shield;
@@ -217,15 +274,17 @@ export function ClaimModal({ profileId, profileName, isOpen, onClose, onClaimed 
                     background: "var(--bg-primary)",
                     border: "1px solid var(--border)",
                     textAlign: "left",
+                    cursor: loading ? "wait" : "pointer",
+                    opacity: loading && selectedMethod !== m.method ? 0.5 : 1,
                   }}
                 >
-                  <Icon size={20} style={{ color: "var(--solana)" }} />
+                  <Icon size={20} style={{ color: m.method === "wallet" ? "#14F195" : "var(--solana)" }} />
                   <div className="flex-1">
                     <div className="text-sm font-semibold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
                       {methodLabels[m.method] || m.method}
                     </div>
                     <div className="text-xs" style={{ color: "var(--text-tertiary)" }}>
-                      @{m.identifier}
+                      {m.method === "wallet" ? methodDescriptions[m.method] : `@${m.identifier}`}
                     </div>
                   </div>
                   {loading && selectedMethod === m.method ? (
@@ -237,14 +296,28 @@ export function ClaimModal({ profileId, profileName, isOpen, onClose, onClaimed 
               );
             })}
             {methods.length === 0 && !error && (
-              <p className="text-xs text-center py-4" style={{ color: "var(--text-tertiary)" }}>
-                Loading available methods...
-              </p>
+              <div className="flex items-center justify-center py-6">
+                <Loader2 size={20} className="animate-spin" style={{ color: "var(--solana)" }} />
+                <span className="ml-2 text-xs" style={{ color: "var(--text-tertiary)" }}>Loading methods...</span>
+              </div>
             )}
           </div>
         )}
 
-        {/* Step 3: Show challenge */}
+        {/* Step: Wallet signing in progress */}
+        {connected && step === "signing" && (
+          <div className="text-center py-8">
+            <Loader2 size={48} className="mx-auto mb-4 animate-spin" style={{ color: "var(--solana)" }} />
+            <p className="text-sm font-semibold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+              Sign the message in your wallet
+            </p>
+            <p className="text-xs" style={{ color: "var(--text-tertiary)" }}>
+              Approve the signature request to prove wallet ownership
+            </p>
+          </div>
+        )}
+
+        {/* Step: Show challenge (for X/GitHub/Domain) */}
         {connected && step === "challenge" && (
           <div className="space-y-4">
             <div
@@ -267,7 +340,11 @@ export function ClaimModal({ profileId, profileName, isOpen, onClose, onClaimed 
                 type="text"
                 value={proof}
                 onChange={(e) => setProof(e.target.value)}
-                placeholder={selectedMethod === "x" ? "https://twitter.com/..." : selectedMethod === "github" ? "https://gist.github.com/..." : "Verification complete"}
+                placeholder={
+                  selectedMethod === "x" ? "https://x.com/..." :
+                  selectedMethod === "github" ? "https://gist.github.com/..." :
+                  "Verification proof"
+                }
                 className="w-full px-4 py-2.5 rounded-lg text-sm outline-none"
                 style={{
                   fontFamily: "var(--font-mono)",
@@ -275,13 +352,14 @@ export function ClaimModal({ profileId, profileName, isOpen, onClose, onClaimed 
                   border: "1px solid var(--border)",
                   color: "var(--text-primary)",
                 }}
+                onKeyDown={(e) => { if (e.key === "Enter" && proof.trim()) handleVerify(); }}
               />
             </div>
 
             <button
               onClick={handleVerify}
               disabled={loading || !proof.trim()}
-              className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold uppercase tracking-wider disabled:opacity-50"
+              className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold uppercase tracking-wider disabled:opacity-50 transition-all hover:shadow-lg"
               style={{
                 fontFamily: "var(--font-mono)",
                 background: "var(--accent)",
@@ -296,7 +374,7 @@ export function ClaimModal({ profileId, profileName, isOpen, onClose, onClaimed 
             </button>
 
             <button
-              onClick={() => { setStep("methods"); setError(""); }}
+              onClick={() => { setStep("methods"); setError(""); setProof(""); }}
               className="w-full text-center text-xs py-2"
               style={{ color: "var(--text-tertiary)" }}
             >
@@ -305,36 +383,57 @@ export function ClaimModal({ profileId, profileName, isOpen, onClose, onClaimed 
           </div>
         )}
 
-        {/* Step 4: Success */}
+        {/* Step: Success */}
         {step === "success" && (
           <div className="text-center py-6">
-            <CheckCircle size={48} className="mx-auto mb-4" style={{ color: "var(--success)" }} />
-            <h3 className="text-lg font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--success)" }}>
-              Profile Claimed!
+            <CheckCircle size={48} className="mx-auto mb-4" style={{ color: "#10B981" }} />
+            <h3 className="text-lg font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "#10B981" }}>
+              Profile Claimed! 🎉
             </h3>
-            <p className="text-sm mb-4" style={{ color: "var(--text-secondary)" }}>
-              {profileName} is now yours. Your wallet has been linked and verification recorded.
+            <p className="text-sm mb-2" style={{ color: "var(--text-secondary)" }}>
+              <strong>{profileName}</strong> is now yours.
             </p>
-            <button
-              onClick={() => window.location.reload()}
-              className="px-6 py-3 rounded-lg text-sm font-semibold"
-              style={{
-                fontFamily: "var(--font-mono)",
-                background: "var(--accent)",
-                color: "#fff",
-              }}
-            >
-              View Your Profile
-            </button>
+            <p className="text-xs mb-6" style={{ color: "var(--text-tertiary)" }}>
+              Your wallet has been linked. You can now edit your bio, links, and skills.
+            </p>
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={() => window.location.reload()}
+                className="px-5 py-2.5 rounded-lg text-sm font-semibold"
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  background: "var(--accent)",
+                  color: "#fff",
+                }}
+              >
+                View Profile
+              </button>
+              <a
+                href={`/profile/${profileId}/edit`}
+                className="px-5 py-2.5 rounded-lg text-sm font-semibold inline-flex items-center"
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  background: "rgba(153, 69, 255, 0.15)",
+                  color: "var(--solana)",
+                  border: "1px solid rgba(153, 69, 255, 0.3)",
+                  textDecoration: "none",
+                }}
+              >
+                Edit Profile <ArrowRight size={14} className="ml-1" />
+              </a>
+            </div>
           </div>
         )}
 
-        {/* Error state */}
+        {/* Error state (no methods available) */}
         {step === "error" && !methods.length && (
           <div className="text-center py-6">
-            <AlertCircle size={48} className="mx-auto mb-4" style={{ color: "var(--accent)" }} />
-            <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+            <AlertCircle size={48} className="mx-auto mb-4 opacity-50" style={{ color: "#ef4444" }} />
+            <p className="text-sm mb-2" style={{ color: "var(--text-secondary)" }}>
               {error || "This profile is not available for claiming."}
+            </p>
+            <p className="text-xs" style={{ color: "var(--text-tertiary)" }}>
+              If you believe this is your profile, contact us on Discord.
             </p>
           </div>
         )}

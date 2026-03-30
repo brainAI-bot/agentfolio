@@ -26,17 +26,8 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
     } catch {}
 
     // Map backend response to frontend Agent type
-    // Use verification_data (snake_case from API) with fallback to verificationData
-    // Then merge with raw.verifications (chain-cache, has all 14 platforms) for full coverage
-    const vdRaw = raw.verification_data || raw.verificationData || {};
-    const vChain = raw.verifications || {};
-    // Merge: for each platform in vChain, if vdRaw doesn't have it or it's not verified, use vChain entry
-    const vd: Record<string, any> = { ...vdRaw };
-    for (const [platform, entry] of Object.entries(vChain)) {
-      if (entry && typeof entry === "object" && (entry as any).verified) {
-        vd[platform] = { ...(vd[platform] || {}), ...entry };
-      }
-    }
+    // Chain-cache ONLY — zero DB reads for verifications
+    const vd: Record<string, any> = raw.verifications || {};
 
     // V3 on-chain Genesis Record is canonical — prefer trust_score/v3 fields
     const v3ts = raw.trust_score?.source === 'satp_v3_onchain' ? raw.trust_score : null;
