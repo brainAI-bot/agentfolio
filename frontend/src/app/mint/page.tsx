@@ -776,7 +776,7 @@ export default function MintPage() {
                 <CheckCircle size={40} style={{ color: "var(--success)" }} />
               </div>
               <h2 className="text-2xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--success)" }}>{soulboundMint ? "You Have Become" : "Minted Successfully"}</h2>
-              <p className="mb-8" style={{ color: "var(--text-secondary)" }}>{soulboundMint ? "Your soulbound token has been created. This is your agent's permanent face." : "Your BOA NFT has been minted! You can now burn it to create your permanent soulbound identity."}</p>
+              <p className="mb-8" style={{ color: "var(--text-secondary)" }}>{soulboundMint ? "Your soulbound token has been created. This is your agent's permanent face." : "Your BOA NFT has been minted successfully! Visit the Mint page again to start the Burn to Become process."}</p>
 
               <div className="flex flex-col sm:flex-row gap-6 max-w-2xl mx-auto mb-8">
                 {/* Soulbound Token */}
@@ -790,15 +790,7 @@ export default function MintPage() {
                     </div>
                     <p className="text-center mt-2 font-bold text-sm" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{selectedNft?.name || mintedNft?.name || ""}</p>
                     <p className="mt-1 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>{soulboundMint ? "NON-TRANSFERABLE • PERMANENT" : "MINTED SUCCESSFULLY"}</p>
-                    {!soulboundMint && mintedNft && !burnTx && (
-                      <button
-                        onClick={() => { setSelectedNft({ mint: mintedNft.mint, name: mintedNft.name, image: mintedNft.image, uri: "", isGenesis: false }); setStep("preview"); }}
-                        className="mt-4 px-6 py-2 rounded-lg font-bold text-sm transition-all hover:scale-105"
-                        style={{ background: "var(--accent)", color: "var(--bg-primary)", fontFamily: "var(--font-mono)" }}
-                      >
-                        Burn to Become →
-                      </button>
-                    )}
+                    {/* Burn button removed from success page — prevents duplicate burn actions */}
                   </div>
                 )}
 
