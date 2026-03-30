@@ -107,6 +107,7 @@ async function run() {
       group: some("paid"),
       mintArgs: {
         solPayment: some({ destination: publicKey("FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be") }),
+        mintLimit: some({ id: 1 }),
       },
     }));
   }
