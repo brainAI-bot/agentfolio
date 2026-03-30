@@ -593,7 +593,7 @@ export default function MintPage() {
                   </div>
 
                   <button
-                    onClick={() => handleMintBOA()}
+                    onClick={() => handleClientMint("paid")}
                     className="w-full group inline-flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all hover:shadow-[0_0_40px_rgba(153,69,255,0.4)] hover:scale-[1.02]"
                     style={{ fontFamily: "var(--font-mono)", background: "linear-gradient(135deg, var(--accent), #7c3aed)", color: "#fff" }}
                   >
