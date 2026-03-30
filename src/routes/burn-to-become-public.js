@@ -1078,7 +1078,7 @@ function handleBurnToBecome(req, res, url) {
 
         // Build unsigned TX via worker
         const { execFile } = require("child_process");
-        execFile("node", ["/home/ubuntu/agentfolio/core-cm-v2/atomic-prepare-worker.mjs", wallet, flow], {
+        execFile("node", ["/home/ubuntu/agentfolio/core-cm-v2/core-cm-prepare-worker.mjs", wallet, flow], {
           timeout: 30000, cwd: "/home/ubuntu/agentfolio/core-cm-v2",
           env: { ...process.env, HOME: process.env.HOME },
         }, (err, stdout, stderr) => {
@@ -1504,9 +1504,9 @@ try {
           } catch (e) { console.warn('[ConfirmMint] burnToBecome failed:', e.message); }
         }
         
-        // For atomic flow: mint soulbound Token-2022 (the Core NFT was already burned in the same TX)
+        // DISABLED: No longer atomic burn — NFT stays in wallet. Soulbound minted only via separate burn flow.
         let soulboundMintAddress = null;
-        if (flow === 'free' || record.flow === 'free') {
+        if (false /* DISABLED: NFT no longer burned in prepare flow */) {
           try {
             const agentName = agentId ? agentId.replace('agent_', '') : 'Unknown';
             const metadataUri = record.imageUri || imageUri || '';
