@@ -790,7 +790,7 @@ export default function MintPage() {
                     </div>
                     <p className="text-center mt-2 font-bold text-sm" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{selectedNft?.name || mintedNft?.name || ""}</p>
                     <p className="mt-1 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>{soulboundMint ? "NON-TRANSFERABLE • PERMANENT" : "MINTED SUCCESSFULLY"}</p>
-                    {!soulboundMint && mintedNft && (
+                    {!soulboundMint && mintedNft && !burnTx && (
                       <button
                         onClick={() => { setSelectedNft({ mint: mintedNft.mint, name: mintedNft.name, image: mintedNft.image, uri: "", isGenesis: false }); setStep("preview"); }}
                         className="mt-4 px-6 py-2 rounded-lg font-bold text-sm transition-all hover:scale-105"

@@ -1570,9 +1570,14 @@ try {
         console.log('[ConfirmMint] Recorded client-signed mint:', effectiveBoaId, 'agent:', agentId, 'sig:', signature.slice(0, 20));
         
         // If free flow + agent has Genesis Record, trigger burnToBecome (uses safe wrapper)
-        if (flow === 'free' && agentId && asset) {
+        if (agentId) {
           try {
-            const burnResult = await safeBurnToBecome(agentId, asset?.imageUri || '', asset?.mintAddress || '', '');
+            // Pass: agentId, faceImage (Irys URL), soulboundMint address, burnTx signature
+            const faceImg = imageUri || record.imageUri || '';
+            const sbMint = soulboundMintAddress || '';
+            const bSig = signature || '';
+            console.log('[ConfirmMint] Calling burnToBecome:', agentId, 'face:', faceImg?.slice(0,40), 'soulbound:', sbMint?.slice(0,16));
+            const burnResult = await safeBurnToBecome(agentId, faceImg, sbMint, bSig);
             if (burnResult.success) {
               console.log('[ConfirmMint] V3 burnToBecome recorded:', agentId, 'tx:', burnResult.txSignature);
               record.burnToBecomeTx = burnResult.txSignature;
