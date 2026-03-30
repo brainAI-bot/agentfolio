@@ -807,19 +807,36 @@ function handleBurnToBecome(req, res, url) {
           metadataUri = genesis.metadata;
           nftName = `${genesis.name} — Soulbound`;
         } else {
-          // Fetch from NFT metadata
-          const [metaPda] = PublicKey.findProgramAddressSync(
-            [Buffer.from('metadata'), TOKEN_METADATA_PROGRAM.toBuffer(), new PublicKey(nftMint).toBuffer()],
-            TOKEN_METADATA_PROGRAM
-          );
-          const metaAccount = await connection.getAccountInfo(metaPda);
-          if (metaAccount) {
-            const parsed = parseMetaplexMetadata(metaAccount.data);
-            if (parsed) {
-              const jsonData = await fetchJson(parsed.uri);
-              artworkUri = jsonData.image;
-              nftName = jsonData.name + ' — Soulbound';
-              metadataUri = parsed.uri;
+          // Try Core NFT first (via Helius DAS), then fall back to SPL Token Metadata
+          try {
+            const dasResp = await fetch(HELIUS_RPC, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getAsset", params: { id: nftMint } }),
+            });
+            const dasData = await dasResp.json();
+            const assetContent = dasData.result && dasData.result.content;
+            if (assetContent) {
+              artworkUri = (assetContent.links && assetContent.links.image) || (assetContent.files && assetContent.files[0] && assetContent.files[0].uri) || "";
+              metadataUri = (assetContent.json_uri) || "";
+              nftName = (assetContent.metadata && assetContent.metadata.name || "BOA") + " — Soulbound";
+            }
+          } catch (dasErr) { console.warn("[BurnPublic] DAS metadata fetch failed:", dasErr.message); }
+
+          // Fallback: SPL Token Metadata PDA
+          if (!artworkUri) {
+            const [metaPda] = PublicKey.findProgramAddressSync(
+              [Buffer.from('metadata'), TOKEN_METADATA_PROGRAM.toBuffer(), new PublicKey(nftMint).toBuffer()],
+              TOKEN_METADATA_PROGRAM
+            );
+            const metaAccount = await connection.getAccountInfo(metaPda);
+            if (metaAccount) {
+              const parsed = parseMetaplexMetadata(metaAccount.data);
+              if (parsed) {
+                const jsonData = await fetchJson(parsed.uri);
+                artworkUri = jsonData.image;
+                nftName = jsonData.name + ' — Soulbound';
+                metadataUri = parsed.uri;
+              }
             }
           }
         }
