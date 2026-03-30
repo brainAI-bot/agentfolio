@@ -1093,9 +1093,48 @@ function handleBurnToBecome(req, res, url) {
           if (isBorn) return sendJson(403, { error: "Already used free burn-to-become", isBorn: true });
         }
 
-        // Build unsigned TX via worker
+        // === ANTI-GAMING: PDA check seeded from agent_id ===
+        let agentIdForPda = null;
+        try {
+          const Database = require("better-sqlite3");
+          const dbPath2 = require("path").join(__dirname, "../../data/agentfolio.db");
+          const db2 = new Database(dbPath2, { readonly: true });
+          const profs = db2.prepare("SELECT * FROM profiles").all();
+          for (const p of profs) {
+            try { const vd = JSON.parse(p.verification_data || "{}"); if (vd.solana && vd.solana.address === wallet) { agentIdForPda = p.id; break; } } catch {}
+            try { const w = JSON.parse(p.wallets || "{}"); if (w.solana === wallet) { agentIdForPda = p.id; break; } } catch {}
+          }
+          db2.close();
+        } catch (e) { console.warn("[PrepareMint] DB lookup:", e.message); }
+
+        if (agentIdForPda) {
+          try {
+            const v3sdk = require("@brainai/satp-v3");
+            const { Connection: Conn2 } = require("@solana/web3.js");
+            const conn2 = new Conn2(process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb", "confirmed");
+            const [genPda] = v3sdk.deriveGenesisPda(agentIdForPda);
+            const [mtPda] = v3sdk.deriveMintTrackerPda(genPda);
+            const tInfo = await conn2.getAccountInfo(mtPda);
+            if (tInfo) {
+              const tracker = v3sdk.deserializeMintTracker(tInfo.data);
+              if (tracker && tracker.mintCount > 0 && flow === "free") {
+                return sendJson(403, { error: "Free mint already used (PDA: " + agentIdForPda + ")", mintTrackerPda: mtPda.toBase58(), mintCount: tracker.mintCount });
+              }
+              if (tracker && tracker.mintCount >= 3) {
+                return sendJson(403, { error: "Max mints reached (PDA: " + agentIdForPda + ")", mintTrackerPda: mtPda.toBase58(), mintCount: tracker.mintCount });
+              }
+              console.log("[PrepareMint] Mint tracker:", agentIdForPda, "count:", tracker?.mintCount || 0);
+            } else {
+              console.log("[PrepareMint] No mint tracker for", agentIdForPda, "- first mint");
+            }
+          } catch (e) { console.warn("[PrepareMint] PDA check failed (non-blocking):", e.message); }
+        }
+
+        // Build unsigned TX via worker (pass agentId for on-chain PDA creation)
         const { execFile } = require("child_process");
-        execFile("node", ["/home/ubuntu/agentfolio/core-cm-v2/core-cm-prepare-worker.mjs", wallet, flow], {
+        const workerArgs = ["/home/ubuntu/agentfolio/core-cm-v2/atomic-prepare-worker.mjs", wallet, flow];
+        if (agentIdForPda) workerArgs.push(agentIdForPda);
+        execFile("node", workerArgs, {
           timeout: 30000, cwd: "/home/ubuntu/agentfolio/core-cm-v2",
           env: { ...process.env, HOME: process.env.HOME },
         }, (err, stdout, stderr) => {
@@ -1523,7 +1562,7 @@ try {
         
         // DISABLED: No longer atomic burn — NFT stays in wallet. Soulbound minted only via separate burn flow.
         let soulboundMintAddress = null;
-        if (false /* DISABLED: NFT no longer burned in prepare flow */) {
+        if (flow === "free" || record.flow === "free") /* Re-enabled: atomic flow burns NFT */ {
           try {
             const agentName = agentId ? agentId.replace('agent_', '') : 'Unknown';
             const metadataUri = record.imageUri || imageUri || '';

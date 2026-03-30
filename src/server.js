@@ -2037,9 +2037,54 @@ app.get('/api/reviews/v2', (req, res) => {
   res.json({ reviews: [], total: 0, agent: req.query.agent || null });
 });
 
-// Profile heatmap - returns empty heatmap until activity tracking wired
+// Profile heatmap — returns activity data from DB + chain-cache attestations
 app.get('/api/profile/:id/heatmap', (req, res) => {
-  res.json({ profileId: req.params.id, heatmap: {}, period: '90d' });
+  try {
+    const d = profileStore.getDb();
+    const id = req.params.id;
+
+    // Get activity_feed events
+    const events = d.prepare(
+      "SELECT event_type, created_at FROM activity_feed WHERE profile_id = ? ORDER BY created_at DESC LIMIT 500"
+    ).all(id);
+
+    // Get on-chain attestation timestamps
+    let attestationDates = [];
+    try {
+      const cc = require('./lib/chain-cache');
+      const atts = cc.getVerifications(id);
+      attestationDates = atts.map(a => a.timestamp).filter(Boolean);
+    } catch (_) {}
+
+    // Build heatmap: date -> count
+    const heatmap = {};
+    for (const ev of events) {
+      if (!ev.created_at) continue;
+      const date = ev.created_at.slice(0, 10);
+      heatmap[date] = (heatmap[date] || 0) + 1;
+    }
+    for (const ts of attestationDates) {
+      const date = ts.slice(0, 10);
+      heatmap[date] = (heatmap[date] || 0) + 1;
+    }
+
+    const totalEvents = Object.values(heatmap).reduce((s, c) => s + c, 0);
+    const activeDays = Object.keys(heatmap).length;
+
+    // Calculate streak
+    let streak = 0;
+    const today = new Date();
+    for (let i = 0; i < 365; i++) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      if (heatmap[key]) { streak++; } else if (i > 0) { break; }
+    }
+
+    res.json({ profileId: id, heatmap, totalEvents, activeDays, streak, period: '365d' });
+  } catch (err) {
+    res.json({ profileId: req.params.id, heatmap: {}, totalEvents: 0, activeDays: 0, streak: 0, period: '365d' });
+  }
 });
 
 // Token stats - returns zeros until token launch
