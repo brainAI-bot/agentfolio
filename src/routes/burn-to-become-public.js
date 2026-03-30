@@ -743,6 +743,26 @@ function handleBurnToBecome(req, res, url) {
     return true;
   }
 
+  // POST /api/burn-to-become/submit-genesis — submit signed burnToBecome TX (client-side authority)
+  if (url.pathname === '/api/burn-to-become/submit-genesis' && req.method === 'POST') {
+    (async () => {
+      try {
+        const { signedTransaction } = req.body || {};
+        if (!signedTransaction) return sendJson(400, { error: 'signedTransaction required' });
+        
+        const txBuffer = Buffer.from(signedTransaction, 'base64');
+        const sig = await connection.sendRawTransaction(txBuffer);
+        await connection.confirmTransaction(sig, 'confirmed');
+        console.log('[SubmitGenesis] burnToBecome TX confirmed:', sig);
+        sendJson(200, { success: true, signature: sig });
+      } catch (e) {
+        console.error('[SubmitGenesis] error:', e.message);
+        sendJson(500, { error: e.message });
+      }
+    })();
+    return true;
+  }
+
   // POST /api/burn-to-become/prepare
   if (url.pathname === '/api/burn-to-become/prepare' && req.method === 'POST') {
     (async () => {
@@ -919,6 +939,28 @@ function handleBurnToBecome(req, res, url) {
               console.log('[BurnPublic] V3 burnToBecome confirmed for ' + agentId + ': tx=' + burnResult.txSignature);
             } else if (burnResult.needsClientSign) {
               console.log('[BurnPublic] V3 burnToBecome needs client sign for ' + agentId + ' (authority: ' + burnResult.authority + ')');
+              // Build burnToBecome TX for client-side signing
+              try {
+                const v3sdk = require('@brainai/satp-v3');
+                const builders = new v3sdk.SatpV3Builders(process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb');
+                const userAuthority = new PublicKey(burnResult.authority);
+                const faceMintPk = soulboundResult.soulboundMint ? new PublicKey(soulboundResult.soulboundMint) : PublicKey.default;
+                const clientBurnTx = await builders.burnToBecome({
+                  agentId: agentId,
+                  authority: userAuthority,
+                  faceImage: artworkUri || '',
+                  faceMint: faceMintPk,
+                  faceBurnTx: burnTx || '',
+                });
+                // Serialize for client signing (no server signature needed)
+                const serializedBurnToBecome = clientBurnTx.serialize({ requireAllSignatures: false }).toString('base64');
+                // Store for response
+                soulboundResult.burnToBecomeTx = serializedBurnToBecome;
+                soulboundResult.burnToBecomeAuthority = burnResult.authority;
+                console.log('[BurnPublic] Built client-side burnToBecome TX for', agentId, 'authority:', burnResult.authority);
+              } catch (btbErr) {
+                console.warn('[BurnPublic] Failed to build client burnToBecome TX:', btbErr.message);
+              }
             } else {
               console.log('[BurnPublic] V3 burnToBecome skipped for ' + agentId + ': ' + burnResult.reason);
             }
@@ -1068,6 +1110,9 @@ function handleBurnToBecome(req, res, url) {
           attestationTx,
           genesisRecordUrl: null,
           boaSatpLinkTx,
+          // Client-side burnToBecome TX (when authority != deployer)
+          burnToBecomeTx: soulboundResult.burnToBecomeTx || null,
+          burnToBecomeAuthority: soulboundResult.burnToBecomeAuthority || null,
         });
       } catch (e) {
         console.error('[BurnPublic] submit error:', e);
@@ -1569,15 +1614,56 @@ try {
         fs.writeFileSync(recordPath, JSON.stringify(record, null, 2));
         console.log('[ConfirmMint] Recorded client-signed mint:', effectiveBoaId, 'agent:', agentId, 'sig:', signature.slice(0, 20));
         
-        // If free flow + agent has Genesis Record, trigger burnToBecome (uses safe wrapper)
-        if (agentId) {
+        // STEP 1: Resolve artwork URI via DAS (same as Card 2 burn flow)
+        let artworkUri = imageUri || record.imageUri || '';
+        let metadataUri = '';
+        let nftName = boaName || 'Burned-Out Agent';
+        
+        if (!artworkUri && asset) {
+          // Try Helius DAS getAsset for the minted BOA
           try {
-            // Pass: agentId, faceImage (Irys URL), soulboundMint address, burnTx signature
-            const faceImg = imageUri || record.imageUri || '';
-            const sbMint = soulboundMintAddress || '';
-            const bSig = signature || '';
-            console.log('[ConfirmMint] Calling burnToBecome:', agentId, 'face:', faceImg?.slice(0,40), 'soulbound:', sbMint?.slice(0,16));
-            const burnResult = await safeBurnToBecome(agentId, faceImg, sbMint, bSig);
+            const HELIUS_RPC = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+            const dasResp = await fetch(HELIUS_RPC, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getAsset', params: { id: asset } }),
+            });
+            const dasData = await dasResp.json();
+            const assetContent = dasData.result && dasData.result.content;
+            if (assetContent) {
+              artworkUri = (assetContent.links && assetContent.links.image) || (assetContent.files && assetContent.files[0] && assetContent.files[0].uri) || '';
+              metadataUri = assetContent.json_uri || '';
+              nftName = (assetContent.metadata && assetContent.metadata.name || nftName) + ' — Soulbound';
+              console.log('[ConfirmMint] DAS resolved artwork:', artworkUri?.slice(0, 60));
+            }
+          } catch (dasErr) { console.warn('[ConfirmMint] DAS artwork resolution failed:', dasErr.message); }
+        }
+        if (!metadataUri) metadataUri = artworkUri;
+        if (!nftName.includes('Soulbound')) nftName += ' — Soulbound';
+        
+        // STEP 2: Mint soulbound FIRST (so we have the address for burnToBecome)
+        let soulboundMintAddress = null;
+        if (artworkUri && wallet) {
+          try {
+            const agentName = agentId ? agentId.replace('agent_', '') : 'Unknown';
+            console.log('[ConfirmMint] Minting soulbound Token-2022 for', agentName, 'artwork:', artworkUri?.slice(0, 50));
+            const sbResult = await mintSoulbound(wallet, artworkUri, metadataUri, nftName, asset || '', signature || '');
+            soulboundMintAddress = sbResult.soulboundMint;
+            record.soulboundMint = soulboundMintAddress;
+            record.soulboundTx = sbResult.signature;
+            console.log('[ConfirmMint] Soulbound minted:', soulboundMintAddress, 'tx:', sbResult.signature?.slice(0, 20));
+          } catch (e) {
+            console.error('[ConfirmMint] Soulbound minting failed:', e.message);
+            record.soulboundError = e.message;
+          }
+        } else {
+          console.warn('[ConfirmMint] No artwork URI — skipping soulbound. imageUri:', imageUri, 'record.imageUri:', record.imageUri);
+        }
+        
+        // STEP 3: Call burnToBecome with soulbound address + artwork
+        if (agentId && soulboundMintAddress) {
+          try {
+            console.log('[ConfirmMint] Calling burnToBecome:', agentId, 'face:', artworkUri?.slice(0, 40), 'soulbound:', soulboundMintAddress?.slice(0, 16));
+            const burnResult = await safeBurnToBecome(agentId, artworkUri || '', soulboundMintAddress, signature || '');
             if (burnResult.success) {
               console.log('[ConfirmMint] V3 burnToBecome recorded:', agentId, 'tx:', burnResult.txSignature);
               record.burnToBecomeTx = burnResult.txSignature;
@@ -1587,30 +1673,6 @@ try {
               console.log('[ConfirmMint] burnToBecome skipped:', agentId, burnResult.reason);
             }
           } catch (e) { console.warn('[ConfirmMint] burnToBecome failed:', e.message); }
-        }
-        
-        // DISABLED: No longer atomic burn — NFT stays in wallet. Soulbound minted only via separate burn flow.
-        let soulboundMintAddress = null;
-        if (true) /* Soulbound for all atomic flows (free + paid) */ {
-          try {
-            const agentName = agentId ? agentId.replace('agent_', '') : 'Unknown';
-            const metadataUri = record.imageUri || imageUri || '';
-            const artworkUri = metadataUri;
-            const nftMintAddr = asset || '';
-            const burnSig = signature || '';
-            
-            if (artworkUri && wallet) {
-              console.log('[ConfirmMint] Minting soulbound Token-2022 for', agentName);
-              const sbResult = await mintSoulbound(wallet, artworkUri, metadataUri, agentName + ' — Soulbound', nftMintAddr, burnSig);
-              soulboundMintAddress = sbResult.soulboundMint;
-              record.soulboundMint = soulboundMintAddress;
-              record.soulboundTx = sbResult.signature;
-              console.log('[ConfirmMint] Soulbound minted:', soulboundMintAddress, 'tx:', sbResult.signature?.slice(0, 20));
-            }
-          } catch (e) {
-            console.error('[ConfirmMint] Soulbound minting failed:', e.message);
-            record.soulboundError = e.message;
-          }
         }
         
         sendJson(200, { success: true, recorded: true, agentId, boaId: effectiveBoaId, soulboundMint: soulboundMintAddress, ...record });

@@ -278,7 +278,30 @@ export default function MintPage() {
       const result = await submitRes.json();
       setBurnTx(result.burnTx);
       setSoulboundMint(result.soulboundMint);
-      // Genesis Record dropped
+      
+      // If server returns a burnToBecome TX (genesis record update), have user sign it
+      if (result.burnToBecomeTx && wallet.signTransaction) {
+        try {
+          const { Transaction } = await import("@solana/web3.js");
+          const btbTx = Transaction.from(Buffer.from(result.burnToBecomeTx, "base64"));
+          const signedBtb = await wallet.signTransaction(btbTx);
+          // Submit the signed burnToBecome TX
+          const btbRes = await fetch(`${API}/api/burn-to-become/submit-genesis`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              signedTransaction: Buffer.from(signedBtb.serialize()).toString("base64"),
+            }),
+          });
+          if (btbRes.ok) {
+            const btbResult = await btbRes.json();
+            console.log("Genesis record updated:", btbResult);
+          }
+        } catch (btbErr) {
+          console.warn("burnToBecome signing failed (non-critical):", btbErr);
+        }
+      }
+      
       setStep("complete");
     } catch (e: any) {
       const msg = e?.code === 4001 ? "Transaction rejected in wallet"

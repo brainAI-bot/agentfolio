@@ -1,9 +1,9 @@
 /**
- * safe-burn-to-become.js v2
+ * safe-burn-to-become.js v3
  * 
  * After soulbound mints, writes faceImage + sets isBorn on SATP genesis record.
  * Creates genesis if it doesn't exist.
- * Uses @brainai/satp-v3 SDK builders directly.
+ * Uses v3-sdk's SATPV3SDK for correct parsing + @brainai/satp-v3 builders for TX.
  */
 
 const { Connection, Keypair, PublicKey } = require("@solana/web3.js");
@@ -21,6 +21,16 @@ function getSigner() {
   return _signer;
 }
 
+// Use v3-sdk SATPV3SDK for correct account parsing
+let _sdk = null;
+function getSDK() {
+  if (!_sdk) {
+    const { SATPV3SDK } = require("../satp-client/src/v3-sdk");
+    _sdk = new SATPV3SDK({ rpcUrl: RPC_URL });
+  }
+  return _sdk;
+}
+
 /**
  * After soulbound is minted, write faceImage to SATP genesis and set isBorn=true.
  * Creates genesis record if it doesn't exist.
@@ -31,12 +41,13 @@ async function safeBurnToBecome(agentId, faceImageUri, soulboundMintAddr, burnTx
     const conn = new Connection(RPC_URL, "confirmed");
     const signer = getSigner();
     const builders = new v3.SatpV3Builders(RPC_URL);
+    const sdk = getSDK();
 
-    const [genesisPda] = v3.deriveGenesisPda(agentId);
-    const accountInfo = await conn.getAccountInfo(genesisPda);
+    // Use v3-sdk's getGenesisRecord (correct field layout)
+    const record = await sdk.getGenesisRecord(agentId);
 
     // STEP 1: Create genesis if it doesn't exist
-    if (!accountInfo) {
+    if (!record) {
       console.log("[SafeBurn] No genesis for", agentId, "— creating...");
       try {
         const createTx = await builders.createIdentity({
@@ -53,29 +64,27 @@ async function safeBurnToBecome(agentId, faceImageUri, soulboundMintAddr, burnTx
         await conn.confirmTransaction(createSig, "confirmed");
         console.log("[SafeBurn] Genesis created for", agentId, "tx:", createSig);
       } catch (e) {
-        // Account might already exist (race condition) — continue to burnToBecome
-        console.warn("[SafeBurn] createIdentity failed (may already exist):", e.message);
+        console.warn("[SafeBurn] createIdentity failed:", e.message);
+        // If AlreadyInUse, the PDA exists — continue to burnToBecome
+        if (!e.message.includes("already in use") && !e.message.includes("AlreadyInUse")) {
+          return { success: false, skipped: false, reason: "createIdentity failed: " + e.message };
+        }
       }
     } else {
-      // Genesis exists — check if deployer is authority
-      try {
-        const record = v3.deserializeGenesis(accountInfo.data);
-        if (record) {
-          if (record.isBorn || v3.isBorn(record)) {
-            return { success: false, skipped: true, reason: "Agent already born: " + agentId };
-          }
-          const recordAuth = record.authority?.toBase58?.() || record.authority?.toString?.() || String(record.authority);
-          if (recordAuth !== signer.publicKey.toBase58()) {
-            console.warn("[SafeBurn] Authority mismatch:", recordAuth, "!= deployer", signer.publicKey.toBase58());
-            return {
-              success: false, skipped: true,
-              reason: "Authority is " + recordAuth + " (not deployer). Agent must sign client-side.",
-              authority: recordAuth, needsClientSign: true,
-            };
-          }
-        }
-      } catch (e) {
-        console.warn("[SafeBurn] Deser failed, attempting burnToBecome anyway:", e.message);
+      // Genesis exists — check state
+      if (record.isBorn) {
+        return { success: false, skipped: true, reason: "Agent already born: " + agentId };
+      }
+      
+      const recordAuth = record.authority;
+      if (recordAuth !== signer.publicKey.toBase58()) {
+        console.log("[SafeBurn] Authority is", recordAuth, "not deployer", signer.publicKey.toBase58());
+        // Cannot sign server-side — need client-side signing
+        return {
+          success: false, skipped: true,
+          reason: "Authority is " + recordAuth + " (not deployer). Needs client-side burnToBecome.",
+          authority: recordAuth, needsClientSign: true,
+        };
       }
     }
 
