@@ -9,7 +9,7 @@
  * Returns JSON: { success, asset, burnTx }
  */
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults';
-import { burnV1, fetchAssetV1 } from '@metaplex-foundation/mpl-core';
+import { burnV1, fetchAssetV1, mplCore } from '@metaplex-foundation/mpl-core';
 import { setComputeUnitLimit, setComputeUnitPrice } from '@metaplex-foundation/mpl-toolbox';
 import {
   keypairIdentity,
@@ -35,7 +35,7 @@ const RPC = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-k
 const DEPLOYER_PATH = process.env.HOME + '/.config/solana/mainnet-deployer.json';
 
 async function run() {
-  const umi = createUmi(RPC).use(import('@metaplex-foundation/mpl-core').then(m => m.mplCore()));
+  const umi = createUmi(RPC).use(mplCore());
   const secretKey = JSON.parse(fs.readFileSync(DEPLOYER_PATH, 'utf-8'));
   const deployerKeypair = umi.eddsa.createKeypairFromSecretKey(Uint8Array.from(secretKey));
   umi.use(keypairIdentity(deployerKeypair));
