@@ -31,7 +31,7 @@ async function safeBurnToBecome(agentId, faceImageUri, soulboundMint, burnTx) {
     const conn = new Connection(RPC_URL, "confirmed");
 
     // Derive genesis PDA and fetch account directly (no client.getGenesisRecord)
-    const genesisPda = v3.deriveGenesisPda(agentId);
+    const [genesisPda] = v3.deriveGenesisPda(agentId);
     const accountInfo = await conn.getAccountInfo(genesisPda);
     if (!accountInfo) {
       return { success: false, skipped: true, reason: "No genesis record for " + agentId };
@@ -65,9 +65,13 @@ async function safeBurnToBecome(agentId, faceImageUri, soulboundMint, burnTx) {
     const signer = Keypair.fromSecretKey(Uint8Array.from(signerKey));
 
     const builders = new v3.SatpV3Builders(RPC_URL);
-    const tx = await builders.buildBurnToBecome(
-      signer.publicKey, genesisPda, faceImageUri || "", soulboundMint || "", burnTx || ""
-    );
+    const tx = await builders.buildBurnToBecome({
+      authority: signer.publicKey,
+      agentId: agentId,
+      faceImage: faceImageUri || "",
+      faceMint: soulboundMint || "",
+      faceBurnTx: burnTx || "",
+    });
     tx.sign(signer);
 
     const sig = await conn.sendRawTransaction(tx.serialize());

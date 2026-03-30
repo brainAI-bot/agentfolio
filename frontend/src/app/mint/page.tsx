@@ -110,6 +110,10 @@ export default function MintPage() {
           number: confirmData.boaId || confirmData.nft_number || prepData.boaId || 0,
           mint: confirmData.mintAddress || confirmData.mint || prepData.asset || "",
         });
+        // Capture soulbound mint from server response (atomic flow burns + mints soulbound)
+        if (confirmData.soulboundMint) {
+          setSoulboundMint(confirmData.soulboundMint);
+        }
       } catch (e) { console.warn("confirm-mint failed (non-critical):", e); }
       setBurnTx(sig);
       await loadWalletData(walletAddr);
