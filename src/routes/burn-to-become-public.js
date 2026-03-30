@@ -1109,23 +1109,26 @@ function handleBurnToBecome(req, res, url) {
 
         if (agentIdForPda) {
           try {
-            const v3sdk = require("@brainai/satp-v3");
-            const { Connection: Conn2 } = require("@solana/web3.js");
+            const { Connection: Conn2, SystemProgram: SP2, PublicKey: PK2 } = require("@solana/web3.js");
+            const crypto2 = require("crypto");
             const conn2 = new Conn2(process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb", "confirmed");
-            const [genPda] = v3sdk.deriveGenesisPda(agentIdForPda);
-            const [mtPda] = v3sdk.deriveMintTrackerPda(genPda);
+            const cmState2 = JSON.parse(require("fs").readFileSync("/home/ubuntu/agentfolio/boa-pipeline/candy-machine-data/core-cm-state.json", "utf-8"));
+            const agentHash2 = crypto2.createHash("sha256").update(agentIdForPda).digest();
+            const cmBytes2 = new PK2(cmState2.candyMachine).toBuffer();
+            // PDA: ["boa_mint_tracker", sha256(agent_id), candy_machine_pubkey] — no genesis dependency
+            const [mtPda] = PK2.findProgramAddressSync(
+              [Buffer.from("boa_mint_tracker"), agentHash2, cmBytes2],
+              SP2.programId
+            );
             const tInfo = await conn2.getAccountInfo(mtPda);
             if (tInfo) {
-              const tracker = v3sdk.deserializeMintTracker(tInfo.data);
-              if (tracker && tracker.mintCount > 0 && flow === "free") {
-                return sendJson(403, { error: "Free mint already used (PDA: " + agentIdForPda + ")", mintTrackerPda: mtPda.toBase58(), mintCount: tracker.mintCount });
+              // PDA has lamports = agent already minted
+              if (flow === "free") {
+                return sendJson(403, { error: "Free mint already used (agent: " + agentIdForPda + ")", mintTrackerPda: mtPda.toBase58() });
               }
-              if (tracker && tracker.mintCount >= 3) {
-                return sendJson(403, { error: "Max mints reached (PDA: " + agentIdForPda + ")", mintTrackerPda: mtPda.toBase58(), mintCount: tracker.mintCount });
-              }
-              console.log("[PrepareMint] Mint tracker:", agentIdForPda, "count:", tracker?.mintCount || 0);
+              console.log("[PrepareMint] Mint tracker exists for", agentIdForPda, "lamports:", tInfo.lamports);
             } else {
-              console.log("[PrepareMint] No mint tracker for", agentIdForPda, "- first mint");
+              console.log("[PrepareMint] No mint tracker for", agentIdForPda, "- first mint allowed");
             }
           } catch (e) { console.warn("[PrepareMint] PDA check failed (non-blocking):", e.message); }
         }
