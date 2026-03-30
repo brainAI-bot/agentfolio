@@ -511,11 +511,19 @@ function enrichProfile(row) {
       try {
         const _cc = require('./lib/chain-cache');
         const _atts = _cc.getVerifications(row.id);
+        // Read DB for display identifiers (read-only)
+        let _dbIds = {};
+        try {
+          const _d = getDb();
+          const _rows = _d.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(row.id);
+          for (const _r of _rows) { if (_r.identifier) _dbIds[_r.platform] = _r.identifier; }
+        } catch (__) {}
         for (const att of _atts) {
           if (!att.platform || att.platform === 'review') continue;
           const plat = att.platform === 'twitter' ? 'x' : att.platform;
           if (vd[plat]) continue;
-          vd[plat] = { verified: true, address: att.identifier || '', linked: true, verifiedAt: att.timestamp || null, source: 'on-chain' };
+          const displayId = _dbIds[att.platform] || _dbIds[plat] || '';
+          vd[plat] = { verified: true, address: displayId, identifier: displayId, linked: true, verifiedAt: att.timestamp || null, source: 'on-chain' };
         }
       } catch (_) {}
       return vd;
@@ -532,15 +540,23 @@ function enrichProfile(row) {
       try {
         const chainCache = require('./lib/chain-cache');
         const atts = chainCache.getVerifications(row.id);
+        // Read DB verifications for display identifiers (read-only, not trust-sensitive)
+        let dbIdentifiers = {};
+        try {
+          const d = getDb();
+          const rows = d.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(row.id);
+          for (const r of rows) { if (r.identifier) dbIdentifiers[r.platform] = r.identifier; }
+        } catch (_) {}
         for (const att of atts) {
           if (!att.platform || att.platform === 'review') continue;
           const platform = att.platform === 'twitter' ? 'x' : att.platform;
           if (vMap[platform]) continue;
           const solscanUrl = att.solscanUrl || ('https://solscan.io/tx/' + att.txSignature);
+          const displayId = dbIdentifiers[att.platform] || dbIdentifiers[platform] || '';
           vMap[platform] = {
             verified: true,
-            address: solscanUrl,
-            identifier: solscanUrl,
+            address: displayId || solscanUrl,
+            identifier: displayId || solscanUrl,
             proof: { txSignature: att.txSignature, timestamp: att.timestamp },
             verified_at: att.timestamp || null,
             solscanUrl: solscanUrl,

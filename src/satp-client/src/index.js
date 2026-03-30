@@ -778,7 +778,7 @@ const v3sdk = require('@brainai/satp-v3');
 // Legacy V3 SDK wrapper — maps old createSATPClient/SATPV3SDK to new SDK
 class SATPV3SDK {
   constructor(opts = {}) {
-    this.client = new v3sdk.SatpV3Client(opts);
+    this.client = new v3sdk.SatpV3Client(opts.rpcUrl || opts);
   }
   async getGenesis(agentId) { return this.client.getGenesis ? this.client.getGenesis(agentId) : null; }
   async getAttestation(pda) { return this.client.getAttestation ? this.client.getAttestation(pda) : null; }
@@ -786,7 +786,7 @@ class SATPV3SDK {
 }
 
 function createSATPClient(opts = {}) {
-  return new v3sdk.SatpV3Client(opts);
+  return new v3sdk.SatpV3Client(opts.rpcUrl || (typeof opts === 'string' ? opts : undefined));
 }
 
 // Legacy borsh reader — keep for any V2 code paths
