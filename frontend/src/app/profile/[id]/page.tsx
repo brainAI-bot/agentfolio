@@ -101,7 +101,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
 
   // Fetch SATP V2 on-chain identity status
   let satpIdentity: any = null;
-  const solWallet = agent.verifications?.solana?.address || agent.walletAddress;
+  const solWallet = (agent as any).wallets?.solana || (agent as any).wallet || agent.walletAddress;
   if (solWallet) {
     try {
       const satpIdRes = await fetch(`http://localhost:3333/api/satp/identity/${solWallet}`, { next: { revalidate: 120 } });
@@ -178,7 +178,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
       }
     }
     // Also fetch SATP on-chain reviews (trustless, from Solana)
-    const wallet = agent.verifications?.solana?.address;
+    const wallet = (agent as any).wallets?.solana || (agent as any).wallet;
     if (wallet) {
       const satpRes = await fetch(`https://agentfolio.bot/api/satp/reviews/${wallet}`, { next: { revalidate: 120 } });
       if (satpRes.ok) {
