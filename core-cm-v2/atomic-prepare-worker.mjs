@@ -101,6 +101,7 @@ async function run() {
       asset,
       collection: collPk,
       owner: recipientPk,
+      payer: ownerSigner,
       group: some('free'),
       mintArgs: {
         thirdPartySigner: some({ signer: umi.identity }),
@@ -112,6 +113,7 @@ async function run() {
       asset,
       collection: collPk,
       owner: recipientPk,
+      payer: ownerSigner,
       group: some('paid'),
       mintArgs: {
         solPayment: some({ destination: publicKey('FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be') }),
@@ -150,19 +152,19 @@ async function run() {
       if (!existing) {
         // First mint: transfer rent-exempt minimum to PDA to mark it
         // SystemProgram.transfer to a PDA just needs the sender to sign
-        const deployerPk = new PK(deployerKeypair.publicKey.toString());
+        const recipientWeb3Pk = new PK(recipient);
         const { fromWeb3JsInstruction } = await import('@metaplex-foundation/umi-web3js-adapters');
         
-        // Transfer 1_000 lamports from deployer to PDA as marker
+        // Transfer 1_000 lamports from USER to PDA as marker (user pays everything)
         const transferIx = SP.transfer({
-          fromPubkey: deployerPk,
+          fromPubkey: recipientWeb3Pk,
           toPubkey: mintTrackerPda,
           lamports: 1_000,
         });
         
         builder = builder.add({
           instruction: fromWeb3JsInstruction(transferIx),
-          signers: [umi.identity],
+          signers: [ownerSigner],
           bytesCreatedOnChain: 0,
         });
         
