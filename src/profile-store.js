@@ -555,11 +555,10 @@ function enrichProfile(row) {
           const displayId = dbIdentifiers[att.platform] || dbIdentifiers[platform] || '';
           vMap[platform] = {
             verified: true,
-            address: displayId || solscanUrl,
-            identifier: displayId || solscanUrl,
-            proof: { txSignature: att.txSignature, timestamp: att.timestamp },
+            address: displayId || platform,
+            identifier: displayId || platform,
+            proof: { txSignature: att.txSignature, timestamp: att.timestamp, url: 'https://solana.fm/tx/' + att.txSignature },
             verified_at: att.timestamp || null,
-            solscanUrl: solscanUrl,
             source: 'on-chain',
           };
         }
