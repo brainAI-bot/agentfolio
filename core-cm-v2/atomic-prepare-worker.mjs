@@ -91,8 +91,8 @@ async function run() {
 
   // Build atomic TX: Mint + Burn
   let builder = transactionBuilder()
-    .add(setComputeUnitLimit(umi, { units: 1_000_000 }))
-    .add(setComputeUnitPrice(umi, { microLamports: 250_000 }));
+    .add(setComputeUnitLimit(umi, { units: 400_000 }))
+    .add(setComputeUnitPrice(umi, { microLamports: 5_000 }));
 
   // Step 1: Mint from Candy Machine (owner = recipient)
   if (flow === 'free') {
