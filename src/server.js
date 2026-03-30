@@ -1697,6 +1697,10 @@ registerTrustCredentialRoutes(app);
 const { registerClaimRoutes } = require("./routes/claim-routes");
 registerClaimRoutes(app, profileStore.getDb);
 
+// ── GitHub Import Routes (profile import from GitHub) ────────────
+const { registerGitHubImportRoutes } = require("./routes/github-import");
+registerGitHubImportRoutes(app, profileStore.getDb);
+
 // Batch Registration API (enterprise import)
 const { registerBatchRoutes } = require('./routes/batch-register');
 registerBatchRoutes(app);
