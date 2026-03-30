@@ -128,63 +128,50 @@ async function run() {
     compressionProof: none(),
   }));
 
-  // If agentId provided, add SATP V3 initMintTracker + recordMint instructions
-  // These create/update a PDA seeded from [agent_id, candy_machine] to prevent wallet-swap gaming
+  // If agentId provided, write a mint-tracker marker PDA on-chain
+  // Seeded from [agent_id, candy_machine_address] — no genesis dependency
   if (agentId) {
     try {
-      const { PublicKey: PK, TransactionInstruction: TI, SystemProgram: SP } = await import('@solana/web3.js');
-      const IDENTITY_PROGRAM = new PK('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
+      const { PublicKey: PK, SystemProgram: SP } = await import('@solana/web3.js');
       const agentHash = await import('crypto').then(c => c.createHash('sha256').update(agentId).digest());
+      const cmBytes = new PK(cmState.candyMachine).toBuffer();
       
-      // Derive genesis PDA: ["genesis", agent_id_hash]
-      const [genesisPda] = PK.findProgramAddressSync(
-        [Buffer.from('genesis'), agentHash],
-        IDENTITY_PROGRAM
-      );
-      // Derive mint tracker PDA: ["mint_tracker", genesis_pda]
+      // Derive PDA: ["boa_mint_tracker", sha256(agent_id), candy_machine_pubkey]
       const [mintTrackerPda] = PK.findProgramAddressSync(
-        [Buffer.from('mint_tracker'), genesisPda.toBuffer()],
-        IDENTITY_PROGRAM
+        [Buffer.from('boa_mint_tracker'), agentHash, cmBytes],
+        SP.programId
       );
       
-      const deployerPk = new PK(deployerKeypair.publicKey.toString());
-      const recipientWeb3 = new PK(recipient);
+      // Check if PDA already has lamports (= already minted)
+      const { Connection: C2 } = await import('@solana/web3.js');
+      const conn = new C2(RPC, 'confirmed');
+      const existing = await conn.getAccountInfo(mintTrackerPda);
       
-      // initMintTracker discriminator: [176, 203, 116, 40, 206, 205, 156, 145]
-      const initDisc = Buffer.from([176, 203, 116, 40, 206, 205, 156, 145]);
-      const initIx = new TI({
-        programId: IDENTITY_PROGRAM,
-        keys: [
-          { pubkey: genesisPda, isSigner: false, isWritable: false },
-          { pubkey: mintTrackerPda, isSigner: false, isWritable: true },
-          { pubkey: deployerPk, isSigner: true, isWritable: true },
-          { pubkey: SP.programId, isSigner: false, isWritable: false },
-        ],
-        data: initDisc,
-      });
-
-      // recordMint discriminator: [162, 92, 105, 126, 18, 1, 158, 242]
-      const recordDisc = Buffer.from([162, 92, 105, 126, 18, 1, 158, 242]);
-      const recordIx = new TI({
-        programId: IDENTITY_PROGRAM,
-        keys: [
-          { pubkey: genesisPda, isSigner: false, isWritable: false },
-          { pubkey: mintTrackerPda, isSigner: false, isWritable: true },
-          { pubkey: deployerPk, isSigner: true, isWritable: false },
-        ],
-        data: recordDisc,
-      });
-
-      // Add instructions via UMI instruction wrapper
-      const { fromWeb3JsInstruction } = await import('@metaplex-foundation/umi-web3js-adapters');
-      builder = builder
-        .add({ instruction: fromWeb3JsInstruction(initIx), signers: [umi.identity], bytesCreatedOnChain: 64 })
-        .add({ instruction: fromWeb3JsInstruction(recordIx), signers: [umi.identity], bytesCreatedOnChain: 0 });
-      
-      console.error('[Atomic Prepare] Added initMintTracker + recordMint for', agentId, 'PDA:', mintTrackerPda.toBase58());
+      if (!existing) {
+        // First mint: transfer rent-exempt minimum to PDA to mark it
+        // SystemProgram.transfer to a PDA just needs the sender to sign
+        const deployerPk = new PK(deployerKeypair.publicKey.toString());
+        const { fromWeb3JsInstruction } = await import('@metaplex-foundation/umi-web3js-adapters');
+        
+        // Transfer 1_000 lamports from deployer to PDA as marker
+        const transferIx = SP.transfer({
+          fromPubkey: deployerPk,
+          toPubkey: mintTrackerPda,
+          lamports: 1_000,
+        });
+        
+        builder = builder.add({
+          instruction: fromWeb3JsInstruction(transferIx),
+          signers: [umi.identity],
+          bytesCreatedOnChain: 0,
+        });
+        
+        console.error('[Atomic Prepare] Added mint-tracker marker for', agentId, 'PDA:', mintTrackerPda.toBase58());
+      } else {
+        console.error('[Atomic Prepare] Mint tracker already exists for', agentId, '- agent already minted');
+      }
     } catch (e) {
-      console.error('[Atomic Prepare] PDA anti-gaming failed (non-blocking):', e.message);
-      // Continue without PDA — the server-side check still works
+      console.error('[Atomic Prepare] PDA marker failed (non-blocking):', e.message);
     }
   }
 
