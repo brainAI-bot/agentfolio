@@ -57,12 +57,25 @@ async function run() {
   const secretKey = JSON.parse(fs.readFileSync(DEPLOYER_PATH, 'utf-8'));
 
   const umi = createUmi(RPC).use(mplCandyMachine());
-  const deployerKeypair = umi.eddsa.createKeypairFromSecretKey(Uint8Array.from(secretKey));
-  umi.use(keypairIdentity(deployerKeypair));
+  const deployerUmiKeypair = umi.eddsa.createKeypairFromSecretKey(Uint8Array.from(secretKey));
+
+  // Set USER as UMI identity + payer (noop signer — will be signed client-side in Phantom)
+  const recipientPk = publicKey(recipient);
+  const userIdentity = createNoopSigner(recipientPk);
+  umi.identity = userIdentity;
+  umi.payer = userIdentity;
+
+  // Deployer signer — only used for thirdPartySigner guard (free flow)
+  // This is a real signer that will partial-sign server-side
+  const deployerSigner = {
+    publicKey: deployerUmiKeypair.publicKey,
+    signMessage: async (msg) => umi.eddsa.sign(msg, deployerUmiKeypair),
+    signTransaction: async (tx) => tx,
+    signAllTransactions: async (txs) => txs,
+  };
 
   const cmPk = publicKey(cmState.candyMachine);
   const collPk = publicKey(cmState.collection);
-  const recipientPk = publicKey(recipient);
 
   // Fetch candy machine state
   const cm = await fetchCandyMachine(umi, cmPk);
@@ -90,11 +103,12 @@ async function run() {
   const ownerSigner = createNoopSigner(recipientPk);
 
   // Build atomic TX: Mint + Burn
+  // USER pays ALL rent + fees. Deployer only co-signs as CM authority.
   let builder = transactionBuilder()
     .add(setComputeUnitLimit(umi, { units: 400_000 }))
     .add(setComputeUnitPrice(umi, { microLamports: 5_000 }));
 
-  // Step 1: Mint from Candy Machine (owner = recipient)
+  // Step 1: Mint from Candy Machine (owner = recipient, payer = recipient)
   if (flow === 'free') {
     builder = builder.add(cmMintV1(umi, {
       candyMachine: cmPk,
@@ -104,7 +118,7 @@ async function run() {
       payer: ownerSigner,
       group: some('free'),
       mintArgs: {
-        thirdPartySigner: some({ signer: umi.identity }),
+        thirdPartySigner: some({ signer: deployerSigner }),
       },
     }));
   } else {
@@ -186,11 +200,11 @@ async function run() {
   const assetWeb3Kp = Keypair.fromSecretKey(Uint8Array.from(asset.secretKey));
   web3Tx.partialSign(assetWeb3Kp);
 
-  // 2. Deployer co-signs for free flow (thirdPartySigner guard)
+  // 2. Deployer co-signs for free flow (thirdPartySigner guard) — NOT as payer
   if (flow === 'free') {
     const deployerWeb3Kp = Keypair.fromSecretKey(Uint8Array.from(secretKey));
     web3Tx.partialSign(deployerWeb3Kp);
-    console.error('[Atomic Prepare] Deployer co-signed for free flow');
+    console.error('[Atomic Prepare] Deployer co-signed as thirdPartySigner (NOT payer)');
   }
 
   // Serialize (user still needs to sign as payer + authority)
