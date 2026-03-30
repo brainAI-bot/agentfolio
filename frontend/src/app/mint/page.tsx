@@ -37,6 +37,14 @@ export default function MintPage() {
   const [selectedNft, setSelectedNft] = useState<NFTItem | null>(null);
   const [burnTx, setBurnTx] = useState("");
   const [soulboundMint, setSoulboundMint] = useState("");
+
+  // Fix Irys/Arweave URLs — some gateways are unreliable
+  const fixImageUrl = (url: string) => {
+    if (!url) return url;
+    return url
+      .replace('node1.irys.xyz', 'gateway.irys.xyz')
+      .replace('arweave.net', 'gateway.irys.xyz');
+  };
   const [mintedNft, setMintedNft] = useState<{image:string;name:string;number:number;mint:string}|null>(null);
   // Genesis Record dropped from scope
   const [error, setError] = useState("");
@@ -65,7 +73,15 @@ export default function MintPage() {
         fetch(`${API}/api/burn-to-become/wallet-nfts?wallet=${walletAddr}`).then(r => r.json()),
         fetch(`${API}/api/burn-to-become/eligibility?wallet=${walletAddr}`).then(r => r.json()),
       ]);
-      if (nftRes.status === "fulfilled") setNfts(nftRes.value.nfts || []);
+      if (nftRes.status === "fulfilled") {
+        // Client-side safety: filter out soulbound tokens from burn selection
+        const rawNfts = nftRes.value.nfts || [];
+        const burnable = rawNfts.filter((n: any) => {
+          const name = (n.name || "").toLowerCase();
+          return !name.includes("soulbound") && !name.includes("soul bound") && !name.includes("soul-bound");
+        });
+        setNfts(burnable);
+      }
       if (scoreRes.status === "fulfilled") {
         setEligibility(scoreRes.value);
         setSatpScore(scoreRes.value.reputation ?? null);
@@ -675,7 +691,7 @@ export default function MintPage() {
                     <button key={nft.mint} onClick={() => { setSelectedNft(nft); setStep("preview"); }}
                       className="group rounded-xl overflow-hidden border transition-all hover:scale-[1.02] hover:border-[var(--accent)] text-left"
                       style={{ borderColor: "var(--border)", background: "var(--bg-tertiary)" }}>
-                      <div className="aspect-square overflow-hidden"><img loading="lazy" src={nft.image} alt={nft.name} className="w-full h-full object-cover transition-transform group-hover:scale-105" /></div>
+                      <div className="aspect-square overflow-hidden"><img loading="lazy" src={fixImageUrl(nft.image)} alt={nft.name} className="w-full h-full object-cover transition-transform group-hover:scale-105" /></div>
                       <div className="p-4">
                         <p className="font-bold text-sm" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{nft.name}</p>
                         <div className="flex items-center gap-1 mt-2 text-xs font-medium" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>Select to burn <ArrowRight size={12} /></div>
@@ -770,7 +786,7 @@ export default function MintPage() {
                       <ImageIcon size={10} className="inline mr-1" /> {soulboundMint ? "Soulbound Token" : "Your BOA NFT"}
                     </p>
                     <div className="rounded-xl overflow-hidden border-2 accent-glow" style={{ borderColor: "var(--accent)" }}>
-                      <img loading="lazy" src={selectedNft?.image || mintedNft?.image || ""} alt={selectedNft?.name || mintedNft?.name || "BOA"} className="w-full aspect-square object-cover" />
+                      <img loading="lazy" src={fixImageUrl(selectedNft?.image || mintedNft?.image || "")} alt={selectedNft?.name || mintedNft?.name || "BOA"} className="w-full aspect-square object-cover" />
                     </div>
                     <p className="text-center mt-2 font-bold text-sm" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{selectedNft?.name || mintedNft?.name || ""}</p>
                     <p className="mt-1 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>{soulboundMint ? "NON-TRANSFERABLE • PERMANENT" : "MINTED SUCCESSFULLY"}</p>
