@@ -173,7 +173,7 @@ async function run() {
         const transferIx = SP.transfer({
           fromPubkey: recipientWeb3Pk,
           toPubkey: mintTrackerPda,
-          lamports: 1_000,
+          lamports: 890_880, // rent-exempt minimum for 0-byte account
         });
         
         builder = builder.add({

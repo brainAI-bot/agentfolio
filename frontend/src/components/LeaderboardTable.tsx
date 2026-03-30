@@ -23,6 +23,7 @@ export function LeaderboardTable({ agents: initialAgents, totalAgents: initialTo
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("trustScore");
   const [filterSkill, setFilterSkill] = useState("");
+  const [filterStatus, setFilterStatus] = useState<"all" | "claimed" | "unclaimed">("all");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -64,7 +65,11 @@ export function LeaderboardTable({ agents: initialAgents, totalAgents: initialTo
   };
   const handleSort = (v: SortKey) => { setSortBy(v); setPage(1); };
   const handleFilter = (v: string) => { setFilterSkill(v); setPage(1); };
+  const handleStatusFilter = (v: "all" | "claimed" | "unclaimed") => { setFilterStatus(v); setPage(1); };
 
+  // Client-side status filter
+  const filteredAgents = filterStatus === "all" ? agents 
+    : agents.filter(a => filterStatus === "unclaimed" ? (a as any).unclaimed : !(a as any).unclaimed);
   const startIdx = (page - 1) * PAGE_SIZE;
 
   return (
@@ -112,6 +117,25 @@ export function LeaderboardTable({ agents: initialAgents, totalAgents: initialTo
               {allSkills.map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
+            </select>
+            <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "var(--text-tertiary)" }} />
+          </div>
+          <div className="relative">
+            <select
+              value={filterStatus}
+              onChange={(e) => handleStatusFilter(e.target.value as any)}
+              className="appearance-none pl-3 pr-8 py-2.5 rounded-lg text-xs uppercase tracking-wider cursor-pointer outline-none"
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: "11px",
+                background: filterStatus !== "all" ? "rgba(153,69,255,0.1)" : "var(--bg-primary)",
+                border: filterStatus !== "all" ? "1px solid rgba(153,69,255,0.3)" : "1px solid var(--border)",
+                color: filterStatus !== "all" ? "var(--solana)" : "var(--text-secondary)",
+              }}
+            >
+              <option value="all">All Status</option>
+              <option value="claimed">✓ Claimed</option>
+              <option value="unclaimed">⚠ Unclaimed</option>
             </select>
             <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "var(--text-tertiary)" }} />
           </div>

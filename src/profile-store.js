@@ -31,10 +31,12 @@ try {
 // SATP V3 SDK — Genesis Record creation + V3 identity reads
 let satpV3;
 try {
-  const { createSATPClient, SATPV3SDK, hashAgentId, getGenesisPDA } = require('./satp-client/src');
-  const v3Client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb' });
+  const { createSATPClient, SATPV3SDK: WrapperSDK, hashAgentId, getGenesisPDA } = require('./satp-client/src');
+  const { SATPV3SDK } = require('./satp-client/src/v3-sdk');
+  const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+  const v3Client = new SATPV3SDK({ rpcUrl: RPC_URL });
   satpV3 = { client: v3Client, SATPV3SDK, hashAgentId, getGenesisPDA };
-  console.log('[SATP V3] SDK loaded successfully (SATPV3SDK + createSATPClient + PDA helpers)');
+  console.log('[SATP V3] SDK loaded (v3-sdk SATPV3SDK with getGenesisRecord)');
 } catch (e) {
   console.warn('[SATP V3] SDK not available:', e.message);
 }
