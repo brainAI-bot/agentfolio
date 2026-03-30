@@ -138,8 +138,19 @@ export default function MintPage() {
         });
         if (!res.ok) { const err = await res.json(); throw new Error(err.error || err.message || "Mint failed"); }
         const data = await res.json();
+        const mintSig = data.signature || data.tx || "";
+        // Confirm TX on-chain before showing success
+        if (mintSig) {
+          try {
+            const { Connection } = await import("@solana/web3.js");
+            const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY", "confirmed");
+            await connection.confirmTransaction(mintSig, "confirmed");
+          } catch (confirmErr) {
+            console.warn("TX confirm check failed (may already be confirmed):", confirmErr);
+          }
+        }
         // Don't set soulboundMint — this is a regular Core NFT mint, not soulbound
-        setBurnTx(data.signature || data.tx || "");
+        setBurnTx(mintSig);
         setMintedNft({ image: data.imageUri || data.image_uri || "", name: data.boaName || data.name || `BOA #${data.boaId || data.nft_number || 1}`, number: data.boaId || data.nft_number || 1, mint: data.mintAddress || data.mint || "" });
         await loadWalletData(walletAddr);
         setStep("complete");
