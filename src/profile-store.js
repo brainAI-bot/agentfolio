@@ -1039,7 +1039,9 @@ function registerRoutes(app) {
         claimed = _ccPl.length > 0;
       } catch (_) {}
       const { _trust_score: ts, ...cleanRest } = rest;
-      return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: {}  /* [P0] chain-cache only, no DB reads */, portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: parseJsonField(cleanRest.metadata), nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, claimed };
+      const _md = parseJsonField(cleanRest.metadata);
+      const unclaimed = _md.unclaimed === true || _md.isPlaceholder === true || _md.placeholder === true;
+      return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: {} /* [P0] chain-cache only, no DB reads */, portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: _md, nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, claimed, unclaimed };
     });
 
     // V3 on-chain score overlay — authoritative
