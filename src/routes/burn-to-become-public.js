@@ -1565,7 +1565,7 @@ try {
         
         // DISABLED: No longer atomic burn — NFT stays in wallet. Soulbound minted only via separate burn flow.
         let soulboundMintAddress = null;
-        if (flow === "free" || record.flow === "free") /* Re-enabled: atomic flow burns NFT */ {
+        if (true) /* Soulbound for all atomic flows (free + paid) */ {
           try {
             const agentName = agentId ? agentId.replace('agent_', '') : 'Unknown';
             const metadataUri = record.imageUri || imageUri || '';
