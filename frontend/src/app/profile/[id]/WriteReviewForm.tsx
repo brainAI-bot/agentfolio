@@ -5,7 +5,7 @@ import { useWallet } from '@solana/wallet-adapter-react';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { Transaction } from '@solana/web3.js';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
 interface WriteReviewFormProps {
   targetProfileId: string;

@@ -19,7 +19,7 @@ import {
   getV3EscrowState,
 } from "@/lib/v3-escrow";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 
 const statusConfig: Record<string, { label: string; color: string; icon: React.ElementType }> = {
   open: { label: "OPEN", color: "var(--success)", icon: CheckCircle },
