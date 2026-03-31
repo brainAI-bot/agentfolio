@@ -82,7 +82,7 @@ function registerRestoredRoutes(app) {
       const v3Client = createSATPClient("mainnet");
       const { Keypair, sendAndConfirmTransaction } = require("@solana/web3.js");
       const { Connection } = require("@solana/web3.js");
-      const deployerKey = JSON.parse(require("fs").readFileSync(process.env.DEPLOYER_KEYPAIR || "/home/ubuntu/.config/solana/id.json", "utf8"));
+      const deployerKey = JSON.parse(require("fs").readFileSync(process.env.DEPLOYER_KEYPAIR || "/home/ubuntu/.config/solana/mainnet-deployer.json", "utf8"));
       const deployer = Keypair.fromSecretKey(new Uint8Array(deployerKey));
       const conn = new Connection(process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb", "confirmed");
 

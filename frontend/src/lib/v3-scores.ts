@@ -58,7 +58,7 @@ function parseGenesisRecord(data: Buffer, pda: PublicKey): V3Score | null {
     offset += 32; // faceMint
     readString(); // faceBurnTx
     const genesisRecord = Number(data.readBigInt64LE(offset)); offset += 8;
-    // NOTE: No isActive field on-chain — struct goes straight to authority
+    const isActive = data[offset] === 1; offset += 1; // isActive bool (added by V3 migration)
     offset += 32; // authority
 
     // Option<Pubkey> — Borsh: 1 byte tag, 32 bytes only if Some(1)
