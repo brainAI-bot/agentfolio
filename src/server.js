@@ -1771,6 +1771,9 @@ app.get('/api/v3/profile/:id', async (req, res) => {
   }
 });
 console.log('[Route Aliases] Mounted: /api/satp/explorer, /api/x402/trust-score, /api/satp/mint-eligibility, /api/v3/profile/:id');
+// ─── Restored Verification + SATP Routes (P0 restore 2026-03-31) ───
+require("./routes/restored-verify-routes").registerRestoredRoutes(app);
+
 
 app.use((err, req, res, next) => {
   console.error(`[ERROR] ${err.message}`, { 
