@@ -366,7 +366,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
             const nftData = JSON.parse(faceRow.nft_avatar);
             if (nftData.image) v3Data.faceImage = nftData.image;
             if (nftData.soulboundMint) v3Data.faceMint = nftData.soulboundMint;
-            if (nftData.permanent) v3Data.isBorn = true;
+            // HARD RULE: isBorn comes from on-chain ONLY — never from DB (CEO directive 2026-03-31)
             if (nftData.burnedAt) v3Data.bornAt = nftData.burnedAt;
           } catch (e) {}
         }

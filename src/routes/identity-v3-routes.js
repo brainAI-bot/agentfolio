@@ -206,7 +206,7 @@ function enrichFromDB(record) {
           if (nftData.image) record.faceImage = nftData.image;
           if (nftData.soulboundMint) record.faceMint = nftData.soulboundMint;
           if (nftData.burnTxSignature) record.faceBurnTx = nftData.burnTxSignature;
-          if (nftData.permanent) record.isBorn = true;
+          // HARD RULE: isBorn comes from on-chain ONLY — never from DB (CEO directive 2026-03-31)
           record._faceEnrichedFromDB = true;
         } catch (e) {}
       }

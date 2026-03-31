@@ -116,7 +116,7 @@ export default function MintPage() {
         const confirmRes = await fetch(API + "/api/burn-to-become/confirm-mint", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wallet: walletAddr, signature: sig, asset: prepData.asset, boaId: prepData.boaId, flow }),
+          body: JSON.stringify({ wallet: walletAddr, signature: sig, asset: prepData.asset, boaId: prepData.boaId, flow, imageUri: prepData.imageUri, metadataUri: prepData.metadataUri, boaName: prepData.boaName }),
         });
         const confirmData = await confirmRes.json().catch(() => ({}));
         // Use actual mint response if available, fall back to prepData
