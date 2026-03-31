@@ -58,6 +58,8 @@ function parseGenesisRecord(pubkey, data) {
     var faceBurnTx = readString();
     var genesisTimestamp = Number(data.readBigInt64LE(offset));
     offset += 8;
+    var isActive = data[offset] === 1;
+    offset += 1;
     var authority = new PublicKey(data.slice(offset, offset + 32));
     offset += 32;
 
@@ -134,7 +136,10 @@ async function fetchAllV3Agents() {
     
     var key = agent.agentName.toLowerCase();
     var existing = byName.get(key);
-    if (!existing || agent.verificationLevel > existing.verificationLevel) {
+    // Prefer valid accounts: verificationLevel must be 0-5, reputationScore < 100M
+    var isValid = agent.verificationLevel <= 5 && agent.reputationScore < 100000000;
+    var existingValid = existing && existing.verificationLevel <= 5 && existing.reputationScore < 100000000;
+    if (!existing || (!existingValid && isValid) || (isValid === existingValid && agent.verificationLevel > existing.verificationLevel)) {
       byName.set(key, agent);
     }
   }
