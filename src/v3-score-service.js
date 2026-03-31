@@ -72,8 +72,9 @@ function parseGenesisRecord(data) {
     const faceBurnTx = readString();
     const genesisRecord = Number(data.readBigInt64LE(offset));
     offset += 8;
-    // NOTE: No isActive field on-chain. Struct goes straight to authority.
-    // See brainChain SDK 3.5.0 TypeScript types (GenesisRecord interface).
+    // is_active: bool (1 byte) — added in V3 migration
+    const isActive = data[offset] === 1;
+    offset += 1;
     const authority = new PublicKey(data.slice(offset, offset + 32));
     offset += 32;
 
@@ -100,7 +101,9 @@ function parseGenesisRecord(data) {
       reputationPct: (reputationScore / 10000).toFixed(2),
       verificationLevel,
       verificationLabel: ['Unverified','Registered','Verified','Established','Trusted','Sovereign'][verificationLevel] || 'Unknown',
+      isActive,
       isBorn: genesisRecord > 0,
+      genesisRecord,
       bornAt: genesisRecord > 0 ? new Date(genesisRecord * 1000).toISOString() : null,
       faceImage,
       faceMint: faceMint.toBase58(),
