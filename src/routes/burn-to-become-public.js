@@ -1632,34 +1632,34 @@ try {
             if (assetContent) {
               artworkUri = (assetContent.links && assetContent.links.image) || (assetContent.files && assetContent.files[0] && assetContent.files[0].uri) || '';
               metadataUri = assetContent.json_uri || '';
-              nftName = (assetContent.metadata && assetContent.metadata.name || nftName) + ' — Soulbound';
+              nftName = (assetContent.metadata && assetContent.metadata.name || nftName);
               console.log('[ConfirmMint] DAS resolved artwork:', artworkUri?.slice(0, 60));
             }
           } catch (dasErr) { console.warn('[ConfirmMint] DAS artwork resolution failed:', dasErr.message); }
         }
         if (!metadataUri) metadataUri = artworkUri;
-        if (!nftName.includes('Soulbound')) nftName += ' — Soulbound';
+        // Card 1/3: Regular tradable NFT — no soulbound suffix
         
-        // STEP 2: Mint soulbound FIRST (so we have the address for burnToBecome)
-        let soulboundMintAddress = null;
-        if (artworkUri && wallet) {
-          try {
-            const agentName = agentId ? agentId.replace('agent_', '') : 'Unknown';
-            console.log('[ConfirmMint] Minting soulbound Token-2022 for', agentName, 'artwork:', artworkUri?.slice(0, 50));
-            const sbResult = await mintSoulbound(wallet, artworkUri, metadataUri, nftName, asset || '', signature || '');
-            soulboundMintAddress = sbResult.soulboundMint;
-            record.soulboundMint = soulboundMintAddress;
-            record.soulboundTx = sbResult.signature;
-            console.log('[ConfirmMint] Soulbound minted:', soulboundMintAddress, 'tx:', sbResult.signature?.slice(0, 20));
-          } catch (e) {
-            console.error('[ConfirmMint] Soulbound minting failed:', e.message);
-            record.soulboundError = e.message;
-          }
-        } else {
-          console.warn('[ConfirmMint] No artwork URI — skipping soulbound. imageUri:', imageUri, 'record.imageUri:', record.imageUri);
-        }
+        // STEP 2: Card 1/3 = regular tradable NFT. Soulbound is ONLY for Card 2 (burn flow).
+        let soulboundMintAddress = null; // Not used for Card 1/3
+        // DISABLED for Card 1/3:         if (artworkUri && wallet) {
+        // DISABLED for Card 1/3:           try {
+        // DISABLED for Card 1/3:             const agentName = agentId ? agentId.replace('agent_', '') : 'Unknown';
+        // DISABLED for Card 1/3:             console.log('[ConfirmMint] Minting soulbound Token-2022 for', agentName, 'artwork:', artworkUri?.slice(0, 50));
+        // DISABLED for Card 1/3:             const sbResult = await mintSoulbound(wallet, artworkUri, metadataUri, nftName, asset || '', signature || '');
+        // DISABLED for Card 1/3:             soulboundMintAddress = sbResult.soulboundMint;
+        // DISABLED for Card 1/3:             record.soulboundMint = soulboundMintAddress;
+        // DISABLED for Card 1/3:             record.soulboundTx = sbResult.signature;
+        // DISABLED for Card 1/3:             console.log('[ConfirmMint] Soulbound minted:', soulboundMintAddress, 'tx:', sbResult.signature?.slice(0, 20));
+        // DISABLED for Card 1/3:           } catch (e) {
+        // DISABLED for Card 1/3:             console.error('[ConfirmMint] Soulbound minting failed:', e.message);
+        // DISABLED for Card 1/3:             record.soulboundError = e.message;
+        // DISABLED for Card 1/3:           }
+        // DISABLED for Card 1/3:         } else {
+        // DISABLED for Card 1/3:           console.warn('[ConfirmMint] No artwork URI — skipping soulbound. imageUri:', imageUri, 'record.imageUri:', record.imageUri);
+        // DISABLED for Card 1/3:         }
         
-        // STEP 3: Call burnToBecome with soulbound address + artwork
+        // STEP 3: SKIPPED for Card 1/3 — burnToBecome only applies when soulbound token exists (Card 2)
         if (agentId && soulboundMintAddress) {
           try {
             console.log('[ConfirmMint] Calling burnToBecome:', agentId, 'face:', artworkUri?.slice(0, 40), 'soulbound:', soulboundMintAddress?.slice(0, 16));

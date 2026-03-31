@@ -820,7 +820,8 @@ function _deserializeGenesisFixed(data) {
     const faceMint = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
     const faceBurnTx = readString();
     const genesisRecord = Number(data.readBigInt64LE(offset)); offset += 8;
-    // NOTE: No isActive field in deployed program (SDK bug — has phantom isActive)
+    // isActive field (bool) — V3 layout
+    const isActive = data[offset] === 1; offset += 1;
     const authority = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
     const hasPending = data[offset]; offset += 1;
     let pendingAuthority = null;

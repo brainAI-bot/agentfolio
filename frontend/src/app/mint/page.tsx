@@ -316,7 +316,7 @@ export default function MintPage() {
     { id: "connect", label: "Connect", num: 1 },
     { id: "choose", label: "Choose", num: 2 },
     { id: "preview", label: "Confirm", num: 3 },
-    { id: "complete", label: "Soulbound", num: 4 },
+    { id: "complete", label: "Complete", num: 4 },
   ];
 
   const stepMap: Record<string, number> = { connect: 0, loading: 1, choose: 1, minting: 1, select: 1, preview: 2, burning: 2, error: 2, complete: 3 };
@@ -483,7 +483,7 @@ export default function MintPage() {
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                {/* Card 1: Free Mint + Soulbound (ONE TX) — PRIMARY CTA */}
+                {/* Card 1: Free Mint (regular tradable NFT) — PRIMARY CTA */}
                 <div
                   className="rounded-xl border p-6 text-left transition-all"
                   style={{ background: "var(--bg-tertiary)", borderColor: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "var(--success)" : "var(--accent)", borderWidth: "2px", boxShadow: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "0 0 30px rgba(16,185,129,0.15)" : "0 0 20px rgba(153,69,255,0.1)" }}
@@ -493,14 +493,14 @@ export default function MintPage() {
                       <Zap size={24} style={{ color: "var(--success)" }} />
                     </div>
                     <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded" style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.1)", color: "var(--success)", border: "1px solid rgba(16,185,129,0.2)" }}>
-                      SOULBOUND
+                      MINT NFT
                     </span>
                   </div>
                   <h3 className="text-base font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
                     Mint + Become (One Step)
                   </h3>
                   <p className="text-xs mb-4 leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                    Mint a Burned-Out Agent AND commit it as your permanent soulbound identity — in a single transaction. Non-transferable, linked to your Genesis Record forever.
+                    Mint a Burned-Out Agent NFT. This is a regular tradable NFT — you can sell it, trade it, or burn it via Card 2 to create a permanent soulbound identity.
                   </p>
                   <div className="rounded-lg p-3 mb-4" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
                     <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>Requirements</p>
@@ -756,7 +756,7 @@ export default function MintPage() {
                     <span className="text-sm font-bold" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>What You Receive</span>
                   </div>
                   <ul className="text-xs space-y-1 ml-6" style={{ color: "var(--text-secondary)" }}>
-                    <li>• <strong>Soulbound Token-2022</strong> — non-transferable, yours forever</li>
+                    <li>• <strong>Regular tradable NFT</strong> — you can sell, trade, or burn it later</li>
                     <li>• <strong>Artwork on Arweave</strong> — permanent, decentralized storage</li>
                     <li>• <strong>On-chain verification</strong> — burn proof, agent data, and SATP identity linked forever</li>
                     <li>• <strong>Permanent AgentFolio avatar</strong> — auto-updated, locked forever</li>
