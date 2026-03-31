@@ -53,10 +53,17 @@ if (typeof (globalThis as any).__v3WarmupDone === 'undefined') {
   try {
     const _initFiles = require('fs').readdirSync(PROFILES_DIR).filter((f: string) => f.endsWith('.json'));
     const _initIds = _initFiles.map((f: string) => f.replace('.json', ''));
-    fetchV3Scores(_initIds).then(scores => {
-      (globalThis as any).__v3ScoresCache = scores;
+    // Backend API is authoritative (reads from on-chain via v3-score-service)
+    fetch("http://localhost:3000/api/profiles").then(r => r.json()).then((profiles: any[]) => {
+      const scoreMap = new Map();
+      for (const p of profiles) {
+        if (p.id && (p.score !== undefined)) {
+          scoreMap.set(p.id, { reputationScore: p.score ?? 0, verificationLevel: p.level ?? 0, verificationLabel: p.levelName ?? "Unknown", isBorn: p.isBorn ?? false, faceImage: p.faceImage ?? "", pda: "", reputationPct: (p.score ?? 0) / 10000 });
+        }
+      }
+      (globalThis as any).__v3ScoresCache = scoreMap;
       (globalThis as any).__v3ScoresCacheTime = Date.now();
-      console.log(`[V3] Pre-warmed ${scores.size} on-chain scores at startup`);
+      console.log(`[V3] Pre-warmed ${scoreMap.size} scores from backend API`);
     }).catch(() => {});
   } catch {}
 }
@@ -268,8 +275,8 @@ function loadAllProfiles(): Agent[] {
     if (v3CacheAge > 300000 || !(globalThis as any).__v3ScoresCache) {
       const agentIds = rawProfiles.map(p => p.id);
       fetchV3Scores(agentIds).then(scores => {
-        (globalThis as any).__v3ScoresCache = scores;
-        (globalThis as any).__v3ScoresCacheTime = Date.now();
+        // (globalThis as any).__v3ScoresCache = scores;
+        // (globalThis as any).__v3ScoresCacheTime = Date.now();
         _agentsCache = null; // Invalidate so next request uses V3 scores
         console.log(`[V3] Cached ${scores.size} on-chain scores`);
       }).catch(e => console.error("[V3] Batch fetch failed:", e.message));
