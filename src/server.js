@@ -496,7 +496,7 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
     // V3 on-chain score (authoritative)
     let v3Data = null;
     try {
-      v3Data = await getV3Score(resolvedId);
+      const nameRow = db.prepare("SELECT name FROM profiles WHERE id = ?").get(resolvedId); v3Data = await getV3Score(nameRow && nameRow.name ? nameRow.name : resolvedId);
       if (!v3Data && !resolvedId.startsWith('agent_')) {
         v3Data = await getV3Score('agent_' + resolvedId);
       }

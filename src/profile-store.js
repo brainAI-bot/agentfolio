@@ -883,7 +883,7 @@ function registerRoutes(app) {
 
   // ── GET /api/profile/:id/genesis — V3 Genesis Record (on-chain) ──
   app.get('/api/profile/:id/genesis', async (req, res) => {
-    if (!satpV3) return res.json({ error: 'SATP V3 SDK not available', genesis: null });
+    if (!v3ScoreService) return res.json({ error: 'V3 score service not available', genesis: null });
     try {
       const rawId = req.params.id;
       let record = null;
@@ -893,12 +893,12 @@ function registerRoutes(app) {
         const d = getDb();
         const row = d.prepare('SELECT name FROM profiles WHERE id = ?').get(rawId);
         if (row && row.name) {
-          record = await satpV3.client.getGenesisRecord(row.name);
+          record = await v3ScoreService.getV3Score(row.name);
         }
       }
       // Fallback: try the raw ID directly
       if (!record) {
-        record = await satpV3.client.getGenesisRecord(rawId);
+        record = await v3ScoreService.getV3Score(rawId);
       }
       // ON-CHAIN = TRUTH: No DB enrichment. Chain data is authoritative. (CEO directive 2026-03-31)
       res.json({ genesis: record });
