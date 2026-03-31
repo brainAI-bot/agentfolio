@@ -75,6 +75,35 @@ function registerRestoredRoutes(app) {
         }).catch(() => {});
       }
     } catch (_) {}
+
+    // V3: Trigger permissionless recompute of reputation + level on-chain
+    try {
+      const { createSATPClient } = require("../satp-client/src");
+      const v3Client = createSATPClient("mainnet");
+      const { Keypair, sendAndConfirmTransaction } = require("@solana/web3.js");
+      const { Connection } = require("@solana/web3.js");
+      const deployerKey = JSON.parse(require("fs").readFileSync(process.env.DEPLOYER_KEYPAIR || "/home/ubuntu/.config/solana/id.json", "utf8"));
+      const deployer = Keypair.fromSecretKey(new Uint8Array(deployerKey));
+      const conn = new Connection(process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb", "confirmed");
+
+      // Recompute reputation (permissionless)
+      v3Client.buildRecomputeReputation(wallet).then(async tx => {
+        tx.feePayer = deployer.publicKey;
+        tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
+        const sig = await sendAndConfirmTransaction(conn, tx, [deployer]);
+        logger.info(`[V3 Recompute] reputation for ${profile.id}: ${sig}`);
+      }).catch(e => logger.warn(`[V3 Recompute] reputation failed: ${e.message}`));
+
+      // Recompute level (permissionless)
+      v3Client.buildRecomputeLevel(wallet).then(async tx => {
+        tx.feePayer = deployer.publicKey;
+        tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
+        const sig = await sendAndConfirmTransaction(conn, tx, [deployer]);
+        logger.info(`[V3 Recompute] level for ${profile.id}: ${sig}`);
+      }).catch(e => logger.warn(`[V3 Recompute] level failed: ${e.message}`));
+    } catch (v3Err) {
+      logger.warn(`[V3 Recompute] init failed: ${v3Err.message}`);
+    }
   }
 
   // Verification providers
