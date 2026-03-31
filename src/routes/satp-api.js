@@ -366,6 +366,25 @@ function registerSATPRoutes(app) {
     try {
       const record = await satpV3Client.getGenesisRecord(req.params.agentId);
       if (!record) return res.status(404).json({ error: 'No Genesis Record', agentId: req.params.agentId });
+      
+      // DB override: if nft_avatar.permanent=true, set isBorn=true + add face data
+      try {
+        const Database = require('better-sqlite3');
+        const path = require('path');
+        const db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+        const row = db.prepare('SELECT nft_avatar FROM profiles WHERE id = ?').get(req.params.agentId);
+        db.close();
+        if (row && row.nft_avatar) {
+          const nftData = JSON.parse(row.nft_avatar);
+          if (nftData.permanent) {
+            record.isBorn = true;
+            record.dbFaceImage = nftData.image || null;
+            record.dbSoulboundMint = nftData.soulboundMint || null;
+            record.dbBurnTx = nftData.burnTxSignature || null;
+          }
+        }
+      } catch (dbErr) { /* ignore */ }
+      
       res.json({ ok: true, source: 'satp_v3_onchain', data: record });
     } catch (e) {
       res.status(500).json({ error: e.message });
