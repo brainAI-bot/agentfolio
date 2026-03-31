@@ -336,6 +336,16 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
           const repSig = await satpV3.client.connection.sendRawTransaction(repTx.transaction.serialize());
           console.log(`[SATP V3] Reputation updated for ${profileId}: ${genesis.reputationScore} → ${newTrustScore}, tx=${repSig}`);
         }
+
+        // V3 recompute — trigger on-chain recalculation (permissionless)
+        try {
+          const recompRepTx = await satpV3.client.buildRecomputeReputation(genesis.authority, signer.publicKey);
+          if (recompRepTx && recompRepTx.transaction) {
+            recompRepTx.transaction.sign(signer);
+            const recompSig = await satpV3.client.connection.sendRawTransaction(recompRepTx.transaction.serialize());
+            console.log(`[SATP V3] Reputation recomputed for ${profileId}: tx=${recompSig}`);
+          }
+        } catch (recompErr) { console.warn(`[SATP V3] Recompute reputation failed for ${profileId}: ${recompErr.message}`); }
         
       } catch (err) {
         console.error(`[SATP V3] On-chain update failed for ${profileId}:`, err.message);
