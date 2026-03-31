@@ -42,7 +42,7 @@ router.get('/agents', async (req, res) => {
     const TEST_NAMES = new Set([
       'braintest3', 'braintest11', 'braintest12', 'braintest20', 'braintest22',
       'mainnet-deploy-test', 'smoketestagent', 'smoketest2', 'smoketest',
-      'smoketestbot', 'e2etestagent', 'brantest', 'agent_suppi',
+      'smoketestbot', 'e2etestagent', 'brantest', 'birth test',
     ]);
     const isTest = (name) => {
       const ln = (name || '').toLowerCase();
@@ -86,6 +86,26 @@ router.get('/agents', async (req, res) => {
         }
       }
       
+      // Check DB for permanent face (overrides on-chain isBorn)
+      let dbBorn = a.isBorn;
+      let dbFaceImage = a.faceImage || null;
+      let dbSoulboundMint = a.faceMint || null;
+      try {
+        const Database = require('better-sqlite3');
+        const path = require('path');
+        const db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+        const row = db.prepare('SELECT nft_avatar FROM profiles WHERE id = ?').get(profileId);
+        db.close();
+        if (row && row.nft_avatar) {
+          const nftData = JSON.parse(row.nft_avatar);
+          if (nftData.permanent) {
+            dbBorn = true;
+            dbFaceImage = nftData.image || dbFaceImage;
+            dbSoulboundMint = nftData.soulboundMint || dbSoulboundMint;
+          }
+        }
+      } catch (e) { /* ignore DB errors */ }
+      
       return {
         pda: a.pda,
         authority: a.authority,
@@ -102,10 +122,10 @@ router.get('/agents', async (req, res) => {
         platformCount: platformSet.size,
         onChainAttestations: attestations.length,
         attestationMemos: attMemos,
-        nftImage: a.faceImage || null,
-        nftMint: a.faceMint || null,
-        soulbound: a.soulbound || false,
-        isBorn: a.isBorn,
+        nftImage: dbFaceImage,
+        nftMint: dbSoulboundMint,
+        soulbound: a.soulbound || dbBorn,
+        isBorn: dbBorn,
         createdAt: a.bornAt,
         programId: 'GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG',
         source: 'v3',
