@@ -5,7 +5,7 @@ import type { Metadata } from "next";
 export async function generateMetadata(): Promise<Metadata> {
   let count = 50;
   try {
-    const stats = await fetch("http://localhost:3333/api/ecosystem/stats", { next: { revalidate: 300 } }).then(r => r.ok ? r.json() : null);
+    const stats = await fetch("http://localhost:3000/api/ecosystem/stats", { next: { revalidate: 300 } }).then(r => r.ok ? r.json() : null);
     count = stats?.totalAgents || stats?.total || 50;
   } catch {}
   return {

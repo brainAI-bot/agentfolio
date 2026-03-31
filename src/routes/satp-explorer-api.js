@@ -1,41 +1,27 @@
-const { Connection, PublicKey } = require('@solana/web3.js');
-const RPC = 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
-const TOKEN_2022 = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+/**
+ * SATP Explorer API — reads from V3 program (GTppU4E4...)
+ * Uses v3-score-service for correct Borsh deserialization.
+ * 
+ * Updated 2026-03-31: Switched from V2 (97yL33...) to V3 program.
+ * ONE deserializer for all endpoints.
+ */
 
-// In-memory cache: { data, timestamp }
+const { Connection, PublicKey } = require("@solana/web3.js");
+const RPC = process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb";
+const TOKEN_2022 = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
+// V3 program + same parser as v3-score-service
+const V3_PROGRAM = new PublicKey("GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG");
+const v3ScoreService = require("../../v3-score-service");
+
 let agentCache = null;
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL = 5 * 60 * 1000;
 
-// --- Borsh helpers ---
-function readString(data, offset) {
-  if (offset + 4 > data.length) return ['', offset];
-  const len = data.readUInt32LE(offset);
-  offset += 4;
-  if (len === 0 || offset + len > data.length) return ['', offset];
-  if (len > 1000) return ['', offset]; // safety
-  return [data.subarray(offset, offset + len).toString('utf8'), offset + len];
-}
-
-function readVecString(data, offset) {
-  if (offset + 4 > data.length) return [[], offset];
-  const count = data.readUInt32LE(offset);
-  offset += 4;
-  if (count > 50) return [[], offset]; // safety
-  const arr = [];
-  for (let i = 0; i < count; i++) {
-    const [s, newOff] = readString(data, offset);
-    arr.push(s);
-    offset = newOff;
-  }
-  return [arr, offset];
-}
-
-// --- NFT lookup ---
+// NFT lookup (unchanged)
 async function lookupNFT(conn, wallet) {
   try {
     const tokens = await conn.getParsedTokenAccountsByOwner(
-      new PublicKey(wallet),
-      { programId: TOKEN_2022 }
+      new PublicKey(wallet), { programId: TOKEN_2022 }
     );
     for (const ta of tokens.value) {
       const info = ta.account.data.parsed.info;
@@ -43,11 +29,10 @@ async function lookupNFT(conn, wallet) {
       const mint = info.mint;
       const mintInfo = await conn.getParsedAccountInfo(new PublicKey(mint));
       const extensions = mintInfo.value?.data?.parsed?.info?.extensions || [];
-      let isNonTransferable = false;
-      let metaUri = null;
+      let isNonTransferable = false, metaUri = null;
       for (const ext of extensions) {
-        if (ext.extension === 'nonTransferable') isNonTransferable = true;
-        if (ext.extension === 'tokenMetadata' && ext.state?.uri) metaUri = ext.state.uri;
+        if (ext.extension === "nonTransferable") isNonTransferable = true;
+        if (ext.extension === "tokenMetadata" && ext.state?.uri) metaUri = ext.state.uri;
       }
       if (!isNonTransferable || !metaUri) continue;
       try {
@@ -60,85 +45,54 @@ async function lookupNFT(conn, wallet) {
   return null;
 }
 
-/**
- * Parse AgentIdentity from SATP v2 identity_registry (97yL33...)
- * 
- * Struct layout (Borsh):
- *   8   discriminator
- *   32  agent_id (Pubkey)
- *   4+N name (String)
- *   4+N description (String)
- *   4+N category (String)
- *   4+M capabilities (Vec<String>)
- *   4+N metadata_uri (String)
- *   8   reputation_score (u64) — divide by 10000 for 0-100
- *   1   verification_level (u8) — 0-5
- *   8   reputation_updated_at (i64)
- *   8   verification_updated_at (i64)
- *   32  authority (Pubkey)
- *   8   created_at (i64)
- *   8   updated_at (i64)
- *   1   bump (u8)
- */
 async function getSatpAgents() {
   if (agentCache && (Date.now() - agentCache.timestamp < CACHE_TTL)) {
     return agentCache.data;
   }
 
-  const conn = new Connection(RPC, 'confirmed');
-  const PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq');
-  const accounts = await conn.getProgramAccounts(PROGRAM);
+  const conn = new Connection(RPC, "confirmed");
 
+  // Fetch ALL accounts from V3 program
+  const accounts = await conn.getProgramAccounts(V3_PROGRAM);
   const agents = [];
+
   for (const { pubkey, account } of accounts) {
     const data = Buffer.from(account.data);
     if (data.length < 80) continue;
+
+    // Use v3-score-service parser (same one that powers genesis endpoint)
     try {
-      let o = 8; // skip discriminator
-      const agentId = new PublicKey(data.subarray(o, o + 32)).toBase58();
-      o += 32;
+      const parsed = v3ScoreService.parseGenesisRecord
+        ? v3ScoreService.parseGenesisRecord(data)
+        : null;
 
-      const [name, o1] = readString(data, o);
-      const [description, o2] = readString(data, o1);
-      const [category, o3] = readString(data, o2);
-      const [capabilities, o4] = readVecString(data, o3);
-      const [metadataUri, o5] = readString(data, o4);
-
-      if (!name || name.length === 0 || name.length > 100) continue;
-
-      // Fixed-size fields after strings
-      const remaining = data.length - o5;
-      if (remaining < 74) continue; // need at least 8+1+8+8+32+8+8+1 = 74 bytes
-
-      const reputationScore = Number(data.readBigUInt64LE(o5));
-      const verificationLevel = data.readUInt8(o5 + 8);
-      const reputationUpdatedAt = Number(data.readBigInt64LE(o5 + 9));
-      const verificationUpdatedAt = Number(data.readBigInt64LE(o5 + 17));
-      const authority = new PublicKey(data.subarray(o5 + 25, o5 + 57)).toBase58();
-      const createdAt = Number(data.readBigInt64LE(o5 + 57));
-      const updatedAt = Number(data.readBigInt64LE(o5 + 65));
+      if (!parsed || !parsed.agentName) continue;
 
       agents.push({
         pda: pubkey.toBase58(),
-        authority,
-        agentId,
-        name,
-        description: description || '',
-        category: category || '',
-        capabilities,
-        metadataUri: metadataUri || '',
-        reputationScore: reputationScore / 10000, // 0-100 scale
-        verificationLevel,
-        createdAt: createdAt > 1577836800 ? new Date(createdAt * 1000).toISOString() : null,
-        updatedAt: updatedAt > 1577836800 ? new Date(updatedAt * 1000).toISOString() : null,
-        programId: PROGRAM.toBase58(),
+        authority: parsed.authority || "",
+        agentId: pubkey.toBase58(),
+        name: parsed.agentName,
+        description: "",
+        category: "",
+        capabilities: [],
+        metadataUri: "",
+        reputationScore: parsed.reputationScore,
+        verificationLevel: parsed.verificationLevel,
+        verificationLabel: parsed.verificationLabel || "",
+        isBorn: parsed.isBorn || false,
+        faceImage: parsed.faceImage || "",
+        faceMint: parsed.faceMint || "",
+        createdAt: parsed.createdAt || null,
+        updatedAt: parsed.updatedAt || null,
+        programId: V3_PROGRAM.toBase58(),
       });
     } catch (e) {}
   }
 
-  // Batch NFT lookups (parallel)
+  // Batch NFT lookups
   const nftResults = await Promise.all(
-    agents.map(agent => lookupNFT(conn, agent.authority))
+    agents.filter(a => a.authority).map(agent => lookupNFT(conn, agent.authority))
   );
   for (let i = 0; i < agents.length; i++) {
     if (nftResults[i]) {
@@ -153,7 +107,7 @@ async function getSatpAgents() {
     }
   }
 
-  const result = { agents, count: agents.length, source: 'solana-mainnet' };
+  const result = { agents, count: agents.length, source: "solana-mainnet-v3" };
   agentCache = { data: result, timestamp: Date.now() };
   return result;
 }

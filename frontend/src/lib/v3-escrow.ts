@@ -12,7 +12,7 @@
 
 import { Transaction, Connection, PublicKey } from '@solana/web3.js';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
 interface V3EscrowCreateParams {
   clientWallet: string;

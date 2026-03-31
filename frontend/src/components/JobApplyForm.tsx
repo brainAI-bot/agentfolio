@@ -5,7 +5,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { Briefcase, Send, Share2, Check } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 
 export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: string }) {
   const { connected, publicKey } = useWallet();

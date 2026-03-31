@@ -104,7 +104,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   const solWallet = (agent as any).wallets?.solana || (agent as any).wallet || agent.walletAddress;
   if (solWallet) {
     try {
-      const satpIdRes = await fetch(`http://localhost:3333/api/satp/identity/${solWallet}`, { next: { revalidate: 120 } });
+      const satpIdRes = await fetch(`http://localhost:3000/api/satp/identity/${solWallet}`, { next: { revalidate: 120 } });
       if (satpIdRes.ok) satpIdentity = await satpIdRes.json();
     } catch {}
   }
@@ -132,7 +132,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   let githubStats: any = null;
   if (v?.github?.verified && v.github.username) {
     try {
-      const ghRes = await fetch(`http://localhost:3333/api/verify/github/stats?username=${encodeURIComponent(v.github.username)}`, { next: { revalidate: 120 } });
+      const ghRes = await fetch(`http://localhost:3000/api/verify/github/stats?username=${encodeURIComponent(v.github.username)}`, { next: { revalidate: 120 } });
       if (ghRes.ok) githubStats = await ghRes.json();
     } catch {}
   }

@@ -1,6 +1,6 @@
 import type { Agent } from "./types";
 
-const API_BASE = process.env.INTERNAL_API_URL || "http://localhost:3333";
+const API_BASE = process.env.INTERNAL_API_URL || "http://localhost:3000";
 
 /**
  * Fetch agent data via HTTP API instead of filesystem.

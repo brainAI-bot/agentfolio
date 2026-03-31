@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Shield, CheckCircle, Star, ExternalLink } from "lucide-react";
 import Link from "next/link";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 
 interface Application {
   id: string;
