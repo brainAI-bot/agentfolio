@@ -166,7 +166,7 @@ setTimeout(() => {
   getAllIdentityAccounts(connection).catch(e => 
     console.error('[SATP Cache] Warmup error:', e.message)
   );
-}, 5000);
+}, 15000); // 15s startup delay to avoid RPC burst
 
 // ─── PDA Derivation ──────────────────────────────────────
 
