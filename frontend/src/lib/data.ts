@@ -273,12 +273,18 @@ function loadAllProfiles(): Agent[] {
     // V3 batch fetch — warm cache for next mapProfile call
     const v3CacheAge = Date.now() - ((globalThis as any).__v3ScoresCacheTime || 0);
     if (v3CacheAge > 300000 || !(globalThis as any).__v3ScoresCache) {
-      const agentIds = rawProfiles.map(p => p.id);
-      fetchV3Scores(agentIds).then(scores => {
-        // (globalThis as any).__v3ScoresCache = scores;
-        // (globalThis as any).__v3ScoresCacheTime = Date.now();
+      const agentNames = rawProfiles.map(p => p.name || p.id);
+      // Build name→id map so we can key cache by DB id
+      const nameToId = new Map<string, string>();
+      rawProfiles.forEach(p => nameToId.set(p.name || p.id, p.id));
+      fetchV3Scores(agentNames).then(scores => {
+        // Re-key by DB id (profile lookup uses p.id)
+        const idScores = new Map();
+        scores.forEach((v, k) => idScores.set(nameToId.get(k) || k, v));
+        (globalThis as any).__v3ScoresCache = idScores;
+        (globalThis as any).__v3ScoresCacheTime = Date.now();
         _agentsCache = null; // Invalidate so next request uses V3 scores
-        console.log(`[V3] Cached ${scores.size} on-chain scores`);
+        console.log(`[V3] Cached ${idScores.size} on-chain scores (name→id mapped)`);
       }).catch(e => console.error("[V3] Batch fetch failed:", e.message));
     }
     
