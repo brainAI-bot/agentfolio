@@ -88,7 +88,7 @@ async function _loadAllAccounts(connection) {
   
   for (let i = 0; i < allProgIds.length; i++) {
     const progId = allProgIds[i];
-    if (i > 0) await new Promise(r => setTimeout(r, 2000)); // 2s delay between programs to avoid 429
+    if (i > 0) await new Promise(r => setTimeout(r, 5000)); // 5s delay between programs to avoid 429
     try {
       const accounts = await connection.getProgramAccounts(progId);
       for (const { pubkey, account } of accounts) {

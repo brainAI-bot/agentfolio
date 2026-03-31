@@ -938,7 +938,7 @@ function registerRoutes(app) {
               const nftData = JSON.parse(fRow.nft_avatar);
               if (nftData.image) record.faceImage = nftData.image;
               if (nftData.soulboundMint) record.faceMint = nftData.soulboundMint;
-              if (nftData.permanent) record.isBorn = true;
+              // HARD RULE: isBorn comes from on-chain ONLY — never from DB (CEO directive 2026-03-31)
               if (nftData.burnedAt) record.bornAt = nftData.burnedAt;
               if (nftData.burnTxSignature) record.faceBurnTx = nftData.burnTxSignature;
               record._faceEnrichedFromDB = true;

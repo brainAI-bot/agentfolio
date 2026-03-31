@@ -1159,7 +1159,7 @@ function handleBurnToBecome(req, res, url) {
           if (isBorn) return sendJson(403, { error: "Already used free burn-to-become", isBorn: true });
         }
 
-        // === ANTI-GAMING: PDA check seeded from agent_id ===
+        // === ANTI-GAMING: PDA check DISABLED (2026-03-31) — using isBorn via V3 Genesis Record instead ===
         let agentIdForPda = null;
         try {
           const Database = require("better-sqlite3");
@@ -1540,7 +1540,7 @@ try {
 
   // POST /api/burn-to-become/confirm-mint — record a client-signed mint after TX confirms
   if (url.pathname === '/api/burn-to-become/confirm-mint' && req.method === 'POST') {
-    const { wallet, signature, asset, boaId, flow } = req.body || {};
+    const { wallet, signature, asset, boaId, flow, imageUri: bodyImageUri, metadataUri: bodyMetadataUri, boaName: bodyBoaName } = req.body || {};
     if (!wallet || !signature) return sendJson(400, { error: 'wallet and signature required' });
     
     (async () => {
@@ -1615,9 +1615,9 @@ try {
         console.log('[ConfirmMint] Recorded client-signed mint:', effectiveBoaId, 'agent:', agentId, 'sig:', signature.slice(0, 20));
         
         // STEP 1: Resolve artwork URI via DAS (same as Card 2 burn flow)
-        let artworkUri = imageUri || record.imageUri || '';
-        let metadataUri = '';
-        let nftName = boaName || 'Burned-Out Agent';
+        let artworkUri = bodyImageUri || imageUri || record.imageUri || '';
+        let metadataUri = bodyMetadataUri || '';
+        let nftName = bodyBoaName || boaName || 'Burned-Out Agent';
         
         if (!artworkUri && asset) {
           // Try Helius DAS getAsset for the minted BOA

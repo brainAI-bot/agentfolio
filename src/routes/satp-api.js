@@ -377,7 +377,7 @@ function registerSATPRoutes(app) {
         if (row && row.nft_avatar) {
           const nftData = JSON.parse(row.nft_avatar);
           if (nftData.permanent) {
-            record.isBorn = true;
+            // HARD RULE: isBorn comes from on-chain ONLY — never from DB (CEO directive 2026-03-31)
             record.dbFaceImage = nftData.image || null;
             record.dbSoulboundMint = nftData.soulboundMint || null;
             record.dbBurnTx = nftData.burnTxSignature || null;

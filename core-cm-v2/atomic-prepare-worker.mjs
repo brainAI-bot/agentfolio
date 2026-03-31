@@ -145,9 +145,12 @@ async function run() {
     compressionProof: none(),
   }));
 
-  // If agentId provided, write a mint-tracker marker PDA on-chain
-  // Seeded from [agent_id, candy_machine_address] — no genesis dependency
-  if (agentId) {
+  // REMOVED: Mint tracker PDA on-chain marker (2026-03-31)
+  // Anti-gaming now handled by SATP Genesis Record isBorn flag.
+  // The old approach caused InsufficientFundsForRent errors when users had
+  // barely enough SOL. The server-side prepare-mint endpoint already checks
+  // isBorn via V3 Genesis Record — no need for a redundant PDA marker.
+  if (false && agentId) { // DISABLED — using SATP Genesis Record instead
     try {
       const { PublicKey: PK, SystemProgram: SP } = await import('@solana/web3.js');
       const agentHash = await import('crypto').then(c => c.createHash('sha256').update(agentId).digest());
