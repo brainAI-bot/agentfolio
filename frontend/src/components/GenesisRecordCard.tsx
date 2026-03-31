@@ -173,7 +173,7 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
                 className="flex items-center gap-1 hover:underline"
                 style={{ color: "var(--text-secondary)" }}
               >
-                {genesis.authority.slice(0, 12)}...{genesis.authority.slice(-6)} <ExternalLink size={9} />
+                {genesis?.authority?.slice(0, 12)}...{genesis?.authority?.slice(-6)} <ExternalLink size={9} />
               </a>
             </div>
           )}
@@ -186,7 +186,7 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
               className="flex items-center gap-1 hover:underline"
               style={{ color: "var(--accent)" }}
             >
-              {genesis.pda.slice(0, 16)}...{genesis.pda.slice(-8)} <ExternalLink size={9} />
+              {genesis?.pda?.slice(0, 16)}...{genesis?.pda?.slice(-8)} <ExternalLink size={9} />
             </a>
           </div>
           {burnTx && (
@@ -199,7 +199,7 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
                 className="flex items-center gap-1 hover:underline"
                 style={{ color: "#F97316" }}
               >
-                {burnTx.slice(0, 16)}...{burnTx.slice(-8)} <ExternalLink size={9} />
+                {burnTx?.slice(0, 16)}...{burnTx?.slice(-8)} <ExternalLink size={9} />
               </a>
             </div>
           )}

@@ -56,7 +56,7 @@ export function SATPOnChainSection({ walletAddress }: { walletAddress?: string }
             {identity.authority && (
               <div className="flex justify-between"><span style={{ color: "var(--text-tertiary)" }}>Authority</span>
                 <a href={`https://explorer.solana.com/address/${identity.authority}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:underline" style={{ color: "var(--accent)" }}>
-                  {identity.authority.slice(0, 8)}...{identity.authority.slice(-4)} <ExternalLink size={10} />
+                  {identity?.authority?.slice(0, 8)}...{identity?.authority?.slice(-4)} <ExternalLink size={10} />
                 </a>
               </div>
             )}

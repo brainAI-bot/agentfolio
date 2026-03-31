@@ -159,7 +159,7 @@ export function V3ReputationCard({ data }: { data: V3ReputationData }) {
             className="text-[11px] hover:underline inline-flex items-center gap-1"
             style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}
           >
-            {data.pda.slice(0, 16)}...{data.pda.slice(-8)}
+            {data?.pda?.slice(0, 16)}...{data?.pda?.slice(-8)}
             <ExternalLink size={10} />
           </a>
         </div>
@@ -175,7 +175,7 @@ export function V3ReputationCard({ data }: { data: V3ReputationData }) {
               className="text-[11px]"
               style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}
             >
-              {data.authority.slice(0, 8)}...{data.authority.slice(-4)}
+              {data?.authority?.slice(0, 8)}...{data?.authority?.slice(-4)}
             </span>
           </div>
         )}

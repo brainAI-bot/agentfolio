@@ -38,21 +38,35 @@ function getGenesisPDA(agentId) {
 
 function parseGenesisRecord(data) {
   if (!data || data.length < 8) return null;
+  
+  // Try with isActive first, then without (layout detection)
+  const result = _parseWithLayout(data, true);
+  if (result && result._valid) return result;
+  const result2 = _parseWithLayout(data, false);
+  if (result2 && result2._valid) return result2;
+  return result || result2; // return best effort
+}
+
+function _parseWithLayout(data, hasIsActive) {
   try {
     let offset = 8; // skip discriminator
     const agentIdHashBytes = data.slice(offset, offset + 32);
     offset += 32;
 
     const readString = () => {
+      if (offset + 4 > data.length) throw new Error('overflow');
       const len = data.readUInt32LE(offset);
       offset += 4;
+      if (len > 1000 || offset + len > data.length) throw new Error('bad string len');
       const str = data.slice(offset, offset + len).toString('utf8');
       offset += len;
       return str;
     };
     const readVecString = () => {
+      if (offset + 4 > data.length) throw new Error('overflow');
       const count = data.readUInt32LE(offset);
       offset += 4;
+      if (count > 50) throw new Error('bad vec count');
       const arr = [];
       for (let i = 0; i < count; i++) arr.push(readString());
       return arr;
@@ -64,33 +78,52 @@ function parseGenesisRecord(data) {
     const capabilities = readVecString();
     const metadataUri = readString();
     const faceImage = readString();
+    
+    if (offset + 32 > data.length) throw new Error('overflow before faceMint');
     const faceMint = new PublicKey(data.slice(offset, offset + 32));
     offset += 32;
     const faceBurnTx = readString();
+    
+    if (offset + 8 > data.length) throw new Error('overflow before genesisRecord');
     const genesisRecord = Number(data.readBigInt64LE(offset));
     offset += 8;
-    // isActive field (bool) — V3 layout
-    const isActive = data[offset] === 1;
-    offset += 1;
+    
+    // isActive: only present in accounts rewritten by admin_rewrite_account
+    let isActive = true;
+    if (hasIsActive) {
+      if (offset >= data.length) throw new Error('overflow at isActive');
+      isActive = data[offset] === 1;
+      offset += 1;
+    }
+    
+    if (offset + 32 > data.length) throw new Error('overflow before authority');
     const authority = new PublicKey(data.slice(offset, offset + 32));
     offset += 32;
 
     // Option<Pubkey> — Borsh: 1 byte tag + 32 bytes only if Some
-    const hasPending = data[offset];
-    offset += 1;
-    if (hasPending === 1) offset += 32;
+    if (offset < data.length) {
+      const hasPending = data[offset];
+      offset += 1;
+      if (hasPending === 1 && offset + 32 <= data.length) offset += 32;
+    }
 
+    if (offset + 8 > data.length) throw new Error('overflow before reputationScore');
     const reputationScore = Number(data.readBigUInt64LE(offset));
     offset += 8;
+    
+    if (offset >= data.length) throw new Error('overflow before verificationLevel');
     const verificationLevel = data[offset];
     offset += 1;
 
-    // Timestamps (SDK 3.5.0 struct)
-    const reputationUpdatedAt = Number(data.readBigInt64LE(offset)); offset += 8;
-    const verificationUpdatedAt = Number(data.readBigInt64LE(offset)); offset += 8;
-    const createdAt = Number(data.readBigInt64LE(offset)); offset += 8;
-    const updatedAt = Number(data.readBigInt64LE(offset)); offset += 8;
-    const bump = data[offset]; offset += 1;
+    // Validation: scores should be reasonable
+    const _valid = verificationLevel <= 5 && reputationScore < 100000000;
+
+    // Timestamps
+    let reputationUpdatedAt = 0, verificationUpdatedAt = 0, createdAt = 0, updatedAt = 0;
+    if (offset + 8 <= data.length) { reputationUpdatedAt = Number(data.readBigInt64LE(offset)); offset += 8; }
+    if (offset + 8 <= data.length) { verificationUpdatedAt = Number(data.readBigInt64LE(offset)); offset += 8; }
+    if (offset + 8 <= data.length) { createdAt = Number(data.readBigInt64LE(offset)); offset += 8; }
+    if (offset + 8 <= data.length) { updatedAt = Number(data.readBigInt64LE(offset)); offset += 8; }
 
     return {
       agentName,
@@ -108,12 +141,12 @@ function parseGenesisRecord(data) {
       verificationUpdatedAt,
       createdAt: createdAt > 0 ? new Date(createdAt * 1000).toISOString() : null,
       updatedAt: updatedAt > 0 ? new Date(updatedAt * 1000).toISOString() : null,
+      _valid,
     };
   } catch (e) {
     return null;
   }
 }
-
 /**
  * Batch-fetch V3 scores for multiple agent IDs.
  * Returns Map<agentId, score|null>

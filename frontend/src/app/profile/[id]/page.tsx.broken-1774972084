@@ -401,7 +401,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                   if (!hasChainAttestation && !vEntry?.verified) continue;
                   const chainTx = chainTxMap.get(t) || (t === "x" ? chainTxMap.get("twitter") : null);
                   let detail = hasChainAttestation ? "On-Chain ⛓️" : "Verified";
-                  if (t === "github") detail = `@${githubStats?.username || vEntry?.username || vEntry?.identifier || vEntry?.address || "?"} — ${githubStats?.repos ?? vEntry?.repos ?? 0} repos, ${(githubStats?.stars ?? vEntry?.stars ?? 0).toLocaleString()}⭐`;
+                  if (t === "github") { const ghUser = githubStats?.username || vEntry?.username || vEntry?.identifier || vEntry?.address || "?"; const ghRepos = githubStats?.repos ?? vEntry?.repos; const ghStars = githubStats?.stars ?? vEntry?.stars; detail = ghRepos != null ? `@${ghUser} — ${ghRepos} repos, ${(ghStars || 0).toLocaleString()}⭐` : `@${ghUser} — Verified ✓`; }
                   else if (t === "solana" && vEntry?.address) detail = `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)}`;
                   else if (t === "ethereum" && vEntry?.address) detail = `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)}`;
                   else if (t === "hyperliquid" && vEntry?.address) detail = vEntry?.volume && vEntry?.volume !== "$0" ? `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)} · ${vEntry?.volume} vol` : `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)} · Verified ✅`;

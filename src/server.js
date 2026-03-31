@@ -2154,3 +2154,17 @@ app.get('/api/profile/:id/endorsements', (req, res) => {
   // Already defined earlier — this is a safety fallback
   res.json({ endorsements: [], total: 0 });
 });
+
+// ETH verify route aliases (frontend uses /api/verify/eth/*, backend has /api/verification/eth/*)
+app.post('/api/verify/eth/initiate', (req, res) => {
+  req.url = '/api/verification/eth/initiate';
+  app.handle(req, res);
+});
+app.post('/api/verify/eth/verify', (req, res) => {
+  req.url = '/api/verification/eth/verify';
+  app.handle(req, res);
+});
+app.post('/api/verify/ethereum/challenge', (req, res) => {
+  req.url = '/api/verification/eth/initiate';
+  app.handle(req, res);
+});

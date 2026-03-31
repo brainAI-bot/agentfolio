@@ -32,6 +32,15 @@ let _v3Loading = false;
  * causing all subsequent fields to shift by 1 byte (reputationScore reads wrong).
  */
 function parseGenesisRecord(data: Buffer, pda: PublicKey): V3Score | null {
+  // Try with isActive first (newer accounts), then without (V2 layout)
+  const r1 = _tryParse(data, pda, true);
+  if (r1 && r1.verificationLevel <= 5 && r1.reputationScore < 100000000) return r1;
+  const r2 = _tryParse(data, pda, false);
+  if (r2 && r2.verificationLevel <= 5 && r2.reputationScore < 100000000) return r2;
+  return r1 || r2;
+}
+
+function _tryParse(data: Buffer, pda: PublicKey, hasIsActive: boolean): V3Score | null {
   if (data.length < 8) return null;
   try {
     let offset = 8; // discriminator
@@ -39,11 +48,13 @@ function parseGenesisRecord(data: Buffer, pda: PublicKey): V3Score | null {
 
     const readString = (): string => {
       const len = data.readUInt32LE(offset); offset += 4;
+      if (len > 1000 || offset + len > data.length) throw new Error("bad len");
       const str = data.slice(offset, offset + len).toString("utf8"); offset += len;
       return str;
     };
     const readVecString = (): string[] => {
       const count = data.readUInt32LE(offset); offset += 4;
+      if (count > 50) throw new Error("bad vec");
       const arr: string[] = [];
       for (let i = 0; i < count; i++) arr.push(readString());
       return arr;
@@ -58,18 +69,26 @@ function parseGenesisRecord(data: Buffer, pda: PublicKey): V3Score | null {
     offset += 32; // faceMint
     readString(); // faceBurnTx
     const genesisRecord = Number(data.readBigInt64LE(offset)); offset += 8;
-    const isActive = data[offset] === 1; offset += 1; // isActive bool (added by V3 migration)
+    
+    if (hasIsActive) {
+      offset += 1; // isActive bool
+    }
+    
     offset += 32; // authority
 
-    // Option<Pubkey> — Borsh: 1 byte tag, 32 bytes only if Some(1)
-    const hasPending = data[offset]; offset += 1;
-    if (hasPending === 1) offset += 32;
+    // Option<Pubkey>
+    if (offset < data.length) {
+      const hasPending = data[offset]; offset += 1;
+      if (hasPending === 1 && offset + 32 <= data.length) offset += 32;
+    }
 
+    if (offset + 8 > data.length) throw new Error("no score");
     const reputationScore = Number(data.readBigUInt64LE(offset)); offset += 8;
+    if (offset >= data.length) throw new Error("no level");
     const verificationLevel = data[offset]; offset += 1;
     offset += 8; // reputationUpdatedAt
     offset += 8; // verificationUpdatedAt
-    const createdAt = Number(data.readBigInt64LE(offset)); offset += 8;
+    const createdAt = (offset + 8 <= data.length) ? Number(data.readBigInt64LE(offset)) : 0;
 
     const labels = ["Unclaimed", "Registered", "Verified", "Established", "Trusted", "Sovereign"];
 
