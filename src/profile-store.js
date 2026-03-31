@@ -1214,48 +1214,41 @@ function registerRoutes(app) {
 
     const enriched = enrichProfile(safe);
 
-    // Use v3-score-service (correct deserialization) — NOT satpV3.client.getGenesisRecord (broken)
-    if (enriched && v3ScoreService) {
+    // ON-CHAIN = TRUTH: Fetch genesis data via internal HTTP call to our own genesis endpoint
+    // This endpoint has the correct deserialization + DB enrichment for on-chain defaults
+    if (enriched) {
       try {
-        // Try row.id first (canonical), then req.params.id, then agent_ prefix
-        let v3Data = await v3ScoreService.getV3Score(row.id);
-        if (!v3Data && row.id !== req.params.id) v3Data = await v3ScoreService.getV3Score(req.params.id);
-        if (!v3Data && !row.id.startsWith('agent_')) v3Data = await v3ScoreService.getV3Score('agent_' + row.id.toLowerCase());
+        const genesisUrl = "http://localhost:" + (process.env.PORT || 3000) + "/api/profile/" + encodeURIComponent(row.id) + "/genesis";
+        const genesisResp = await fetch(genesisUrl);
+        const genesisJson = await genesisResp.json();
+        const v3Data = genesisJson && genesisJson.genesis ? genesisJson.genesis : genesisJson;
+        const hasGenesis = v3Data && v3Data.agentName && !v3Data.error;
 
-        if (v3Data) {
+        if (hasGenesis) {
           enriched.onchain = v3Data;
-          enriched.trust_score = {
-            source: 'v3_score_service',
-            reputationScore: v3Data.reputationScore,
-            reputationPct: v3Data.reputationPct,
-            verificationLevel: v3Data.verificationLevel,
-            verificationLabel: v3Data.verificationLabel,
-            isBorn: v3Data.isBorn,
-          };
+          enriched.trust_score = { source: "on-chain", reputationScore: v3Data.reputationScore, verificationLevel: v3Data.verificationLevel, isBorn: v3Data.isBorn, faceImage: v3Data.faceImage || null, authority: v3Data.authority || null };
+          const levelLabels = ["Unverified","Registered","Verified","Established","Trusted","Sovereign"];
+          enriched.level = v3Data.verificationLevel;
+          enriched.score = v3Data.reputationScore;
+          enriched.levelName = v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || "Unknown";
+          enriched.verificationLevel = v3Data.verificationLevel;
+          enriched.verification_level = v3Data.verificationLevel;
+          enriched.reputation_score = v3Data.reputationScore;
+          enriched.tier = v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || "Unknown";
+          enriched.isBorn = v3Data.isBorn;
+          if (v3Data.faceImage) enriched.faceImage = v3Data.faceImage;
+          if (v3Data.authority) enriched.walletAddress = v3Data.authority;
         } else {
           enriched.onchain = null;
-          enriched.trust_score = { source: 'none', message: 'No SATP V3 Genesis Record' };
+          enriched.trust_score = { source: "none", message: "No on-chain Genesis Record" };
+          enriched.level = 0; enriched.score = 0; enriched.levelName = "Unverified";
+          enriched.verificationLevel = 0; enriched.verification_level = 0;
+          enriched.reputation_score = 0; enriched.tier = "Unverified"; enriched.isBorn = false;
         }
       } catch (e) {
         enriched.onchain = null;
-        enriched.trust_score = { source: 'error', message: e.message };
+        enriched.trust_score = { source: "error", message: e.message };
       }
-    }
-
-    // Set top-level level/score/tier from V3 data (authoritative)
-    if (enriched) {
-      const levelLabels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
-      const ts = enriched.trust_score || {};
-      const v3 = enriched.v3 || {};
-      let level = ts.verificationLevel ?? v3.verificationLevel ?? 0;
-      let score = ts.reputationScore ?? v3.reputationScore ?? 0;
-      let label = ts.verificationLabel || v3.verificationLabel || '';
-
-      enriched.level = level;
-      enriched.score = score;
-      enriched.levelName = label || levelLabels[level] || 'Unknown';
-      enriched.verificationLevel = level;
-      enriched.tier = label || levelLabels[level] || 'Unknown';
     }
     res.json(enriched);
   });
