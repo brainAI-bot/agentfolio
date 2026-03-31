@@ -2099,7 +2099,29 @@ app.get('/api/tokens/stats', (req, res) => {
 app.get('/api/verify/github/stats', async (req, res) => {
   const { username } = req.query;
   if (!username) return res.status(400).json({ error: 'username required' });
-  res.json({ username, repos: null, followers: null, contributions: null, verified: false });
+  try {
+    const ghResp = await fetch('https://api.github.com/users/' + encodeURIComponent(username), {
+      headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'AgentFolio/1.0' }
+    });
+    if (ghResp.ok) {
+      const user = await ghResp.json();
+      res.json({
+        username: user.login,
+        repos: user.public_repos || 0,
+        followers: user.followers || 0,
+        stars: 0, // Would need separate API call for stars
+        contributions: null,
+        verified: true,
+        avatar: user.avatar_url,
+        bio: user.bio,
+        profileUrl: user.html_url,
+      });
+    } else {
+      res.json({ username, repos: 0, followers: 0, contributions: null, verified: false, error: 'GitHub user not found' });
+    }
+  } catch (e) {
+    res.json({ username, repos: 0, followers: 0, contributions: null, verified: false, error: e.message });
+  }
 });
 
 // Dynamic SVG trust badge
