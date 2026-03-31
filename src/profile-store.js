@@ -900,52 +900,7 @@ function registerRoutes(app) {
       if (!record) {
         record = await satpV3.client.getGenesisRecord(rawId);
       }
-      // DB enrichment: if on-chain shows defaults, enrich from DB trust scores
-      if (record) {
-        try {
-          const rawId = req.params.id;
-          const d = getDb();
-          // Resolve profile ID
-          let dbRow = d.prepare('SELECT id FROM profiles WHERE id = ? OR LOWER(name) = LOWER(?)').get(rawId, rawId);
-          if (!dbRow && !rawId.startsWith('agent_')) {
-            dbRow = d.prepare('SELECT id FROM profiles WHERE id = ?').get('agent_' + rawId.toLowerCase());
-          }
-          if (dbRow) {
-            const trustRow = require('better-sqlite3')(require('path').join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true })
-              .prepare('SELECT overall_score, level, score_breakdown FROM satp_trust_scores WHERE agent_id = ?').get(dbRow.id);
-            if (trustRow && (record.verificationLevel === 0 || record.reputationScore === 500000)) {
-              const levelMap = { UNCLAIMED: 0, REGISTERED: 1, VERIFIED: 2, ESTABLISHED: 3, TRUSTED: 4, SOVEREIGN: 5 };
-              const levelLabels = ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'];
-              const numLevel = typeof trustRow.level === 'number' ? trustRow.level : (levelMap[String(trustRow.level).toUpperCase()] || 0);
-              record.verificationLevel = numLevel;
-              record.verificationLabel = levelLabels[numLevel] || 'Unclaimed';
-              record.reputationScore = trustRow.overall_score || record.reputationScore;
-              record._enrichedFromDB = true;
-            }
-          }
-        } catch (enrichErr) {
-          console.warn('[Genesis] DB enrichment failed:', enrichErr.message);
-        }
-        // Enrich face from DB nft_avatar if on-chain is empty
-        if (!record.faceImage || record.faceImage === '' || record.faceImage === null) {
-          try {
-            const d = getDb();
-            const rawId2 = req.params.id;
-            let profileId2 = rawId2;
-            if (!rawId2.startsWith('agent_')) profileId2 = 'agent_' + rawId2.toLowerCase();
-            const fRow = d.prepare('SELECT nft_avatar FROM profiles WHERE id = ? OR LOWER(name) = LOWER(?)').get(profileId2, rawId2);
-            if (fRow && fRow.nft_avatar) {
-              const nftData = JSON.parse(fRow.nft_avatar);
-              if (nftData.image) record.faceImage = nftData.image;
-              if (nftData.soulboundMint) record.faceMint = nftData.soulboundMint;
-              // HARD RULE: isBorn comes from on-chain ONLY — never from DB (CEO directive 2026-03-31)
-              if (nftData.burnedAt) record.bornAt = nftData.burnedAt;
-              if (nftData.burnTxSignature) record.faceBurnTx = nftData.burnTxSignature;
-              record._faceEnrichedFromDB = true;
-            }
-          } catch (e) {}
-        }
-      }
+      // ON-CHAIN = TRUTH: No DB enrichment. Chain data is authoritative. (CEO directive 2026-03-31)
       res.json({ genesis: record });
     } catch (e) {
       res.json({ genesis: null, error: e.message });
@@ -1087,37 +1042,37 @@ function registerRoutes(app) {
             }
           }
         }
-        // DB enrichment fallback for agents with chain defaults (level=0)
-        const levelMap = { 'NEW': 0, 'UNVERIFIED': 0, 'REGISTERED': 1, 'BASIC': 2, 'VERIFIED': 2, 'ESTABLISHED': 3, 'TRUSTED': 4, 'SOVEREIGN': 5 };
-        for (const p of profiles) {
-          if (!p.v3 || !p.v3.level) {
-            try {
-              const d = getDb();
-              let row = d.prepare('SELECT verification FROM profiles WHERE id = ?').get(p.id);
-              if (row && row.verification) {
-                const vData = typeof row.verification === 'string' ? JSON.parse(row.verification) : row.verification;
-                // level can be a string label ("SOVEREIGN") or number
-                const numLevel = typeof vData.level === 'number' ? vData.level : (levelMap[(vData.level || '').toUpperCase()] ?? 0);
-                const numScore = vData.score || vData.reputationScore || 0;
-                if (numLevel > 0 || numScore > 0) {
-                  const labels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
-                  p.v3 = {
-                    level: numLevel,
-                    score: numScore,
-                    reputationScore: numScore,
-                    reputationPct: (numScore / 100).toFixed(2),
-                    verificationLevel: numLevel,
-                    verificationLabel: labels[numLevel] || 'Unknown',
-                    isBorn: vData.isBorn || false,
-                  };
-                  if (numScore > (p.trust_score || 0)) {
-                    p.trust_score = numScore;
-                  }
-                }
-              }
-            } catch (_) {}
-          }
-        }
+        // REMOVED: // DB enrichment fallback for agents with chain defaults (level=0)
+        // REMOVED: const levelMap = { 'NEW': 0, 'UNVERIFIED': 0, 'REGISTERED': 1, 'BASIC': 2, 'VERIFIED': 2, 'ESTABLISHED': 3, 'TRUSTED': 4, 'SOVEREIGN': 5 };
+        // REMOVED: for (const p of profiles) {
+        // REMOVED: if (!p.v3 || !p.v3.level) {
+        // REMOVED: try {
+        // REMOVED: const d = getDb();
+        // REMOVED: let row = d.prepare('SELECT verification FROM profiles WHERE id = ?').get(p.id);
+        // REMOVED: if (row && row.verification) {
+        // REMOVED: const vData = typeof row.verification === 'string' ? JSON.parse(row.verification) : row.verification;
+        // REMOVED: // level can be a string label ("SOVEREIGN") or number
+        // REMOVED: const numLevel = typeof vData.level === 'number' ? vData.level : (levelMap[(vData.level || '').toUpperCase()] ?? 0);
+        // REMOVED: const numScore = vData.score || vData.reputationScore || 0;
+        // REMOVED: if (numLevel > 0 || numScore > 0) {
+        // REMOVED: const labels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
+        // REMOVED: p.v3 = {
+        // REMOVED: level: numLevel,
+        // REMOVED: score: numScore,
+        // REMOVED: reputationScore: numScore,
+        // REMOVED: reputationPct: (numScore / 100).toFixed(2),
+        // REMOVED: verificationLevel: numLevel,
+        // REMOVED: verificationLabel: labels[numLevel] || 'Unknown',
+        // REMOVED: isBorn: vData.isBorn || false,
+        // REMOVED: };
+        // REMOVED: if (numScore > (p.trust_score || 0)) {
+        // REMOVED: p.trust_score = numScore;
+        // REMOVED: }
+        // REMOVED: }
+        // REMOVED: }
+        // REMOVED: } catch (_) {}
+        // REMOVED: }
+        // REMOVED: }
         // Re-sort by trust_score DESC after V3 overlay (DB sort may be stale)
         profiles.sort((a, b) => (b.trust_score || 0) - (a.trust_score || 0));
       } catch (e) {
