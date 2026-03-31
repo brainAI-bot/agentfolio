@@ -567,7 +567,7 @@ function enrichProfile(row) {
       } catch (e) { /* chain-cache not available */ }
       return vMap;
     })(),
-    activity: activity.map(a => ({ ...a, detail: parseJsonField(a.detail) })),
+    activity: activity.map(a => ({ ...a, type: a.event_type, detail: parseJsonField(a.detail) })),
     reviews: {
       total: reviewStats.total,
       avg_rating: reviewStats.avg_rating,
