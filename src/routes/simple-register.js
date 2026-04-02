@@ -9,7 +9,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 const simpleLimiter = rateLimit({
-  validate: { xForwardedForHeader: false },
+  validate: false,
   windowMs: 60 * 60 * 1000,
   max: 10,
   standardHeaders: true,

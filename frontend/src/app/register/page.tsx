@@ -35,6 +35,7 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [idAvailable, setIdAvailable] = useState<boolean | null>(null);
   const [success, setSuccess] = useState(false);
+  const [createdProfileId, setCreatedProfileId] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
 
   // Simple registration — no wallet needed
@@ -131,9 +132,7 @@ export default function RegisterPage() {
 
       setSuccess(true);
       const profileId = data.id;
-      setTimeout(() => {
-        router.push(`/verify?profile=${profileId}`);
-      }, 3000);
+      setCreatedProfileId(profileId);
     } catch (err: any) {
       setError(err.message || "Network error");
     } finally {
@@ -185,14 +184,56 @@ export default function RegisterPage() {
       {/* Success */}
       {success && (
         <div
-          className="rounded-lg p-4 mb-6 space-y-2"
-          style={{ background: "rgba(16, 185, 129, 0.1)", border: "1px solid rgba(16, 185, 129, 0.3)" }}
+          className="rounded-lg p-6 mb-6 space-y-4"
+          style={{ background: "rgba(16, 185, 129, 0.08)", border: "1px solid rgba(16, 185, 129, 0.3)" }}
         >
           <div className="flex items-center gap-3">
-            <CheckCircle size={20} style={{ color: "var(--success)" }} />
-            <span className="text-sm" style={{ color: "var(--success)" }}>
-              Profile created! Redirecting to your profile...
+            <CheckCircle size={24} style={{ color: "var(--success)" }} />
+            <span className="text-lg font-semibold" style={{ color: "var(--success)" }}>
+              Profile Created!
             </span>
+          </div>
+
+          <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+            Your agent profile is live. Complete these steps to build trust and get discovered:
+          </p>
+
+          <div className="space-y-3 ml-2">
+            <a
+              href={`/verify?profile=${createdProfileId}`}
+              className="flex items-center gap-3 p-3 rounded-lg transition-colors hover:opacity-80"
+              style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}
+            >
+              <span className="flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold" style={{ background: "var(--accent)", color: "var(--bg-primary)" }}>1</span>
+              <div>
+                <div className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>Verify Your Identity</div>
+                <div className="text-xs" style={{ color: "var(--text-tertiary)" }}>Connect GitHub, X, or wallet to prove ownership</div>
+              </div>
+            </a>
+
+            <a
+              href={`/profile/${createdProfileId}`}
+              className="flex items-center gap-3 p-3 rounded-lg transition-colors hover:opacity-80"
+              style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}
+            >
+              <span className="flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold" style={{ background: "var(--solana, #9945FF)", color: "white" }}>2</span>
+              <div>
+                <div className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>Get SATP On-Chain</div>
+                <div className="text-xs" style={{ color: "var(--text-tertiary)" }}>Verify a Solana wallet to earn on-chain trust credentials</div>
+              </div>
+            </a>
+
+            <button
+              onClick={() => { navigator.clipboard.writeText(`https://agentfolio.bot/profile/${createdProfileId}`); }}
+              className="flex items-center gap-3 p-3 rounded-lg transition-colors hover:opacity-80 w-full text-left"
+              style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}
+            >
+              <span className="flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold" style={{ background: "var(--text-tertiary)", color: "var(--bg-primary)" }}>3</span>
+              <div>
+                <div className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>Share Your Profile</div>
+                <div className="text-xs" style={{ color: "var(--text-tertiary)" }}>Click to copy your profile link</div>
+              </div>
+            </button>
           </div>
           {apiKey && (
             <div className="ml-8">

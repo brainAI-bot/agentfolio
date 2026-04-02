@@ -22,7 +22,7 @@ const rateLimit = require('express-rate-limit');
 
 // Rate limiter for registration: 5 per hour per IP
 const registerLimiter = rateLimit({
-  validate: { xForwardedForHeader: false },
+  validate: false,
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 5,
   standardHeaders: true,
@@ -380,43 +380,7 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
       .catch(err => console.error(`[ProfileStore] Memo attestation failed for ${profileId}/${platform}:`, err.message));
   }
 
-  // Fire-and-forget: update V3 on-chain verification level
-  if (satpV3 && !userPaidGenesis) {
-    (async () => {
-      try {
-        // Check if Genesis Record exists first
-        const record = await satpV3.client.getGenesisRecord(profileId);
-        if (!record || record.error) {
-          console.log(`[SATP V3] No Genesis Record for ${profileId} — skipping verification update`);
-          return;
-        }
-
-        // Calculate new verification level based on platform count
-        const d = getDb();
-        const verifs = d.prepare('SELECT platform FROM verifications WHERE profile_id = ?').all(profileId);
-        const platforms = new Set(verifs.map(v => v.platform));
-        const HUMAN_PLATS = ['github', 'x', 'twitter'];
-        const hasHuman = [...platforms].some(p => HUMAN_PLATS.includes(p));
-        let newLevel = 0;
-        if (platforms.size >= 8 && hasHuman) newLevel = 5;
-        else if (platforms.size >= 8) newLevel = 4;
-        else if (platforms.size >= 5) newLevel = 3;
-        else if (platforms.size >= 3) newLevel = 2;
-        else if (platforms.size >= 1) newLevel = 1;
-
-        if (newLevel > record.verificationLevel) {
-          const { Keypair } = require('@solana/web3.js');
-          const signer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(require('fs').readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'))));
-          const { transaction } = await satpV3.client.buildUpdateVerification(signer.publicKey, profileId, newLevel);
-          transaction.sign(signer);
-          const sig = await satpV3.client.connection.sendRawTransaction(transaction.serialize());
-          console.log(`[SATP V3] Verification level updated to ${newLevel} for ${profileId}: tx=${sig}`);
-        }
-      } catch (err) {
-        console.error(`[SATP V3] Failed to update verification for ${profileId}:`, err.message);
-      }
-    })();
-  }
+  // [REMOVED] Duplicate V3 update block — handled by the unified V3 block above (verification + reputation + recompute)
 
   // Notify CMD Center of verification
   try {
@@ -533,27 +497,37 @@ function enrichProfile(row) {
     links: parseJsonField(row.links, {}),
     wallets: parseJsonField(row.wallets, {}),
     skills: parseJsonField(row.skills),
-    // [P0 FIX] verification_data derived from chain-cache, NOT from DB
+    // [P0 FIX v2] verification_data: chain-cache first, DB fallback for recent verifications
     verification_data: (() => {
       const vd = {};
+      // 1. Read DB verifications (always available immediately after verify)
+      let dbVerifs = {};
+      try {
+        const _d = getDb();
+        const _rows = _d.prepare('SELECT platform, identifier, verified_at FROM verifications WHERE profile_id = ?').all(row.id);
+        for (const _r of _rows) {
+          const plat = _r.platform === 'twitter' ? 'x' : _r.platform;
+          dbVerifs[plat] = { identifier: _r.identifier || '', verifiedAt: _r.verified_at || null };
+        }
+      } catch (__) {}
+      // 2. Read chain-cache attestations (authoritative when available)
       try {
         const _cc = require('./lib/chain-cache');
         const _atts = _cc.getVerifications(row.id);
-        // Read DB for display identifiers (read-only)
-        let _dbIds = {};
-        try {
-          const _d = getDb();
-          const _rows = _d.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(row.id);
-          for (const _r of _rows) { if (_r.identifier) _dbIds[_r.platform] = _r.identifier; }
-        } catch (__) {}
         for (const att of _atts) {
           if (!att.platform || att.platform === 'review') continue;
           const plat = att.platform === 'twitter' ? 'x' : att.platform;
           if (vd[plat]) continue;
-          const displayId = _dbIds[att.platform] || _dbIds[plat] || '';
+          const displayId = dbVerifs[plat]?.identifier || '';
           vd[plat] = { verified: true, address: displayId, identifier: displayId, linked: true, verifiedAt: att.timestamp || null, source: 'on-chain' };
         }
       } catch (_) {}
+      // 3. Fill in DB-only verifications not yet on-chain (recent verifications pre-attestation)
+      for (const [plat, info] of Object.entries(dbVerifs)) {
+        if (!vd[plat]) {
+          vd[plat] = { verified: true, address: info.identifier, identifier: info.identifier, linked: true, verifiedAt: info.verifiedAt, source: 'db' };
+        }
+      }
       return vd;
     })(),
     portfolio: parseJsonField(row.portfolio),
@@ -564,33 +538,48 @@ function enrichProfile(row) {
     endorsements: { items: endorsements, total: endorsements.length },
     verifications: (() => {
       const vMap = {};
-      // === Chain-cache attestations ONLY — ZERO DB reads ===
+      // 1. DB verifications (immediate persistence)
+      let dbVerifs = {};
+      try {
+        const d = getDb();
+        const rows = d.prepare('SELECT platform, identifier, verified_at FROM verifications WHERE profile_id = ?').all(row.id);
+        for (const r of rows) {
+          const plat = r.platform === 'twitter' ? 'x' : r.platform;
+          dbVerifs[plat] = { identifier: r.identifier || '', verifiedAt: r.verified_at || null, rawPlatform: r.platform };
+        }
+      } catch (_) {}
+      // 2. Chain-cache attestations (authoritative when available)
       try {
         const chainCache = require('./lib/chain-cache');
         const atts = chainCache.getVerifications(row.id);
-        // Read DB verifications for display identifiers (read-only, not trust-sensitive)
-        let dbIdentifiers = {};
-        try {
-          const d = getDb();
-          const rows = d.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(row.id);
-          for (const r of rows) { if (r.identifier) dbIdentifiers[r.platform] = r.identifier; }
-        } catch (_) {}
         for (const att of atts) {
           if (!att.platform || att.platform === 'review') continue;
           const platform = att.platform === 'twitter' ? 'x' : att.platform;
           if (vMap[platform]) continue;
-          const solscanUrl = att.solscanUrl || ('https://solscan.io/tx/' + att.txSignature);
-          const displayId = dbIdentifiers[att.platform] || dbIdentifiers[platform] || '';
+          const displayId = dbVerifs[platform]?.identifier || platform;
           vMap[platform] = {
             verified: true,
-            address: displayId || platform,
-            identifier: displayId || platform,
+            address: displayId,
+            identifier: displayId,
             proof: { txSignature: att.txSignature, timestamp: att.timestamp, url: 'https://solana.fm/tx/' + att.txSignature },
             verified_at: att.timestamp || null,
             source: 'on-chain',
           };
         }
       } catch (e) { /* chain-cache not available */ }
+      // 3. DB fallback for platforms not yet on-chain
+      for (const [plat, info] of Object.entries(dbVerifs)) {
+        if (!vMap[plat]) {
+          vMap[plat] = {
+            verified: true,
+            address: info.identifier || plat,
+            identifier: info.identifier || plat,
+            proof: {},
+            verified_at: info.verifiedAt || null,
+            source: 'db',
+          };
+        }
+      }
       return vMap;
     })(),
     activity: activity.map(a => ({ ...a, type: a.event_type, detail: parseJsonField(a.detail) })),
