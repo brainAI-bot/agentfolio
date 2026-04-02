@@ -19,6 +19,9 @@ const { registerSimpleRoutes } = require("./routes/simple-register");
 
 // Profile Store (SQLite-backed persistent profiles, endorsements, reviews)
 const profileStore = require('./profile-store');
+// Post-verification hook (on-chain attestation + score recompute)
+const { postVerificationHook } = require('./post-verification-hook');
+
 
 // Scoring module
 const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainData } = require('./scoring');
@@ -1496,6 +1499,7 @@ app.post('/api/verify/github/confirm', async (req, res) => {
     const proof = { gistUrl, gistOwner: gist.owner.login, verifiedAt: new Date().toISOString() };
     await verificationChallenges.completeChallenge(challengeId, proof);
     profileStore.addVerification(challenge.profileId, 'github', challenge.challengeData.identifier, proof);
+    postVerificationHook(challenge.profileId, 'github', challenge.challengeData.identifier, proof).catch(e => console.error('[PostVerify] github hook error:', e.message));
     res.json({ verified: true, platform: 'github', identifier: challenge.challengeData.identifier, proof: { challengeId, gistUrl } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1530,6 +1534,7 @@ app.post('/api/verify/x/confirm', async (req, res) => {
     const proof = { tweetUrl, tweetId, verifiedAt: new Date().toISOString() };
     await verificationChallenges.completeChallenge(challengeId, proof);
     profileStore.addVerification(challenge.profileId, 'x', handle, proof);
+    postVerificationHook(challenge.profileId, 'x', handle, proof).catch(e => console.error('[PostVerify] x hook error:', e.message));
     res.json({ verified: true, platform: 'x', identifier: handle, proof: { challengeId, tweetUrl } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1570,6 +1575,7 @@ app.post('/api/verify/solana/confirm', async (req, res) => {
     const proof = { challengeId, signature: signature.slice(0, 16) + '...', walletAddress, verifiedAt: new Date().toISOString() };
     await verificationChallenges.completeChallenge(challengeId, proof);
     profileStore.addVerification(challenge.profileId, 'solana', walletAddress, proof);
+    postVerificationHook(challenge.profileId, 'solana', walletAddress, proof).catch(e => console.error('[PostVerify] solana hook error:', e.message));
     res.json({ verified: true, platform: 'solana', identifier: walletAddress, proof: { challengeId, signature: signature.slice(0, 16) + '...' } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1598,6 +1604,8 @@ app.post('/api/verify/agentmail/confirm', async (req, res) => {
     if (!challenge) return res.status(404).json({ error: 'Challenge not found or expired' });
     if (code.toUpperCase() !== challenge.challengeData.code) return res.status(400).json({ error: 'Invalid verification code' });
     await verificationChallenges.completeChallenge(challengeId, { email: challenge.challengeData.identifier, verifiedAt: new Date().toISOString() });
+    profileStore.addVerification(challenge.profileId, 'agentmail', challenge.challengeData.identifier, { email: challenge.challengeData.identifier, verifiedAt: new Date().toISOString() });
+    postVerificationHook(challenge.profileId, 'agentmail', challenge.challengeData.identifier, { verifiedAt: new Date().toISOString() }).catch(e => console.error('[PostVerify] agentmail hook error:', e.message));
     res.json({ verified: true, platform: 'agentmail', identifier: challenge.challengeData.identifier, proof: { challengeId } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
