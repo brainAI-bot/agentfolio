@@ -796,17 +796,28 @@ const borshReader = require('./borsh-reader');
 // Fixed genesis deserializer — matches actual on-chain struct (no isActive field)
 function _deserializeGenesisFixed(data) {
   if (!data || data.length < 8) return null;
+  // Layout detection: try with isActive (V3 accounts), then without (V2 accounts)
+  const r1 = _parseGenesisLayout(data, true);
+  if (r1 && !r1.error && r1.verificationLevel <= 5 && r1.reputationScore < 100000000) return r1;
+  const r2 = _parseGenesisLayout(data, false);
+  if (r2 && !r2.error && r2.verificationLevel <= 5 && r2.reputationScore < 100000000) return r2;
+  return r1 || r2;
+}
+
+function _parseGenesisLayout(data, hasIsActive) {
   try {
     const { PublicKey } = require('@solana/web3.js');
     let offset = 8; // skip discriminator
     const agentIdHashBytes = data.slice(offset, offset + 32); offset += 32;
     const readString = () => {
       const len = data.readUInt32LE(offset); offset += 4;
+      if (len > 2000 || offset + len > data.length) throw new Error('bad string len');
       const str = data.slice(offset, offset + len).toString('utf8'); offset += len;
       return str;
     };
     const readVecString = () => {
       const count = data.readUInt32LE(offset); offset += 4;
+      if (count > 100) throw new Error('bad vec count');
       const arr = [];
       for (let i = 0; i < count; i++) arr.push(readString());
       return arr;
@@ -820,22 +831,31 @@ function _deserializeGenesisFixed(data) {
     const faceMint = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
     const faceBurnTx = readString();
     const genesisRecord = Number(data.readBigInt64LE(offset)); offset += 8;
-    // isActive field (bool) — V3 layout
-    const isActive = data[offset] === 1; offset += 1;
-    const authority = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
-    const hasPending = data[offset]; offset += 1;
-    let pendingAuthority = null;
-    if (hasPending === 1) {
-      pendingAuthority = new PublicKey(data.slice(offset, offset + 32)).toBase58();
-      offset += 32;
+    // isActive: only in V3 accounts (rewritten by admin_rewrite_account)
+    let isActive = true;
+    if (hasIsActive) {
+      isActive = data[offset] === 1; offset += 1;
     }
+    if (offset + 32 > data.length) throw new Error('overflow before authority');
+    const authority = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
+    let pendingAuthority = null;
+    if (offset < data.length) {
+      const hasPending = data[offset]; offset += 1;
+      if (hasPending === 1 && offset + 32 <= data.length) {
+        pendingAuthority = new PublicKey(data.slice(offset, offset + 32)).toBase58();
+        offset += 32;
+      }
+    }
+    if (offset + 8 > data.length) throw new Error('overflow before reputationScore');
     const reputationScore = Number(data.readBigUInt64LE(offset)); offset += 8;
+    if (offset >= data.length) throw new Error('overflow before verificationLevel');
     const verificationLevel = data[offset]; offset += 1;
-    const reputationUpdatedAt = Number(data.readBigInt64LE(offset)); offset += 8;
-    const verificationUpdatedAt = Number(data.readBigInt64LE(offset)); offset += 8;
-    const createdAt = Number(data.readBigInt64LE(offset)); offset += 8;
-    const updatedAt = Number(data.readBigInt64LE(offset)); offset += 8;
-    const bump = data[offset]; offset += 1;
+    let reputationUpdatedAt = 0, verificationUpdatedAt = 0, createdAt = 0, updatedAt = 0, bump = 0;
+    if (offset + 8 <= data.length) { reputationUpdatedAt = Number(data.readBigInt64LE(offset)); offset += 8; }
+    if (offset + 8 <= data.length) { verificationUpdatedAt = Number(data.readBigInt64LE(offset)); offset += 8; }
+    if (offset + 8 <= data.length) { createdAt = Number(data.readBigInt64LE(offset)); offset += 8; }
+    if (offset + 8 <= data.length) { updatedAt = Number(data.readBigInt64LE(offset)); offset += 8; }
+    if (offset < data.length) { bump = data[offset]; offset += 1; }
     return {
       agentIdHash: Array.from(agentIdHashBytes),
       agentName, description, category, capabilities, metadataUri, faceImage,
@@ -843,6 +863,7 @@ function _deserializeGenesisFixed(data) {
       faceBurnTx,
       genesisRecord,
       isBorn: genesisRecord > 0,
+      isActive,
       authority: authority.toBase58(),
       pendingAuthority,
       reputationScore,
@@ -855,7 +876,7 @@ function _deserializeGenesisFixed(data) {
       bump,
     };
   } catch (e) {
-    return { error: e.message, raw: data.toString('hex').slice(0, 200) };
+    return { error: e.message };
   }
 }
 

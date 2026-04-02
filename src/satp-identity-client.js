@@ -88,7 +88,7 @@ async function _loadAllAccounts(connection) {
   
   for (let i = 0; i < allProgIds.length; i++) {
     const progId = allProgIds[i];
-    if (i > 0) await new Promise(r => setTimeout(r, 5000)); // 5s delay between programs to avoid 429
+    if (i > 0) await new Promise(r => setTimeout(r, 10000)); // 10s delay between programs to avoid 429
     try {
       const accounts = await connection.getProgramAccounts(progId);
       for (const { pubkey, account } of accounts) {
@@ -166,7 +166,7 @@ setTimeout(() => {
   getAllIdentityAccounts(connection).catch(e => 
     console.error('[SATP Cache] Warmup error:', e.message)
   );
-}, 15000); // 15s startup delay to avoid RPC burst
+}, 30000); // 30s startup delay to avoid RPC burst
 
 // ─── PDA Derivation ──────────────────────────────────────
 

@@ -177,26 +177,30 @@ function registerGitHubImportRoutes(app, getDb) {
     try {
       const { username, wallet, signature, signedMessage, overrides } = req.body;
       if (!username) return res.status(400).json({ error: 'username required' });
-      if (!wallet) return res.status(400).json({ error: 'wallet required — connect your Solana wallet' });
-      if (!signature || !signedMessage) return res.status(400).json({ error: 'signature + signedMessage required for wallet proof' });
+      // Wallet is optional — allows programmatic import without wallet
+      // If wallet is provided, signature verification is required
 
       const ip = req.headers['x-forwarded-for'] || req.ip || 'unknown';
       if (!checkImportLimit(ip)) {
         return res.status(429).json({ error: 'Rate limit exceeded' });
       }
 
-      // Verify wallet signature
-      try {
-        const nacl = require('tweetnacl');
-        const bs58 = require('bs58');
-        const msgBytes = Buffer.from(signedMessage);
-        const sigBytes = Buffer.from(signature, 'base64');
-        const pubBytes = bs58.decode(wallet);
-        if (!nacl.sign.detached.verify(msgBytes, sigBytes, pubBytes)) {
-          return res.status(401).json({ error: 'Invalid wallet signature' });
+      // Verify wallet signature (only if wallet provided)
+      if (wallet && signature && signedMessage) {
+        try {
+          const nacl = require('tweetnacl');
+          const bs58 = require('bs58');
+          const msgBytes = Buffer.from(signedMessage);
+          const sigBytes = Buffer.from(signature, 'base64');
+          const pubBytes = bs58.decode(wallet);
+          if (!nacl.sign.detached.verify(msgBytes, sigBytes, pubBytes)) {
+            return res.status(401).json({ error: 'Invalid wallet signature' });
+          }
+        } catch (e) {
+          return res.status(401).json({ error: 'Signature verification failed' });
         }
-      } catch (e) {
-        return res.status(401).json({ error: 'Signature verification failed' });
+      } else if (wallet && (!signature || !signedMessage)) {
+        return res.status(400).json({ error: 'When wallet is provided, signature and signedMessage are required' });
       }
 
       // Fetch GitHub data
@@ -229,10 +233,7 @@ function registerGitHubImportRoutes(app, getDb) {
         description: bio,
         bio,
         avatar,
-        wallet,
-        wallets: { solana: wallet },
-        signature,
-        signedMessage,
+        ...(wallet ? { wallet, wallets: { solana: wallet }, signature, signedMessage } : {}),
         skills: skills.map(s => s.name),
         links: {
           github: `https://github.com/${profile.login}`,

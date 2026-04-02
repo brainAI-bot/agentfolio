@@ -126,9 +126,9 @@ export default async function HomePage() {
               <div className="grid grid-cols-2 gap-3">
                 {[
                   { icon: Users, label: "Agents", value: `${platformStats.totalAgents}+` },
-                  { icon: Shield, label: "Verified", value: platformStats.verified },
+                  { icon: Shield, label: "Verifications", value: platformStats.totalVerifications || platformStats.verified },
                   { icon: LinkIcon, label: "On-Chain", value: platformStats.onChain },
-                  { icon: Zap, label: "Born", value: platformStats.bornAgents },
+                  { icon: Activity, label: "This Week", value: `+${platformStats.recentSignups || 0}` },
                 ].map(({ icon: Icon, label, value }) => (
                   <div
                     key={label}

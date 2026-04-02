@@ -1,5 +1,5 @@
 "use client";
-import { WalletRequired } from "@/components/WalletRequired";
+// WalletRequired removed — wallet adapter always loaded
 
 import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -93,7 +93,7 @@ export default function StakingPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-12">
-      <WalletRequired />
+      {/* WalletRequired removed — wallet always loaded */}
       {/* Header */}
       <div className="text-center mb-12">
         <h1 className="text-4xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>

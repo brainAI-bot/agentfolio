@@ -54,7 +54,8 @@ if (typeof (globalThis as any).__v3WarmupDone === 'undefined') {
     const _initFiles = require('fs').readdirSync(PROFILES_DIR).filter((f: string) => f.endsWith('.json'));
     const _initIds = _initFiles.map((f: string) => f.replace('.json', ''));
     // Backend API is authoritative (reads from on-chain via v3-score-service)
-    fetch("http://localhost:3000/api/profiles").then(r => r.json()).then((profiles: any[]) => {
+    fetch("http://localhost:3333/api/profiles?limit=300").then(r => r.json()).then((data: any) => {
+      const profiles = Array.isArray(data) ? data : (data.profiles || []);
       const scoreMap = new Map();
       for (const p of profiles) {
         if (p.id && (p.score !== undefined)) {
@@ -258,7 +259,7 @@ function loadAllProfiles(): Agent[] {
       }
     }
     // Sort by trust score desc
-    agents.sort((a, b) => (b.verificationLevel ?? b.tier) - (a.verificationLevel ?? a.tier) || b.trustScore - a.trustScore);
+    agents.sort((a, b) => b.trustScore - a.trustScore); // CEO directive: sort by score only, not level-first
     // Filter out test profiles from public views
     const TEST_IDS = ["test_satp", "test-no-sig", "test-check-id", "ghosttest", "ghosttest3806"];
     const TEST_EXACT_NAMES = ["SmokeTest", "TestCLI", "CEOTestAgent", "test", "E2E-Test-Agent", "BrainForgeQA", "ghosttest", "ghost_test_3806"];
@@ -273,18 +274,16 @@ function loadAllProfiles(): Agent[] {
     // V3 batch fetch — warm cache for next mapProfile call
     const v3CacheAge = Date.now() - ((globalThis as any).__v3ScoresCacheTime || 0);
     if (v3CacheAge > 300000 || !(globalThis as any).__v3ScoresCache) {
-      const agentNames = rawProfiles.map(p => p.name || p.id);
-      // Build name→id map so we can key cache by DB id
-      const nameToId = new Map<string, string>();
-      rawProfiles.forEach(p => nameToId.set(p.name || p.id, p.id));
-      fetchV3Scores(agentNames).then(scores => {
-        // Re-key by DB id (profile lookup uses p.id)
-        const idScores = new Map();
-        scores.forEach((v, k) => idScores.set(nameToId.get(k) || k, v));
-        (globalThis as any).__v3ScoresCache = idScores;
+      // Use profile IDs (agent_xxx) for V3 PDA derivation — names like "Suppi" derive wrong PDAs
+      const agentIds = rawProfiles.map(p => p.id || p.name);
+      fetchV3Scores(agentIds).then(scores => {
+        // MERGE with existing cache (warm-up from /api/profiles has more data than 429-limited RPC)
+        const existing = (globalThis as any).__v3ScoresCache || new Map();
+        scores.forEach((v, k) => { if (v) existing.set(k, v); });
+        (globalThis as any).__v3ScoresCache = existing;
         (globalThis as any).__v3ScoresCacheTime = Date.now();
         _agentsCache = null; // Invalidate so next request uses V3 scores
-        console.log(`[V3] Cached ${idScores.size} on-chain scores (name→id mapped)`);
+        console.log(`[V3] Merged ${scores.size} on-chain scores into cache (${existing.size} total)`);
       }).catch(e => console.error("[V3] Batch fetch failed:", e.message));
     }
     
@@ -406,12 +405,28 @@ export function getStats() {
       if (val && (val as any).verified) verificationTypes.add(key);
     }
   }
+  // Count total individual verifications across all agents
+  let totalVerifications = 0;
+  for (const a of agents) {
+    for (const [key, val] of Object.entries(a.verifications)) {
+      if (val && (val as any).verified) totalVerifications++;
+    }
+  }
+  // Count recent signups (last 7 days)
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const recentSignups = agents.filter(a => {
+    const created = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    return created > sevenDaysAgo;
+  }).length;
+
   return {
     totalAgents: agents.length,
     totalSkills,
     verified,
     onChain,
     bornAgents,
+    totalVerifications,
+    recentSignups,
     verificationTypes: verificationTypes.size || 10, // fallback to known count
   };
 }

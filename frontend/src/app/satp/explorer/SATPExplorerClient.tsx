@@ -118,10 +118,16 @@ export default function SATPExplorerPage() {
             let reviewData: any = {};
 
             try {
+              // 5s timeout per request to prevent hanging on RPC 429s
+              const fetchWithTimeout = (url: string, ms = 5000) => {
+                const ctrl = new AbortController();
+                const timer = setTimeout(() => ctrl.abort(), ms);
+                return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer)).catch(() => null);
+              };
               const [scoresRes, repRes, revRes] = await Promise.all([
-                fetch(`/api/satp/scores/${wallet}`).catch(() => null),
-                fetch(`/api/satp/reputation/${wallet}`).catch(() => null),
-                fetch(`/api/satp/reviews/${wallet}`).catch(() => null),
+                fetchWithTimeout(`/api/satp/scores/${wallet}`),
+                fetchWithTimeout(`/api/satp/reputation/${wallet}`),
+                fetchWithTimeout(`/api/satp/reviews/${wallet}`),
               ]);
               if (scoresRes?.ok) scores = await scoresRes.json();
               if (repRes?.ok) reputation = await repRes.json();

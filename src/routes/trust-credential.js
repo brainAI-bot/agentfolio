@@ -167,13 +167,26 @@ function registerTrustCredentialRoutes(app) {
       try { const t = JSON.parse(profile.tags || '[]'); parsed.tags = Array.isArray(t) ? t : []; } catch (_) {}
       try { const s = JSON.parse(profile.skills || '[]'); parsed.skills = Array.isArray(s) ? s : []; } catch (_) {}
 
-      // 3. Compute trust score — prefer V3 on-chain Genesis Record, fallback to V2
+      // 3. Compute trust score — V3 on-chain > satp_trust_scores DB > V2 fallback
       const scoreResult = await computeScoreWithOnChain(parsed);
       let v3Data = null;
       try {
         v3Data = await getV3Score(agentId);
       } catch (e) {
         console.warn('[TrustCredential] V3 score fetch failed for', agentId, e.message);
+      }
+
+      // If no V3 on-chain record, check satp_trust_scores DB table
+      let dbTrustScore = null;
+      if (!v3Data) {
+        try {
+          const trustRow = db.prepare('SELECT overall_score, level FROM satp_trust_scores WHERE agent_id = ?').get(agentId);
+          if (trustRow && trustRow.overall_score > 0) {
+            dbTrustScore = { score: trustRow.overall_score, level: trustRow.level };
+          }
+        } catch (e) {
+          console.warn('[TrustCredential] DB trust score lookup failed:', e.message);
+        }
       }
 
       // 4. Build W3C Verifiable Credential payload
@@ -184,10 +197,10 @@ function registerTrustCredentialRoutes(app) {
         id: `did:agentfolio:${agentId}`,
         agentId,
         name: profile.name,
-        trustScore: v3Data ? v3Data.reputationScore : scoreResult.score,
-        maxScore: v3Data ? 800 : scoreResult.maxScore,
-        tier: v3Data ? v3Data.verificationLabel.toUpperCase() : (scoreResult.level || scoreTier(scoreResult.score)),
-        scoreVersion: v3Data ? 'v3' : 'v2',
+        trustScore: v3Data ? v3Data.reputationScore : dbTrustScore ? dbTrustScore.score : scoreResult.score,
+        maxScore: v3Data ? 800 : dbTrustScore ? 800 : scoreResult.maxScore,
+        tier: v3Data ? v3Data.verificationLabel.toUpperCase() : dbTrustScore ? dbTrustScore.level : (scoreResult.level || scoreTier(scoreResult.score)),
+        scoreVersion: v3Data ? 'v3' : dbTrustScore ? 'v3-db' : 'v2',
         verificationCount: (() => {
           // Merge DB verifications with chain-cache verifications for full count
           const dbCount = parsed.verifications.filter(v => v.verified !== false).length;
@@ -202,7 +215,7 @@ function registerTrustCredentialRoutes(app) {
             return Math.max(dbCount, allPlatforms.size);
           } catch { return dbCount; }
         })(),
-        onChainRegistered: v3Data ? true : (scoreResult.onChainRegistered || parsed.metadata?.registeredOnChain || parsed.verifications?.some(v => v.platform === 'satp' && v.verified) || false),
+        onChainRegistered: (v3Data || dbTrustScore) ? true : (scoreResult.onChainRegistered || parsed.metadata?.registeredOnChain || parsed.verifications?.some(v => v.platform === 'satp' && v.verified) || false),
         breakdown: (() => {
           // V3 scoring uses different category structure than V2
           const cats = scoreResult.breakdown?.trustScore?.categories || {};

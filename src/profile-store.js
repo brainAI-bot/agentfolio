@@ -18,6 +18,18 @@ const _bs58 = require('bs58');
 const bs58 = _bs58.default || _bs58;
 const path = require('path');
 const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
+
+// Rate limiter for registration: 5 per hour per IP
+const registerLimiter = rateLimit({
+  validate: { xForwardedForHeader: false },
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many registration attempts. Try again in 1 hour.' },
+  keyGenerator: (req) => req.ip || req.headers['x-forwarded-for'] || 'unknown',
+});
 const { sendWelcomeEmail } = require('./lib/welcome-email');
 
 // SATP on-chain identity registration (fire-and-forget on profile creation)
@@ -179,6 +191,10 @@ function initSchema() {
   // Store for use in queries
   module.exports._reviewFk = reviewFk;
 }
+
+// Review auth: challenge-response with wallet signing
+let _reviewChallenges = new Map(); // nonce -> { wallet, profileId, expiresAt }
+const REVIEW_CHALLENGE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 function genId(prefix = 'agent') {
   return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
@@ -598,7 +614,7 @@ function enrichProfile(row) {
 
 function registerRoutes(app) {
   // ── POST /api/register ──────────────────────────────────────────
-  app.post('/api/register', (req, res) => {
+  app.post('/api/register', registerLimiter, (req, res) => {
     const { name, handle, description, bio, avatar, website, framework, capabilities, tags, wallet, wallets, skills, links, twitter, github, email, signature, signedMessage, userPaidGenesis } = req.body;
     if (!name || typeof name !== 'string' || name.trim().length < 1) {
       return res.status(400).json({ error: 'name is required (non-empty string)' });
@@ -606,28 +622,27 @@ function registerRoutes(app) {
 
     // ── Server-side wallet signature verification (ed25519) ──────────
     const solWallet = (wallets && wallets.solana) || wallet || '';
-    if (!solWallet) {
-      return res.status(400).json({ error: 'wallet (Solana address) is required' });
-    }
-    if (!signature || !signedMessage) {
-      return res.status(400).json({ error: 'signature and signedMessage are required to prove wallet ownership' });
-    }
-    try {
-      const pubkeyBytes = bs58.decode(solWallet);
-      if (pubkeyBytes.length !== 32) throw new Error('invalid pubkey length');
-      // Signature can be base58 or base64
-      let sigBytes;
-      try { sigBytes = bs58.decode(signature); } catch (_) {
-        sigBytes = Buffer.from(signature, 'base64');
+    // Wallet is optional for programmatic registration (MCP/A2A)
+    // If wallet is provided, signature verification is required
+    if (solWallet && signature && signedMessage) {
+      try {
+        const pubkeyBytes = bs58.decode(solWallet);
+        if (pubkeyBytes.length !== 32) throw new Error('invalid pubkey length');
+        let sigBytes;
+        try { sigBytes = bs58.decode(signature); } catch (_) {
+          sigBytes = Buffer.from(signature, 'base64');
+        }
+        if (sigBytes.length !== 64) throw new Error('invalid signature length');
+        const msgBytes = new TextEncoder().encode(signedMessage);
+        const valid = nacl.sign.detached.verify(msgBytes, sigBytes, pubkeyBytes);
+        if (!valid) {
+          return res.status(401).json({ error: 'invalid wallet signature — proof of ownership failed' });
+        }
+      } catch (sigErr) {
+        return res.status(400).json({ error: `signature verification error: ${sigErr.message}` });
       }
-      if (sigBytes.length !== 64) throw new Error('invalid signature length');
-      const msgBytes = new TextEncoder().encode(signedMessage);
-      const valid = nacl.sign.detached.verify(msgBytes, sigBytes, pubkeyBytes);
-      if (!valid) {
-        return res.status(401).json({ error: 'invalid wallet signature — proof of ownership failed' });
-      }
-    } catch (sigErr) {
-      return res.status(400).json({ error: `signature verification error: ${sigErr.message}` });
+    } else if (solWallet && (!signature || !signedMessage)) {
+      return res.status(400).json({ error: 'When wallet is provided, signature and signedMessage are required' });
     }
 
     // Normalize frontend format → backend format
@@ -880,6 +895,9 @@ function registerRoutes(app) {
 
       res.status(201).json({
         id,
+        profileId: id,
+        profileUrl: `https://agentfolio.bot/profile/${id}`,
+        verifyUrl: `https://agentfolio.bot/verify/${id}`,
         api_key: apiKey,
         message: 'Profile registered successfully. Save your api_key — it authenticates write operations.',
         satp: solanaWallet ? 'On-chain identity creation initiated' : 'No wallet provided — on-chain identity skipped',
@@ -897,18 +915,30 @@ function registerRoutes(app) {
     try {
       const rawId = req.params.id;
       let record = null;
-      // For DB-style IDs (e.g. "agent_brainkid"), look up the profile NAME first
-      // The canonical Genesis Record PDA is derived from the agent's display name
-      if (rawId.startsWith('agent_')) {
+      // Try the raw ID directly (handles both "agent_brainkid" and display names)
+      record = await v3ScoreService.getV3Score(rawId);
+      // If not found and it's an agent_ ID, try looking up profile name
+      if (!record && rawId.startsWith('agent_')) {
         const d = getDb();
         const row = d.prepare('SELECT name FROM profiles WHERE id = ?').get(rawId);
         if (row && row.name) {
           record = await v3ScoreService.getV3Score(row.name);
         }
       }
-      // Fallback: try the raw ID directly
-      if (!record) {
-        record = await v3ScoreService.getV3Score(rawId);
+      // If not found and it looks like a display name, try agent_ + lowercase
+      if (!record && !rawId.startsWith('agent_')) {
+        const normalizedId = 'agent_' + rawId.toLowerCase().replace(/[^a-z0-9]/g, '');
+        record = await v3ScoreService.getV3Score(normalizedId);
+        // Also try DB lookup by name (case-insensitive)
+        if (!record) {
+          try {
+            const d = getDb();
+            const row = d.prepare('SELECT id FROM profiles WHERE LOWER(name) = LOWER(?)').get(rawId);
+            if (row && row.id) {
+              record = await v3ScoreService.getV3Score(row.id);
+            }
+          } catch {}
+        }
       }
       // ON-CHAIN = TRUTH: No DB enrichment. Chain data is authoritative. (CEO directive 2026-03-31)
       res.json({ genesis: record });
@@ -981,7 +1011,7 @@ function registerRoutes(app) {
   app.get('/api/profiles', async (req, res) => {
     const d = getDb();
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 20));
+    const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit) || 50));
     const offset = (page - 1) * limit;
     const status = req.query.status || 'active';
 
@@ -1151,9 +1181,32 @@ function registerRoutes(app) {
       p.score = v.reputationScore || v.score || cs || p.trust_score || 0;
       p.levelName = v.verificationLabel || levelLabels[p.level] || 'Unknown';
     }
+    // Sort parameter: trust_desc (default), trust_asc, name_asc, name_desc, newest, oldest
+    const sortParam = (req.query.sort || "trust_desc").toLowerCase();
+    switch (sortParam) {
+      case "trust_asc":
+        profiles.sort((a, b) => (a.trust_score || 0) - (b.trust_score || 0));
+        break;
+      case "name_asc":
+        profiles.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+        break;
+      case "name_desc":
+        profiles.sort((a, b) => (b.name || "").localeCompare(a.name || ""));
+        break;
+      case "newest":
+        profiles.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+        break;
+      case "oldest":
+        profiles.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+        break;
+      case "trust_desc":
+      default:
+        profiles.sort((a, b) => (b.trust_score || 0) - (a.trust_score || 0));
+        break;
+    }
 
     const paginatedProfiles = profiles.slice(offset, offset + limit);
-    res.json({ profiles: paginatedProfiles, total, page, limit, pages: Math.ceil(total / limit) });
+    res.json({ profiles: paginatedProfiles, total, page, limit, pages: Math.ceil(total / limit), sort: sortParam });
   });
 
   // ── GET /api/profile/:id ───────────────────────────────────────
@@ -1332,30 +1385,126 @@ function registerRoutes(app) {
     res.json({ endorsements: items, total: items.length });
   });
 
-  // ── POST /api/profile/:id/reviews ──────────────────────────────
-  app.post('/api/profile/:id/reviews', (req, res) => {
-    const { reviewer_id, reviewer_name, rating, title, comment, job_id } = req.body;
-    if (!reviewer_id || !rating) return res.status(400).json({ error: 'reviewer_id and rating (1-5) are required' });
-    const r = parseInt(rating);
-    if (r < 1 || r > 5) return res.status(400).json({ error: 'rating must be 1-5' });
+  // ── POST /api/profile/:id/reviews/challenge — Get signing challenge ──
+  app.post('/api/profile/:id/reviews/challenge', (req, res) => {
+    const { wallet } = req.body;
+    if (!wallet) return res.status(400).json({ error: 'wallet (Solana address) required' });
 
     const d = getDb();
     const profile = d.prepare('SELECT id FROM profiles WHERE id = ?').get(req.params.id);
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+    // Generate challenge
+    const nonce = crypto.randomBytes(32).toString('hex');
+    const message = `AgentFolio Review Challenge\nProfile: ${req.params.id}\nWallet: ${wallet}\nNonce: ${nonce}\nTimestamp: ${new Date().toISOString()}`;
+
+    _reviewChallenges.set(nonce, {
+      wallet,
+      profileId: req.params.id,
+      expiresAt: Date.now() + REVIEW_CHALLENGE_TTL_MS,
+    });
+
+    // Cleanup expired challenges
+    for (const [k, v] of _reviewChallenges) {
+      if (v.expiresAt < Date.now()) _reviewChallenges.delete(k);
+    }
+
+    res.json({ nonce, message, expiresIn: REVIEW_CHALLENGE_TTL_MS / 1000 });
+  });
+
+  // ── POST /api/profile/:id/reviews — Submit review (AUTHENTICATED) ──
+  app.post('/api/profile/:id/reviews', (req, res) => {
+    const { wallet, signature, nonce, rating, title, comment, job_id } = req.body;
+
+    // Require wallet auth
+    if (!wallet || !signature || !nonce) {
+      return res.status(401).json({
+        error: 'Authentication required. Call POST /api/profile/:id/reviews/challenge first, then sign the message.',
+        required: ['wallet', 'signature', 'nonce', 'rating'],
+      });
+    }
+    if (!rating) return res.status(400).json({ error: 'rating (1-5) is required' });
+    const r = parseInt(rating);
+    if (r < 1 || r > 5) return res.status(400).json({ error: 'rating must be 1-5' });
+
+    // Verify challenge
+    const challenge = _reviewChallenges.get(nonce);
+    if (!challenge) return res.status(401).json({ error: 'Invalid or expired challenge nonce' });
+    if (challenge.expiresAt < Date.now()) {
+      _reviewChallenges.delete(nonce);
+      return res.status(401).json({ error: 'Challenge expired' });
+    }
+    if (challenge.wallet !== wallet || challenge.profileId !== req.params.id) {
+      return res.status(401).json({ error: 'Challenge mismatch (wallet or profileId)' });
+    }
+    _reviewChallenges.delete(nonce); // One-time use
+
+    // Verify Solana signature
+    try {
+      const { PublicKey } = require('@solana/web3.js');
+      const nacl = require('tweetnacl');
+      const bs58 = require('bs58');
+
+      const expectedMessage = `AgentFolio Review Challenge\nProfile: ${req.params.id}\nWallet: ${wallet}\nNonce: ${nonce}\nTimestamp: ${challenge.issuedAt || ''}`;
+      // Reconstruct the message that was signed
+      const challengeMsg = _reviewChallenges._lastMessage || `AgentFolio Review Challenge\nProfile: ${req.params.id}\nWallet: ${wallet}\nNonce: ${nonce}`;
+
+      const pubkey = new PublicKey(wallet);
+      const sigBytes = bs58.decode(signature);
+      // Try to verify with the challenge message stored format
+      const msgBytes = new TextEncoder().encode(`AgentFolio Review Challenge\nProfile: ${req.params.id}\nWallet: ${wallet}\nNonce: ${nonce}`);
+
+      // Note: Full ed25519 verification. If tweetnacl not available, fall back to challenge-only auth.
+      let sigValid = false;
+      try {
+        sigValid = nacl.sign.detached.verify(msgBytes, sigBytes, pubkey.toBytes());
+      } catch (sigErr) {
+        console.error('[Reviews Auth] Signature verification failed:', sigErr.message);
+        sigValid = false; // Reject invalid signatures — no fallback
+      }
+
+      if (!sigValid) {
+        return res.status(401).json({ error: 'Invalid signature' });
+      }
+    } catch (authErr) {
+      console.error('[Reviews Auth] Auth error:', authErr.message);
+      return res.status(401).json({ error: 'Authentication failed: ' + authErr.message });
+    }
+
+    // Resolve reviewer profile from wallet
+    const d = getDb();
+    const profile = d.prepare('SELECT id FROM profiles WHERE id = ?').get(req.params.id);
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+    // Find reviewer's profile by wallet
+    let reviewer_id = null;
+    let reviewer_name = wallet.slice(0, 8) + '...' + wallet.slice(-4);
+    try {
+      const allProfiles = d.prepare('SELECT id, name, wallets FROM profiles').all();
+      for (const p of allProfiles) {
+        try {
+          const w = JSON.parse(p.wallets || '{}');
+          if (w.solana === wallet) {
+            reviewer_id = p.id;
+            reviewer_name = p.name || reviewer_id;
+            break;
+          }
+        } catch {}
+      }
+    } catch {}
+    if (!reviewer_id) reviewer_id = 'wallet_' + wallet.slice(0, 12);
+
     if (reviewer_id === req.params.id) return res.status(400).json({ error: 'Cannot self-review' });
 
     const id = genId('rev');
+    const rfk = module.exports._reviewFk || 'reviewee_id';
     d.prepare(`
-      INSERT INTO reviews (id, profile_id, reviewer_id, reviewer_name, rating, title, comment, job_id)
+      INSERT INTO reviews (id, ${rfk}, reviewer_id, reviewer_name, rating, title, comment, job_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, req.params.id, reviewer_id, reviewer_name || '', r, title || '', comment || '', job_id || '');
     addActivity(req.params.id, 'review', { reviewer_id, reviewer_name, rating: r, title });
 
-      // Fire-and-forget: send welcome email if agent provided an email
-      if (resolvedEmail) {
-        sendWelcomeEmail(resolvedEmail, { id, name: name.trim(), handle: h });
-      }
-    res.status(201).json({ id, rating: r, title: title || '', comment: comment || '', reviewer_id, reviewer_name: reviewer_name || '', job_id: job_id || '', message: 'Review added' });
+    res.status(201).json({ id, rating: r, title: title || '', comment: comment || '', reviewer_id, reviewer_name, job_id: job_id || '', authenticated: true, message: 'Review added (wallet-authenticated)' });
   });
 
   // ── GET /api/profile/:id/reviews ───────────────────────────────

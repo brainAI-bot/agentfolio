@@ -1,15 +1,11 @@
 /**
- * SATP On-Chain Reviews Reader (v2)
+ * SATP On-Chain Reviews Reader (v2) — with RPC cache + dedup + retry
  * Reads review data directly from the satp_reviews program on Solana mainnet.
- * Uses real IDL discriminators and struct layouts from brainChain's deployed program.
  * 
  * Program: 8b2jb9U9whNjRWrCbBVR26AqhkPzXZL3yjBuAzauPYBy
  * 
- * ReviewAccount layout (v2):
- *   reviewer_did(32) + reviewed_did(32) + escrow_ref(32) + rating(1) +
- *   category_quality(1) + category_reliability(1) + category_communication(1) +
- *   reviewer_rep_weight(8) + comment_uri(4+N) + comment_hash(32) + timestamp(8) +
- *   has_response(1) + response_uri(4+N) + response_hash(32) + response_timestamp(8) + bump(1)
+ * OPTIMIZATION (2026-04-02): Single bulk getProgramAccounts for ALL reviews,
+ * cached for 30min. Per-agent queries served from memory. Eliminates per-agent RPC calls.
  */
 
 const { Connection, PublicKey } = require('@solana/web3.js');
@@ -18,9 +14,112 @@ const REVIEWS_PROGRAM = new PublicKey('8b2jb9U9whNjRWrCbBVR26AqhkPzXZL3yjBuAzauP
 const REPUTATION_PROGRAM = new PublicKey('TQ4P9R2Y5FRyw1TZfwoWQ2Mf6XeohbGdhYNcDxh6YYh');
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 
-// Anchor discriminators from IDL
-const REVIEW_DISCRIMINATOR = Buffer.from([119, 177, 213, 232, 143, 161, 255, 66]);
-const REPUTATION_DISCRIMINATOR = Buffer.from([19, 185, 177, 157, 34, 87, 67, 233]);
+// ─── Shared connection ──────────────
+const connection = new Connection(RPC_URL, 'confirmed');
+
+// ─── BULK CACHE: single getProgramAccounts for ALL reviews ──────────────
+const _bulkCache = {
+  allReviews: [],           // All parsed reviews
+  byReviewed: new Map(),    // reviewedDid -> [reviews]
+  byReviewer: new Map(),    // reviewerDid -> [reviews]
+  lastFetch: 0,
+  loading: null,            // Promise (dedup concurrent loads)
+};
+const BULK_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes — reviews change very rarely
+
+// Reputation cache (individual lookups, longer TTL)
+const _repCache = new Map(); // key -> { data, expires }
+const REP_CACHE_TTL_MS = 30 * 60 * 1000;
+
+// ─── Retry with exponential backoff on 429 ──────────────
+async function withRetry(fn, maxRetries = 3) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const is429 = err.message && err.message.includes('429');
+      if (is429 && attempt < maxRetries) {
+        const delay = Math.min(1000 * Math.pow(2, attempt) + Math.random() * 500, 8000);
+        console.log(`[SATP Reviews] 429 hit, retry ${attempt + 1}/${maxRetries} in ${Math.round(delay)}ms`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+/**
+ * Load ALL reviews from chain in a single bulk call, then index by agent.
+ * Deduplicates concurrent calls (thundering herd protection).
+ */
+async function ensureBulkCache() {
+  const now = Date.now();
+  if (_bulkCache.lastFetch && (now - _bulkCache.lastFetch) < BULK_CACHE_TTL_MS) {
+    return; // Cache is fresh
+  }
+
+  // Dedup: if already loading, wait for that promise
+  if (_bulkCache.loading) {
+    await _bulkCache.loading;
+    return;
+  }
+
+  _bulkCache.loading = _loadBulkReviews();
+  try {
+    await _bulkCache.loading;
+  } finally {
+    _bulkCache.loading = null;
+  }
+}
+
+async function _loadBulkReviews() {
+  try {
+    const accounts = await withRetry(() =>
+      connection.getProgramAccounts(REVIEWS_PROGRAM)
+    );
+
+    const allReviews = [];
+    const byReviewed = new Map();
+    const byReviewer = new Map();
+
+    for (const { pubkey, account } of accounts) {
+      const review = parseReviewAccount(account.data);
+      if (!review) continue;
+      review.pda = pubkey.toBase58();
+      allReviews.push(review);
+
+      // Index by reviewed agent
+      if (!byReviewed.has(review.reviewedDid)) byReviewed.set(review.reviewedDid, []);
+      byReviewed.get(review.reviewedDid).push(review);
+
+      // Index by reviewer
+      if (!byReviewer.has(review.reviewerDid)) byReviewer.set(review.reviewerDid, []);
+      byReviewer.get(review.reviewerDid).push(review);
+    }
+
+    // Sort each list by timestamp desc
+    allReviews.sort((a, b) => b.timestamp - a.timestamp);
+    for (const list of byReviewed.values()) list.sort((a, b) => b.timestamp - a.timestamp);
+    for (const list of byReviewer.values()) list.sort((a, b) => b.timestamp - a.timestamp);
+
+    _bulkCache.allReviews = allReviews;
+    _bulkCache.byReviewed = byReviewed;
+    _bulkCache.byReviewer = byReviewer;
+    _bulkCache.lastFetch = Date.now();
+
+    console.log(`[SATP Reviews] Bulk cache loaded: ${allReviews.length} reviews, ${byReviewed.size} agents reviewed, ${byReviewer.size} reviewers`);
+  } catch (err) {
+    // If bulk load fails and we have stale data, keep serving it
+    if (_bulkCache.allReviews.length > 0) {
+      console.warn(`[SATP Reviews] Bulk refresh failed (serving stale ${_bulkCache.allReviews.length} reviews):`, err.message);
+      _bulkCache.lastFetch = Date.now() - BULK_CACHE_TTL_MS + 5 * 60 * 1000; // Retry in 5min
+    } else {
+      console.error('[SATP Reviews] Bulk load failed with no fallback:', err.message);
+      throw err;
+    }
+  }
+}
 
 /**
  * Parse a ReviewAccount from raw account data
@@ -29,14 +128,12 @@ function parseReviewAccount(data) {
   if (!data || data.length < 80) return null;
   
   try {
-    let offset = 8; // skip Anchor discriminator
+    let offset = 8;
     
     const reviewerDid = new PublicKey(data.slice(offset, offset + 32)).toBase58();
     offset += 32;
-    
     const reviewedDid = new PublicKey(data.slice(offset, offset + 32)).toBase58();
     offset += 32;
-    
     const escrowRef = new PublicKey(data.slice(offset, offset + 32)).toBase58();
     offset += 32;
     
@@ -48,39 +145,31 @@ function parseReviewAccount(data) {
     const reviewerRepWeight = Number(data.readBigUInt64LE(offset));
     offset += 8;
     
-    // comment_uri: borsh string (u32 len + bytes)
     const commentUriLen = data.readUInt32LE(offset); offset += 4;
     const commentUri = commentUriLen > 0 && commentUriLen < 500
       ? data.slice(offset, offset + commentUriLen).toString('utf8') : '';
     offset += commentUriLen;
     
-    // comment_hash: [u8; 32]
     const commentHash = data.slice(offset, offset + 32).toString('hex');
     offset += 32;
     
-    // timestamp: i64
     const timestamp = Number(data.readBigInt64LE(offset));
     offset += 8;
     
-    // has_response: bool
     const hasResponse = data.readUInt8(offset) === 1;
     offset += 1;
     
-    // response_uri: borsh string
     const responseUriLen = data.readUInt32LE(offset); offset += 4;
     const responseUri = responseUriLen > 0 && responseUriLen < 500
       ? data.slice(offset, offset + responseUriLen).toString('utf8') : '';
     offset += responseUriLen;
     
-    // response_hash: [u8; 32]
     const responseHash = data.slice(offset, offset + 32).toString('hex');
     offset += 32;
     
-    // response_timestamp: i64
     const responseTimestamp = Number(data.readBigInt64LE(offset));
     offset += 8;
     
-    // bump: u8
     const bump = data.readUInt8(offset);
     
     return {
@@ -120,11 +209,10 @@ function parseReputationAccount(data) {
   if (!data || data.length < 80) return null;
   
   try {
-    let offset = 8; // discriminator
+    let offset = 8;
     
     const owner = new PublicKey(data.slice(offset, offset + 32)).toBase58();
     offset += 32;
-    
     const score = Number(data.readBigUInt64LE(offset)); offset += 8;
     const endorsements = data.readUInt32LE(offset); offset += 4;
     const lastEndorser = new PublicKey(data.slice(offset, offset + 32)).toBase58();
@@ -135,14 +223,13 @@ function parseReputationAccount(data) {
     const weightedRatingSum = Number(data.readBigUInt64LE(offset)); offset += 8;
     const totalWeight = Number(data.readBigUInt64LE(offset)); offset += 8;
     
-    // Compute human-readable score
     const avgRating = totalReviews > 0 ? (totalRatingSum / totalReviews) : 0;
     const weightedAvg = totalWeight > 0 ? (weightedRatingSum / totalWeight) : 0;
     
     return {
       owner,
       score,
-      scoreNormalized: score / 10000, // 0-100 scale
+      scoreNormalized: score / 10000,
       endorsements,
       lastEndorser,
       updatedAt: new Date(updatedAt * 1000).toISOString(),
@@ -161,71 +248,31 @@ function parseReputationAccount(data) {
 
 /**
  * Get all on-chain reviews for an agent (by reviewed_did wallet)
+ * NOW: Served from bulk cache — zero per-agent RPC calls
  */
 async function getReviewsForAgent(walletPubkey) {
-  const connection = new Connection(RPC_URL, 'confirmed');
-  const wallet = new PublicKey(walletPubkey);
-  
-  // Filter reviews by reviewed_did at offset 8 (disc) + 32 (reviewer_did) = 40
-  const accounts = await connection.getProgramAccounts(REVIEWS_PROGRAM, {
-    filters: [
-      { memcmp: { offset: 40, bytes: wallet.toBase58() } },
-    ],
-  });
-  
-  return accounts
-    .map(({ pubkey, account }) => {
-      const review = parseReviewAccount(account.data);
-      if (review) review.pda = pubkey.toBase58();
-      return review;
-    })
-    .filter(Boolean)
-    .sort((a, b) => b.timestamp - a.timestamp);
+  await ensureBulkCache();
+  return _bulkCache.byReviewed.get(walletPubkey) || [];
 }
 
 /**
  * Get all on-chain reviews BY an agent (as reviewer)
+ * NOW: Served from bulk cache — zero per-agent RPC calls
  */
 async function getReviewsByAgent(walletPubkey) {
-  const connection = new Connection(RPC_URL, 'confirmed');
-  const wallet = new PublicKey(walletPubkey);
-  
-  // Filter by reviewer_did at offset 8
-  const accounts = await connection.getProgramAccounts(REVIEWS_PROGRAM, {
-    filters: [
-      { memcmp: { offset: 8, bytes: wallet.toBase58() } },
-    ],
-  });
-  
-  return accounts
-    .map(({ pubkey, account }) => {
-      const review = parseReviewAccount(account.data);
-      if (review) review.pda = pubkey.toBase58();
-      return review;
-    })
-    .filter(Boolean)
-    .sort((a, b) => b.timestamp - a.timestamp);
+  await ensureBulkCache();
+  return _bulkCache.byReviewer.get(walletPubkey) || [];
 }
 
 /**
  * Get all reviews in the system (paginated)
+ * NOW: Served from bulk cache
  */
 async function getAllReviews(limit = 50, offset = 0) {
-  const connection = new Connection(RPC_URL, 'confirmed');
-  const accounts = await connection.getProgramAccounts(REVIEWS_PROGRAM);
-  
-  const reviews = accounts
-    .map(({ pubkey, account }) => {
-      const review = parseReviewAccount(account.data);
-      if (review) review.pda = pubkey.toBase58();
-      return review;
-    })
-    .filter(Boolean)
-    .sort((a, b) => b.timestamp - a.timestamp);
-  
+  await ensureBulkCache();
   return {
-    reviews: reviews.slice(offset, offset + limit),
-    total: reviews.length,
+    reviews: _bulkCache.allReviews.slice(offset, offset + limit),
+    total: _bulkCache.allReviews.length,
     limit,
     offset,
   };
@@ -235,20 +282,32 @@ async function getAllReviews(limit = 50, offset = 0) {
  * Get on-chain reputation account for a wallet
  */
 async function getReputation(walletPubkey) {
-  const connection = new Connection(RPC_URL, 'confirmed');
-  const wallet = new PublicKey(walletPubkey);
-  
-  const [repPDA] = PublicKey.findProgramAddressSync(
-    [Buffer.from('reputation'), wallet.toBuffer()],
-    REPUTATION_PROGRAM
-  );
-  
-  const acct = await connection.getAccountInfo(repPDA);
-  if (!acct) return null;
-  
-  const rep = parseReputationAccount(acct.data);
-  if (rep) rep.pda = repPDA.toBase58();
-  return rep;
+  const cacheKey = `reputation:${walletPubkey}`;
+  const cached = _repCache.get(cacheKey);
+  if (cached && Date.now() < cached.expires) return cached.data;
+
+  try {
+    const wallet = new PublicKey(walletPubkey);
+    const [repPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('reputation'), wallet.toBuffer()],
+      REPUTATION_PROGRAM
+    );
+    
+    const acct = await withRetry(() => connection.getAccountInfo(repPDA));
+    if (!acct) {
+      _repCache.set(cacheKey, { data: null, expires: Date.now() + REP_CACHE_TTL_MS });
+      return null;
+    }
+    
+    const rep = parseReputationAccount(acct.data);
+    if (rep) rep.pda = repPDA.toBase58();
+    _repCache.set(cacheKey, { data: rep, expires: Date.now() + REP_CACHE_TTL_MS });
+    return rep;
+  } catch (err) {
+    // Return stale cache on error
+    if (cached) return cached.data;
+    throw err;
+  }
 }
 
 /**
