@@ -1,5 +1,5 @@
 "use client";
-import { WalletRequired } from "@/components/WalletRequired";
+// WalletRequired removed — wallet adapter always loaded
 
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
@@ -146,7 +146,7 @@ export default function EditProfilePage({ params }: { params: Promise<{ id: stri
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-      <WalletRequired />
+      {/* WalletRequired removed — wallet always loaded */}
         <Loader2 className="w-6 h-6 animate-spin" style={{ color: "var(--accent)" }} />
       </div>
     );

@@ -13,7 +13,6 @@ function truncateAddress(addr: string) {
 
 export function NavbarWalletButtonActive({ onProfileId }: { onProfileId?: (id: string | null) => void }) {
   const wallet = useWallet();
-  const { setVisible } = useWalletModal();
   const { smartConnect } = useSmartConnect();
   const { isDemo, demoPublicKey } = useDemoMode();
   const connected = isDemo ? true : wallet.connected;
@@ -30,13 +29,6 @@ export function NavbarWalletButtonActive({ onProfileId }: { onProfileId?: (id: s
       .then(d => onProfileId?.(d?.profile?.id || null))
       .catch(() => onProfileId?.(null));
   }, [publicKey, onProfileId]);
-
-  // Auto-open wallet modal on first load (user just clicked "Connect Wallet")
-  useEffect(() => {
-    if (!connected && !isDemo) {
-      smartConnect();
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (connected && publicKey) {
     return (

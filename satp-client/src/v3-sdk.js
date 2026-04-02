@@ -1572,8 +1572,25 @@ class SATPV3SDK {
     const acct = await this.connection.getAccountInfo(pda);
     if (!acct) return null;
 
+    // Try both layouts: with isActive (V3 accounts rewritten by admin_rewrite_account)
+    // and without isActive (original V2 accounts). Validate by checking score/level sanity.
+    const r1 = this._parseGenesisLayout(acct.data, pda, true);
+    if (r1 && !r1.error && r1.verificationLevel <= 5 && r1.reputationScore < 100000000) return r1;
+    const r2 = this._parseGenesisLayout(acct.data, pda, false);
+    if (r2 && !r2.error && r2.verificationLevel <= 5 && r2.reputationScore < 100000000) return r2;
+    return r1 || r2; // best effort
+  }
+
+  /**
+   * Parse Genesis Record with explicit layout flag.
+   * @param {Buffer} rawData - Account data (including discriminator)
+   * @param {PublicKey} pda
+   * @param {boolean} hasIsActive - Whether the account has the isActive bool field
+   * @returns {object|null}
+   */
+  _parseGenesisLayout(rawData, pda, hasIsActive) {
     try {
-      const data = acct.data.slice(8); // skip Anchor discriminator
+      const data = rawData.slice(8); // skip Anchor discriminator
       let offset = 0;
 
       const agentIdHash = data.slice(offset, offset + 32); offset += 32;
@@ -1581,12 +1598,14 @@ class SATPV3SDK {
       // Read strings
       const readString = () => {
         const len = data.readUInt32LE(offset); offset += 4;
+        if (len > 2000 || offset + len > data.length) throw new Error('bad string len');
         const str = data.slice(offset, offset + len).toString('utf8'); offset += len;
         return str;
       };
 
       const readVecString = () => {
         const count = data.readUInt32LE(offset); offset += 4;
+        if (count > 100) throw new Error('bad vec count');
         const arr = [];
         for (let i = 0; i < count; i++) arr.push(readString());
         return arr;
@@ -1601,29 +1620,43 @@ class SATPV3SDK {
       const faceMint = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
       const faceBurnTx = readString();
       const genesisRecord = Number(data.readBigInt64LE(offset)); offset += 8;
+
+      // Layout detection: V3 accounts have isActive bool here, V2 accounts skip straight to authority
+      let isActive = true;
+      if (hasIsActive) {
+        isActive = data[offset] === 1;
+        offset += 1;
+      }
+
+      if (offset + 32 > data.length) throw new Error('overflow before authority');
       const authority = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
 
       // Option<Pubkey> — Borsh: 0x00 = None (1 byte), 0x01 + 32 bytes = Some
-      const hasPending = data[offset] === 1; offset += 1;
       let pendingAuthority = null;
-      if (hasPending) {
-        pendingAuthority = new PublicKey(data.slice(offset, offset + 32)).toBase58();
-        offset += 32;
+      if (offset < data.length) {
+        const hasPending = data[offset] === 1; offset += 1;
+        if (hasPending && offset + 32 <= data.length) {
+          pendingAuthority = new PublicKey(data.slice(offset, offset + 32)).toBase58();
+          offset += 32;
+        }
       }
 
+      if (offset + 8 > data.length) throw new Error('overflow before reputationScore');
       const reputationScore = Number(data.readBigUInt64LE(offset)); offset += 8;
+      if (offset >= data.length) throw new Error('overflow before verificationLevel');
       const verificationLevel = data[offset]; offset += 1;
-      const reputationUpdatedAt = Number(data.readBigInt64LE(offset)); offset += 8;
-      const verificationUpdatedAt = Number(data.readBigInt64LE(offset)); offset += 8;
-      const createdAt = Number(data.readBigInt64LE(offset)); offset += 8;
-      const updatedAt = Number(data.readBigInt64LE(offset)); offset += 8;
-      const bump = data[offset]; offset += 1;
+
+      let reputationUpdatedAt = 0, verificationUpdatedAt = 0, createdAt = 0, updatedAt = 0, bump = 0;
+      if (offset + 8 <= data.length) { reputationUpdatedAt = Number(data.readBigInt64LE(offset)); offset += 8; }
+      if (offset + 8 <= data.length) { verificationUpdatedAt = Number(data.readBigInt64LE(offset)); offset += 8; }
+      if (offset + 8 <= data.length) { createdAt = Number(data.readBigInt64LE(offset)); offset += 8; }
+      if (offset + 8 <= data.length) { updatedAt = Number(data.readBigInt64LE(offset)); offset += 8; }
+      if (offset < data.length) { bump = data[offset]; offset += 1; }
 
       const isBorn = genesisRecord !== 0;
 
       return {
         pda: pda.toBase58(),
-        
         agentIdHash: Buffer.from(agentIdHash).toString('hex'),
         agentName,
         description,
@@ -1635,6 +1668,7 @@ class SATPV3SDK {
         faceBurnTx: faceBurnTx || null,
         genesisRecord,
         isBorn,
+        isActive,
         authority: authority.toBase58(),
         pendingAuthority,
         reputationScore,
@@ -1646,7 +1680,7 @@ class SATPV3SDK {
         bump,
       };
     } catch (e) {
-      return { pda: pda.toBase58(), raw: acct.data.toString('hex'), error: e.message };
+      return { pda: pda.toBase58(), error: e.message };
     }
   }
 

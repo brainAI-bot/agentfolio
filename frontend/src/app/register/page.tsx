@@ -1,23 +1,20 @@
 "use client";
-import { WalletRequired } from "@/components/WalletRequired";
 
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { useRouter } from "next/navigation";
 import { Connection } from "@solana/web3.js";
 import { useDemoMode } from "@/lib/demo-mode";
-import { Wallet, ArrowRight, AlertCircle, CheckCircle, X, Link2 } from "lucide-react";
+import { Wallet, ArrowRight, AlertCircle, CheckCircle, X, Link2, Zap } from "lucide-react";
+import { ClaimSearch } from "./ClaimSearch";
 import {
-  buildRegisterAgentTransaction,
   SOLANA_RPC,
   explorerUrl,
 } from "@/lib/identity-registry";
 
 export default function RegisterPage() {
   const wallet = useWallet();
-  const { setVisible } = useWalletModal();
   const { smartConnect } = useSmartConnect();
   const router = useRouter();
   const { isDemo, demoPublicKey } = useDemoMode();
@@ -28,10 +25,9 @@ export default function RegisterPage() {
 
   const [customId, setCustomId] = useState("");
   const [name, setName] = useState("");
-  const [bio, setBio] = useState("");
+  const [tagline, setTagline] = useState("");
   const [skills, setSkills] = useState("");
   const [github, setGithub] = useState("");
-  const [x, setX] = useState("");
   const [website, setWebsite] = useState("");
   const [loading, setLoading] = useState(false);
   const [chainStatus, setChainStatus] = useState<"idle" | "signing" | "confirming" | "done" | "skipped" | "genesis">("idle");
@@ -39,158 +35,105 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [idAvailable, setIdAvailable] = useState<boolean | null>(null);
   const [success, setSuccess] = useState(false);
+  const [apiKey, setApiKey] = useState("");
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Simple registration — no wallet needed
+  const handleSimpleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!connected || !publicKey) {
-      smartConnect();
-      return;
-    }
-
     setLoading(true);
     setError("");
-    setChainStatus("idle");
 
     try {
-      // SOL balance check — need ~0.005 SOL for SATP registration
-      if (publicKey) {
-        try {
-          const connection = new Connection(SOLANA_RPC, "confirmed");
-          const balance = await connection.getBalance(publicKey);
-          if (balance < 5_000_000) { // 0.005 SOL
-            setError(`Insufficient SOL balance (${(balance / 1e9).toFixed(4)} SOL). You need at least 0.005 SOL for on-chain registration. Fund your wallet: ${publicKey.toBase58()}`);
-            setLoading(false);
-            return;
-          }
-        } catch (balErr: any) {
-          console.warn("[Register] Balance check failed:", balErr.message);
-          // Continue anyway — let the TX fail naturally if insufficient
-        }
-      }
-
-      // Build profile payload
       const skillList = skills.split(",").map(s => s.trim()).filter(Boolean);
-      const walletAddress = publicKey.toBase58();
-      // STEP 0: Sign message to prove wallet ownership
-      setChainStatus("signing");
-      const signedMessage = `AgentFolio Registration\nAgent: ${name.trim()}\nWallet: ${walletAddress}\nTimestamp: ${Date.now()}`;
-      let signatureB58 = "";
-      try {
-        if (isDemo) {
-          signatureB58 = "demo_signature";
-        } else if (!signMessage) {
-          setError("Your wallet does not support message signing. Please use a wallet that supports signMessage (Phantom, Solflare, etc.).");
-          setLoading(false);
-          return;
-        } else {
-          const msgBytes = new TextEncoder().encode(signedMessage);
-          const sigBytes = await signMessage(msgBytes);
-          // Convert to base64 (backend accepts base58 or base64)
-          signatureB58 = Buffer.from(sigBytes).toString("base64");
-        }
-      } catch (sigErr: any) {
-        if (sigErr.message?.includes("rejected") || sigErr.message?.includes("denied")) {
-          setError("Wallet signature rejected. You must sign to prove wallet ownership.");
-        } else {
-          setError("Failed to sign message: " + (sigErr.message || "Unknown error"));
-        }
-        setLoading(false);
-        return;
-      }
-
       const payload: any = {
         customId: customId.trim() || undefined,
         name: name.trim(),
-        bio: bio.trim(),
-        skills: skillList.map(s => ({ name: s, category: "general", verified: false })),
-        wallets: { solana: walletAddress },
-        links: {
-          github: github.trim() || null,
-          x: x.trim() || null,
-          website: website.trim() || null,
-        },
-        signature: signatureB58,
-        signedMessage: signedMessage,
-        userPaidGenesis: true,
+        tagline: tagline.trim(),
+        skills: skillList.join(","),
+        github: github.trim() || undefined,
+        website: website.trim() || undefined,
       };
 
-      // STEP 1: Create profile in DB first (needed for SATP genesis)
-      setChainStatus("genesis");
-      const res = await fetch("/api/register", {
+      const res = await fetch("/api/register/simple", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || "Failed to create profile");
+        setError(data.error || "Registration failed");
+        setLoading(false);
         return;
       }
-      const profileId = data.profile_id || data.id;
 
-      // STEP 2: ONE TX — SATP identity creation (user signs = wallet verified)
-      let satpTxSig = "";
-      try {
-        setChainStatus("signing");
-        const connection = new Connection(SOLANA_RPC, "confirmed");
+      setApiKey(data.api_key || "");
 
-        // Request unsigned SATP identity TX from backend
-        const satpRes = await fetch("/api/satp-auto/identity/create", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ walletAddress, profileId }),
-        });
-        const satpData = await satpRes.json();
-
-        if (satpData.data?.alreadyExists) {
-          // SATP already exists — skip TX, still count as verified
-          satpTxSig = "existing";
-          setChainStatus("done");
-        } else if (satpData.data?.transaction) {
-          // Sign and send the single TX
-          const { Transaction } = await import("@solana/web3.js");
-          const tx = Transaction.from(Buffer.from(satpData.data.transaction, "base64"));
-          const sig = await sendTransaction(tx, connection);
-          setChainStatus("confirming");
-          await connection.confirmTransaction(sig, "confirmed");
-          satpTxSig = sig;
-          setTxSignature(sig);
-          setChainStatus("done");
-        } else {
-          // SATP unavailable — skip gracefully
-          setChainStatus("skipped");
-        }
-      } catch (txErr: any) {
-        console.warn("[Register] SATP TX failed (profile still saved):", txErr.message);
-        setChainStatus("skipped");
-      }
-
-      // STEP 3: Notify backend of TX signature (auto-verifies wallet)
-      if (satpTxSig) {
+      // If wallet is connected, try on-chain registration too
+      if (connected && publicKey) {
         try {
-          await fetch("/api/register", {
-            method: "PATCH",
+          const profileId = data.id;
+          const walletAddress = publicKey.toBase58();
+
+          // Sign message to prove ownership
+          setChainStatus("signing");
+          const signedMessage = `AgentFolio Registration\nAgent: ${name.trim()}\nWallet: ${walletAddress}\nTimestamp: ${Date.now()}`;
+          let signatureB58 = "";
+          if (isDemo) {
+            signatureB58 = "demo_signature";
+          } else if (signMessage) {
+            const msgBytes = new TextEncoder().encode(signedMessage);
+            const sigBytes = await signMessage(msgBytes);
+            signatureB58 = Buffer.from(sigBytes).toString("base64");
+          }
+
+          if (signatureB58) {
+            // Update profile with wallet
+            await fetch("/api/register", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ profileId, walletAddress, signature: signatureB58, signedMessage }),
+            });
+          }
+
+          // Try SATP identity
+          const connection = new Connection(SOLANA_RPC, "confirmed");
+          const satpRes = await fetch("/api/satp-auto/identity/create", {
+            method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ profileId, txSignature: satpTxSig, walletAddress }),
+            body: JSON.stringify({ walletAddress, profileId }),
           });
-        } catch {}
-        // Also confirm SATP identity to backend
-        if (satpTxSig !== "existing") {
-          try {
+          const satpData = await satpRes.json();
+
+          if (satpData.data?.alreadyExists) {
+            setChainStatus("done");
+          } else if (satpData.data?.transaction) {
+            const { Transaction } = await import("@solana/web3.js");
+            const tx = Transaction.from(Buffer.from(satpData.data.transaction, "base64"));
+            const sig = await sendTransaction(tx, connection);
+            setChainStatus("confirming");
+            await connection.confirmTransaction(sig, "confirmed");
+            setTxSignature(sig);
+            setChainStatus("done");
+
             await fetch("/api/satp-auto/identity/confirm", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ walletAddress, profileId, txSignature: satpTxSig }),
-            });
-          } catch {}
+              body: JSON.stringify({ walletAddress, profileId, txSignature: sig }),
+            }).catch(() => {});
+          } else {
+            setChainStatus("skipped");
+          }
+        } catch (chainErr) {
+          console.warn("[Register] On-chain step failed (profile still saved):", chainErr);
+          setChainStatus("skipped");
         }
       }
 
       setSuccess(true);
-      // Redirect to profile page (NOT verify page)
+      const profileId = data.id;
       setTimeout(() => {
-        router.push(`/profile/${profileId}`);
-      }, 5000);
+        router.push(`/verify?profile=${profileId}`);
+      }, 3000);
     } catch (err: any) {
       setError(err.message || "Network error");
     } finally {
@@ -200,56 +143,46 @@ export default function RegisterPage() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <WalletRequired />
       <div className="mb-8">
         <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
           Register Your Agent
         </h1>
         <p className="text-sm mt-1" style={{ color: "var(--text-tertiary)" }}>
-          Create a profile to build trust and get discovered — registered on-chain via SATP
+          Create a profile in 30 seconds. No wallet required — verify later for on-chain trust.
         </p>
       </div>
 
-      {/* Wallet Connection */}
-      {!connected ? (
-        <div
-          className="rounded-lg p-6 mb-6 text-center"
-          style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
-        >
-          <Wallet size={32} className="mx-auto mb-3" style={{ color: "var(--solana)" }} />
-          <h2 className="text-lg font-semibold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-            Connect Your Wallet First
-          </h2>
-          <p className="text-sm mb-4" style={{ color: "var(--text-tertiary)" }}>
-            A Solana wallet is required to register. Your wallet address becomes your on-chain identity.
-          </p>
-          <button
-            onClick={() => smartConnect()}
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all hover:shadow-[0_0_20px_rgba(153,69,255,0.3)]"
-            style={{
-              fontFamily: "var(--font-mono)",
-              background: "rgba(153, 69, 255, 0.15)",
-              color: "var(--solana)",
-              border: "1px solid rgba(153, 69, 255, 0.3)",
-            }}
-          >
-            <Wallet size={16} />
-            Connect Wallet
-          </button>
-        </div>
-      ) : (
+      {/* Wallet status — optional, informational */}
+      {connected && publicKey ? (
         <div
           className="rounded-lg p-3 mb-6 flex items-center gap-3"
           style={{ background: "rgba(153, 69, 255, 0.08)", border: "1px solid rgba(153, 69, 255, 0.2)" }}
         >
           <Wallet size={16} style={{ color: "var(--solana)" }} />
           <span className="text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--solana)" }}>
-            Connected: {publicKey?.toBase58()}
+            Wallet connected: {publicKey.toBase58().slice(0,4)}...{publicKey.toBase58().slice(-4)} — will auto-verify on registration
           </span>
+        </div>
+      ) : (
+        <div
+          className="rounded-lg p-3 mb-6 flex items-center justify-between"
+          style={{ background: "rgba(153, 69, 255, 0.05)", border: "1px solid rgba(153, 69, 255, 0.15)" }}
+        >
+          <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>
+            <Zap size={12} className="inline mr-1" />
+            Optional: Connect a wallet to auto-verify on-chain during registration
+          </span>
+          <button
+            onClick={() => smartConnect()}
+            className="text-xs px-3 py-1 rounded"
+            style={{ fontFamily: "var(--font-mono)", color: "var(--solana)", border: "1px solid rgba(153, 69, 255, 0.3)" }}
+          >
+            Connect
+          </button>
         </div>
       )}
 
-      {/* Success message */}
+      {/* Success */}
       {success && (
         <div
           className="rounded-lg p-4 mb-6 space-y-2"
@@ -258,9 +191,19 @@ export default function RegisterPage() {
           <div className="flex items-center gap-3">
             <CheckCircle size={20} style={{ color: "var(--success)" }} />
             <span className="text-sm" style={{ color: "var(--success)" }}>
-              Profile created successfully! Redirecting...
+              Profile created! Redirecting to your profile...
             </span>
           </div>
+          {apiKey && (
+            <div className="ml-8">
+              <p className="text-xs" style={{ color: "var(--text-tertiary)" }}>
+                Your API key (save it!):
+              </p>
+              <code className="text-xs px-2 py-1 rounded block mt-1 break-all" style={{ background: "var(--bg-primary)", color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
+                {apiKey}
+              </code>
+            </div>
+          )}
           {chainStatus === "done" && txSignature && (
             <div className="flex items-center gap-2 ml-8">
               <Link2 size={14} style={{ color: "var(--solana)" }} />
@@ -277,7 +220,7 @@ export default function RegisterPage() {
           )}
           {chainStatus === "skipped" && (
             <p className="text-xs ml-8" style={{ color: "var(--text-tertiary)" }}>
-              On-chain registration skipped. You can complete it later from your profile.
+              On-chain registration skipped — verify your wallet later from your profile.
             </p>
           )}
         </div>
@@ -292,11 +235,12 @@ export default function RegisterPage() {
           <span className="text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--solana)" }}>
             {chainStatus === "signing" && "⏳ Approve the transaction in your wallet..."}
             {chainStatus === "confirming" && "⏳ Confirming on-chain..."}
+            {chainStatus === "genesis" && "⏳ Creating profile..."}
           </span>
         </div>
       )}
 
-      {/* Error message */}
+      {/* Error */}
       {error && (
         <div
           className="rounded-lg p-4 mb-6 flex items-center gap-3"
@@ -308,15 +252,12 @@ export default function RegisterPage() {
         </div>
       )}
 
-      {/* Registration Form */}
-      <form onSubmit={handleSubmit}>
+      {/* Form */}
+      <form onSubmit={handleSimpleSubmit}>
         <div
           className="rounded-lg p-6 space-y-5"
           style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
         >
-          {/* Profile ID auto-generated from Agent Name */}
-          <input type="hidden" value={customId} />
-
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
               Agent Name * <span className="normal-case font-normal" style={{ color: "var(--text-tertiary)" }}>(max 32 chars)</span>
@@ -335,7 +276,7 @@ export default function RegisterPage() {
               }}
               required
               maxLength={32}
-              placeholder="e.g. brainKID"
+              placeholder="e.g. ResearchBot, TradingAgent"
               className="w-full px-4 py-2.5 rounded-lg text-sm outline-none transition-all"
               style={{
                 fontFamily: "var(--font-mono)",
@@ -349,27 +290,25 @@ export default function RegisterPage() {
             {customId && (
               <div className="flex items-center gap-2 mt-1.5">
                 <span className="text-[11px]" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-                  Profile ID: {customId}
+                  Profile URL: agentfolio.bot/profile/{customId}
                 </span>
                 {idAvailable === true && <span className="text-[11px]" style={{ color: "var(--success)" }}>✓ Available</span>}
-                {idAvailable === false && <span className="text-[11px]" style={{ color: "var(--accent)" }}>✗ Taken — choose a different name</span>}
+                {idAvailable === false && <span className="text-[11px]" style={{ color: "var(--accent)" }}>✗ Taken</span>}
               </div>
             )}
           </div>
 
-          {/* Handle comes from X verification later */}
-
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
-              Description * <span className="normal-case font-normal" style={{ color: "var(--text-tertiary)" }}>(max 256 chars)</span>
+              Tagline * <span className="normal-case font-normal" style={{ color: "var(--text-tertiary)" }}>(what does your agent do?)</span>
             </label>
             <textarea
-              value={bio}
-              onChange={e => setBio(e.target.value)}
+              value={tagline}
+              onChange={e => setTagline(e.target.value)}
               required
-              rows={3}
+              rows={2}
               maxLength={256}
-              placeholder="What does your agent do?"
+              placeholder="AI trading agent specializing in DeFi yield optimization"
               className="w-full px-4 py-2.5 rounded-lg text-sm outline-none transition-all resize-none"
               style={{
                 fontFamily: "var(--font-mono)",
@@ -384,14 +323,13 @@ export default function RegisterPage() {
 
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
-              Skills * <span className="normal-case font-normal" style={{ color: "var(--text-tertiary)" }}>(comma separated)</span>
+              Skills <span className="normal-case font-normal" style={{ color: "var(--text-tertiary)" }}>(comma separated, optional)</span>
             </label>
             <input
               type="text"
               value={skills}
               onChange={e => setSkills(e.target.value)}
-              required
-              placeholder="Trading, Research, Backend Dev, Smart Contracts"
+              placeholder="Trading, Research, Smart Contracts"
               className="w-full px-4 py-2.5 rounded-lg text-sm outline-none transition-all"
               style={{
                 fontFamily: "var(--font-mono)",
@@ -411,17 +349,11 @@ export default function RegisterPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>GitHub</label>
-                <input type="text" value={github} onChange={e => setGithub(e.target.value)} placeholder="username"
+                <input type="text" value={github} onChange={e => setGithub(e.target.value)} placeholder="username or URL"
                   className="w-full px-3 py-2 rounded-lg text-sm outline-none"
                   style={{ fontFamily: "var(--font-mono)", background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-primary)" }} />
               </div>
               <div>
-                <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>X</label>
-                <input type="text" value={x} onChange={e => setX(e.target.value)} placeholder="@handle"
-                  className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-                  style={{ fontFamily: "var(--font-mono)", background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-primary)" }} />
-              </div>
-              <div className="sm:col-span-2">
                 <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>Website</label>
                 <input type="text" value={website} onChange={e => setWebsite(e.target.value)} placeholder="https://..."
                   className="w-full px-3 py-2 rounded-lg text-sm outline-none"
@@ -433,7 +365,7 @@ export default function RegisterPage() {
           <div className="pt-2">
             <button
               type="submit"
-              disabled={loading || !connected || success}
+              disabled={loading || success}
               className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all hover:shadow-[0_0_30px_rgba(153,69,255,0.3)] disabled:opacity-50"
               style={{
                 fontFamily: "var(--font-mono)",
@@ -441,15 +373,31 @@ export default function RegisterPage() {
                 color: "#fff",
               }}
             >
-              {loading ? (chainStatus === "signing" ? "Approve in Wallet..." : chainStatus === "confirming" ? "Confirming On-Chain..." : "Creating...") : "Register Agent"}
+              {loading ? (chainStatus === "signing" ? "Approve in Wallet..." : chainStatus === "confirming" ? "Confirming..." : "Creating...") : "Register Agent"}
               {!loading && <ArrowRight size={16} />}
             </button>
             <p className="text-[11px] text-center mt-2" style={{ color: "var(--text-tertiary)" }}>
-              This will save your profile and create an on-chain SATP identity (requires ~0.005 SOL for rent)
+              Free to register. Connect a wallet anytime to verify on-chain.
             </p>
           </div>
         </div>
       </form>
+
+      {/* Claim Existing Profile */}
+      <div className="mt-8">
+        <div
+          className="rounded-lg p-6"
+          style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
+        >
+          <h2 className="text-sm font-semibold uppercase tracking-wider mb-1" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
+            Already registered?
+          </h2>
+          <p className="text-xs mb-4" style={{ color: "var(--text-tertiary)" }}>
+            Search by name or wallet address to find and claim your existing profile.
+          </p>
+          <ClaimSearch />
+        </div>
+      </div>
     </div>
   );
 }

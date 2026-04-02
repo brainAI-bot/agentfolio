@@ -5,7 +5,7 @@ export async function generateStaticParams() {
   // Return empty array — pages are generated on-demand and cached via ISR
   return [];
 }
-import { WalletRequired } from "@/components/WalletRequired";
+// import { WalletRequired } from "@/components/WalletRequired"; // Removed: profile pages are read-only, no wallet needed
 import type { Metadata } from "next";
 import { fetchAgent } from "@/lib/data-fetch";
 import { notFound } from "next/navigation";
@@ -147,7 +147,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
       const dbData = await dbRes.json();
       reviews = (dbData.reviews || []).map((r: any) => ({
         author: r.reviewer_name || r.reviewer_id || "Anonymous",
-        rating: r.rating || 5,
+        rating: r.rating || 0,
         text: r.comment || r.text || "",
         date: r.created_at || null,
         tx_signature: r.tx_signature || null,
@@ -165,7 +165,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
       const prData = await prRes.json();
       const peerReviews = (prData.endorsements || []).map((r: any) => ({
         author: r.from || r.fromName || "Anonymous",
-        rating: r.rating || 5,
+        rating: r.rating || 0,
         text: r.text || r.comment || "",
         date: r.created_at || null,
         tx_signature: r.tx_signature || null,
@@ -185,7 +185,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
         const satpData = await satpRes.json();
         const onChainReviews = (satpData.data?.reviews || []).map((r: any) => ({
           author: r.reviewer ? `${r.reviewer.slice(0, 8)}...${r.reviewer.slice(-4)}` : "On-Chain",
-          rating: r.rating || r.overall || 5,
+          rating: r.rating || r.overall || 0,
           text: r.comment || "",
           date: r.timestamp || null,
           tx_signature: r.account || null,
@@ -233,7 +233,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     <>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <WalletRequired />
+      {/* WalletRequired removed — profile pages are read-only */}
       {/* Profile Header */}
       <div
         className="rounded-lg p-6 mb-6 border-l-[3px]"
@@ -338,7 +338,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
           <div className="flex flex-wrap gap-x-6 gap-y-2 pt-2 border-t border-white/5">
             {[
               { label: "Jobs", value: agent.jobsCompleted.toString() },
-              { label: "Rating", value: `${displayRating.toFixed(1)}★` },
+              { label: "Rating", value: agent.jobsCompleted > 0 ? `${displayRating.toFixed(1)}★` : (reviews.length > 0 && displayRating > 0 ? `${displayRating.toFixed(1)}★ (peer)` : "—") },
               { label: "Status", value: agent.unclaimed ? "UNCLAIMED" : agent.status.toUpperCase() },
             ].map(({ label, value }) => (
               <div key={label} className="flex items-center gap-1.5">

@@ -190,8 +190,38 @@ router.get('/reputation/:agentId', requireSDK, async (req, res) => {
       return res.status(400).json({ error: 'agentId is required' });
     }
 
-    const identity = await req.sdk.getGenesisRecord(agentId);
+    // Try live RPC first, fall back to cached v3-score-service on 429/timeout
+    let identity = null;
+    try {
+      identity = await req.sdk.getGenesisRecord(agentId);
+    } catch (rpcErr) {
+      console.warn('[Reputation V3] RPC failed, trying cache:', rpcErr.message?.slice(0, 80));
+    }
+
+    // Fallback: use backend's v3-score-service cache
     if (!identity) {
+      try {
+        const { getV3Score } = require('../../v3-score-service');
+        const cached = await getV3Score(agentId);
+        if (cached) {
+          const { deriveGenesisPda } = require('@brainai/satp-v3');
+          const [pda] = deriveGenesisPda(agentId);
+          return res.json({
+            agentId,
+            pda: pda.toBase58(),
+            reputationScore: cached.reputationScore || 0,
+            verificationLevel: cached.verificationLevel || 0,
+            tier: null,
+            tierLabel: cached.verificationLabel || null,
+            authority: cached.authority || '',
+            isBorn: cached.isBorn || false,
+            network: NETWORK,
+            source: 'cache',
+          });
+        }
+      } catch (cacheErr) {
+        // Cache also unavailable
+      }
       return res.status(404).json({ error: 'Agent not found', agentId });
     }
 

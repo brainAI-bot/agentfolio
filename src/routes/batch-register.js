@@ -27,6 +27,17 @@ const nacl = require('tweetnacl');
 const _bs58 = require('bs58');
 const bs58 = _bs58.default || _bs58;
 const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
+
+const batchLimiter = rateLimit({
+  validate: { xForwardedForHeader: false },
+  windowMs: 60 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many batch registration attempts. Try again in 1 hour.' },
+  keyGenerator: (req) => req.ip || req.headers['x-forwarded-for'] || 'unknown',
+});
 
 // Platform API keys for trusted batch imports (skip wallet signature verification)
 // Set via BATCH_API_KEYS env var (comma-separated)
@@ -47,7 +58,7 @@ function genApiKey() {
 function registerBatchRoutes(app) {
   const profileStore = require('../profile-store');
 
-  app.post('/api/register/batch', (req, res) => {
+  app.post('/api/register/batch', batchLimiter, (req, res) => {
     const { agents, apiKey } = req.body;
 
     // Validate input

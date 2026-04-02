@@ -15,6 +15,7 @@ const satpReviews = require('./satp-reviews');
 // SATP On-Chain API (read + write)
 const { registerSATPRoutes } = require('./routes/satp-api');
 const { registerSATPWriteRoutes } = require('./routes/satp-write-api');
+const { registerSimpleRoutes } = require("./routes/simple-register");
 
 // Profile Store (SQLite-backed persistent profiles, endorsements, reviews)
 const profileStore = require('./profile-store');
@@ -274,6 +275,56 @@ app.get('/.well-known/did.json', (req, res) => {
   res.setHeader('Content-Type', 'application/did+json');
   res.setHeader('Cache-Control', 'public, max-age=3600');
   res.json(didDocument);
+});
+
+
+// ── GET /api/stats — Platform analytics ──────────────────────────
+app.get("/api/stats", (req, res) => {
+  try {
+    const d = profileStore.getDb();
+    const total = d.prepare("SELECT COUNT(*) as count FROM profiles").get().count;
+    const claimed = d.prepare("SELECT COUNT(*) as count FROM profiles WHERE wallet IS NOT NULL AND wallet != ''").get().count;
+    const verified = d.prepare("SELECT COUNT(*) as count FROM profiles WHERE verification_data IS NOT NULL AND verification_data != '{}' AND verification_data != ''").get().count;
+    
+    // On-chain: profiles with SATP trust scores
+    let onChain = 0;
+    try { onChain = d.prepare("SELECT COUNT(*) as count FROM satp_trust_scores").get().count; } catch(_) {}
+    
+    // New this week
+    const weekAgo = new Date(Date.now() - 7*24*60*60*1000).toISOString();
+    let newThisWeek = 0;
+    try { newThisWeek = d.prepare("SELECT COUNT(*) as count FROM profiles WHERE created_at > ?").get(weekAgo).count; } catch(_) {}
+    
+    // Skills distribution (top 10)
+    let topSkills = [];
+    try {
+      const rows = d.prepare("SELECT skills FROM profiles WHERE skills IS NOT NULL AND skills != '[]'").all();
+      const skillCount = {};
+      for (const row of rows) {
+        try {
+          const skills = JSON.parse(row.skills);
+          for (const s of skills) {
+            const name = (typeof s === "string" ? s : s.name || "").toLowerCase();
+            if (name) skillCount[name] = (skillCount[name] || 0) + 1;
+          }
+        } catch(_) {}
+      }
+      topSkills = Object.entries(skillCount).sort((a,b) => b[1]-a[1]).slice(0,10).map(([name,count]) => ({name,count}));
+    } catch(_) {}
+
+    res.json({
+      total,
+      claimed,
+      verified,
+      onChain,
+      newThisWeek,
+      topSkills,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch(e) {
+    console.error("[Stats] error:", e.message);
+    res.status(500).json({ error: "Failed to compute stats" });
+  }
 });
 
 // Explorer API — /api/explorer/agents, /stats, /leaderboard, /search (MUST be before :agentId catch-all)
@@ -1172,6 +1223,7 @@ app.post('/api/verification/farcaster/verify', async (req, res) => {
 // ── Profile Store routes (register, profiles, endorsements, reviews) ──
 profileStore.registerRoutes(app);
 
+registerSimpleRoutes(app, require("./profile-store").getDb);
 // NOTE: GET /api/profile/:id is now handled by profileStore.registerRoutes above
 
 // HTML profile page with SATP reviews
@@ -1417,9 +1469,9 @@ const verificationChallenges = require('./verification-challenges');
 // GitHub: challenge → user creates gist → confirm
 app.post('/api/verify/github/challenge', async (req, res) => {
   try {
-    const { profileId, githubUsername } = req.body;
-    if (!profileId || !githubUsername) return res.status(400).json({ error: 'profileId and githubUsername required' });
-    const challenge = verificationChallenges.generateChallenge(profileId, 'github', githubUsername);
+    const { profileId, githubUsername, username } = req.body; const ghUser = githubUsername || username;
+    if (!profileId || !ghUser) return res.status(400).json({ error: 'profileId and githubUsername required' });
+    const challenge = verificationChallenges.generateChallenge(profileId, 'github', ghUser);
     challenge.challengeData.instructions = `Create a public gist containing: agentfolio-verify:${challenge.id}`;
     challenge.challengeData.expectedContent = `agentfolio-verify:${challenge.id}`;
     await verificationChallenges.storeChallenge(challenge);
@@ -2001,6 +2053,9 @@ console.log(`[${new Date().toISOString()}] info: x402 payment layer initialized`
 });
 
 // Start server
+// Static SEO files
+app.get("/robots.txt", (req, res) => res.sendFile(require("path").join(__dirname, "..", "public", "robots.txt")));
+app.get("/sitemap.xml", (req, res) => res.sendFile(require("path").join(__dirname, "..", "public", "sitemap.xml")));
 app.listen(PORT, () => {
   console.log(`[${new Date().toISOString()}] info: AgentFolio server started`, { 
     service: "agentfolio",
@@ -2166,5 +2221,23 @@ app.post('/api/verify/eth/verify', (req, res) => {
 });
 app.post('/api/verify/ethereum/challenge', (req, res) => {
   req.url = '/api/verification/eth/initiate';
+  app.handle(req, res);
+});
+
+// X verify route alias (frontend uses /initiate, backend has /challenge)
+app.post('/api/verify/x/initiate', (req, res) => {
+  req.url = '/api/verify/x/challenge';
+  app.handle(req, res);
+});
+
+// GitHub verify route alias
+app.post('/api/verify/github/initiate', (req, res) => {
+  req.url = '/api/verify/github/challenge';
+  app.handle(req, res);
+});
+
+// Solana verify route alias  
+app.post('/api/verify/solana/initiate', (req, res) => {
+  req.url = '/api/verify/solana/challenge';
   app.handle(req, res);
 });

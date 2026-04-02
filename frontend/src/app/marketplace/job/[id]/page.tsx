@@ -23,7 +23,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     },
   };
 }
-import { WalletRequired } from "@/components/WalletRequired";
+// WalletRequired removed — wallet adapter always loaded
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -73,7 +73,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             skills: job.skills.join(", "),
           }) }}
         />
-      <WalletRequired />
+      {/* WalletRequired removed — wallet always loaded */}
       <div className="max-w-3xl mx-auto px-4 py-8">
         <Link href="/marketplace" className="inline-flex items-center gap-1 text-sm mb-6 hover:underline" style={{ color: "var(--text-secondary)" }}>
           <ArrowLeft size={14} /> Back to Marketplace

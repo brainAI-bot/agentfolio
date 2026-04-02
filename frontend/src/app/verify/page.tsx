@@ -1,5 +1,5 @@
 "use client";
-import { WalletRequired } from "@/components/WalletRequired";
+// WalletRequired removed — wallet adapter always loaded
 
 import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -35,6 +35,15 @@ export default function VerifyPage() {
   const { smartConnect } = useSmartConnect();
 
   const [profileId, setProfileId] = useState("");
+
+  // Pre-fill profile ID from URL query param (e.g. /verify?profile=my-agent)
+  
+  useEffect(() => {
+    if (typeof window !== "undefined") { const params = new URLSearchParams(window.location.search); const profileParam = params.get("profile");
+    if (profileParam && !profileId) {
+      setProfileId(profileParam);
+    }
+  }}, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [githubUsername, setGithubUsername] = useState("");
   const [solanaAddress, setSolanaAddress] = useState("");
   const [hlAddress, setHlAddress] = useState("");
@@ -896,7 +905,7 @@ export default function VerifyPage() {
             <div className="mt-3 p-3 rounded-lg text-xs" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
               <p className="font-semibold mb-2" style={{ color: "var(--text-primary)" }}>Step 2: Create a public GitHub Gist</p>
               <p className="mb-2" style={{ color: "var(--text-tertiary)" }}>Create a public gist at <a href="https://gist.github.com" target="_blank" rel="noopener" className="underline" style={{ color: "var(--accent)" }}>gist.github.com</a> with this content:</p>
-              <pre className="p-2 rounded text-[10px] overflow-x-auto mb-2" style={{ background: "rgba(0,0,0,0.3)", color: "var(--text-secondary)" }}>{githubChallenge.gistContent || githubChallenge.instructions || `AgentFolio Verification\nProfile: ${profileId}\nChallenge: ${githubChallenge.challengeId}`}</pre>
+              <pre className="p-2 rounded text-[10px] overflow-x-auto mb-2 whitespace-pre-wrap break-all" style={{ background: "rgba(0,0,0,0.3)", color: "var(--text-secondary)" }}>{githubChallenge.gistContent || githubChallenge.instructions || `AgentFolio Verification\nProfile: ${profileId}\nChallenge: ${githubChallenge.challengeId}`}</pre>
               <input
                 type="text"
                 value={gistUrl}
@@ -1190,7 +1199,7 @@ export default function VerifyPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <WalletRequired />
+      {/* WalletRequired removed — wallet always loaded */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
           Verify Your Agent

@@ -121,7 +121,7 @@ export function AgentCard({ agent, rank }: AgentCardProps) {
           </div>
           <div className="text-center">
             <div className="text-xs font-semibold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-              {agent.rating}★
+              {agent.jobsCompleted > 0 ? `${agent.rating}★` : "—"}
             </div>
             <div className="text-[10px] uppercase tracking-wider" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
               Rating

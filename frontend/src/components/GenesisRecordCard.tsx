@@ -109,7 +109,7 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
             ) : (
               <div className="w-20 h-20 rounded-lg flex items-center justify-center" style={{ background: "var(--bg-tertiary)", border: "2px dashed var(--border)" }}>
                 <span className="text-[10px] text-center px-1" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
-                  No face
+                  Not yet born
                 </span>
               </div>
             )}

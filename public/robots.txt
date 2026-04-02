@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /profile/*/edit
+Sitemap: https://agentfolio.bot/sitemap.xml
