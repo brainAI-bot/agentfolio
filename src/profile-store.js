@@ -1531,4 +1531,7 @@ function registerRoutes(app) {
   });
 }
 
-module.exports = { registerRoutes, getDb, addVerification, addActivity };
+// addVerification IS the unified onVerificationComplete hook
+// Every verification handler calls it → DB persist + V3 on-chain update + memo attestation + recompute
+const onVerificationComplete = addVerification;
+module.exports = { registerRoutes, getDb, addVerification, onVerificationComplete, addActivity };
