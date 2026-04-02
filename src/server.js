@@ -1475,7 +1475,7 @@ app.post('/api/verify/github/challenge', async (req, res) => {
     challenge.challengeData.instructions = `Create a public gist containing: agentfolio-verify:${challenge.id}`;
     challenge.challengeData.expectedContent = `agentfolio-verify:${challenge.id}`;
     await verificationChallenges.storeChallenge(challenge);
-    res.json({ challengeId: challenge.id, instructions: challenge.challengeData.instructions, expiresAt: challenge.challengeData.expiresAt });
+    res.json({ challengeId: challenge.id, instructions: challenge.challengeData.instructions, gistContent: challenge.challengeData.expectedContent, expiresAt: challenge.challengeData.expiresAt });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

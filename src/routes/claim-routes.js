@@ -64,6 +64,30 @@ function parseJson(val, fallback) {
  * @param {import('express').Express} app
  * @param {Function} getDb — returns better-sqlite3 instance
  */
+
+// ─── Claim Token System (for outreach URLs) ─────────────────────────
+
+function ensureClaimTokensTable(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS claim_tokens (
+      profile_id TEXT PRIMARY KEY,
+      token TEXT NOT NULL UNIQUE,
+      created_at TEXT DEFAULT (datetime('now')),
+      notified_at TEXT,
+      claimed_at TEXT
+    )
+  `);
+}
+
+function generateClaimToken(db, profileId) {
+  ensureClaimTokensTable(db);
+  const existing = db.prepare('SELECT token FROM claim_tokens WHERE profile_id = ?').get(profileId);
+  if (existing) return existing.token;
+  const token = crypto.randomBytes(16).toString('hex');
+  db.prepare('INSERT INTO claim_tokens (profile_id, token) VALUES (?, ?)').run(profileId, token);
+  return token;
+}
+
 function registerClaimRoutes(app, getDb) {
 
   // ── GET /api/claims/eligible ──────────────────────────────────
@@ -317,7 +341,7 @@ function registerClaimRoutes(app, getDb) {
   });
 
   console.log('✅ Claim flow routes registered: /api/claims/eligible, /api/claims/initiate, /api/claims/self-verify');
-}
+
 
 // ── Verification helpers ──────────────────────────────────────────
 
@@ -436,6 +460,108 @@ function verifyWalletSignature(claim, signatureBase64) {
   } catch (e) {
     return { verified: false, verificationProof: { error: `Signature verification failed: ${e.message}` } };
   }
+}
+
+
+  // ─── Admin: Claim Token + Profile Management APIs ─────────────
+
+  const ADMIN_KEY = process.env.ADMIN_API_KEY || 'agentfolio-admin-2026';
+  function requireAdmin(req, res, next) {
+    const key = req.headers['x-admin-key'] || req.query.admin_key;
+    if (key !== ADMIN_KEY) return res.status(403).json({ error: 'Unauthorized' });
+    next();
+  }
+
+  // GET /api/admin/profiles/unclaimed — list unclaimed profiles for outreach
+  app.get('/api/admin/profiles/unclaimed', requireAdmin, (req, res) => {
+    const db = getDb();
+    ensureClaimTokensTable(db);
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const offset = parseInt(req.query.offset) || 0;
+    
+    const profiles = db.prepare(`
+      SELECT p.id, p.name, p.handle, p.avatar, p.created_at,
+        ct.token as claim_token, ct.notified_at, ct.claimed_at
+      FROM profiles p
+      LEFT JOIN claim_tokens ct ON ct.profile_id = p.id
+      WHERE (p.metadata LIKE '%"unclaimed":true%' OR p.metadata LIKE '%"unclaimed": true%')
+        AND (ct.claimed_at IS NULL OR ct.claimed_at = '')
+      ORDER BY p.name
+      LIMIT ? OFFSET ?
+    `).all(limit, offset);
+
+    for (const p of profiles) {
+      if (!p.claim_token) {
+        p.claim_token = generateClaimToken(db, p.id);
+      }
+      p.claim_url = 'https://agentfolio.bot/claim/' + p.id + '?token=' + p.claim_token;
+    }
+
+    const total = db.prepare(
+      `SELECT COUNT(*) as cnt FROM profiles WHERE (metadata LIKE '%"unclaimed":true%' OR metadata LIKE '%"unclaimed": true%')`
+    ).get();
+
+    res.json({ profiles, total: total?.cnt || 0, limit, offset });
+  });
+
+  // POST /api/admin/profile/:id/notify — mark profile as notified
+  app.post('/api/admin/profile/:id/notify', requireAdmin, (req, res) => {
+    const db = getDb();
+    ensureClaimTokensTable(db);
+    const { id } = req.params;
+    const token = generateClaimToken(db, id);
+    db.prepare("UPDATE claim_tokens SET notified_at = datetime('now') WHERE profile_id = ?").run(id);
+    res.json({ ok: true, profileId: id, token, claimUrl: 'https://agentfolio.bot/claim/' + id + '?token=' + token });
+  });
+
+  // DELETE /api/admin/profile/:id — delete a profile
+  app.delete('/api/admin/profile/:id', requireAdmin, (req, res) => {
+    const db = getDb();
+    const { id } = req.params;
+    const profile = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(id);
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
+    
+    db.prepare('DELETE FROM verifications WHERE profile_id = ?').run(id);
+    db.prepare('DELETE FROM claim_tokens WHERE profile_id = ?').run(id);
+    db.prepare('DELETE FROM profiles WHERE id = ?').run(id);
+    
+    console.log('[Admin] Deleted profile:', id, profile.name);
+    res.json({ ok: true, deleted: { id, name: profile.name } });
+  });
+
+  // GET /api/admin/claim-stats — claim funnel stats
+  app.get('/api/admin/claim-stats', requireAdmin, (req, res) => {
+    const db = getDb();
+    ensureClaimTokensTable(db);
+    const totalUnclaimed = db.prepare(
+      "SELECT COUNT(*) as cnt FROM profiles WHERE metadata LIKE '%unclaimed%true%'"
+    ).get()?.cnt || 0;
+    const tokensGenerated = db.prepare('SELECT COUNT(*) as cnt FROM claim_tokens').get()?.cnt || 0;
+    const notified = db.prepare(
+      'SELECT COUNT(*) as cnt FROM claim_tokens WHERE notified_at IS NOT NULL'
+    ).get()?.cnt || 0;
+    const claimed = db.prepare(
+      'SELECT COUNT(*) as cnt FROM claim_tokens WHERE claimed_at IS NOT NULL'
+    ).get()?.cnt || 0;
+    res.json({ totalUnclaimed, tokensGenerated, notified, claimed });
+  });
+
+  // GET /api/claim/validate/:id — validate a claim token (public, for frontend)
+  app.get('/api/claim/validate/:id', (req, res) => {
+    const db = getDb();
+    ensureClaimTokensTable(db);
+    const { id } = req.params;
+    const { token } = req.query;
+    if (!token) return res.json({ valid: false, reason: 'No token provided' });
+    const row = db.prepare(
+      'SELECT * FROM claim_tokens WHERE profile_id = ? AND token = ? AND claimed_at IS NULL'
+    ).get(id, token);
+    res.json({ valid: !!row, profileId: id });
+  });
+
+  console.log('[ClaimRoutes] Admin routes registered');
+
+
 }
 
 module.exports = { registerClaimRoutes };

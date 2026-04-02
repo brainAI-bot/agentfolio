@@ -1274,7 +1274,7 @@ export default function VerifyPage() {
             <div className="flex-1">
               <div className="flex items-center justify-between mb-1">
                 <h3 className="text-base font-semibold" style={{ color: "var(--text-primary)" }}>SATP On-Chain Identity</h3>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded" style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.15)", color: "var(--success)" }}>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded max-w-[180px] truncate" style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.15)", color: "var(--success)" }}>
                   {satpState.success ? "✅ Registered" : existingVerifications?.satp?.verified ? "✅ On-Chain" : "Pending"}
                 </span>
               </div>
@@ -1382,7 +1382,7 @@ export default function VerifyPage() {
                       {v.title}
                     </h3>
                     <span
-                      className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded"
+                      className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded max-w-[180px] truncate"
                       style={{ fontFamily: "var(--font-mono)", background: (v.state.success || existingVerifications?.[v.type]?.verified) ? "rgba(16,185,129,0.15)" : "rgba(16,185,129,0.1)", color: (v.state.success || existingVerifications?.[v.type]?.verified) ? "var(--success)" : "var(--success)" }}
                     >
                       {(v.state.success || existingVerifications?.[v.type]?.verified) ? "✅ Verified" : v.reward}
