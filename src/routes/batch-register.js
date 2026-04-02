@@ -30,7 +30,7 @@ const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 
 const batchLimiter = rateLimit({
-  validate: { xForwardedForHeader: false },
+  validate: false,
   windowMs: 60 * 60 * 1000,
   max: 3,
   standardHeaders: true,

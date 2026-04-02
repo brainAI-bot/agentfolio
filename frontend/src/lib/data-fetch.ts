@@ -10,7 +10,7 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
   try {
     const url = `${API_BASE}/api/profile/${encodeURIComponent(id)}`;
     const res = await fetch(url, {
-      next: { revalidate: 120 },
+      next: { revalidate: 30 },
     });
     if (!res.ok) return null;
     const raw = await res.json();
@@ -18,7 +18,7 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
     // Fetch trust credential breakdown (normalized)
     let trustBreakdown = null;
     try {
-      const tcRes = await globalThis.fetch(`${API_BASE}/api/trust-credential/${encodeURIComponent(id)}?format=json`, { next: { revalidate: 120 } });
+      const tcRes = await globalThis.fetch(`${API_BASE}/api/trust-credential/${encodeURIComponent(id)}?format=json`, { next: { revalidate: 30 } });
       if (tcRes.ok) {
         const tcData = await tcRes.json();
         trustBreakdown = tcData?.credential?.credentialSubject?.breakdown || null;

@@ -117,11 +117,36 @@ function recomputeDBScore(profileId) {
   }
 }
 
+
+// Revalidate Next.js ISR cache so profile page reflects verification immediately
+async function revalidateProfileCache(profileId) {
+  try {
+    const res = await globalThis.fetch('http://localhost:3000/api/revalidate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        secret: 'agentfolio-revalidate-2026',
+        profileId,
+      }),
+    });
+    if (res.ok) {
+      console.log('[PostVerify] ✅ ISR cache revalidated for', profileId);
+    } else {
+      console.warn('[PostVerify] ISR revalidation returned', res.status);
+    }
+  } catch (e) {
+    console.warn('[PostVerify] ISR revalidation failed:', e.message);
+  }
+}
+
 async function postVerificationHook(profileId, platform, identifier, proof) {
   console.log(`[PostVerify] Hook fired: ${profileId} verified ${platform} (${identifier})`);
 
   // Step 1: Recompute DB trust score (fast, sync)
   recomputeDBScore(profileId);
+
+  // Step 1.5: Revalidate frontend cache
+  revalidateProfileCache(profileId).catch(e => console.warn('[PostVerify] cache revalidation error:', e.message));
 
   // Step 2: On-chain attestation (async, non-blocking)
   const kp = getPlatformKeypair();
@@ -160,4 +185,4 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
   }
 }
 
-module.exports = { postVerificationHook, recomputeDBScore };
+module.exports = { postVerificationHook, recomputeDBScore, revalidateProfileCache };
