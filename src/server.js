@@ -1462,8 +1462,21 @@ app.use((req, res, next) => {
 });
 
 // Marketplace (full job flow)
+// Hardened verification routes (Hyperliquid, Domain)
+try {
+  const { handleVerificationRoutes } = require('./lib/hardened-verification-routes');
+  app.use((req, res, next) => {
+    if (handleVerificationRoutes(req, res)) return;
+    next();
+  });
+  console.log('[Routes] Hardened verification routes loaded');
+} catch(e) { console.warn('[Routes] Hardened verification routes not available:', e.message); }
+
 const marketplace = require('./marketplace');
 marketplace.registerRoutes(app);
+// On-chain escrow integration for marketplace
+const { registerMarketplaceEscrowOnchain } = require("./marketplace-escrow-onchain");
+registerMarketplaceEscrowOnchain(app);
 
 // Jobs marketplace endpoint (legacy stub)
 // ===== HARDENED VERIFICATION ENDPOINTS (Challenge-Response) =====
@@ -1514,7 +1527,7 @@ app.post('/api/verify/x/challenge', async (req, res) => {
     challenge.challengeData.instructions = `Post a tweet containing: agentfolio-verify:${challenge.id}`;
     challenge.challengeData.expectedContent = `agentfolio-verify:${challenge.id}`;
     await verificationChallenges.storeChallenge(challenge);
-    res.json({ challengeId: challenge.id, instructions: challenge.challengeData.instructions, expiresAt: challenge.challengeData.expiresAt });
+    res.json({ challengeId: challenge.id, instructions: challenge.challengeData.instructions, code: challenge.challengeData.expectedContent, tweetContent: challenge.challengeData.expectedContent, expiresAt: challenge.challengeData.expiresAt });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
