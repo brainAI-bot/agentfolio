@@ -1,4 +1,4 @@
-export const revalidate = 120;
+export const revalidate = 30;
 export const dynamicParams = true;
 
 export async function generateStaticParams() {
@@ -63,7 +63,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   // Fetch V3 on-chain Genesis Record for trust scores
   let genesis: any = null;
   try {
-    const genesisRes = await fetch(`https://agentfolio.bot/api/profile/${id}/genesis`, { next: { revalidate: 120 } });
+    const genesisRes = await fetch(`https://agentfolio.bot/api/profile/${id}/genesis`, { next: { revalidate: 30 } });
     if (genesisRes.ok) {
       const gData = await genesisRes.json();
       genesis = gData.genesis;
@@ -73,7 +73,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   // Fetch trust-score (DB-enriched, normalized values)
   let trustScoreData: any = null;
   try {
-    const tsRes = await fetch(`https://agentfolio.bot/api/profile/${id}/trust-score`, { next: { revalidate: 120 } });
+    const tsRes = await fetch(`https://agentfolio.bot/api/profile/${id}/trust-score`, { next: { revalidate: 30 } });
     if (tsRes.ok) {
       const tsData = await tsRes.json();
       trustScoreData = tsData.data;
@@ -92,7 +92,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   // Fetch chain-cache attestations (on-chain verified platforms)
   let chainAttestations: Array<{ platform: string; txSignature?: string; timestamp?: string; solscanUrl?: string }> = [];
   try {
-    const explorerRes = await fetch(`https://agentfolio.bot/api/explorer/${id}`, { next: { revalidate: 120 } });
+    const explorerRes = await fetch(`https://agentfolio.bot/api/explorer/${id}`, { next: { revalidate: 30 } });
     if (explorerRes.ok) {
       const explorerData = await explorerRes.json();
       chainAttestations = explorerData.attestationMemos || [];
@@ -104,7 +104,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   const solWallet = (agent as any).wallets?.solana || (agent as any).wallet || agent.walletAddress;
   if (solWallet) {
     try {
-      const satpIdRes = await fetch(`http://localhost:3000/api/satp/identity/${solWallet}`, { next: { revalidate: 120 } });
+      const satpIdRes = await fetch(`http://localhost:3000/api/satp/identity/${solWallet}`, { next: { revalidate: 30 } });
       if (satpIdRes.ok) satpIdentity = await satpIdRes.json();
     } catch {}
   }
@@ -113,7 +113,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   // Fetch V3 on-chain reputation (from SATP V3 SDK — deserialization fixed 2026-03-29)
   let v3Reputation: any = null;
   try {
-    const v3RepRes = await fetch(`https://agentfolio.bot/api/v3/reputation/${id}`, { next: { revalidate: 120 } });
+    const v3RepRes = await fetch(`https://agentfolio.bot/api/v3/reputation/${id}`, { next: { revalidate: 30 } });
     if (v3RepRes.ok) {
       const v3Data = await v3RepRes.json();
       if (v3Data && v3Data.reputationScore !== undefined) {
@@ -132,7 +132,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   let githubStats: any = null;
   if (v?.github?.verified && v.github.username) {
     try {
-      const ghRes = await fetch(`http://localhost:3000/api/verify/github/stats?username=${encodeURIComponent(v.github.username)}`, { next: { revalidate: 120 } });
+      const ghRes = await fetch(`http://localhost:3000/api/verify/github/stats?username=${encodeURIComponent(v.github.username)}`, { next: { revalidate: 30 } });
       if (ghRes.ok) githubStats = await ghRes.json();
     } catch {}
   }
@@ -180,7 +180,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     // Also fetch SATP on-chain reviews (trustless, from Solana)
     const wallet = (agent as any).wallets?.solana || (agent as any).wallet;
     if (wallet) {
-      const satpRes = await fetch(`https://agentfolio.bot/api/satp/reviews/${wallet}`, { next: { revalidate: 120 } });
+      const satpRes = await fetch(`https://agentfolio.bot/api/satp/reviews/${wallet}`, { next: { revalidate: 30 } });
       if (satpRes.ok) {
         const satpData = await satpRes.json();
         const onChainReviews = (satpData.data?.reviews || []).map((r: any) => ({
