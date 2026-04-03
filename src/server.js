@@ -824,6 +824,21 @@ app.post('/api/verification/discord/initiate', async (req, res) => {
   }
 });
 
+app.post('/api/verification/discord/verify', async (req, res) => {
+  const { challengeId, messageUrl } = req.body;
+  if (!challengeId) return res.status(400).json({ error: 'Missing challengeId' });
+  try {
+    const result = await discordVerify.verifyDiscordChallenge(challengeId, messageUrl);
+    if (result.verified && result.discordUsername) {
+      const challenge = await require('./verification-challenges').getChallenge(challengeId);
+      if (challenge && challenge.profileId) {
+        profileStore.addVerification(challenge.profileId, 'discord', result.discordUsername, { challengeId, messageId: result.messageId, verifiedAt: new Date().toISOString() });
+      }
+    }
+    res.json(result);
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
 // Telegram verification endpoints
 app.get('/api/verification/telegram/status', async (req, res) => {
   const { challengeId } = req.query;
@@ -978,6 +993,9 @@ app.post('/api/verification/eth/verify', (req, res) => {
     const { challengeId, signature } = req.body;
     if (!challengeId || !signature) return res.status(400).json({ error: 'challengeId and signature required' });
     const result = ethVerify.verifySignature(challengeId, signature);
+    if (result.verified && result.profileId) {
+      profileStore.addVerification(result.profileId, 'eth', result.walletAddress, { challengeId, signature: signature.slice(0, 16) + '...', verifiedAt: new Date().toISOString() });
+    }
     res.json(result);
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
@@ -998,6 +1016,9 @@ app.post('/api/verification/ens/verify', async (req, res) => {
     const { challengeId, signature } = req.body;
     if (!challengeId || !signature) return res.status(400).json({ error: 'challengeId and signature required' });
     const result = await ensVerify.verifyENSOwnership(challengeId, signature);
+    if (result.verified && result.profileId) {
+      profileStore.addVerification(result.profileId, 'ens', result.ensName || result.identifier, { challengeId, verifiedAt: new Date().toISOString() });
+    }
     res.json(result);
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
@@ -1024,6 +1045,9 @@ app.post('/api/verification/farcaster/verify', async (req, res) => {
     const { challengeId, castHash } = req.body;
     if (!challengeId || !castHash) return res.status(400).json({ error: 'challengeId and castHash required' });
     const result = await farcasterVerify.verifyCast(challengeId, castHash);
+    if (result.verified && result.profileId) {
+      profileStore.addVerification(result.profileId, 'farcaster', result.fid || result.identifier, { challengeId, castHash, verifiedAt: new Date().toISOString() });
+    }
     res.json(result);
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
@@ -1605,6 +1629,7 @@ app.post('/api/verify/agentmail/confirm', async (req, res) => {
     if (!challenge) return res.status(404).json({ error: 'Challenge not found or expired' });
     if (code.toUpperCase() !== challenge.challengeData.code) return res.status(400).json({ error: 'Invalid verification code' });
     await verificationChallenges.completeChallenge(challengeId, { email: challenge.challengeData.identifier, verifiedAt: new Date().toISOString() });
+    profileStore.addVerification(challenge.profileId, 'agentmail', challenge.challengeData.identifier, { challengeId, verifiedAt: new Date().toISOString() });
     res.json({ verified: true, platform: 'agentmail', identifier: challenge.challengeData.identifier, proof: { challengeId } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
