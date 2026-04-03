@@ -1092,6 +1092,81 @@ ${unclaimed.map(u => '<tr><td>' + escapeHtml(u.id) + '</td><td>' + escapeHtml(u.
 </body></html>`);
 });
 
+
+// ── Admin Dashboard ──
+app.get('/admin', (req, res) => {
+  const key = req.query.key || req.headers['x-admin-key'];
+  if (!key || key !== (process.env.ADMIN_KEY || 'bf-admin-2026')) {
+    return res.status(401).send('<h1>Unauthorized</h1><p>Add ?key=YOUR_ADMIN_KEY to the URL</p>');
+  }
+  
+  const db = getDb();
+  const total = db.prepare('SELECT COUNT(*) as c FROM profiles').get().c;
+  const claimed = db.prepare('SELECT COUNT(*) as c FROM profiles WHERE claimed = 1').get().c;
+  const verified = db.prepare("SELECT COUNT(DISTINCT profile_id) as c FROM verifications").get().c;
+  
+  let onChain = 0;
+  try { onChain = db.prepare("SELECT COUNT(*) as c FROM satp_trust_scores WHERE overall_score > 0").get().c; } catch(e) {}
+  
+  // Recent registrations
+  let recentRegs = [];
+  try { recentRegs = db.prepare("SELECT id, name, handle, created_at FROM profiles ORDER BY created_at DESC LIMIT 10").all(); } catch(e) {}
+  
+  // Recent verifications
+  let recentVerifs = [];
+  try { recentVerifs = db.prepare("SELECT profile_id, platform, identifier, verified_at FROM verifications ORDER BY verified_at DESC LIMIT 10").all(); } catch(e) {}
+  
+  // Unclaimed profiles
+  let unclaimed = [];
+  try { unclaimed = db.prepare("SELECT id, name, handle, claim_token FROM profiles WHERE (claimed = 0 OR claimed IS NULL) ORDER BY name LIMIT 50").all(); } catch(e) {}
+  
+  const escapeHtml = (str) => String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  
+  res.send(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>AgentFolio Admin</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0a0a0f;color:#e0e0e0;padding:2rem}
+h1{font-size:1.8rem;margin-bottom:1.5rem;background:linear-gradient(135deg,#8b5cf6,#06b6d4);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+h2{font-size:1.2rem;margin:1.5rem 0 0.75rem;color:#8b5cf6}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-bottom:2rem}
+.stat{background:#141420;border:1px solid #2a2a3a;border-radius:12px;padding:1.5rem;text-align:center}
+.stat .num{font-size:2rem;font-weight:700;color:#8b5cf6}
+.stat .label{font-size:0.85rem;color:#999;margin-top:0.25rem}
+table{width:100%;border-collapse:collapse;background:#141420;border-radius:12px;overflow:hidden;margin-bottom:1.5rem}
+th{background:#1a1a2e;padding:0.75rem;text-align:left;font-size:0.85rem;color:#999;border-bottom:1px solid #2a2a3a}
+td{padding:0.6rem 0.75rem;border-bottom:1px solid #1a1a2e;font-size:0.85rem}
+tr:hover{background:#1a1a2e}
+a{color:#8b5cf6;text-decoration:none}a:hover{text-decoration:underline}
+.claim-url{font-size:0.75rem;color:#666;word-break:break-all}
+</style></head><body>
+<h1>🛡️ AgentFolio Admin Dashboard</h1>
+<div class="stats">
+  <div class="stat"><div class="num">${total}</div><div class="label">Total Agents</div></div>
+  <div class="stat"><div class="num">${claimed}</div><div class="label">Claimed</div></div>
+  <div class="stat"><div class="num">${verified}</div><div class="label">Verified</div></div>
+  <div class="stat"><div class="num">${onChain}</div><div class="label">On-Chain</div></div>
+  <div class="stat"><div class="num">${total - claimed}</div><div class="label">Unclaimed</div></div>
+</div>
+
+<h2>📋 Recent Registrations</h2>
+<table><tr><th>ID</th><th>Name</th><th>Handle</th><th>Created</th></tr>
+${recentRegs.map(r => `<tr><td><a href="/profile/${r.id}">${escapeHtml(r.id)}</a></td><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.handle)}</td><td>${r.created_at || '-'}</td></tr>`).join('')}
+</table>
+
+<h2>✅ Recent Verifications</h2>
+<table><tr><th>Profile</th><th>Platform</th><th>Identifier</th><th>When</th></tr>
+${recentVerifs.map(v => `<tr><td><a href="/profile/${v.profile_id}">${escapeHtml(v.profile_id)}</a></td><td>${escapeHtml(v.platform)}</td><td>${escapeHtml(v.identifier)}</td><td>${v.verified_at || '-'}</td></tr>`).join('')}
+</table>
+
+<h2>📨 Unclaimed Profiles (first 50)</h2>
+<table><tr><th>ID</th><th>Name</th><th>Handle</th><th>Claim URL</th></tr>
+${unclaimed.map(u => `<tr><td><a href="/profile/${u.id}">${escapeHtml(u.id)}</a></td><td>${escapeHtml(u.name)}</td><td>${escapeHtml(u.handle)}</td><td class="claim-url"><a href="/claim/${u.id}?token=${u.claim_token}">/claim/${u.id}</a></td></tr>`).join('')}
+</table>
+</body></html>`);
+});
+
 // ── Profile Store routes (register, profiles, endorsements, reviews) ──
 profileStore.registerRoutes(app);
 
