@@ -1031,6 +1031,7 @@ app.post('/api/verification/farcaster/verify', async (req, res) => {
 
 // P2: Admin Dashboard
 app.get('/admin', (req, res) => {
+  const getDb = profileStore.getDb;
   const key = req.query.key || req.headers['x-admin-key'];
   if (!key || key !== (process.env.ADMIN_KEY || 'bf-admin-2026')) {
     return res.status(401).send('<h1>401 Unauthorized</h1><p>Append ?key=YOUR_ADMIN_KEY</p>');
@@ -1960,6 +1961,7 @@ console.log(`[${new Date().toISOString()}] info: x402 payment layer initialized`
   // === P2: Admin Dashboard ===
   const db = profileStore.getDb();
   app.get('/admin', (req, res) => {
+  const getDb = profileStore.getDb;
     const key = req.query.key || req.headers['x-admin-key'];
     const ADMIN_KEY = process.env.ADMIN_KEY || 'brainforge-admin-2026';
     if (key !== ADMIN_KEY) return res.status(401).send('<h1>Unauthorized</h1><p>Add ?key=YOUR_KEY</p>');
