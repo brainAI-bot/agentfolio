@@ -1492,6 +1492,9 @@ app.use((req, res, next) => {
 // Marketplace (full job flow)
 const marketplace = require('./marketplace');
 marketplace.registerRoutes(app);
+// Marketplace on-chain escrow (V3 program integration)
+const { registerMarketplaceEscrowOnchain } = require("./marketplace-escrow-onchain");
+registerMarketplaceEscrowOnchain(app);
 
 // Jobs marketplace endpoint (legacy stub)
 // ===== HARDENED VERIFICATION ENDPOINTS (Challenge-Response) =====
