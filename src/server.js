@@ -1631,11 +1631,18 @@ try {
   const explorerRouter = require('./routes/explorer-api');
   app.use('/api/explorer', explorerRouter);
   console.log('[Explorer API] Mounted at /api/explorer');
-  // SATP Explorer API — legacy route compatibility
+  // SATP Explorer API — wrap getSatpAgents as route handler
   try {
-    const satpExplorerApi = require('./routes/satp-explorer-api');
-    app.use('/api/satp/explorer', satpExplorerApi);
-    console.log('[SATP Explorer API] Mounted at /api/satp/explorer');
+    const { getSatpAgents } = require('./routes/satp-explorer-api');
+    app.get('/api/satp/explorer/agents', async (req, res) => {
+      try {
+        const result = await getSatpAgents();
+        res.json(result);
+      } catch (e) {
+        res.status(500).json({ error: e.message });
+      }
+    });
+    console.log('[SATP Explorer API] Mounted at /api/satp/explorer/agents');
   } catch (e) {
     console.log('[SATP Explorer API] Failed to mount:', e.message);
   }
