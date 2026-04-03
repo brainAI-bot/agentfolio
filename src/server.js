@@ -1726,6 +1726,77 @@ try {
 
 // Admin Routes — P1: Profile management for outreach automation
 try {
+
+// P2: Admin Dashboard Page
+app.get('/admin', (req, res) => {
+  const key = req.query.key || req.headers['x-admin-key'];
+  if (!key || key !== (process.env.ADMIN_KEY || 'bf-admin-2026')) {
+    return res.status(401).send('<html><body style="background:#0a0a0f;color:#e0e0e0;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><h1>🔒 Admin access required. Add ?key=YOUR_KEY</h1></body></html>');
+  }
+  
+  const db = getDb();
+  const total = db.prepare('SELECT COUNT(*) as c FROM profiles').get().c;
+  const claimed = db.prepare('SELECT COUNT(*) as c FROM profiles WHERE claimed = 1').get().c;
+  const verified = db.prepare("SELECT COUNT(DISTINCT profile_id) as c FROM verifications").get().c;
+  
+  let onChain = 0;
+  try { onChain = db.prepare("SELECT COUNT(*) as c FROM satp_trust_scores WHERE overall_score > 0").get().c; } catch(e){}
+  
+  const recentRegs = db.prepare("SELECT id, name, handle, created_at FROM profiles ORDER BY created_at DESC LIMIT 20").all();
+  const recentVerifs = db.prepare("SELECT profile_id, platform, identifier, verified_at FROM verifications ORDER BY verified_at DESC LIMIT 20").all();
+  const unclaimed = db.prepare("SELECT id, name, handle, claim_token, notified, notified_at FROM profiles WHERE (claimed = 0 OR claimed IS NULL) ORDER BY created_at DESC LIMIT 50").all();
+  
+  const escapeHtml = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  
+  const regRows = recentRegs.map(r => 
+    '<tr><td>' + escapeHtml(r.id) + '</td><td>' + escapeHtml(r.name) + '</td><td>' + escapeHtml(r.handle) + '</td><td>' + escapeHtml(r.created_at) + '</td></tr>'
+  ).join('');
+  
+  const verifRows = recentVerifs.map(v =>
+    '<tr><td>' + escapeHtml(v.profile_id) + '</td><td>' + escapeHtml(v.platform) + '</td><td>' + escapeHtml(v.identifier) + '</td><td>' + escapeHtml(v.verified_at) + '</td></tr>'
+  ).join('');
+  
+  const unclaimedRows = unclaimed.map(u =>
+    '<tr><td><a href="/profile/' + escapeHtml(u.id) + '">' + escapeHtml(u.id) + '</a></td><td>' + escapeHtml(u.name) + '</td><td>' + escapeHtml(u.handle) + '</td><td>' + (u.notified ? '✅ ' + escapeHtml(u.notified_at) : '❌') + '</td><td><a href="/claim/' + escapeHtml(u.id) + '?token=' + escapeHtml(u.claim_token) + '" target="_blank">Claim Link</a></td></tr>'
+  ).join('');
+  
+  res.send(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>AgentFolio Admin</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0a0a0f;color:#e0e0e0;padding:2rem}
+h1{font-size:1.8rem;margin-bottom:1.5rem;background:linear-gradient(135deg,#8b5cf6,#06b6d4);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+h2{font-size:1.2rem;margin:1.5rem 0 0.75rem;color:#8b5cf6}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-bottom:2rem}
+.stat{background:#141420;border:1px solid #2a2a3a;border-radius:12px;padding:1.5rem;text-align:center}
+.stat-num{font-size:2rem;font-weight:700;background:linear-gradient(135deg,#8b5cf6,#06b6d4);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.stat-label{color:#999;font-size:0.85rem;margin-top:0.25rem}
+table{width:100%;border-collapse:collapse;background:#141420;border-radius:12px;overflow:hidden;margin-bottom:1.5rem}
+th{background:#1a1a2e;padding:0.75rem;text-align:left;font-size:0.8rem;color:#999;text-transform:uppercase}
+td{padding:0.6rem 0.75rem;border-top:1px solid #1a1a2e;font-size:0.85rem}
+a{color:#8b5cf6;text-decoration:none}a:hover{text-decoration:underline}
+.refresh{position:fixed;top:1rem;right:1rem;background:#8b5cf6;color:white;border:none;padding:0.5rem 1rem;border-radius:8px;cursor:pointer;font-size:0.85rem}
+</style></head><body>
+<button class="refresh" onclick="location.reload()">↻ Refresh</button>
+<h1>🛡️ AgentFolio Admin Dashboard</h1>
+<div class="stats">
+  <div class="stat"><div class="stat-num">${total}</div><div class="stat-label">Total Profiles</div></div>
+  <div class="stat"><div class="stat-num">${claimed}</div><div class="stat-label">Claimed</div></div>
+  <div class="stat"><div class="stat-num">${verified}</div><div class="stat-label">Verified</div></div>
+  <div class="stat"><div class="stat-num">${onChain}</div><div class="stat-label">On-Chain</div></div>
+  <div class="stat"><div class="stat-num">${total - claimed}</div><div class="stat-label">Unclaimed</div></div>
+  <div class="stat"><div class="stat-num">${((claimed/total)*100).toFixed(1)}%</div><div class="stat-label">Claim Rate</div></div>
+</div>
+<h2>📝 Recent Registrations</h2>
+<table><thead><tr><th>ID</th><th>Name</th><th>Handle</th><th>Created</th></tr></thead><tbody>${regRows || '<tr><td colspan="4">None</td></tr>'}</tbody></table>
+<h2>✅ Recent Verifications</h2>
+<table><thead><tr><th>Profile</th><th>Platform</th><th>Identifier</th><th>Verified At</th></tr></thead><tbody>${verifRows || '<tr><td colspan="4">None</td></tr>'}</tbody></table>
+<h2>📨 Unclaimed Profiles (top 50)</h2>
+<table><thead><tr><th>ID</th><th>Name</th><th>Handle</th><th>Notified</th><th>Claim</th></tr></thead><tbody>${unclaimedRows || '<tr><td colspan="5">None</td></tr>'}</tbody></table>
+</body></html>`);
+});
+
   const { registerAdminRoutes } = require('./routes/admin-routes');
   registerAdminRoutes(app, profileStore.getDb);
 } catch (e) {
