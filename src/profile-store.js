@@ -593,9 +593,9 @@ function enrichProfile(row) {
     // Computed level/tier/score — chain-cache is primary source
     level: v3 ? v3.verificationLevel : (trust_score ? trust_score.level : null),
     tier: v3 ? (['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'][v3.verificationLevel] || v3.verificationLabel || 'Unclaimed') : (trust_score ? (trust_score.level >= 4 ? 'Elite' : trust_score.level >= 3 ? 'Established' : trust_score.level >= 2 ? 'Verified' : trust_score.level >= 1 ? 'Basic' : 'Unclaimed') : null),
-    score: v3 ? v3.reputationScore : (trust_score ? trust_score.overall_score : null),
+    score: (trust_score && trust_score.overall_score) ? trust_score.overall_score : (v3 ? v3.reputationScore : null),
     verification_level: v3 ? v3.verificationLevel : (trust_score ? trust_score.level : 0),
-    reputation_score: v3 ? v3.reputationScore : (trust_score ? trust_score.overall_score : 0),
+    reputation_score: (trust_score && trust_score.overall_score) ? trust_score.overall_score : (v3 ? v3.reputationScore : 0),
     // Top-level unclaimed flag for frontend (from metadata)
     unclaimed: (() => { try { const m = typeof row.metadata === 'string' ? JSON.parse(row.metadata || '{}') : (row.metadata || {}); return m.unclaimed === true || m.isPlaceholder === true || m.placeholder === true; } catch { return false; } })(),
   };
@@ -1066,9 +1066,8 @@ function registerRoutes(app) {
               verificationLabel: v3.verificationLabel,
               isBorn: v3.isBorn,
             };
-            if (v3.reputationScore > p.trust_score) {
-              p.trust_score = v3.reputationScore;
-            }
+            // DB score is authoritative until on-chain is verified correct
+            // if (v3.reputationScore > p.trust_score) { p.trust_score = v3.reputationScore; }
           }
         }
         // REMOVED: // DB enrichment fallback for agents with chain defaults (level=0)
@@ -1167,7 +1166,7 @@ function registerRoutes(app) {
       const cl = p.chain_level || 0;
       const cs = p.chain_score || 0;
       p.level = v.verificationLevel || v.level || cl || 0;
-      p.score = v.reputationScore || v.score || cs || p.trust_score || 0;
+      p.score = p.trust_score || v.reputationScore || v.score || cs || 0;
       p.levelName = v.verificationLabel || levelLabels[p.level] || 'Unknown';
     }
     // Sort parameter: trust_desc (default), trust_asc, name_asc, name_desc, newest, oldest
@@ -1236,11 +1235,11 @@ function registerRoutes(app) {
           enriched.trust_score = { source: "on-chain", reputationScore: v3Data.reputationScore, verificationLevel: v3Data.verificationLevel, isBorn: v3Data.isBorn, faceImage: v3Data.faceImage || null, authority: v3Data.authority || null };
           const levelLabels = ["Unverified","Registered","Verified","Established","Trusted","Sovereign"];
           enriched.level = v3Data.verificationLevel;
-          enriched.score = v3Data.reputationScore;
+          enriched.score = enriched.trust_score?.overall_score || enriched.score || v3Data.reputationScore;
           enriched.levelName = v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || "Unknown";
           enriched.verificationLevel = v3Data.verificationLevel;
           enriched.verification_level = v3Data.verificationLevel;
-          enriched.reputation_score = v3Data.reputationScore;
+          enriched.reputation_score = enriched.trust_score?.overall_score || enriched.reputation_score || v3Data.reputationScore;
           enriched.tier = v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || "Unknown";
           enriched.isBorn = v3Data.isBorn;
           if (v3Data.faceImage) enriched.faceImage = v3Data.faceImage;
