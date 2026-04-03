@@ -97,4 +97,5 @@ function verifySignature(challengeId, signature) {
   }
 }
 
-module.exports = { generateChallenge, verifySignature };
+function getChallenge(id) { return challenges.get(id); }
+module.exports = { generateChallenge, verifySignature, getChallenge };
