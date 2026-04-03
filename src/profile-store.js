@@ -366,8 +366,14 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
           console.log(`[SATP V3] Verification updated for ${profileId}: level ${genesis.verificationLevel} → ${newLevel}, tx=${sig}`);
         }
         
-        // Update reputation score if changed (with score protection)
-        if (newTrustScore > genesis.reputationScore && newTrustScore <= 10000) {
+        // Update reputation score if changed (with score protection — P1 hardening)
+        const levelJump = Math.abs(newLevel - genesis.verificationLevel);
+        if (levelJump > 2) {
+          console.warn(`[SATP V3] BLOCKED: Level jump too large for ${profileId}: ${genesis.verificationLevel} -> ${newLevel} (delta=${levelJump}). Max allowed: 2.`);
+        } else if (newTrustScore > 10000) {
+          console.warn(`[SATP V3] BLOCKED: Score too high for ${profileId}: ${newTrustScore}. Max allowed: 10000.`);
+        }
+        if (newTrustScore > genesis.reputationScore && newTrustScore <= 10000 && newTrustScore < 1500) {
           const repTx = await satpV3.client.buildUpdateReputation(signer.publicKey, profileId, newTrustScore);
           repTx.transaction.sign(signer);
           const repSig = await satpV3.client.connection.sendRawTransaction(repTx.transaction.serialize());
