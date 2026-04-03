@@ -1126,9 +1126,13 @@ function registerRoutes(app) {
       for (const p of profiles) {
         if (!p.v3) {
           const ccScore = chainCache.getScore(p.id);
-          if (ccScore && ccScore.reputationScore > (p.trust_score || 0)) {
-            p.trust_score = ccScore.reputationScore;
+          // DB is authoritative (CEO directive) — don't overwrite with chain score
+          if (ccScore) {
             p.chain_cache_score = ccScore;
+            // Only use chain score if NO DB score exists
+            if (!p.trust_score && ccScore.reputationScore) {
+              p.trust_score = ccScore.reputationScore;
+            }
           }
         }
         // Add verification count from chain-cache (on-chain source of truth)
@@ -1161,8 +1165,8 @@ function registerRoutes(app) {
         if (ccScore) {
           p.chain_score = ccScore.reputationScore || 0;
           p.chain_level = ccScore.verificationLevel || 0;
-          // Chain-cache score is authoritative
-          if (ccScore.reputationScore && ccScore.reputationScore > (p.trust_score || 0)) {
+          // DB is authoritative (CEO directive) — chain score as fallback only
+          if (ccScore.reputationScore && !p.trust_score) {
             p.trust_score = ccScore.reputationScore;
           }
         }
@@ -1244,15 +1248,33 @@ function registerRoutes(app) {
 
         if (hasGenesis) {
           enriched.onchain = v3Data;
-          enriched.trust_score = { source: "on-chain", reputationScore: v3Data.reputationScore, verificationLevel: v3Data.verificationLevel, isBorn: v3Data.isBorn, faceImage: v3Data.faceImage || null, authority: v3Data.authority || null };
+          // DB is authoritative for scores (CEO directive 2026-04-03)
+          const dbScore = enriched.trust_score;
+          const hasDbScore = dbScore && dbScore.overall_score != null;
+          const LEVEL_MAP = {'UNVERIFIED':0,'NEW':0,'REGISTERED':1,'VERIFIED':2,'ESTABLISHED':3,'TRUSTED':4,'SOVEREIGN':5,'ELITE':5};
           const levelLabels = ["Unverified","Registered","Verified","Established","Trusted","Sovereign"];
-          enriched.level = v3Data.verificationLevel;
-          enriched.score = enriched.trust_score?.overall_score || enriched.score || v3Data.reputationScore;
-          enriched.levelName = v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || "Unknown";
-          enriched.verificationLevel = v3Data.verificationLevel;
-          enriched.verification_level = v3Data.verificationLevel;
-          enriched.reputation_score = enriched.trust_score?.overall_score || enriched.reputation_score || v3Data.reputationScore;
-          enriched.tier = v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || "Unknown";
+          if (hasDbScore) {
+            // Preserve DB scores, add on-chain metadata
+            enriched.trust_score = { ...dbScore, source: "database", onchain: { reputationScore: v3Data.reputationScore, verificationLevel: v3Data.verificationLevel } };
+            enriched.score = dbScore.overall_score;
+            enriched.reputation_score = dbScore.overall_score;
+            const dbLevel = LEVEL_MAP[dbScore.level] != null ? LEVEL_MAP[dbScore.level] : v3Data.verificationLevel;
+            enriched.level = dbLevel;
+            enriched.verification_level = dbLevel;
+            enriched.verificationLevel = dbLevel;
+            enriched.levelName = dbScore.level || levelLabels[dbLevel] || "Unknown";
+            enriched.tier = dbScore.level || levelLabels[dbLevel] || "Unknown";
+          } else {
+            // No DB score — fallback to on-chain
+            enriched.trust_score = { source: "on-chain", reputationScore: v3Data.reputationScore, verificationLevel: v3Data.verificationLevel, isBorn: v3Data.isBorn, faceImage: v3Data.faceImage || null, authority: v3Data.authority || null };
+            enriched.level = v3Data.verificationLevel;
+            enriched.score = v3Data.reputationScore;
+            enriched.levelName = v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || "Unknown";
+            enriched.verificationLevel = v3Data.verificationLevel;
+            enriched.verification_level = v3Data.verificationLevel;
+            enriched.reputation_score = v3Data.reputationScore;
+            enriched.tier = v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || "Unknown";
+          }
           enriched.isBorn = v3Data.isBorn;
           if (v3Data.faceImage) enriched.faceImage = v3Data.faceImage;
           if (v3Data.authority) enriched.walletAddress = v3Data.authority;
