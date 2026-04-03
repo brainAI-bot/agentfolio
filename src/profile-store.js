@@ -586,10 +586,10 @@ function enrichProfile(row) {
     },
     trust_score,
     // Computed level/tier/score — chain-cache is primary source
-    level: v3 ? v3.verificationLevel : (trust_score ? trust_score.level : null),
-    tier: v3 ? (['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'][v3.verificationLevel] || v3.verificationLabel || 'Unclaimed') : (trust_score ? (trust_score.level >= 4 ? 'Elite' : trust_score.level >= 3 ? 'Established' : trust_score.level >= 2 ? 'Verified' : trust_score.level >= 1 ? 'Basic' : 'Unclaimed') : null),
+    level: (trust_score && trust_score.level) ? trust_score.level : (v3 ? v3.verificationLevel : null),
+    tier: (trust_score && trust_score.level) ? trust_score.level : (v3 ? (['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'][v3.verificationLevel] || v3.verificationLabel || 'Unclaimed') : null),
     score: (trust_score && trust_score.overall_score) ? trust_score.overall_score : (v3 ? v3.reputationScore : null),
-    verification_level: v3 ? v3.verificationLevel : (trust_score ? trust_score.level : 0),
+    verification_level: (trust_score && trust_score.level) ? ({'UNVERIFIED':0,'NEW':0,'REGISTERED':1,'VERIFIED':2,'ESTABLISHED':3,'TRUSTED':4,'SOVEREIGN':5,'ELITE':5}[trust_score.level] || 0) : (v3 ? v3.verificationLevel : 0),
     reputation_score: (trust_score && trust_score.overall_score) ? trust_score.overall_score : (v3 ? v3.reputationScore : 0),
     // Top-level unclaimed flag for frontend (from metadata)
     unclaimed: (() => { try { const m = typeof row.metadata === 'string' ? JSON.parse(row.metadata || '{}') : (row.metadata || {}); return m.unclaimed === true || m.isPlaceholder === true || m.placeholder === true; } catch { return false; } })(),
