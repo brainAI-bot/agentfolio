@@ -228,6 +228,24 @@ function validateScoreWrite(agentId, newScore, newLevel, source) {
     console.error('[SCORE GUARD] BLOCKED: invalid level "' + newLevel + '" for ' + agentId + ' (source: ' + source + ')');
     return false;
   }
+  // P1: Level jump protection — reject if level changes by more than 2 steps
+  if (newLevel) {
+    try {
+      const db = getDb();
+      const existing = db.prepare('SELECT level FROM satp_trust_scores WHERE agent_id = ?').get(agentId);
+      if (existing && existing.level) {
+        const LEVEL_ORDER = ['NEW', 'UNVERIFIED', 'REGISTERED', 'VERIFIED', 'ESTABLISHED', 'TRUSTED', 'SOVEREIGN', 'ELITE'];
+        const oldIdx = LEVEL_ORDER.indexOf(existing.level);
+        const newIdx = LEVEL_ORDER.indexOf(newLevel);
+        if (oldIdx >= 0 && newIdx >= 0 && Math.abs(newIdx - oldIdx) > 2) {
+          console.error('[SCORE GUARD] BLOCKED: level jump too large for ' + agentId + ': ' + existing.level + ' -> ' + newLevel + ' (delta=' + Math.abs(newIdx - oldIdx) + ', max=2, source: ' + source + ')');
+          return false;
+        }
+      }
+    } catch (e) {
+      // DB read failure shouldn't block writes
+    }
+  }
   return true;
 }
 
