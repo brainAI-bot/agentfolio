@@ -353,15 +353,10 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
           console.log(`[SATP V3] Reputation updated for ${profileId}: ${genesis.reputationScore} → ${newTrustScore}, tx=${repSig}`);
         }
 
-        // V3 recompute — trigger on-chain recalculation (permissionless)
-        try {
-          const recompRepTx = await satpV3.client.buildRecomputeReputation(genesis.authority, signer.publicKey);
-          if (recompRepTx && recompRepTx.transaction) {
-            recompRepTx.transaction.sign(signer);
-            const recompSig = await satpV3.client.connection.sendRawTransaction(recompRepTx.transaction.serialize());
-            console.log(`[SATP V3] Reputation recomputed for ${profileId}: tx=${recompSig}`);
-          }
-        } catch (recompErr) { console.warn(`[SATP V3] Recompute reputation failed for ${profileId}: ${recompErr.message}`); }
+        // V3 recompute DISABLED — on-chain recompute_reputation produces incorrect scores
+        // Re-enable once the Solana program's recompute logic matches the DB scoring engine
+        // (CEO directive 2026-04-03: DB is authoritative until on-chain is fixed)
+        console.log(`[SATP V3] Skipping recompute_reputation for ${profileId} (disabled — DB authoritative)`);
         
       } catch (err) {
         console.error(`[SATP V3] On-chain update failed for ${profileId}:`, err.message);
@@ -929,7 +924,24 @@ function registerRoutes(app) {
           } catch {}
         }
       }
-      // ON-CHAIN = TRUTH: No DB enrichment. Chain data is authoritative. (CEO directive 2026-03-31)
+      // DB is authoritative for scores until on-chain is fixed (CEO directive 2026-04-03)
+      if (record) {
+        try {
+          const d = getDb();
+          const dbScore = d.prepare('SELECT overall_score, level FROM satp_trust_scores WHERE agent_id = ?').get(rawId);
+          if (dbScore && dbScore.overall_score > 0) {
+            // Override on-chain score with DB score if they diverge significantly
+            if (Math.abs(record.reputationScore - dbScore.overall_score) > 100) {
+              console.log('[Genesis] Score mismatch for ' + rawId + ': chain=' + record.reputationScore + ' db=' + dbScore.overall_score + ' — using DB');
+              record.reputationScore = dbScore.overall_score;
+              record.reputationPct = (dbScore.overall_score / 1000 * 100).toFixed(2);
+              record._scoreSource = 'db_override';
+            }
+          }
+        } catch (dbErr) {
+          console.error('[Genesis] DB score lookup failed:', dbErr.message);
+        }
+      }
       res.json({ genesis: record });
     } catch (e) {
       res.json({ genesis: null, error: e.message });
