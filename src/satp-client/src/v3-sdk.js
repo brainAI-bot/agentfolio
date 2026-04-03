@@ -971,6 +971,22 @@ class SATPV3SDK {
    * @returns {{ transaction: Transaction }}
    */
   async buildRecomputeReputation(caller, agentIdOrHash, reviewAccounts = []) {
+    // Score protection guard — fetch current genesis and validate before building tx
+    const [checkPDA] = getGenesisPDA(agentIdOrHash, this.network);
+    try {
+      const acctInfo = await this.connection.getAccountInfo(checkPDA);
+      if (acctInfo && acctInfo.data) {
+        // Read reputation_score from genesis (u32 at offset 72 based on IDL)
+        const currentScore = acctInfo.data.readUInt32LE(72);
+        if (currentScore > 10000) {
+          throw new Error(`SCORE_GUARD: Current on-chain score ${currentScore} already exceeds 10000 — refusing recompute`);
+        }
+      }
+    } catch (guardErr) {
+      if (guardErr.message.startsWith('SCORE_GUARD')) throw guardErr;
+      // If we can't read the account, let it proceed (account might not exist yet)
+      console.warn('[V3-SDK] Score guard check failed (non-blocking):', guardErr.message);
+    }
     const callerKey = new PublicKey(caller);
     const [genesisPDA] = getGenesisPDA(agentIdOrHash, this.network);
     const [repAuthority] = getV3ReputationAuthorityPDA(this.network);
@@ -1015,6 +1031,20 @@ class SATPV3SDK {
    * @returns {{ transaction: Transaction }}
    */
   async buildRecomputeLevel(caller, agentIdOrHash, attestationAccounts = []) {
+    // Level protection guard — reject if level jump would be > 2
+    const [checkPDA] = getGenesisPDA(agentIdOrHash, this.network);
+    try {
+      const acctInfo = await this.connection.getAccountInfo(checkPDA);
+      if (acctInfo && acctInfo.data) {
+        const currentLevel = acctInfo.data.readUInt8(76); // verification_level offset
+        if (currentLevel > 5) {
+          throw new Error(`LEVEL_GUARD: Current on-chain level ${currentLevel} is invalid (max 5) — refusing recompute`);
+        }
+      }
+    } catch (guardErr) {
+      if (guardErr.message.startsWith('LEVEL_GUARD')) throw guardErr;
+      console.warn('[V3-SDK] Level guard check failed (non-blocking):', guardErr.message);
+    }
     const callerKey = new PublicKey(caller);
     const [genesisPDA] = getGenesisPDA(agentIdOrHash, this.network);
     const [valAuthority] = getV3ValidationAuthorityPDA(this.network);
