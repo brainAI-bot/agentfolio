@@ -210,6 +210,27 @@ function parseJsonField(val, defaultVal = []) {
   try { return JSON.parse(val); } catch { return defaultVal; }
 }
 
+
+// Score protection guard — prevents corrupt scores from being written
+const MAX_VALID_SCORE = 10000;
+const MAX_LEVEL_JUMP = 2;
+const VALID_LEVELS = ['NEW', 'UNVERIFIED', 'REGISTERED', 'VERIFIED', 'ESTABLISHED', 'TRUSTED', 'SOVEREIGN', 'ELITE'];
+function validateScoreWrite(agentId, newScore, newLevel, source) {
+  if (typeof newScore === 'number' && newScore > MAX_VALID_SCORE) {
+    console.error('[SCORE GUARD] BLOCKED: score ' + newScore + ' > ' + MAX_VALID_SCORE + ' for ' + agentId + ' (source: ' + source + ')');
+    return false;
+  }
+  if (typeof newScore === 'number' && newScore < 0) {
+    console.error('[SCORE GUARD] BLOCKED: negative score ' + newScore + ' for ' + agentId + ' (source: ' + source + ')');
+    return false;
+  }
+  if (newLevel && !VALID_LEVELS.includes(newLevel)) {
+    console.error('[SCORE GUARD] BLOCKED: invalid level "' + newLevel + '" for ' + agentId + ' (source: ' + source + ')');
+    return false;
+  }
+  return true;
+}
+
 function addVerification(profileId, platform, identifier, proof, userPaidGenesis = false) {
   const d = getDb();
   const id = genId('ver');
@@ -345,8 +366,8 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
           console.log(`[SATP V3] Verification updated for ${profileId}: level ${genesis.verificationLevel} → ${newLevel}, tx=${sig}`);
         }
         
-        // Update reputation score if changed
-        if (newTrustScore > genesis.reputationScore) {
+        // Update reputation score if changed (with score protection)
+        if (newTrustScore > genesis.reputationScore && newTrustScore <= 10000) {
           const repTx = await satpV3.client.buildUpdateReputation(signer.publicKey, profileId, newTrustScore);
           repTx.transaction.sign(signer);
           const repSig = await satpV3.client.connection.sendRawTransaction(repTx.transaction.serialize());
@@ -588,9 +609,9 @@ function enrichProfile(row) {
     // Computed level/tier/score — chain-cache is primary source
     level: (trust_score && trust_score.level) ? trust_score.level : (v3 ? v3.verificationLevel : null),
     tier: (trust_score && trust_score.level) ? trust_score.level : (v3 ? (['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'][v3.verificationLevel] || v3.verificationLabel || 'Unclaimed') : null),
-    score: (trust_score && trust_score.overall_score) ? trust_score.overall_score : (v3 ? v3.reputationScore : null),
+    score: v3 ? v3.reputationScore : (trust_score ? trust_score.overall_score : null),
     verification_level: (trust_score && trust_score.level) ? ({'UNVERIFIED':0,'NEW':0,'REGISTERED':1,'VERIFIED':2,'ESTABLISHED':3,'TRUSTED':4,'SOVEREIGN':5,'ELITE':5}[trust_score.level] || 0) : (v3 ? v3.verificationLevel : 0),
-    reputation_score: (trust_score && trust_score.overall_score) ? trust_score.overall_score : (v3 ? v3.reputationScore : 0),
+    reputation_score: v3 ? v3.reputationScore : (trust_score ? trust_score.overall_score : 0),
     // Top-level unclaimed flag for frontend (from metadata)
     unclaimed: (() => { try { const m = typeof row.metadata === 'string' ? JSON.parse(row.metadata || '{}') : (row.metadata || {}); return m.unclaimed === true || m.isPlaceholder === true || m.placeholder === true; } catch { return false; } })(),
   };
@@ -843,7 +864,11 @@ function registerRoutes(app) {
         const overallScore = scoringData.overall?.score || scoringData.reputationScore?.score || 0;
         const level = scoringData.verificationLevel?.name || 'NEW';
         const breakdown = JSON.stringify(scoringData);
-        d.prepare("INSERT OR REPLACE INTO satp_trust_scores (agent_id, overall_score, level, score_breakdown, last_computed) VALUES (?, ?, ?, ?, datetime('now'))").run(id, overallScore, level, breakdown);
+        if (validateScoreWrite(id, overallScore, level, 'registration')) {
+          d.prepare("INSERT OR REPLACE INTO satp_trust_scores (agent_id, overall_score, level, score_breakdown, last_computed) VALUES (?, ?, ?, ?, datetime('now'))").run(id, overallScore, level, breakdown);
+        } else {
+          console.error('[SCORE GUARD] Skipped corrupt score write for ' + id + ': score=' + overallScore + ' level=' + level);
+        }
         // Record score history
         if (global._recordScoreHistory) {
           global._recordScoreHistory(id, overallScore, level, breakdown, 'registration');
@@ -1078,8 +1103,7 @@ function registerRoutes(app) {
               verificationLabel: v3.verificationLabel,
               isBorn: v3.isBorn,
             };
-            // DB score is authoritative until on-chain is verified correct
-            // if (v3.reputationScore > p.trust_score) { p.trust_score = v3.reputationScore; }
+            if (v3.reputationScore > (p.trust_score || 0)) { p.trust_score = v3.reputationScore; }
           }
         }
         // REMOVED: // DB enrichment fallback for agents with chain defaults (level=0)
@@ -1181,13 +1205,9 @@ function registerRoutes(app) {
       const v = p.v3 || {};
       const cl = p.chain_level || 0;
       const cs = p.chain_score || 0;
-      p.level = (() => {
-        const LMAP = {'UNVERIFIED':0,'NEW':0,'REGISTERED':1,'BASIC':2,'VERIFIED':2,'ESTABLISHED':3,'TRUSTED':4,'SOVEREIGN':5,'ELITE':5};
-        if (p._dbLevel && LMAP[p._dbLevel.toUpperCase()] != null) return LMAP[p._dbLevel.toUpperCase()];
-        return v.verificationLevel || v.level || cl || 0;
-      })();
-      p.score = p.trust_score || v.reputationScore || v.score || cs || 0;
-      p.levelName = levelLabels[p.level] || v.verificationLabel || 'Unknown';
+      p.level = v.verificationLevel || v.level || cl || 0;
+      p.score = v.reputationScore || v.score || cs || p.trust_score || 0;
+      p.levelName = v.verificationLabel || levelLabels[p.level] || 'Unknown';
     }
     // Sort parameter: trust_desc (default), trust_asc, name_asc, name_desc, newest, oldest
     const sortParam = (req.query.sort || "trust_desc").toLowerCase();

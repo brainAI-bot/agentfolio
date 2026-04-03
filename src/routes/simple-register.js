@@ -144,7 +144,11 @@ function registerSimpleRoutes(app, getDb) {
         const overallScore = scoringData.overall?.score || scoringData.reputationScore?.score || 0;
         const level = scoringData.verificationLevel?.name || 'NEW';
         const breakdown = JSON.stringify(scoringData);
-        d.prepare("INSERT OR REPLACE INTO satp_trust_scores (agent_id, overall_score, level, score_breakdown, last_computed) VALUES (?, ?, ?, ?, datetime('now'))").run(id, overallScore, level, breakdown);
+        if (overallScore <= 10000 && overallScore >= 0) {
+          d.prepare("INSERT OR REPLACE INTO satp_trust_scores (agent_id, overall_score, level, score_breakdown, last_computed) VALUES (?, ?, ?, ?, datetime('now'))").run(id, overallScore, level, breakdown);
+        } else {
+          console.error('[SCORE GUARD] Blocked corrupt score in simple-register for ' + id + ': ' + overallScore);
+        }
       } catch (scoreErr) {
         console.error('[SimpleRegister] Trust scoring failed:', scoreErr.message);
       }
