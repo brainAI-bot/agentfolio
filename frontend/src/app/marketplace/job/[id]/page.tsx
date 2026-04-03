@@ -31,6 +31,7 @@ import { JobApplyForm } from "@/components/JobApplyForm";
 import { JobReviewSection } from "@/components/JobReviewSection";
 import { SubmitWorkForm } from "@/components/SubmitWorkForm";
 import { ApplicationsList } from "@/components/ApplicationsList";
+import { OnChainEscrowActions } from "@/components/OnChainEscrowActions";
 
 export const dynamic = "force-dynamic";
 
@@ -174,6 +175,17 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
           <div className="mt-4 text-[11px] px-3 py-2 rounded-lg" style={{ background: "var(--bg-primary)", fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
             API: POST /api/marketplace/jobs/{job.id}/apply
+
+          <OnChainEscrowActions
+            jobId={job.id}
+            jobStatus={job.status}
+            escrowStatus={(job as any).escrowStatus || "ready"}
+            escrowId={(job as any).escrowId}
+            clientId={(job as any).clientId}
+            assigneeId={(job as any).assigneeId}
+            budget={job.budget}
+            onchainEscrowPDA={(job as any).v3EscrowPDA || (job as any).onchainEscrowPDA}
+          />
           </div>
         </div>
       </div>
