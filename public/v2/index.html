@@ -333,18 +333,34 @@
     // Initialize
     document.addEventListener('DOMContentLoaded', async () => {
       await loadStats();
+      // Auto-refresh stats every 60s
+      setInterval(loadStats, 60000);
       await loadAgents();
       setupEventListeners();
     });
     
-    // Load platform stats
+    // Animated counter
+    function animateCount(el, target, duration = 1200) {
+      const start = parseInt(el.textContent) || 0;
+      if (start === target) return;
+      const startTime = performance.now();
+      function step(now) {
+        const progress = Math.min((now - startTime) / duration, 1);
+        const ease = 1 - Math.pow(1 - progress, 3); // easeOutCubic
+        el.textContent = Math.round(start + (target - start) * ease);
+        if (progress < 1) requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    }
+
+    // Load platform stats (live from API)
     async function loadStats() {
       try {
         const res = await fetch(`${API_BASE}/stats`);
         const stats = await res.json();
         
-        document.getElementById('total-agents').textContent = stats.totalAgents || 0;
-        document.getElementById('verified-agents').textContent = stats.verifiedAgents || 0;
+        animateCount(document.getElementById('total-agents'), stats.totalAgents || stats.total_agents || 0);
+        animateCount(document.getElementById('verified-agents'), stats.verifiedAgents || stats.verified || 0);
         document.getElementById('total-jobs').textContent = stats.totalJobs || 0;
         document.getElementById('total-volume').textContent = formatCurrency(stats.totalVolume || 0);
       } catch (err) {

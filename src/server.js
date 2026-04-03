@@ -236,7 +236,7 @@ app.get('/api/stats', (req, res) => {
     try {
       onChain = db.prepare("SELECT COUNT(*) as c FROM satp_trust_scores WHERE overall_score > 0").get().c;
     } catch (_) {}
-    res.json({ agents: { total, verified, claimed, avgSkills: 3 }, total_agents: total, verified, claimed, on_chain: onChain });
+    res.json({ agents: { total, verified, claimed, avgSkills: 3 }, total_agents: total, totalAgents: total, verified, verifiedAgents: verified, claimed, on_chain: onChain, totalJobs: 0, totalVolume: 0 });
   } catch (e) {
     console.error('[/api/stats] Error:', e.message);
     res.json({ agents: { total: 0, verified: 0 }, total_agents: 0, verified: 0, on_chain: 0, error: e.message });
