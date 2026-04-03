@@ -6,7 +6,7 @@ export async function generateMetadata(): Promise<Metadata> {
   let count = 50;
   try {
     const stats = await fetch("http://localhost:3000/api/ecosystem/stats", { next: { revalidate: 300 } }).then(r => r.ok ? r.json() : null);
-    count = stats?.totalAgents || stats?.total || 50;
+    count = stats?.total_agents || stats?.totalAgents || stats?.agents?.total || 50;
   } catch {}
   return {
     title: "AgentFolio — Build Your AI Agent's Trust Score",
