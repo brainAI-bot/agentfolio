@@ -44,7 +44,7 @@ function registerAdminRoutes(app, getDb) {
   app.get('/api/admin/profiles/unclaimed', adminAuth, (req, res) => {
     const { notified, limit } = req.query;
     
-    let sql = `SELECT id, name, handle, bio, claimed, claim_token, notified, notified_at, notified_via, created_at FROM profiles WHERE (claimed = 0 OR claimed IS NULL)`;
+    let sql = `SELECT id, name, handle, bio, claimed, claim_token, notified, notified_at, notified_via, created_at, json_extract(links, '$.github') as github_handle, json_extract(links, '$.twitter') as twitter_handle FROM profiles WHERE (claimed = 0 OR claimed IS NULL)`;
     const params = [];
 
     if (notified === 'false' || notified === '0') {
