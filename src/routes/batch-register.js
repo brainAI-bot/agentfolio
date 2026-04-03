@@ -47,6 +47,14 @@ const TRUSTED_API_KEYS = new Set(
 
 const MAX_BATCH_SIZE = 100;
 
+// Quality gate: reject non-AI-agent entries in bulk imports
+const AI_KEYWORDS = /\b(ai|agent|bot|llm|gpt|model|autonomous|neural|ml|machine.?learn|nlp|chatbot|assistant|copilot|framework|protocol|smart.?contract|dao|defi|nft|crypto|web3|solana|ethereum|blockchain|decentrali[sz]ed|wallet|token)\b/i;
+
+function isLikelyAIAgent(entry) {
+  const text = [entry.name, entry.bio, entry.description, ...(entry.skills || []), ...(entry.capabilities || []), ...(entry.tags || [])].filter(Boolean).join(" ");
+  return AI_KEYWORDS.test(text);
+}
+
 function genId() {
   return crypto.randomBytes(8).toString('hex');
 }
@@ -93,6 +101,12 @@ function registerBatchRoutes(app) {
         // Validate name
         if (!agent.name || typeof agent.name !== 'string' || agent.name.trim().length < 1) {
           errors.push({ index: i, name: agent.name || '(unnamed)', error: 'name is required' });
+          continue;
+        }
+
+        // Quality gate: reject non-AI-agent entries
+        if (!isLikelyAIAgent(agent)) {
+          errors.push({ index: i, name: agent.name, error: "rejected by quality gate: does not appear to be an AI agent" });
           continue;
         }
 
