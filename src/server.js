@@ -1028,6 +1028,69 @@ app.post('/api/verification/farcaster/verify', async (req, res) => {
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
+
+// P2: Admin Dashboard
+app.get('/admin', (req, res) => {
+  const key = req.query.key || req.headers['x-admin-key'];
+  if (!key || key !== (process.env.ADMIN_KEY || 'bf-admin-2026')) {
+    return res.status(401).send('<h1>401 Unauthorized</h1><p>Append ?key=YOUR_ADMIN_KEY</p>');
+  }
+  const db = getDb();
+  const total = db.prepare('SELECT COUNT(*) as c FROM profiles').get().c;
+  const claimed = db.prepare('SELECT COUNT(*) as c FROM profiles WHERE claimed = 1').get().c;
+  const verified = db.prepare('SELECT COUNT(DISTINCT profile_id) as c FROM verifications').get().c;
+  let onChain = 0;
+  try { onChain = db.prepare('SELECT COUNT(*) as c FROM satp_trust_scores WHERE overall_score > 0').get().c; } catch(e) {}
+  
+  const recentRegs = db.prepare("SELECT id, name, handle, created_at FROM profiles ORDER BY created_at DESC LIMIT 10").all();
+  const recentVerifs = db.prepare("SELECT profile_id, platform, identifier, verified_at FROM verifications ORDER BY verified_at DESC LIMIT 10").all();
+  const unclaimed = db.prepare("SELECT id, name, handle, claim_token FROM profiles WHERE (claimed = 0 OR claimed IS NULL) ORDER BY name LIMIT 50").all();
+
+  const escapeHtml = (s) => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const row = (cells) => '<tr>' + cells.map(c => '<td>' + escapeHtml(c) + '</td>').join('') + '</tr>';
+
+  res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>AgentFolio Admin</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui;background:#0a0a0f;color:#e0e0e0;padding:2rem}
+h1{font-size:1.6rem;margin-bottom:1.5rem;background:linear-gradient(135deg,#8b5cf6,#06b6d4);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+h2{font-size:1.1rem;margin:1.5rem 0 0.75rem;color:#8b5cf6}
+.stats{display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem}
+.stat{background:#141420;border:1px solid #2a2a3a;border-radius:12px;padding:1.25rem 1.5rem;min-width:140px}
+.stat .num{font-size:2rem;font-weight:700;color:#8b5cf6}.stat .label{font-size:0.8rem;color:#888;margin-top:0.25rem}
+table{width:100%;border-collapse:collapse;margin-bottom:1rem;font-size:0.85rem}
+th,td{padding:0.5rem 0.75rem;text-align:left;border-bottom:1px solid #1a1a2e}
+th{color:#8b5cf6;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em}
+tr:hover{background:#141420}
+a{color:#06b6d4;text-decoration:none}a:hover{text-decoration:underline}
+.tag{background:#1a1a2e;border-radius:4px;padding:0.15rem 0.5rem;font-size:0.75rem}
+</style></head><body>
+<h1>🛡️ AgentFolio Admin Dashboard</h1>
+<div class="stats">
+<div class="stat"><div class="num">${total}</div><div class="label">Total Profiles</div></div>
+<div class="stat"><div class="num">${claimed}</div><div class="label">Claimed</div></div>
+<div class="stat"><div class="num">${verified}</div><div class="label">Verified</div></div>
+<div class="stat"><div class="num">${onChain}</div><div class="label">On-Chain</div></div>
+<div class="stat"><div class="num">${total - claimed}</div><div class="label">Unclaimed</div></div>
+</div>
+
+<h2>📝 Recent Registrations</h2>
+<table><tr><th>ID</th><th>Name</th><th>Handle</th><th>Created</th></tr>
+${recentRegs.map(r => row([r.id, r.name, r.handle, r.created_at])).join('')}
+</table>
+
+<h2>✅ Recent Verifications</h2>
+<table><tr><th>Profile</th><th>Platform</th><th>Identifier</th><th>Verified</th></tr>
+${recentVerifs.map(v => row([v.profile_id, v.platform, v.identifier, v.verified_at])).join('')}
+</table>
+
+<h2>📋 Unclaimed Profiles (first 50)</h2>
+<table><tr><th>ID</th><th>Name</th><th>Handle</th><th>Claim Link</th></tr>
+${unclaimed.map(u => '<tr><td>' + escapeHtml(u.id) + '</td><td>' + escapeHtml(u.name) + '</td><td>' + escapeHtml(u.handle) + '</td><td><a href="/claim/' + u.id + '?token=' + (u.claim_token||'') + '">Claim Link</a></td></tr>').join('')}
+</table>
+<p style="color:#666;font-size:0.8rem;margin-top:2rem">Generated ${new Date().toISOString()}</p>
+</body></html>`);
+});
+
 // ── Profile Store routes (register, profiles, endorsements, reviews) ──
 profileStore.registerRoutes(app);
 
