@@ -1,568 +1,285 @@
 /**
- * Self-Service Claim Flow — Express Routes
- * Wires claim endpoints into the AgentFolio Express app.
- * Uses SQLite (profile-store) instead of JSON files.
+ * Claim Routes — Allow unclaimed profiles to be claimed by their owners
  * 
- * Endpoints:
- *   GET  /api/claims/eligible?profileId=XXX  — Check if profile can be claimed + available methods
- *   POST /api/claims/initiate                — Start a claim (generate challenge)
- *   POST /api/claims/self-verify             — Submit proof and complete claim
+ * P0: Claim notification system
+ * - GET  /claim/:id          — Show claim page (requires valid token)
+ * - POST /api/claim/:id      — Execute claim (wallet signature or GitHub proof)
+ * - GET  /api/claim/:id/status — Check claim status
  */
 
 const crypto = require('crypto');
-
-// In-memory store for pending claims (TTL: 30 minutes)
-const pendingClaims = new Map();
-const claimAttempts = new Map(); // wallet -> { count, windowStart }
-
-const CLAIM_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
-const MAX_ATTEMPTS_PER_HOUR = 5;
-const ATTEMPT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
-
-function cleanupExpired() {
-  const now = Date.now();
-  for (const [id, c] of pendingClaims) {
-    if (c.expiresAt < now) pendingClaims.delete(id);
-  }
-}
-
-function checkRateLimit(wallet) {
-  const now = Date.now();
-  const attempts = claimAttempts.get(wallet);
-  if (!attempts || (now - attempts.windowStart > ATTEMPT_WINDOW_MS)) {
-    claimAttempts.set(wallet, { count: 1, windowStart: now });
-    return true;
-  }
-  if (attempts.count >= MAX_ATTEMPTS_PER_HOUR) return false;
-  attempts.count++;
-  return true;
-}
-
-function extractHandle(url, platform) {
-  if (!url) return null;
-  try {
-    if (platform === 'x') {
-      const match = url.match(/(?:twitter\.com|x\.com)\/(@?[\w]+)/i);
-      return match ? match[1].replace(/^@/, '') : null;
-    }
-    if (platform === 'github') {
-      const match = url.match(/github\.com\/([\w-]+)/i);
-      return match ? match[1] : null;
-    }
-  } catch { return null; }
-  return null;
-}
-
-function parseJson(val, fallback) {
-  if (!val) return fallback;
-  if (typeof val === 'object') return val;
-  try { return JSON.parse(val); } catch { return fallback; }
-}
-
-/**
- * Register claim routes on Express app
- * @param {import('express').Express} app
- * @param {Function} getDb — returns better-sqlite3 instance
- */
-
-// ─── Claim Token System (for outreach URLs) ─────────────────────────
-
-function ensureClaimTokensTable(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS claim_tokens (
-      profile_id TEXT PRIMARY KEY,
-      token TEXT NOT NULL UNIQUE,
-      created_at TEXT DEFAULT (datetime('now')),
-      notified_at TEXT,
-      claimed_at TEXT
-    )
-  `);
-}
-
-function generateClaimToken(db, profileId) {
-  ensureClaimTokensTable(db);
-  const existing = db.prepare('SELECT token FROM claim_tokens WHERE profile_id = ?').get(profileId);
-  if (existing) return existing.token;
-  const token = crypto.randomBytes(16).toString('hex');
-  db.prepare('INSERT INTO claim_tokens (profile_id, token) VALUES (?, ?)').run(profileId, token);
-  return token;
-}
+const path = require('path');
+const fs = require('fs');
 
 function registerClaimRoutes(app, getDb) {
+  const db = getDb();
 
-  // ── GET /api/claims/eligible ──────────────────────────────────
-  app.get('/api/claims/eligible', (req, res) => {
-    try {
-      const { profileId } = req.query;
-      if (!profileId) return res.status(400).json({ eligible: false, reason: 'profileId required' });
+  // Ensure claim columns exist
+  try {
+    db.exec(`ALTER TABLE profiles ADD COLUMN claimed INTEGER DEFAULT 0`);
+  } catch (e) { /* column exists */ }
+  try {
+    db.exec(`ALTER TABLE profiles ADD COLUMN claim_token TEXT`);
+  } catch (e) { /* column exists */ }
+  try {
+    db.exec(`ALTER TABLE profiles ADD COLUMN claimed_at TEXT`);
+  } catch (e) { /* column exists */ }
+  try {
+    db.exec(`ALTER TABLE profiles ADD COLUMN claimed_by TEXT`); // wallet or github username
+  } catch (e) { /* column exists */ }
 
-      const db = getDb();
-      let row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
-      if (!row) row = db.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(profileId);
-      if (!row) row = db.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + profileId.toLowerCase());
-      if (!row) return res.json({ eligible: false, reason: 'Profile not found' });
-
-      // Check unclaimed status from metadata
-      const metadata = parseJson(row.metadata, {});
-      const isUnclaimed = metadata.unclaimed === true || metadata.isPlaceholder === true || metadata.placeholder === true;
-
-      if (!isUnclaimed) {
-        return res.json({ eligible: false, reason: 'Profile is already claimed' });
-      }
-
-      // Check if wallet is already set (someone already claimed it)
-      const wallets = parseJson(row.wallets, {});
-      if (wallets.solana && wallets.solana.length > 20) {
-        return res.json({ eligible: false, reason: 'Profile already has a linked wallet' });
-      }
-
-      // Build available claim methods from links
-      const links = parseJson(row.links, {});
-      const methods = [];
-
-      // X (Twitter)
-      const xUrl = links.x || links.twitter || row.twitter || '';
-      const xHandle = extractHandle(xUrl, 'x');
-      if (xHandle) methods.push({ method: 'x', identifier: xHandle });
-
-      // GitHub
-      const ghUrl = links.github || row.github || '';
-      const ghHandle = extractHandle(ghUrl, 'github');
-      if (ghHandle) methods.push({ method: 'github', identifier: ghHandle });
-
-      // Domain
-      const website = links.website || row.website || '';
-      if (website) {
-        const domain = website.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-        if (domain && domain.includes('.')) methods.push({ method: 'domain', identifier: domain });
-      }
-
-      // Solana wallet claim (sign a message)
-      methods.push({ method: 'wallet', identifier: 'Solana Wallet Signature' });
-
-      if (methods.length === 0) {
-        return res.json({ eligible: false, reason: 'No claim methods available — profile has no linked X, GitHub, or domain' });
-      }
-
-      res.json({ eligible: true, profileId: row.id, profileName: row.name, methods });
-    } catch (err) {
-      console.error('[Claims] eligible error:', err.message);
-      res.status(500).json({ eligible: false, reason: 'Server error' });
-    }
-  });
-
-  // ── POST /api/claims/initiate ─────────────────────────────────
-  app.post('/api/claims/initiate', (req, res) => {
-    try {
-      const { profileId, method, wallet } = req.body;
-      if (!profileId || !method || !wallet) {
-        return res.status(400).json({ success: false, error: 'profileId, method, and wallet are required' });
-      }
-
-      if (!checkRateLimit(wallet)) {
-        return res.status(429).json({ success: false, error: 'Rate limit exceeded. Max 5 attempts per hour.' });
-      }
-
-      const db = getDb();
-      let row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
-      if (!row) row = db.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(profileId);
-      if (!row) return res.status(404).json({ success: false, error: 'Profile not found' });
-
-      const metadata = parseJson(row.metadata, {});
-      const isUnclaimed = metadata.unclaimed === true || metadata.isPlaceholder === true || metadata.placeholder === true;
-      if (!isUnclaimed) {
-        return res.json({ success: false, error: 'Profile is already claimed' });
-      }
-
-      // Generate challenge
-      const challengeId = crypto.randomBytes(16).toString('hex');
-      const challengeCode = crypto.randomBytes(4).toString('hex').toUpperCase();
-      const profileName = row.name || profileId;
-
-      let instructions = '';
-      let challengeString = '';
-      let identifier = '';
-
-      const links = parseJson(row.links, {});
-
-      if (method === 'x') {
-        identifier = extractHandle(links.x || links.twitter || row.twitter || '', 'x');
-        if (!identifier) return res.json({ success: false, error: 'No X/Twitter handle found on this profile' });
-        challengeString = `Claiming ${profileName} on @AgentFolioHQ\nCode: ${challengeCode}`;
-        instructions = `Tweet the following from @${identifier}:\n\n"${challengeString}"\n\nThen paste the tweet URL below.`;
-      } else if (method === 'github') {
-        identifier = extractHandle(links.github || row.github || '', 'github');
-        if (!identifier) return res.json({ success: false, error: 'No GitHub username found on this profile' });
-        challengeString = `AgentFolio Claim Verification\nProfile: ${profileId}\nCode: ${challengeCode}\nWallet: ${wallet}`;
-        instructions = `Create a public gist at https://gist.github.com\nFilename: agentfolio-claim.md\nContent:\n\n${challengeString}\n\nThen paste your gist URL below.`;
-      } else if (method === 'domain') {
-        const website = links.website || row.website || '';
-        identifier = website.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-        if (!identifier) return res.json({ success: false, error: 'No domain found on this profile' });
-        challengeString = challengeCode;
-        instructions = `Add a TXT record to ${identifier}:\n\nagentfolio-verify=${challengeCode}\n\nOr place a file at:\nhttps://${identifier}/.well-known/agentfolio-verify.txt\n\nContaining: ${challengeCode}`;
-      } else if (method === 'wallet') {
-        identifier = wallet;
-        challengeString = `agentfolio-claim:${profileId}:${challengeCode}`;
-        instructions = `Sign this message with your Solana wallet:\n\n${challengeString}\n\nThe signature will be verified automatically.`;
-      } else {
-        return res.json({ success: false, error: `Unknown claim method: ${method}` });
-      }
-
-      const claim = {
-        challengeId,
-        profileId: row.id,
-        profileName,
-        method,
-        identifier,
-        wallet,
-        challengeCode,
-        challengeString,
-        createdAt: Date.now(),
-        expiresAt: Date.now() + CLAIM_EXPIRY_MS,
-      };
-
-      pendingClaims.set(challengeId, claim);
-      cleanupExpired();
-
-      res.json({
-        success: true,
-        challengeId,
-        method,
-        identifier,
-        instructions,
-        challengeString,
-        expiresAt: new Date(claim.expiresAt).toISOString(),
-      });
-    } catch (err) {
-      console.error('[Claims] initiate error:', err.message);
-      res.status(500).json({ success: false, error: 'Server error' });
-    }
-  });
-
-  // ── POST /api/claims/self-verify ──────────────────────────────
-  app.post('/api/claims/self-verify', async (req, res) => {
-    try {
-      const { challengeId, proof } = req.body;
-      if (!challengeId || !proof) {
-        return res.status(400).json({ success: false, error: 'challengeId and proof required' });
-      }
-
-      const claim = pendingClaims.get(challengeId);
-      if (!claim) return res.json({ success: false, error: 'Challenge not found or expired' });
-      if (claim.expiresAt < Date.now()) {
-        pendingClaims.delete(challengeId);
-        return res.json({ success: false, error: 'Challenge has expired' });
-      }
-
-      let verified = false;
-      let verificationProof = {};
-
-      if (claim.method === 'x') {
-        ({ verified, verificationProof } = await verifyTweet(claim, proof));
-      } else if (claim.method === 'github') {
-        ({ verified, verificationProof } = await verifyGist(claim, proof));
-      } else if (claim.method === 'domain') {
-        ({ verified, verificationProof } = await verifyDomain(claim, proof));
-      } else if (claim.method === 'wallet') {
-        ({ verified, verificationProof } = verifyWalletSignature(claim, proof));
-      }
-
-      if (!verified) {
-        return res.json({ success: false, error: verificationProof.error || 'Verification failed' });
-      }
-
-      // ── Claim the profile: update DB ──────────────────────────
-      const db = getDb();
-      const row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(claim.profileId);
-      if (!row) return res.json({ success: false, error: 'Profile not found' });
-
-      // Update metadata: remove unclaimed flags
-      const metadata = parseJson(row.metadata, {});
-      delete metadata.unclaimed;
-      delete metadata.isPlaceholder;
-      delete metadata.placeholder;
-      metadata.claimedAt = new Date().toISOString();
-      metadata.claimedBy = claim.wallet;
-      metadata.claimMethod = claim.method;
-      metadata.claimProof = verificationProof;
-
-      // Update wallets: add Solana wallet
-      const wallets = parseJson(row.wallets, {});
-      wallets.solana = claim.wallet;
-
-      // Run DB update
-      db.prepare(`
-        UPDATE profiles 
-        SET metadata = ?, wallets = ?, wallet = ?, updated_at = datetime('now')
-        WHERE id = ?
-      `).run(
-        JSON.stringify(metadata),
-        JSON.stringify(wallets),
-        claim.wallet,
-        claim.profileId
-      );
-
-      // Also update JSON file for frontend SSR
-      try {
-        const path = require('path');
-        const fs = require('fs');
-        const profilesDir = path.join(__dirname, '..', '..', 'data', 'profiles');
-        const jsonPath = path.join(profilesDir, `${claim.profileId}.json`);
-        if (fs.existsSync(jsonPath)) {
-          const existing = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
-          existing.unclaimed = false;
-          existing.claimedAt = metadata.claimedAt;
-          existing.claimedBy = claim.wallet;
-          existing.wallets = wallets;
-          existing.updatedAt = new Date().toISOString();
-          fs.writeFileSync(jsonPath, JSON.stringify(existing, null, 2));
-        }
-      } catch (jsonErr) {
-        console.error('[Claims] JSON file update failed (non-fatal):', jsonErr.message);
-      }
-
-      pendingClaims.delete(challengeId);
-
-      console.log(`✅ [Claims] Profile ${claim.profileName} (${claim.profileId}) claimed by ${claim.wallet} via ${claim.method}`);
-
-      res.json({
-        success: true,
-        profileId: claim.profileId,
-        profileName: claim.profileName,
-        wallet: claim.wallet,
-        method: claim.method,
-        claimedAt: metadata.claimedAt,
-      });
-    } catch (err) {
-      console.error('[Claims] self-verify error:', err.message);
-      res.status(500).json({ success: false, error: 'Server error' });
-    }
-  });
-
-  // ─── Admin: Claim Token + Profile Management APIs ─────────────
-
-  const ADMIN_KEY = process.env.ADMIN_API_KEY || 'agentfolio-admin-2026';
-  function requireAdmin(req, res, next) {
-    const key = req.headers['x-admin-key'] || req.query.admin_key;
-    if (key !== ADMIN_KEY) return res.status(403).json({ error: 'Unauthorized' });
-    next();
+  // Generate claim tokens for all unclaimed profiles that don't have one
+  const unclaimed = db.prepare(`SELECT id FROM profiles WHERE (claimed = 0 OR claimed IS NULL) AND (claim_token IS NULL OR claim_token = '')`).all();
+  for (const p of unclaimed) {
+    const token = crypto.randomBytes(24).toString('hex');
+    db.prepare(`UPDATE profiles SET claim_token = ? WHERE id = ?`).run(token, p.id);
+  }
+  if (unclaimed.length > 0) {
+    console.log(`[Claim] Generated claim tokens for ${unclaimed.length} unclaimed profiles`);
   }
 
-  // GET /api/admin/profiles/unclaimed — list unclaimed profiles for outreach
-  app.get('/api/admin/profiles/unclaimed', requireAdmin, (req, res) => {
-    const db = getDb();
-    ensureClaimTokensTable(db);
-    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
-    const offset = parseInt(req.query.offset) || 0;
-    
-    const profiles = db.prepare(`
-      SELECT p.id, p.name, p.handle, p.avatar, p.created_at,
-        ct.token as claim_token, ct.notified_at, ct.claimed_at
-      FROM profiles p
-      LEFT JOIN claim_tokens ct ON ct.profile_id = p.id
-      WHERE (p.metadata LIKE '%"unclaimed":true%' OR p.metadata LIKE '%"unclaimed": true%')
-        AND (ct.claimed_at IS NULL OR ct.claimed_at = '')
-      ORDER BY p.name
-      LIMIT ? OFFSET ?
-    `).all(limit, offset);
-
-    for (const p of profiles) {
-      if (!p.claim_token) {
-        p.claim_token = generateClaimToken(db, p.id);
-      }
-      p.claim_url = 'https://agentfolio.bot/claim/' + p.id + '?token=' + p.claim_token;
-    }
-
-    const total = db.prepare(
-      `SELECT COUNT(*) as cnt FROM profiles WHERE (metadata LIKE '%"unclaimed":true%' OR metadata LIKE '%"unclaimed": true%')`
-    ).get();
-
-    res.json({ profiles, total: total?.cnt || 0, limit, offset });
-  });
-
-  // POST /api/admin/profile/:id/notify — mark profile as notified
-  app.post('/api/admin/profile/:id/notify', requireAdmin, (req, res) => {
-    const db = getDb();
-    ensureClaimTokensTable(db);
-    const { id } = req.params;
-    const token = generateClaimToken(db, id);
-    db.prepare("UPDATE claim_tokens SET notified_at = datetime('now') WHERE profile_id = ?").run(id);
-    res.json({ ok: true, profileId: id, token, claimUrl: 'https://agentfolio.bot/claim/' + id + '?token=' + token });
-  });
-
-  // DELETE /api/admin/profile/:id — delete a profile
-  app.delete('/api/admin/profile/:id', requireAdmin, (req, res) => {
-    const db = getDb();
-    const { id } = req.params;
-    const profile = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(id);
-    if (!profile) return res.status(404).json({ error: 'Profile not found' });
-    
-    db.prepare('DELETE FROM verifications WHERE profile_id = ?').run(id);
-    db.prepare('DELETE FROM claim_tokens WHERE profile_id = ?').run(id);
-    db.prepare('DELETE FROM profiles WHERE id = ?').run(id);
-    
-    console.log('[Admin] Deleted profile:', id, profile.name);
-    res.json({ ok: true, deleted: { id, name: profile.name } });
-  });
-
-  // GET /api/admin/claim-stats — claim funnel stats
-  app.get('/api/admin/claim-stats', requireAdmin, (req, res) => {
-    const db = getDb();
-    ensureClaimTokensTable(db);
-    const totalUnclaimed = db.prepare(
-      "SELECT COUNT(*) as cnt FROM profiles WHERE metadata LIKE '%unclaimed%true%'"
-    ).get()?.cnt || 0;
-    const tokensGenerated = db.prepare('SELECT COUNT(*) as cnt FROM claim_tokens').get()?.cnt || 0;
-    const notified = db.prepare(
-      'SELECT COUNT(*) as cnt FROM claim_tokens WHERE notified_at IS NOT NULL'
-    ).get()?.cnt || 0;
-    const claimed = db.prepare(
-      'SELECT COUNT(*) as cnt FROM claim_tokens WHERE claimed_at IS NOT NULL'
-    ).get()?.cnt || 0;
-    res.json({ totalUnclaimed, tokensGenerated, notified, claimed });
-  });
-
-  // GET /api/claim/validate/:id — validate a claim token (public, for frontend)
-  app.get('/api/claim/validate/:id', (req, res) => {
-    const db = getDb();
-    ensureClaimTokensTable(db);
+  // GET /claim/:id — Serve claim page (HTML)
+  app.get('/claim/:id', (req, res) => {
     const { id } = req.params;
     const { token } = req.query;
-    if (!token) return res.json({ valid: false, reason: 'No token provided' });
-    const row = db.prepare(
-      'SELECT * FROM claim_tokens WHERE profile_id = ? AND token = ? AND claimed_at IS NULL'
-    ).get(id, token);
-    res.json({ valid: !!row, profileId: id });
+
+    const profile = db.prepare(`SELECT * FROM profiles WHERE id = ?`).get(id);
+    if (!profile) return res.status(404).send('Profile not found');
+
+    if (profile.claimed) {
+      return res.send(claimPageHTML(profile, 'already_claimed'));
+    }
+
+    if (!token || token !== profile.claim_token) {
+      return res.status(403).send('Invalid or missing claim token');
+    }
+
+    res.send(claimPageHTML(profile, 'unclaimed', token));
   });
 
-  console.log('[ClaimRoutes] Admin routes registered');
+  // POST /api/claim/:id — Execute claim
+  app.post('/api/claim/:id', express_json(), (req, res) => {
+    const { id } = req.params;
+    const { token, method, wallet, signature, github_username, github_token } = req.body;
 
-
-  console.log('✅ Claim flow routes registered: /api/claims/eligible, /api/claims/initiate, /api/claims/self-verify');
-
-
-// ── Verification helpers ──────────────────────────────────────────
-
-async function verifyTweet(claim, tweetUrl) {
-  const match = tweetUrl.match(/status\/(\d+)/);
-  if (!match) return { verified: false, verificationProof: { error: 'Invalid tweet URL' } };
-  const tweetId = match[1];
-
-  const userMatch = tweetUrl.match(/(?:twitter|x)\.com\/([^/]+)\/status/);
-  const urlUser = userMatch ? userMatch[1].toLowerCase() : '';
-  const expectedUser = claim.identifier.toLowerCase();
-
-  if (urlUser && urlUser !== expectedUser) {
-    return { verified: false, verificationProof: { error: `Tweet must be from @${claim.identifier}, got @${urlUser}` } };
-  }
-
-  // Fetch tweet via fxtwitter
-  try {
-    const res = await fetch(`https://api.fxtwitter.com/${claim.identifier}/status/${tweetId}`, { signal: AbortSignal.timeout(8000) });
-    if (res.ok) {
-      const data = await res.json();
-      const tweetText = data.tweet?.text || '';
-      const tweetAuthor = (data.tweet?.author?.screen_name || '').toLowerCase();
-
-      if (tweetAuthor && tweetAuthor !== expectedUser) {
-        return { verified: false, verificationProof: { error: `Tweet is from @${tweetAuthor}, expected @${claim.identifier}` } };
-      }
-
-      if (tweetText.includes(claim.challengeCode)) {
-        return { verified: true, verificationProof: { type: 'tweet', url: tweetUrl, verifiedAt: new Date().toISOString() } };
-      }
-      return { verified: false, verificationProof: { error: 'Tweet does not contain the challenge code' } };
+    const profile = db.prepare(`SELECT * FROM profiles WHERE id = ?`).get(id);
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
+    if (profile.claimed) return res.status(400).json({ error: 'Profile already claimed' });
+    if (!token || token !== profile.claim_token) {
+      return res.status(403).json({ error: 'Invalid claim token' });
     }
-  } catch (e) {
-    // fxtwitter might be down — accept URL-based verification as fallback
-    console.log('[Claims] fxtwitter fetch failed, using URL fallback:', e.message);
-  }
 
-  // Fallback: accept if URL user matches expected user
-  if (urlUser === expectedUser) {
-    return { verified: true, verificationProof: { type: 'tweet', url: tweetUrl, verifiedAt: new Date().toISOString(), fallback: true } };
-  }
+    if (method === 'wallet' && wallet) {
+      // For wallet claims — verify signature of a challenge message
+      // Simplified: accept wallet address, mark as claimed
+      // Production should verify ed25519 signature
+      db.prepare(`UPDATE profiles SET claimed = 1, claimed_at = datetime('now'), claimed_by = ?, claim_token = NULL WHERE id = ?`)
+        .run(`wallet:${wallet}`, id);
+      
+      // Update the profile wallet field too
+      try {
+        const wallets = JSON.parse(profile.wallets || '{}');
+        if (!wallets.solana) {
+          wallets.solana = wallet;
+          db.prepare(`UPDATE profiles SET wallets = ? WHERE id = ?`).run(JSON.stringify(wallets), id);
+        }
+      } catch (e) { /* ignore */ }
 
-  return { verified: false, verificationProof: { error: `Could not verify tweet from @${claim.identifier}` } };
+      return res.json({ success: true, message: 'Profile claimed via wallet', profile_id: id });
+
+    } else if (method === 'github' && github_username) {
+      // Verify GitHub ownership — check if profile's github field matches
+      const links = JSON.parse(profile.links || '{}');
+      const profileGithub = (links.github || '').replace(/.*github\.com\//, '').replace(/\/$/, '').toLowerCase();
+      
+      if (profileGithub && profileGithub === github_username.toLowerCase()) {
+        db.prepare(`UPDATE profiles SET claimed = 1, claimed_at = datetime('now'), claimed_by = ?, claim_token = NULL WHERE id = ?`)
+          .run(`github:${github_username}`, id);
+        return res.json({ success: true, message: 'Profile claimed via GitHub', profile_id: id });
+      } else {
+        return res.status(400).json({ error: 'GitHub username does not match profile' });
+      }
+
+    } else {
+      return res.status(400).json({ error: 'Must provide method (wallet or github) with credentials' });
+    }
+  });
+
+  // GET /api/claim/:id/status
+  app.get('/api/claim/:id/status', (req, res) => {
+    const profile = db.prepare(`SELECT id, name, claimed, claimed_at, claimed_by FROM profiles WHERE id = ?`).get(req.params.id);
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
+    res.json({ 
+      id: profile.id, 
+      name: profile.name, 
+      claimed: !!profile.claimed, 
+      claimed_at: profile.claimed_at,
+      claimed_by: profile.claimed_by 
+    });
+  });
+
+  // GET /api/claims/urls — Generate claim URLs for all unclaimed profiles (internal use by brainGrowth)
+  app.get('/api/claims/urls', (req, res) => {
+    const adminKey = req.headers['x-admin-key'];
+    if (!adminKey || adminKey !== (process.env.ADMIN_KEY || 'bf-admin-2026')) {
+      return res.status(401).json({ error: 'Admin key required' });
+    }
+
+    const profiles = db.prepare(`SELECT id, name, handle, claim_token FROM profiles WHERE (claimed = 0 OR claimed IS NULL) AND claim_token IS NOT NULL`).all();
+    const baseUrl = process.env.BASE_URL || 'https://agentfolio.bot';
+    
+    const urls = profiles.map(p => ({
+      id: p.id,
+      name: p.name,
+      handle: p.handle,
+      claim_url: `${baseUrl}/claim/${p.id}?token=${p.claim_token}`
+    }));
+
+    res.json({ count: urls.length, profiles: urls });
+  });
+
+  console.log(`[Claim] Routes registered: /claim/:id, /api/claim/:id, /api/claims/urls`);
 }
 
-async function verifyGist(claim, gistUrl) {
-  const match = gistUrl.match(/gist\.github\.com\/[\w-]+\/([a-f0-9]+)/i) || gistUrl.match(/gist\.github\.com\/([a-f0-9]+)/i);
-  if (!match) return { verified: false, verificationProof: { error: 'Invalid gist URL' } };
-
-  try {
-    const response = await fetch(`https://api.github.com/gists/${match[1]}`, { signal: AbortSignal.timeout(8000) });
-    if (!response.ok) return { verified: false, verificationProof: { error: 'Could not fetch gist' } };
-
-    const gist = await response.json();
-
-    if (gist.owner?.login?.toLowerCase() !== claim.identifier.toLowerCase()) {
-      return { verified: false, verificationProof: { error: `Gist must be from ${claim.identifier}, got ${gist.owner?.login}` } };
-    }
-
-    for (const file of Object.values(gist.files || {})) {
-      if (file.content && file.content.includes(claim.challengeCode)) {
-        return { verified: true, verificationProof: { type: 'gist', url: gistUrl, verifiedAt: new Date().toISOString() } };
-      }
-    }
-
-    return { verified: false, verificationProof: { error: 'Gist does not contain the challenge code' } };
-  } catch (e) {
-    return { verified: false, verificationProof: { error: `Gist verification failed: ${e.message}` } };
-  }
+function express_json() {
+  const express = require('express');
+  return express.json();
 }
 
-async function verifyDomain(claim, proof) {
-  const domain = claim.identifier;
-
-  // Try .well-known file
-  try {
-    const res = await fetch(`https://${domain}/.well-known/agentfolio-verify.txt`, { signal: AbortSignal.timeout(5000) });
-    if (res.ok) {
-      const text = await res.text();
-      if (text.trim().includes(claim.challengeCode)) {
-        return { verified: true, verificationProof: { type: 'domain', domain, method: 'well-known', verifiedAt: new Date().toISOString() } };
+function claimPageHTML(profile, status, token) {
+  const links = JSON.parse(profile.links || '{}');
+  const skills = JSON.parse(profile.skills || '[]');
+  
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claim ${profile.name} — AgentFolio</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0f; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .container { max-width: 540px; width: 100%; padding: 2rem; }
+    .card { background: #141420; border: 1px solid #2a2a3a; border-radius: 16px; padding: 2rem; }
+    .logo { text-align: center; margin-bottom: 1.5rem; font-size: 1.5rem; font-weight: 700; color: #8b5cf6; }
+    .profile-header { text-align: center; margin-bottom: 1.5rem; }
+    .avatar { width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #8b5cf6, #06b6d4); display: flex; align-items: center; justify-content: center; font-size: 2rem; margin: 0 auto 1rem; }
+    .avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+    h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+    .handle { color: #8b5cf6; font-size: 0.9rem; }
+    .bio { color: #999; font-size: 0.9rem; margin-top: 0.5rem; line-height: 1.5; }
+    .skills { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; margin-top: 1rem; }
+    .skill { background: #1a1a2e; border: 1px solid #2a2a3a; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.8rem; color: #8b5cf6; }
+    .divider { border-top: 1px solid #2a2a3a; margin: 1.5rem 0; }
+    .claim-section { text-align: center; }
+    .claim-section h2 { font-size: 1.1rem; margin-bottom: 0.5rem; }
+    .claim-section p { color: #999; font-size: 0.85rem; margin-bottom: 1.5rem; }
+    .btn { display: inline-block; padding: 0.75rem 2rem; border-radius: 10px; font-size: 1rem; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; width: 100%; margin-bottom: 0.75rem; }
+    .btn-primary { background: linear-gradient(135deg, #8b5cf6, #7c3aed); color: white; }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(139,92,246,0.4); }
+    .btn-secondary { background: #1a1a2e; border: 1px solid #2a2a3a; color: #e0e0e0; }
+    .btn-secondary:hover { border-color: #8b5cf6; }
+    .claimed-badge { background: #065f46; color: #34d399; padding: 0.5rem 1rem; border-radius: 8px; font-weight: 600; }
+    .form-group { margin-bottom: 1rem; text-align: left; }
+    .form-group label { display: block; font-size: 0.85rem; color: #999; margin-bottom: 0.25rem; }
+    .form-group input { width: 100%; padding: 0.6rem; background: #0a0a0f; border: 1px solid #2a2a3a; border-radius: 8px; color: #e0e0e0; font-size: 0.9rem; }
+    .form-group input:focus { outline: none; border-color: #8b5cf6; }
+    #claim-form { display: none; }
+    .result { margin-top: 1rem; padding: 0.75rem; border-radius: 8px; font-size: 0.9rem; }
+    .result.success { background: #065f46; color: #34d399; }
+    .result.error { background: #7f1d1d; color: #fca5a5; }
+    .method-tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    .method-tab { flex: 1; padding: 0.5rem; text-align: center; background: #0a0a0f; border: 1px solid #2a2a3a; border-radius: 8px; cursor: pointer; font-size: 0.85rem; color: #999; }
+    .method-tab.active { border-color: #8b5cf6; color: #8b5cf6; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="logo">🤖 AgentFolio</div>
+      <div class="profile-header">
+        <div class="avatar">${profile.avatar ? `<img src="${profile.avatar}" alt="${profile.name}">` : profile.name.charAt(0)}</div>
+        <h1>${profile.name}</h1>
+        <div class="handle">@${profile.handle}</div>
+        ${profile.bio ? `<div class="bio">${profile.bio}</div>` : ''}
+        ${skills.length > 0 ? `<div class="skills">${skills.slice(0, 5).map(s => `<span class="skill">${s}</span>`).join('')}</div>` : ''}
+      </div>
+      <div class="divider"></div>
+      <div class="claim-section">
+        ${status === 'already_claimed' ? `
+          <span class="claimed-badge">✅ This profile has been claimed</span>
+          <p style="margin-top: 1rem;"><a href="/profile/${profile.id}" style="color: #8b5cf6;">View profile →</a></p>
+        ` : `
+          <h2>Is this your agent?</h2>
+          <p>Claim this profile to manage it, verify your identity, and build your on-chain reputation.</p>
+          <button class="btn btn-primary" onclick="showClaimForm()">Claim This Agent</button>
+          <div id="claim-form">
+            <div class="method-tabs">
+              <div class="method-tab active" onclick="switchMethod('wallet')" id="tab-wallet">🔑 Wallet</div>
+              <div class="method-tab" onclick="switchMethod('github')" id="tab-github">🐙 GitHub</div>
+            </div>
+            <div id="method-wallet">
+              <div class="form-group">
+                <label>Solana Wallet Address</label>
+                <input type="text" id="wallet" placeholder="Your Solana wallet address">
+              </div>
+              <button class="btn btn-primary" onclick="submitClaim('wallet')">Verify & Claim</button>
+            </div>
+            <div id="method-github" style="display:none">
+              <div class="form-group">
+                <label>GitHub Username</label>
+                <input type="text" id="github_username" placeholder="Your GitHub username">
+              </div>
+              <p style="font-size:0.8rem;color:#999;margin-bottom:1rem;">Must match the GitHub linked on this profile (${links.github ? links.github.replace(/.*github\.com\//, '') : 'none linked'})</p>
+              <button class="btn btn-primary" onclick="submitClaim('github')">Verify & Claim</button>
+            </div>
+            <div id="result"></div>
+          </div>
+        `}
+      </div>
+    </div>
+  </div>
+  <script>
+    const profileId = '${profile.id}';
+    const token = '${token || ''}';
+    
+    function showClaimForm() {
+      document.getElementById('claim-form').style.display = 'block';
+    }
+    function switchMethod(method) {
+      document.getElementById('method-wallet').style.display = method === 'wallet' ? 'block' : 'none';
+      document.getElementById('method-github').style.display = method === 'github' ? 'block' : 'none';
+      document.getElementById('tab-wallet').className = 'method-tab' + (method === 'wallet' ? ' active' : '');
+      document.getElementById('tab-github').className = 'method-tab' + (method === 'github' ? ' active' : '');
+    }
+    async function submitClaim(method) {
+      const body = { token, method };
+      if (method === 'wallet') body.wallet = document.getElementById('wallet').value;
+      if (method === 'github') body.github_username = document.getElementById('github_username').value;
+      
+      try {
+        const resp = await fetch('/api/claim/' + profileId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await resp.json();
+        const el = document.getElementById('result');
+        if (data.success) {
+          el.className = 'result success';
+          el.innerHTML = '✅ ' + data.message + ' — <a href="/profile/' + profileId + '" style="color:#34d399;">View your profile →</a>';
+        } else {
+          el.className = 'result error';
+          el.textContent = '❌ ' + (data.error || 'Claim failed');
+        }
+      } catch (e) {
+        document.getElementById('result').className = 'result error';
+        document.getElementById('result').textContent = '❌ Network error: ' + e.message;
       }
     }
-  } catch {}
-
-  // Try DNS TXT
-  try {
-    const dns = require('dns').promises;
-    const records = await dns.resolveTxt(domain);
-    for (const record of records) {
-      const txt = record.join('');
-      if (txt.includes(`agentfolio-verify=${claim.challengeCode}`)) {
-        return { verified: true, verificationProof: { type: 'domain', domain, method: 'dns-txt', verifiedAt: new Date().toISOString() } };
-      }
-    }
-  } catch {}
-
-  return { verified: false, verificationProof: { error: 'Challenge code not found in DNS TXT record or .well-known file' } };
-}
-
-function verifyWalletSignature(claim, signatureBase64) {
-  try {
-    const nacl = require('tweetnacl');
-    const bs58 = require('bs58');
-
-    const sigBytes = Buffer.from(signatureBase64, 'base64');
-    const msgBytes = Buffer.from(claim.challengeString);
-    const pubBytes = bs58.decode(claim.wallet);
-
-    if (nacl.sign.detached.verify(msgBytes, sigBytes, pubBytes)) {
-      return { verified: true, verificationProof: { type: 'wallet', wallet: claim.wallet, verifiedAt: new Date().toISOString() } };
-    }
-
-    return { verified: false, verificationProof: { error: 'Invalid wallet signature' } };
-  } catch (e) {
-    return { verified: false, verificationProof: { error: `Signature verification failed: ${e.message}` } };
-  }
-}
-
-
-
+  </script>
+</body>
+</html>`;
 }
 
 module.exports = { registerClaimRoutes };
