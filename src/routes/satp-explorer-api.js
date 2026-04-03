@@ -7,6 +7,8 @@
  */
 
 const { Connection, PublicKey } = require("@solana/web3.js");
+let profileStore;
+try { profileStore = require("../profile-store"); } catch(e) { profileStore = null; }
 const RPC = process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb";
 const TOKEN_2022 = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
@@ -77,7 +79,8 @@ async function getSatpAgents() {
         category: "",
         capabilities: [],
         metadataUri: "",
-        reputationScore: parsed.reputationScore,
+        reputationScore: parsed.reputationScore > 10000 ? Math.round(parsed.reputationScore / 1000) : parsed.reputationScore,
+        rawReputationScore: parsed.reputationScore,
         verificationLevel: parsed.verificationLevel,
         verificationLabel: parsed.verificationLabel || "",
         isBorn: parsed.isBorn || false,
@@ -107,6 +110,35 @@ async function getSatpAgents() {
     }
   }
 
+  // Merge DB trust scores where available (DB is authoritative for score/level)
+  if (profileStore) {
+    try {
+      const db = profileStore.getDb();
+      for (const agent of agents) {
+        const nameClean = agent.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+        const row = db.prepare("SELECT overall_score, level FROM satp_trust_scores WHERE agent_id LIKE ? OR agent_id LIKE ?").get("%" + nameClean + "%", "agent_" + nameClean);
+        if (row && row.overall_score > 0) {
+          agent.dbScore = row.overall_score;
+          agent.dbLevel = row.level;
+        }
+      }
+    } catch(e) { console.warn("[SATP Explorer] DB merge failed:", e.message); }
+  }
+  // Override display score and level with DB values when available
+  const levelMap = { NEW: 0, REGISTERED: 1, VERIFIED: 2, ESTABLISHED: 3, TRUSTED: 4, SOVEREIGN: 5 };
+  const labelMap = { 0: "Unverified", 1: "Registered", 2: "Verified", 3: "Established", 4: "Trusted", 5: "Sovereign" };
+  for (const agent of agents) {
+    if (agent.dbScore != null) {
+      agent.chainReputationScore = agent.reputationScore;
+      agent.reputationScore = agent.dbScore;
+    }
+    if (agent.dbLevel) {
+      agent.chainVerificationLevel = agent.verificationLevel;
+      const lvl = levelMap[agent.dbLevel.toUpperCase()] ?? agent.verificationLevel;
+      agent.verificationLevel = lvl;
+      agent.verificationLabel = labelMap[lvl] || agent.verificationLabel;
+    }
+  }
   const result = { agents, count: agents.length, source: "solana-mainnet-v3" };
   agentCache = { data: result, timestamp: Date.now() };
   return result;

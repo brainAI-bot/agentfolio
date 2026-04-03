@@ -374,11 +374,10 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       console.warn('[Explorer] V3 score fetch failed for', agentId, e.message);
     }
     
-    // Use V3 on-chain score if available, otherwise fall back to V2
-    const trustScore = v3Data ? v3Data.reputationScore : scoreResult.score;
-    const tier = v3Data
-      ? v3Data.verificationLabel.toUpperCase()
-      : (scoreResult.level || (scoreResult.score >= 80 ? 'ELITE' : scoreResult.score >= 60 ? 'PRO' : scoreResult.score >= 40 ? 'VERIFIED' : scoreResult.score >= 20 ? 'BASIC' : 'NEW'));
+    // Use DB score as primary (authoritative), V3 on-chain as supplementary context
+    // V3 on-chain reputationScore uses a different scale (0-1M basis points) vs DB (0-1000)
+    const trustScore = scoreResult.score;
+    const tier = scoreResult.level || (scoreResult.score >= 80 ? 'ELITE' : scoreResult.score >= 60 ? 'PRO' : scoreResult.score >= 40 ? 'VERIFIED' : scoreResult.score >= 20 ? 'BASIC' : 'NEW');
     
     res.json({
       agentId: profile.id,
@@ -400,7 +399,8 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       onChainRegistered: v3Data ? v3Data.isBorn : (scoreResult.onChainRegistered || false),
       ...(v3Data ? {
         v3: {
-          reputationScore: v3Data.reputationScore,
+          reputationScore: v3Data.reputationScore > 10000 ? Math.round(v3Data.reputationScore / 1000) : v3Data.reputationScore,
+          rawReputationScore: v3Data.reputationScore,
           reputationPct: v3Data.reputationPct,
           verificationLevel: v3Data.verificationLevel,
           verificationLabel: v3Data.verificationLabel,
@@ -451,7 +451,8 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
       const levelLabels = ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'];
       return res.json({
         agentId: resolvedId,
-        score: v3Data.reputationScore,
+        score: v3Data.reputationScore > 10000 ? Math.round(v3Data.reputationScore / 1000) : v3Data.reputationScore,
+        rawScore: v3Data.reputationScore,
         level: v3Data.verificationLevel,
         levelName: levelLabels[v3Data.verificationLevel] || 'Unclaimed',
         tier: v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || 'Unclaimed',
@@ -1202,7 +1203,7 @@ app.get('/profile/:id', async (req, res) => {
       <div style="margin-top:16px;padding:16px;background:#0d1117;border:1px solid #30363d;border-radius:8px">
         <h2 style="margin-bottom:12px">⛓️ V3 On-Chain Reputation</h2>
         <div class="stats">
-          <div class="stat"><div class="num" style="color:${v3Rep.reputationScore >= 400 ? '#3fb950' : v3Rep.reputationScore >= 200 ? '#d29922' : '#58a6ff'}">${v3Rep.reputationScore}</div><div class="label">Reputation Score</div></div>
+          <div class="stat"><div class="num" style="color:${v3Rep.reputationScore >= 400 ? '#3fb950' : v3Rep.reputationScore >= 200 ? '#d29922' : '#58a6ff'}">${v3Rep.reputationScore > 10000 ? Math.round(v3Rep.reputationScore / 1000) : v3Rep.reputationScore}</div><div class="label">Reputation Score</div></div>
           <div class="stat"><div class="num">${v3Rep.verificationLevel}</div><div class="label">Verification Level</div></div>
           <div class="stat"><div class="num">${esc(v3Rep.verificationLabel)}</div><div class="label">Tier</div></div>
         </div>

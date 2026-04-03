@@ -1020,7 +1020,7 @@ function registerRoutes(app) {
     let rows;
     try {
       rows = d.prepare(`
-        SELECT p.*, COALESCE(t.overall_score, 0) AS _trust_score
+        SELECT p.*, COALESCE(t.overall_score, 0) AS _trust_score, t.level AS _trust_level
         FROM profiles p
         LEFT JOIN satp_trust_scores t ON t.agent_id = p.id
         WHERE p.status = ? AND (p.hidden = 0 OR p.hidden IS NULL)
@@ -1051,10 +1051,10 @@ function registerRoutes(app) {
         const _ccPl = _ccCl.getVerifiedPlatforms(rest.id);
         claimed = _ccPl.length > 0;
       } catch (_) {}
-      const { _trust_score: ts, ...cleanRest } = rest;
+      const { _trust_score: ts, _trust_level: dbLevel, ...cleanRest } = rest;
       const _md = parseJsonField(cleanRest.metadata);
       const unclaimed = _md.unclaimed === true || _md.isPlaceholder === true || _md.placeholder === true;
-      return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: {} /* [P0] chain-cache only, no DB reads */, portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: _md, nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, claimed, unclaimed };
+      return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: {} /* [P0] chain-cache only, no DB reads */, portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: _md, nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, _dbLevel: dbLevel || null, claimed, unclaimed };
     });
 
     // V3 on-chain score overlay — authoritative
@@ -1181,9 +1181,13 @@ function registerRoutes(app) {
       const v = p.v3 || {};
       const cl = p.chain_level || 0;
       const cs = p.chain_score || 0;
-      p.level = v.verificationLevel || v.level || cl || 0;
+      p.level = (() => {
+        const LMAP = {'UNVERIFIED':0,'NEW':0,'REGISTERED':1,'BASIC':2,'VERIFIED':2,'ESTABLISHED':3,'TRUSTED':4,'SOVEREIGN':5,'ELITE':5};
+        if (p._dbLevel && LMAP[p._dbLevel.toUpperCase()] != null) return LMAP[p._dbLevel.toUpperCase()];
+        return v.verificationLevel || v.level || cl || 0;
+      })();
       p.score = p.trust_score || v.reputationScore || v.score || cs || 0;
-      p.levelName = v.verificationLabel || levelLabels[p.level] || 'Unknown';
+      p.levelName = levelLabels[p.level] || v.verificationLabel || 'Unknown';
     }
     // Sort parameter: trust_desc (default), trust_asc, name_asc, name_desc, newest, oldest
     const sortParam = (req.query.sort || "trust_desc").toLowerCase();
