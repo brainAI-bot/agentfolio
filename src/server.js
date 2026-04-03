@@ -206,7 +206,7 @@ app.use((req, res, next) => {
 // === Ecosystem Stats (for frontend) ===
 app.get('/api/ecosystem/stats', (req, res) => {
   try {
-    const db = getDb();
+    const db = profileStore.getDb();
     const total = db.prepare('SELECT COUNT(*) as c FROM profiles').get().c;
     const claimed = db.prepare('SELECT COUNT(*) as c FROM profiles WHERE claimed = 1').get().c;
     const verified = db.prepare("SELECT COUNT(*) as c FROM profiles WHERE json_extract(verification, '$.github') IS NOT NULL OR json_extract(verification, '$.solana') IS NOT NULL").get().c;
@@ -218,7 +218,7 @@ app.get('/api/ecosystem/stats', (req, res) => {
 app.get('/api/leaderboard', (req, res) => { const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''; res.redirect(301, '/api/leaderboard/scores' + qs); });
 app.get('/api/stats', (req, res) => {
   try {
-    const db = getDb();
+    const db = profileStore.getDb();
     const total = db.prepare('SELECT COUNT(*) as c FROM profiles').get().c;
     const claimed = db.prepare('SELECT COUNT(*) as c FROM profiles WHERE claimed = 1').get().c;
     // Count profiles that have at least one verification
