@@ -155,22 +155,10 @@ function mapProfile(p: RawProfile): Agent {
   const v3 = (globalThis as any).__v3ScoresCache?.get(p.id);
   // Trust Score: SATP on-chain is source of truth (synced by backend score engine)
   // V3 reputationPct is 0-100 scale, multiply by 8 to get 0-800 v2 trust score
-  const trustScore = v3 ? v3.reputationScore : (p.verification?.score || calcTrustScore(p));
+  const trustScore = v3 ? v3.reputationScore : 0; // P0: v3 on-chain only, no DB fallback
   const vd = p.verificationData || {};
-  // Count local verifications for level fallback
-  const localVerifCount = Object.values(vd).filter((v: any) => v && v.verified).length;
-  const hasSATP = !!(vd.satp?.verified || (p.wallets?.solana));
-  // Tier: SATP on-chain is source of truth. Local fallback for agents without genesis records.
-  let tier: number;
-  if (v3) {
-    tier = v3.verificationLevel;
-  } else if (localVerifCount >= 2) {
-    tier = localVerifCount >= 5 ? 3 : (localVerifCount >= 2 ? 2 : 1); // L1 registered, L2 verified (2+), L3 established (5+)
-  } else if (hasSATP || localVerifCount >= 1) {
-    tier = 1; // L1 Registered — has SATP or at least 1 verification
-  } else {
-    tier = calcTierFromScore(p.verification?.tier, trustScore);
-  }
+  // P0: Tier from v3 on-chain only. No local/DB fallback.
+  const tier: number = v3 ? v3.verificationLevel : 0;
 
   return {
     id: p.id,
@@ -389,7 +377,8 @@ export function getStats() {
   const agents = loadAllProfiles();
   const totalSkills = new Set(agents.flatMap(a => a.skills)).size;
   const verified = agents.filter(a => (a.verificationLevel ?? a.tier ?? 0) >= 1).length;
-  const onChain = agents.filter(a => a.verifications.satp?.verified || a.verifications.solana?.verified).length;
+  // [CEO Apr 4] On-chain count from V3 cache only — not DB verifications
+  const onChain = (() => { const c = (globalThis as any).__v3ScoresCache as Map<string, any> | undefined; if (!c) return 0; let n = 0; for (const v of c.values()) if (v.reputationScore > 0) n++; return n; })();
   // Count born agents from V3 cache
   let bornAgents = 0;
   const v3Cache = (globalThis as any).__v3ScoresCache as Map<string, any> | undefined;

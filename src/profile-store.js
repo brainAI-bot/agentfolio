@@ -535,7 +535,7 @@ function enrichProfile(row) {
 function registerRoutes(app) {
   // ── POST /api/register ──────────────────────────────────────────
   app.post('/api/register', registerLimiter, (req, res) => {
-    const { name, handle, description, bio, avatar, website, framework, capabilities, tags, wallet, wallets, skills, links, twitter, github, email, signature, signedMessage, userPaidGenesis } = req.body;
+    const { name, handle, description, tagline, bio, avatar, website, framework, capabilities, tags, wallet, wallets, skills, links, twitter, github, email, signature, signedMessage, userPaidGenesis } = req.body;
     if (!name || typeof name !== 'string' || name.trim().length < 1) {
       return res.status(400).json({ error: 'name is required (non-empty string)' });
     }
@@ -566,7 +566,7 @@ function registerRoutes(app) {
     }
 
     // Normalize frontend format → backend format
-    const resolvedBio = (bio || description || '').trim();
+    const resolvedBio = (bio || tagline || description || '').trim();
     const resolvedWallets = wallets || {};
     const solanaWallet = resolvedWallets.solana || wallet || '';
     const resolvedLinks = links || {};
@@ -1202,33 +1202,16 @@ function registerRoutes(app) {
           if (v3Data.faceImage) enriched.faceImage = v3Data.faceImage;
           if (v3Data.authority) enriched.walletAddress = v3Data.authority;
         } else {
-          // DB FALLBACK when on-chain genesis missing (CEO fix 2026-04-04)
+          // P0: DB fallback REMOVED — on-chain v3 only. Display 0 if no on-chain data.
           enriched.onchain = null;
-          {
-            // On-chain preferred, DB fallback when chain data missing
-            const _d = getDb();
-            const trustRow = _d.prepare("SELECT overall_score, level, score_breakdown FROM satp_trust_scores WHERE agent_id = ?").get(row.id);
-            if (trustRow && trustRow.overall_score > 0) {
-              enriched.trust_score = { source: "db-fallback", overall_score: trustRow.overall_score, level: trustRow.level, score_breakdown: trustRow.score_breakdown };
-              enriched.score = trustRow.overall_score;
-              const dbLevelMap = {"SOVEREIGN":5,"TRUSTED":4,"ESTABLISHED":3,"VERIFIED":2,"REGISTERED":1};
-              enriched.level = dbLevelMap[trustRow.level] || 0;
-              enriched.levelName = trustRow.level || "Unverified";
-              enriched.tier = trustRow.level || "Unverified";
-              enriched.verificationLevel = enriched.level;
-              enriched.verification_level = enriched.level;
-              enriched.reputation_score = trustRow.overall_score;
-            } else {
-              enriched.trust_score = { source: "none", overall_score: 0, level: "Unverified" };
-              enriched.score = 0;
-              enriched.level = 0;
-              enriched.levelName = "Unverified";
-              enriched.tier = "Unverified";
-              enriched.verificationLevel = 0;
-              enriched.verification_level = 0;
-              enriched.reputation_score = 0;
-            }
-          }
+          enriched.trust_score = { source: "none", overall_score: 0, level: "Unverified" };
+          enriched.score = 0;
+          enriched.level = 0;
+          enriched.levelName = "Unverified";
+          enriched.tier = "Unverified";
+          enriched.verificationLevel = 0;
+          enriched.verification_level = 0;
+          enriched.reputation_score = 0;
           enriched.isBorn = false;
         }
       } catch (e) {
