@@ -1,9 +1,13 @@
 /**
- * Post-Verification Hook
- * After a verification succeeds (GitHub, X, Solana, AgentMail, etc.):
- * 1. Recomputes trust score in DB
- * 2. Creates on-chain attestation via SATP Attestations program
- * 3. Recomputes reputation score via SATP Reputation program
+ * Post-Verification Hook — Apr 4 2026
+ * Called by addVerification() after every successful verification.
+ * 
+ * Pipeline:
+ * 1. Recompute DB trust score (sync, fast)
+ * 2. Revalidate frontend cache
+ * 3. Create on-chain attestation via SATP Attestations program
+ * 4. Recompute on-chain reputation via CPI
+ * 5. Recompute on-chain verification level via CPI
  * 
  * Fire-and-forget — verification success returned immediately, on-chain work is async.
  */
@@ -11,11 +15,20 @@
 const fs = require('fs');
 const path = require('path');
 
-let satpWriteClient, profileStore, keypair;
+let satpWriteClient, profileStore, keypair, v3sdk;
 
 function getSATPWriteClient() {
   if (!satpWriteClient) satpWriteClient = require('./satp-write-client');
   return satpWriteClient;
+}
+
+function getV3SDK() {
+  if (!v3sdk) {
+    const { SATPV3SDK } = require('./satp-client/src/v3-sdk');
+    const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+    v3sdk = new SATPV3SDK({ rpcUrl: RPC_URL });
+  }
+  return v3sdk;
 }
 
 function getProfileStore() {
@@ -23,15 +36,16 @@ function getProfileStore() {
   return profileStore;
 }
 
+const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/agentfolio/keys/platform-keypair.json';
+
 function getPlatformKeypair() {
   if (!keypair) {
-    const keypairPath = process.env.SATP_PLATFORM_KEYPAIR;
-    if (!keypairPath || !fs.existsSync(keypairPath)) {
-      console.warn('[PostVerify] No platform keypair configured — on-chain attestation skipped');
+    if (!fs.existsSync(PLATFORM_KEYPAIR_PATH)) {
+      console.warn('[PostVerify] No platform keypair at', PLATFORM_KEYPAIR_PATH, '— on-chain skipped');
       return null;
     }
     const { Keypair } = require('@solana/web3.js');
-    const raw = JSON.parse(fs.readFileSync(keypairPath, 'utf8'));
+    const raw = JSON.parse(fs.readFileSync(PLATFORM_KEYPAIR_PATH, 'utf8'));
     keypair = Keypair.fromSecretKey(Uint8Array.from(raw));
   }
   return keypair;
@@ -50,6 +64,12 @@ function platformToAttestationType(platform) {
     website: 'website_verification',
     ens: 'ens_verification',
     farcaster: 'farcaster_verification',
+    moltbook: 'moltbook_verification',
+    polymarket: 'polymarket_verification',
+    hyperliquid: 'hyperliquid_verification',
+    mcp: 'mcp_verification',
+    a2a: 'a2a_verification',
+    kalshi: 'kalshi_verification',
   };
   return map[platform] || `${platform}_verification`;
 }
@@ -87,6 +107,7 @@ function recomputeDBScore(profileId) {
     const scoreMap = {
       solana: 100, eth: 80, github: 60, x: 40, agentmail: 30,
       telegram: 20, discord: 20, domain: 50, website: 40, ens: 50, farcaster: 30,
+      moltbook: 30, polymarket: 40, hyperliquid: 40, mcp: 30, a2a: 30, kalshi: 30,
     };
 
     let score = 0;
@@ -117,40 +138,40 @@ function recomputeDBScore(profileId) {
   }
 }
 
-
-// Revalidate Next.js ISR cache so profile page reflects verification immediately
 async function revalidateProfileCache(profileId) {
   try {
     const res = await globalThis.fetch('http://localhost:3000/api/revalidate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        secret: 'agentfolio-revalidate-2026',
-        profileId,
-      }),
+      body: JSON.stringify({ secret: 'agentfolio-revalidate-2026', profileId }),
     });
     if (res.ok) {
       console.log('[PostVerify] ✅ ISR cache revalidated for', profileId);
-    } else {
-      console.warn('[PostVerify] ISR revalidation returned', res.status);
     }
   } catch (e) {
-    console.warn('[PostVerify] ISR revalidation failed:', e.message);
+    // non-critical
   }
 }
 
+/**
+ * Main hook — called after every successful verification.
+ * Fire-and-forget. Never throws to caller.
+ */
 async function postVerificationHook(profileId, platform, identifier, proof) {
-  console.log(`[PostVerify] Hook fired: ${profileId} verified ${platform} (${identifier})`);
+  console.log(`[PostVerify] ═══ Hook fired: ${profileId} verified ${platform} (${identifier}) ═══`);
 
   // Step 1: Recompute DB trust score (fast, sync)
   recomputeDBScore(profileId);
 
-  // Step 1.5: Revalidate frontend cache
-  revalidateProfileCache(profileId).catch(e => console.warn('[PostVerify] cache revalidation error:', e.message));
+  // Step 2: Revalidate frontend cache (async, non-blocking)
+  revalidateProfileCache(profileId).catch(() => {});
 
-  // Step 2: On-chain attestation (async, non-blocking)
+  // Step 3-5: On-chain work (async)
   const kp = getPlatformKeypair();
-  if (!kp) return;
+  if (!kp) {
+    console.log('[PostVerify] No keypair — on-chain steps skipped');
+    return;
+  }
 
   const wallet = getProfileWallet(profileId);
   if (!wallet) {
@@ -158,6 +179,7 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
     return;
   }
 
+  // Step 3: Create on-chain attestation
   try {
     const client = getSATPWriteClient();
     const attestationType = platformToAttestationType(platform);
@@ -167,30 +189,36 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
       challengeId: proof?.challengeId || 'direct',
     }).slice(0, 200);
 
-    console.log(`[PostVerify] Creating on-chain attestation: ${attestationType} for ${wallet}`);
+    console.log(`[PostVerify] Creating attestation: ${attestationType} for ${wallet}`);
     const result = await client.createAttestation({
       agentId: wallet, attestationType, proofData,
     }, kp, 'mainnet');
     console.log(`[PostVerify] ✅ Attestation TX: ${result.txSignature}`);
-
-    // Step 3: Recompute on-chain reputation
-    try {
-      const repResult = await client.recomputeReputation(wallet, kp, 'mainnet');
-      console.log(`[PostVerify] ✅ Reputation recomputed: ${repResult.txSignature}`);
-    } catch (repErr) {
-      console.warn(`[PostVerify] Reputation recompute skipped: ${repErr.message}`);
-    }
-
-    // Step 4: Recompute on-chain verification level (CEO directive Apr 4)
-    try {
-      const lvlResult = await client.recomputeLevel(wallet, kp, 'mainnet');
-      console.log(`[PostVerify] ✅ Level recomputed: ${lvlResult.txSignature}`);
-    } catch (lvlErr) {
-      console.warn(`[PostVerify] Level recompute skipped: ${lvlErr.message}`);
-    }
   } catch (e) {
-    console.error(`[PostVerify] On-chain attestation failed: ${e.message}`);
+    console.error(`[PostVerify] ❌ Attestation failed: ${e.message}`);
   }
+
+  // Step 4: Recompute on-chain reputation
+  try {
+    const client = getSATPWriteClient();
+    const repResult = await client.recomputeReputation(wallet, kp, 'mainnet');
+    console.log(`[PostVerify] ✅ Reputation recomputed: ${repResult.txSignature}`);
+  } catch (e) {
+    console.warn(`[PostVerify] ⚠️ Reputation recompute skipped: ${e.message}`);
+  }
+
+  // Step 5: Recompute on-chain verification level via V3 SDK
+  try {
+    const sdk = getV3SDK();
+    const { transaction } = await sdk.buildRecomputeLevel(kp.publicKey, profileId);
+    transaction.sign(kp);
+    const sig = await sdk.connection.sendRawTransaction(transaction.serialize());
+    console.log(`[PostVerify] ✅ Level recomputed: ${sig}`);
+  } catch (e) {
+    console.warn(`[PostVerify] ⚠️ Level recompute skipped: ${e.message}`);
+  }
+
+  console.log(`[PostVerify] ═══ Pipeline complete for ${profileId}/${platform} ═══`);
 }
 
 module.exports = { postVerificationHook, recomputeDBScore, revalidateProfileCache };

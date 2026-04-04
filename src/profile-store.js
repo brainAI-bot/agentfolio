@@ -288,150 +288,14 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
   }
 
 
-  // [S4 FIX] Removed duplicate SATP update block — single block below handles it
+  // Post-verification pipeline: DB score + on-chain attestation + recompute CPI
+  // (CEO directive Apr 4 — single unified hook for all verification types)
+  if (postVerificationHook) postVerificationHook(profileId, platform, identifier, proof).catch(e =>
+    console.error("[PostVerify] Hook error:", e.message)
+  );
 
-  // V3: Update verification level AND reputation on-chain (unified)
-  if (satpV3 && !userPaidGenesis) {
-    (async () => {
-      try {
-        const { Keypair } = require('@solana/web3.js');
-        const signerKey = JSON.parse(require('fs').readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'));
-        const signer = Keypair.fromSecretKey(Uint8Array.from(signerKey));
-        
-        // Check if genesis record exists first
-        const genesis = await satpV3.client.getGenesisRecord(profileId);
-        if (!genesis || genesis.error) {
-          console.log(`[SATP V3] No genesis record for ${profileId}, skipping on-chain updates`);
-          return;
-        }
-        
-        // Get all verifications for this profile
-        const d = getDb();
-        const allVerifs = d.prepare('SELECT platform FROM verifications WHERE profile_id = ?').all(profileId);
-        const verifCount = allVerifs.length;
-        
-        // Calculate new verification level with category awareness
-        const CATEGORY_MAP = {
-          solana: 'wallets', ethereum: 'wallets', hyperliquid: 'wallets', polymarket: 'wallets',
-          moltbook: 'platforms', agentmail: 'platforms', github: 'platforms', x: 'platforms', twitter: 'platforms', discord: 'platforms', telegram: 'platforms',
-          domain: 'infrastructure', mcp: 'infrastructure', a2a: 'infrastructure', website: 'infrastructure',
-          satp: 'onchain',
-        };
-        const categories = new Set(allVerifs.map(v => CATEGORY_MAP[v.platform] || 'other'));
-        const catCount = categories.size;
-        
-        // Verification level calculation: L0-L5
-        // L5 Sovereign: L4 + human-proof verification (X or GitHub verified)
-        const HUMAN_PLATFORMS = ['github', 'x', 'twitter'];
-        const hasHumanProof = allVerifs.some(v => HUMAN_PLATFORMS.includes(v.platform));
-        let newLevel = 0;
-        if (verifCount >= 8 && catCount >= 3 && hasHumanProof) newLevel = 5; // L5 Sovereign
-        else if (verifCount >= 8 && catCount >= 3) newLevel = 4; // L4 Trusted
-        else if (verifCount >= 5 && catCount >= 2) newLevel = 3; // L3 Established  
-        else if (verifCount >= 2) newLevel = 2; // L2 Verified
-        else if (verifCount >= 1) newLevel = 1; // L1 Registered
-        
-        // Calculate trust score using Scoring Engine V2
-        let newTrustScore = 0;
-        try {
-          // Build profile object for v2 engine from DB data
-          const profileRow = d.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
-          const endorsements = d.prepare('SELECT * FROM endorsements WHERE profile_id = ?').all(profileId);
-          const rfk = module.exports._reviewFk || 'profile_id';
-          const reviews = d.prepare(`SELECT * FROM reviews WHERE ${rfk} = ?`).all(profileId);
-          const jobCount = (() => { try { return d.prepare("SELECT COUNT(*) as c FROM jobs WHERE selected_agent_id = ? AND status = 'completed'").get(profileId)?.c || 0; } catch { return 0; } })();
-          
-          // Build verificationData from DB verifications table
-          const verifData = {};
-          for (const v of allVerifs) {
-            verifData[v.platform] = { verified: true };
-          }
-          
-          const profileObj = {
-            id: profileId,
-            name: profileRow?.name || '',
-            handle: profileRow?.handle || '',
-            bio: profileRow?.bio || profileRow?.description || '',
-            avatar: profileRow?.avatar || '',
-            skills: parseJsonField(profileRow?.skills, []),
-            verificationData: verifData,
-            endorsements: endorsements,
-            stats: {
-              jobsCompleted: jobCount,
-              reviewsReceived: reviews.length,
-              rating: reviews.length > 0 ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : 0,
-            },
-            lastActivity: profileRow?.updated_at || profileRow?.created_at,
-            createdAt: profileRow?.created_at,
-            nftAvatar: parseJsonField(profileRow?.nft_avatar, {}),
-          };
-          
-          if (scoringEngineV2) {
-            const scoreResult = scoringEngineV2.getCompleteScore(profileObj);
-            newTrustScore = scoreResult.reputationScore.score;
-            console.log(`[SATP V3] V2 Score for ${profileId}: L${scoreResult.verificationLevel.level} ${scoreResult.verificationLevel.name}, Rep=${newTrustScore}, Tier=${scoreResult.overall.tier}`);
-          } else {
-            // Fallback: simple verification count * 50
-            newTrustScore = Math.min(800, verifCount * 50);
-            console.log(`[SATP V3] Fallback score for ${profileId}: ${newTrustScore}`);
-          }
-        } catch (scoreErr) {
-          console.error(`[SATP V3] Score calculation error for ${profileId}:`, scoreErr.message);
-          newTrustScore = Math.min(800, verifCount * 50); // fallback
-        }
-        
-        // Update verification level if changed
-        if (newLevel > genesis.verificationLevel) {
-          const { transaction } = await satpV3.client.buildUpdateVerification(signer.publicKey, profileId, newLevel);
-          transaction.sign(signer);
-          const sig = await satpV3.client.connection.sendRawTransaction(transaction.serialize());
-          console.log(`[SATP V3] Verification updated for ${profileId}: level ${genesis.verificationLevel} → ${newLevel}, tx=${sig}`);
-        }
-        
-        // Update reputation score if changed (with score protection — P1 hardening)
-        const levelJump = Math.abs(newLevel - genesis.verificationLevel);
-        if (levelJump > 2) {
-          console.warn(`[SATP V3] BLOCKED: Level jump too large for ${profileId}: ${genesis.verificationLevel} -> ${newLevel} (delta=${levelJump}). Max allowed: 2.`);
-        } else if (newTrustScore > 10000) {
-          console.warn(`[SATP V3] BLOCKED: Score too high for ${profileId}: ${newTrustScore}. Max allowed: 10000.`);
-        }
-        if (newTrustScore > genesis.reputationScore && newTrustScore <= 10000 && newTrustScore < 1500) {
-          const repTx = await satpV3.client.buildUpdateReputation(signer.publicKey, profileId, newTrustScore);
-          repTx.transaction.sign(signer);
-          const repSig = await satpV3.client.connection.sendRawTransaction(repTx.transaction.serialize());
-          console.log(`[SATP V3] Reputation updated for ${profileId}: ${genesis.reputationScore} → ${newTrustScore}, tx=${repSig}`);
-        }
+      addActivity(profileId, 'verification', { platform, identifier });
 
-        // V3 recompute CPI — fire-and-forget after direct updates (CEO directive Apr 4)
-        try {
-          const recomputeLevelTx = await satpV3.client.buildRecomputeLevel(signer.publicKey, profileId, []);
-          recomputeLevelTx.transaction.sign(signer);
-          const lvlSig = await satpV3.client.connection.sendRawTransaction(recomputeLevelTx.transaction.serialize());
-          console.log(`[SATP V3] recompute_level CPI for ${profileId}: tx=${lvlSig}`);
-        } catch (rcErr) {
-          console.warn(`[SATP V3] recompute_level CPI failed for ${profileId}: ${rcErr.message}`);
-        }
-        try {
-          const recomputeRepTx = await satpV3.client.buildRecomputeReputation(signer.publicKey, profileId, []);
-          recomputeRepTx.transaction.sign(signer);
-          const repRcSig = await satpV3.client.connection.sendRawTransaction(recomputeRepTx.transaction.serialize());
-          console.log(`[SATP V3] recompute_reputation CPI for ${profileId}: tx=${repRcSig}`);
-        } catch (rcErr) {
-          console.warn(`[SATP V3] recompute_reputation CPI failed for ${profileId}: ${rcErr.message}`);
-        }
-        
-      } catch (err) {
-        console.error(`[SATP V3] On-chain update failed for ${profileId}:`, err.message);
-      }
-    })();
-  }
-
-    addActivity(profileId, 'verification', { platform, identifier });
-
-  // [CEO-URGENT Apr 4] Fire postVerificationHook (attestation + recompute CPI)
-  if (postVerificationHook) {
-    postVerificationHook(profileId, platform, identifier, proof).catch(err => console.error('[PostVerify] Hook error:', err.message));
-  }
 
   // Fire-and-forget: post on-chain Memo attestation
   if (postMemoAttestation) {
@@ -442,11 +306,6 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
       .catch(err => console.error(`[ProfileStore] Memo attestation failed for ${profileId}/${platform}:`, err.message));
   }
 
-    // [CEO-URGENT 2026-04-04] ISR cache revalidation after verification
-  try {
-    const { revalidateProfileCache } = require('./post-verification-hook');
-    revalidateProfileCache(profileId).catch(e => console.warn('[PostVerify] ISR revalidation error:', e.message));
-  } catch (e) { /* post-verification-hook not available */ }
 
   // [REMOVED] Duplicate V3 update block — handled by the unified V3 block above (verification + reputation + recompute)
 
