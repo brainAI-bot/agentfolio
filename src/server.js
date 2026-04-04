@@ -384,8 +384,9 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     
     // Use DB score as primary (authoritative), V3 on-chain as supplementary context
     // V3 on-chain reputationScore uses a different scale (0-1M basis points) vs DB (0-1000)
-    const trustScore = scoreResult.score;
-    const tier = scoreResult.level || (scoreResult.score >= 80 ? 'ELITE' : scoreResult.score >= 60 ? 'PRO' : scoreResult.score >= 40 ? 'VERIFIED' : scoreResult.score >= 20 ? 'BASIC' : 'NEW');
+    // [CEO-URGENT 2026-04-04] V3 on-chain score is primary, DB fallback only
+    const trustScore = v3Data ? (v3Data.reputationScore > 10000 ? Math.round(v3Data.reputationScore / 1000) : v3Data.reputationScore) : scoreResult.score;
+    const tier = v3Data ? (v3Data.verificationLabel || ['Unverified','Registered','Verified','Established','Trusted','Sovereign'][v3Data.verificationLevel] || 'Unverified') : (scoreResult.level || (trustScore >= 80 ? 'ELITE' : trustScore >= 60 ? 'PRO' : trustScore >= 40 ? 'VERIFIED' : trustScore >= 20 ? 'BASIC' : 'NEW'));
     
     res.json({
       agentId: profile.id,

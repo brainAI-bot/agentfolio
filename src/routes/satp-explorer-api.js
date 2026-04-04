@@ -110,35 +110,7 @@ async function getSatpAgents() {
     }
   }
 
-  // Merge DB trust scores where available (DB is authoritative for score/level)
-  if (profileStore) {
-    try {
-      const db = profileStore.getDb();
-      for (const agent of agents) {
-        const nameClean = agent.name.toLowerCase().replace(/[^a-z0-9]/g, "");
-        const row = db.prepare("SELECT overall_score, level FROM satp_trust_scores WHERE agent_id LIKE ? OR agent_id LIKE ?").get("%" + nameClean + "%", "agent_" + nameClean);
-        if (row && row.overall_score > 0) {
-          agent.dbScore = row.overall_score;
-          agent.dbLevel = row.level;
-        }
-      }
-    } catch(e) { console.warn("[SATP Explorer] DB merge failed:", e.message); }
-  }
-  // Override display score and level with DB values when available
-  const levelMap = { NEW: 0, REGISTERED: 1, VERIFIED: 2, ESTABLISHED: 3, TRUSTED: 4, SOVEREIGN: 5 };
-  const labelMap = { 0: "Unverified", 1: "Registered", 2: "Verified", 3: "Established", 4: "Trusted", 5: "Sovereign" };
-  for (const agent of agents) {
-    if (agent.dbScore != null) {
-      agent.chainReputationScore = agent.reputationScore;
-      agent.reputationScore = agent.dbScore;
-    }
-    if (agent.dbLevel) {
-      agent.chainVerificationLevel = agent.verificationLevel;
-      const lvl = levelMap[agent.dbLevel.toUpperCase()] ?? agent.verificationLevel;
-      agent.verificationLevel = lvl;
-      agent.verificationLabel = labelMap[lvl] || agent.verificationLabel;
-    }
-  }
+  // [CEO-URGENT 2026-04-04] DB score overrides REMOVED — on-chain is sole display source
   const result = { agents, count: agents.length, source: "solana-mainnet-v3" };
   agentCache = { data: result, timestamp: Date.now() };
   return result;
