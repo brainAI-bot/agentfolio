@@ -203,7 +203,7 @@ function registerFrontendBridge(app, profileStore) {
   // ─── 5. /api/import/github/* → wire github-import routes ───
   try {
     const { registerGitHubImportRoutes } = require('./github-import');
-    registerGitHubImportRoutes(app);
+    registerGitHubImportRoutes(app, getDbFn);
     console.log('[Bridge] Wired /api/import/github/*');
   } catch (e) {
     console.warn('[Bridge] github-import failed:', e.message);
