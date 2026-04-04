@@ -465,8 +465,15 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
       });
     }
     
-    // P0: DB fallback removed — v3 on-chain is sole source
-    
+    // DB fallback when on-chain missing
+    try {
+      const mainDb = require("./profile-store").getDb();
+      const trustRow = mainDb.prepare("SELECT overall_score, level FROM satp_trust_scores WHERE agent_id = ?").get(resolvedId);
+      if (trustRow && trustRow.overall_score > 0) {
+        const levelLabels2 = {SOVEREIGN:5,TRUSTED:4,ESTABLISHED:3,VERIFIED:2,REGISTERED:1};
+        return res.json({ agentId: resolvedId, score: trustRow.overall_score, level: levelLabels2[trustRow.level]||0, levelName: trustRow.level||'Unclaimed', tier: trustRow.level||'Unclaimed', source: 'db-fallback' });
+      }
+    } catch(_) {}
     res.json({ agentId: resolvedId, score: 0, level: 0, levelName: 'Unclaimed', tier: 'Unclaimed', source: 'none' });
   } catch (err) {
     console.error('[Trust Score] Error:', err);
