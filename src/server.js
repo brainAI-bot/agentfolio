@@ -15,6 +15,7 @@ const satpReviews = require('./satp-reviews');
 // SATP On-Chain API (read + write)
 const { registerSATPRoutes } = require('./routes/satp-api');
 const { registerSATPWriteRoutes } = require('./routes/satp-write-api');
+const { registerReviewsV2Routes } = require("./api/reviews-v2");
 
 // Profile Store (SQLite-backed persistent profiles, endorsements, reviews)
 const profileStore = require('./profile-store');
@@ -1917,6 +1918,7 @@ a{color:#8b5cf6;text-decoration:none}a:hover{text-decoration:underline}
 try {
   const { registerEligibilityRoutes } = require("./api/eligibility");
   registerEligibilityRoutes(app);
+registerReviewsV2Routes(app);
   console.log("[Eligibility API] Mounted — /api/mint/eligibility, /api/boa/eligibility");
 } catch (e) {
   console.warn("[Eligibility API] Failed to mount:", e.message);
@@ -2256,6 +2258,22 @@ app.listen(PORT, () => {
     console.log(`[${new Date().toISOString()}] info: ✓ Chain-cache started (120s refresh)`, {service: "agentfolio"});
   } catch (e) {
     console.warn(`[${new Date().toISOString()}] warn: Chain-cache start failed:`, e.message);
+  }
+});
+
+// GitHub stats endpoint (used by frontend profile page)
+app.get('/api/verify/github/stats', async (req, res) => {
+  const { username } = req.query;
+  if (!username) return res.status(400).json({ error: 'username required' });
+  try {
+    const resp = await fetch(`https://api.github.com/users/${encodeURIComponent(username)}`, {
+      headers: { 'User-Agent': 'AgentFolio/1.0' }
+    });
+    if (!resp.ok) return res.json({ username, repos: 0, stars: 0 });
+    const data = await resp.json();
+    res.json({ username: data.login, repos: data.public_repos || 0, stars: data.followers || 0 });
+  } catch (e) {
+    res.json({ username, repos: 0, stars: 0 });
   }
 });
 
