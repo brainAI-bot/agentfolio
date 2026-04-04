@@ -26,7 +26,7 @@ export function NavbarWalletButtonActive({ onProfileId }: { onProfileId?: (id: s
     const addr = publicKey.toBase58();
     fetch(`/api/wallet/lookup/${addr}`)
       .then(r => r.ok ? r.json() : null)
-      .then(d => onProfileId?.(d?.profile?.id || null))
+      .then(d => onProfileId?.(d?.profileId || d?.profile?.id || d?.id || null))
       .catch(() => onProfileId?.(null));
   }, [publicKey, onProfileId]);
 

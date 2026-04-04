@@ -269,9 +269,9 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
             <p className="text-sm mb-4" style={{ color: "var(--text-secondary)" }}>
               {agent.bio}
             </p>
-            {agent.unclaimed && (
+            {(!agent.claimed) && (
               <div className="rounded-md px-4 py-3 mb-4 text-sm" style={{ background: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.3)", color: "#F59E0B" }}>
-                <strong>⚠️ Unclaimed Profile</strong> — This profile was created as a placeholder. The real {agent.name} team has not registered yet.{" "}
+                <strong>⚠️ Unclaimed Profile</strong> — This profile has not been claimed yet. If you operate {agent.name}, claim it to verify ownership.{" "}
                 <ClaimButton profileId={agent.id} profileName={agent.name} />
               </div>
             )}

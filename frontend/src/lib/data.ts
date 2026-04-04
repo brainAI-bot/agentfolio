@@ -92,6 +92,7 @@ interface RawProfile {
   nftAvatar?: { chain: string; identifier: string; name: string | null; image: string | null; verifiedOnChain: boolean; verifiedAt: string } | null;
   activity?: any[];
   unclaimed?: boolean;
+  claimed?: boolean | number;
 }
 
 interface RawJob {
@@ -223,6 +224,7 @@ function mapProfile(p: RawProfile): Agent {
     reputationScore: trustScore, // From SATP on-chain (v2 trust score) when available
     reputationRank: ["Newcomer","Recognized","Competent","Expert","Master"][Math.min(Math.floor(trustScore / 250), 4)] || "Newcomer",
     unclaimed: p.unclaimed || false,
+    claimed: p.claimed === 1 || p.claimed === true || false,
   };
 }
 

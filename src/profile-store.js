@@ -528,13 +528,61 @@ function enrichProfile(row) {
     verification_level: v3 ? v3.verificationLevel : 0, // on-chain only
     reputation_score: v3 ? v3.reputationScore : 0, // on-chain only
     // Top-level unclaimed flag for frontend (from metadata)
-    unclaimed: (() => { try { const m = typeof row.metadata === 'string' ? JSON.parse(row.metadata || '{}') : (row.metadata || {}); return m.unclaimed === true || m.isPlaceholder === true || m.placeholder === true; } catch { return false; } })(),
+    unclaimed: (() => { try { if (row.claimed === 0 || row.claimed === "0") return true; const m = typeof row.metadata === "string" ? JSON.parse(row.metadata || "{}") : (row.metadata || {}); return m.unclaimed === true || m.isPlaceholder === true || m.placeholder === true; } catch { return false; } })(),
   };
 }
 
 function registerRoutes(app) {
   // ── POST /api/register ──────────────────────────────────────────
-  app.post('/api/register', registerLimiter, (req, res) => {
+  // Alias: /api/register/simple → same as /api/register
+  app.post('/api/register/simple', registerLimiter, (req, res) => {
+    // Forward to the same handler
+    req.url = '/api/register';
+    app.handle(req, res);
+  });
+  // ── PATCH /api/register — update wallet after registration ──
+  app.patch('/api/register', (req, res) => {
+    const { profileId, walletAddress, signature, signedMessage } = req.body;
+    if (!profileId || !walletAddress) {
+      return res.status(400).json({ error: 'profileId and walletAddress required' });
+    }
+    // Verify signature if provided
+    if (signature && signedMessage) {
+      try {
+        const pubkeyBytes = bs58.decode(walletAddress);
+        if (pubkeyBytes.length !== 32) throw new Error('invalid pubkey length');
+        let sigBytes;
+        try { sigBytes = bs58.decode(signature); } catch (_) {
+          sigBytes = Buffer.from(signature, 'base64');
+        }
+        if (sigBytes.length !== 64) throw new Error('invalid signature length');
+        const msgBytes = new TextEncoder().encode(signedMessage);
+        const valid = nacl.sign.detached.verify(msgBytes, sigBytes, pubkeyBytes);
+        if (!valid) {
+          return res.status(401).json({ error: 'invalid wallet signature' });
+        }
+      } catch (sigErr) {
+        return res.status(400).json({ error: `signature verification error: ${sigErr.message}` });
+      }
+    }
+    try {
+      const db = getDb();
+      const now = new Date().toISOString();
+      db.prepare('UPDATE profiles SET wallet = ?, claimed = 1, claimed_by = ?, claimed_at = ?, updated_at = ? WHERE id = ?').run(walletAddress, walletAddress, now, now, profileId);
+      // Also update wallets JSON
+      const row = db.prepare('SELECT wallets FROM profiles WHERE id = ?').get(profileId);
+      if (row) {
+        const wallets = JSON.parse(row.wallets || '{}');
+        wallets.solana = walletAddress;
+        db.prepare('UPDATE profiles SET wallets = ? WHERE id = ?').run(JSON.stringify(wallets), profileId);
+      }
+      res.json({ ok: true, wallet: walletAddress });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+    app.post('/api/register', registerLimiter, (req, res) => {
     const { name, handle, description, tagline, bio, avatar, website, framework, capabilities, tags, wallet, wallets, skills, links, twitter, github, email, signature, signedMessage, userPaidGenesis } = req.body;
     if (!name || typeof name !== 'string' || name.trim().length < 1) {
       return res.status(400).json({ error: 'name is required (non-empty string)' });
@@ -646,6 +694,9 @@ function registerRoutes(app) {
         ['verification_data', hasVerificationData, JSON.stringify(verificationData)],
         ['created_at', true, now],
         ['updated_at', true, now],
+        ['claimed', cols.includes('claimed'), solanaWallet ? 1 : 0],
+        ['claimed_by', cols.includes('claimed_by'), solanaWallet || ''],
+        ['claimed_at', cols.includes('claimed_at'), solanaWallet ? now : ''],
       ];
 
       for (const [col, exists, val] of optionalFields) {
@@ -711,7 +762,7 @@ function registerRoutes(app) {
           const { Keypair } = require('@solana/web3.js');
           const signerKey = JSON.parse(require('fs').readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'));
           const signer = Keypair.fromSecretKey(Uint8Array.from(signerKey));
-          const hashBuf = satpV3.agentIdHash(id);
+          const hashBuf = satpV3.hashAgentId(id);
           try {
             const { transaction, genesisPda } = await satpV3.client.buildCreateGenesisRecord(
               signer.publicKey,
@@ -908,7 +959,7 @@ function registerRoutes(app) {
       const skills = profile?.skills ? (typeof profile.skills === 'string' ? JSON.parse(profile.skills) : profile.skills).slice(0, 5).map(s => s.name || s) : [];
       const category = profile?.framework || 'general';
 
-      const hashBuf = satpV3.agentIdHash(agentId);
+      const hashBuf = satpV3.hashAgentId(agentId);
       const { PublicKey } = require('@solana/web3.js');
       const payerKey = new PublicKey(payer);
 
@@ -994,7 +1045,7 @@ function registerRoutes(app) {
       } catch (_) {}
       const { _trust_score: ts, _trust_level: dbLevel, ...cleanRest } = rest;
       const _md = parseJsonField(cleanRest.metadata);
-      const unclaimed = _md.unclaimed === true || _md.isPlaceholder === true || _md.placeholder === true;
+      const unclaimed = (cleanRest.claimed === 0 || cleanRest.claimed === "0") || _md.unclaimed === true || _md.isPlaceholder === true || _md.placeholder === true;
       return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: {} /* [P0] chain-cache only, no DB reads */, portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: _md, nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, _dbLevel: dbLevel || null, claimed, unclaimed };
     });
 
@@ -1470,12 +1521,45 @@ function registerRoutes(app) {
   });
 
 
+  // GET /api/wallet/lookup/:addr — find profile by Solana wallet (frontend format)
+  app.get('/api/wallet/lookup/:addr', (req, res) => {
+    const wallet = req.params.addr;
+    if (!wallet) return res.status(400).json({ found: false, error: 'wallet address required' });
+    try {
+      const db = getDb();
+      // Check wallet column directly
+      let match = db.prepare('SELECT id, name FROM profiles WHERE wallet = ?').get(wallet);
+      if (!match) match = db.prepare('SELECT id, name FROM profiles WHERE claimed_by = ?').get(wallet);
+      if (!match) {
+        // Check wallets JSON column
+        const all = db.prepare('SELECT id, name, wallets FROM profiles').all();
+        for (const p of all) {
+          try {
+            const w = JSON.parse(p.wallets || '{}');
+            if (w.solana === wallet) { match = { id: p.id, name: p.name }; break; }
+          } catch (_) {}
+        }
+      }
+      if (match) {
+        return res.json({ found: true, profileId: match.id, name: match.name, profile: { id: match.id, name: match.name } });
+      }
+      return res.status(404).json({ found: false, error: 'No profile found for this wallet' });
+    } catch (e) {
+      return res.status(500).json({ found: false, error: e.message });
+    }
+  });
+
   // GET /api/profile-by-wallet?wallet=<address> — find profile by Solana wallet
   app.get('/api/profile-by-wallet', (req, res) => {
     const { wallet } = req.query;
     if (!wallet) return res.status(400).json({ error: 'wallet required' });
     try {
       const db = getDb();
+      // Direct wallet column lookup (fast path)
+      const directMatch = db.prepare('SELECT id, name FROM profiles WHERE wallet = ?').get(wallet);
+      if (directMatch) return res.json({ id: directMatch.id, name: directMatch.name });
+      const claimedMatch = db.prepare('SELECT id, name FROM profiles WHERE claimed_by = ?').get(wallet);
+      if (claimedMatch) return res.json({ id: claimedMatch.id, name: claimedMatch.name });
       const profiles = db.prepare('SELECT id, name, wallets FROM profiles').all();
       for (const p of profiles) {
         try {

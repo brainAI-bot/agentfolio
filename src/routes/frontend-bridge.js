@@ -241,7 +241,7 @@ function registerFrontendBridge(app, profileStore) {
       const { addr } = req.params;
       const profile = db.prepare("SELECT id, name, avatar, handle, claimed, wallet, wallets FROM profiles WHERE wallet = ? OR wallets LIKE '%" + addr.replace(/'/g, '') + "%'").get(addr);
       if (!profile) return res.status(404).json({ found: false, address: addr });
-      res.json({ found: true, profileId: profile.id, name: profile.name, avatar: profile.avatar, handle: profile.handle, claimed: !!profile.claimed });
+      res.json({ found: true, profileId: profile.id, name: profile.name, avatar: profile.avatar, handle: profile.handle, claimed: !!profile.claimed, profile: { id: profile.id, name: profile.name } });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }

@@ -44,7 +44,7 @@ function genApiKey() {
 
 function registerSimpleRoutes(app, getDb) {
   app.post('/api/register/simple', simpleLimiter, (req, res) => {
-    const { name, tagline, github, website, skills } = req.body;
+    const { name, tagline, github, website, skills, walletAddress } = req.body;
 
     if (!name || typeof name !== 'string' || name.trim().length < 1) {
       return res.status(400).json({ error: 'name is required' });
@@ -104,13 +104,15 @@ function registerSimpleRoutes(app, getDb) {
         ['framework', ''],
         ['capabilities', JSON.stringify(resolvedSkills.map(s => s.name || s))],
         ['tags', '[]'],
-        ['wallet', ''],
-        ['wallets', '{}'],
+        ['wallet', walletAddress || ''],
+        ['wallets', walletAddress ? JSON.stringify({solana: walletAddress}) : '{}'],
         ['twitter', ''],
         ['github', resolvedGithub],
         ['email', ''],
         ['api_key', apiKey],
         ['status', 'active'],
+        ['claimed', walletAddress ? 1 : 0],
+        ['claimed_by', walletAddress || ''],
         ['skills', JSON.stringify(resolvedSkills)],
         ['links', JSON.stringify({ github: resolvedGithub || null, website: resolvedWebsite || null })],
         ['verification_data', '{}'],
