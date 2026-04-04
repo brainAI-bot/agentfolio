@@ -209,8 +209,15 @@ app.get('/api/ecosystem/stats', (req, res) => {
     const db = profileStore.getDb();
     const total = db.prepare('SELECT COUNT(*) as c FROM profiles').get().c;
     const claimed = db.prepare('SELECT COUNT(*) as c FROM profiles WHERE claimed = 1').get().c;
-    const verified = db.prepare("SELECT COUNT(*) as c FROM profiles WHERE json_extract(verification, '$.github') IS NOT NULL OR json_extract(verification, '$.solana') IS NOT NULL").get().c;
-    res.json({ agents: { total, verified, claimed, avgSkills: 3 }, total_agents: total, verified, on_chain: verified });
+    let verified = 0;
+    try {
+      verified = db.prepare('SELECT COUNT(DISTINCT profile_id) as c FROM verifications').get().c;
+    } catch (_) {
+      try { verified = db.prepare("SELECT COUNT(*) as c FROM profiles WHERE verification_data IS NOT NULL AND verification_data != '{}' AND verification_data != ''").get().c; } catch (__) {}
+    }
+    let onChain = 0;
+    try { onChain = db.prepare("SELECT COUNT(*) as c FROM satp_trust_scores WHERE overall_score > 0").get().c; } catch (_) {}
+    res.json({ agents: { total, verified, claimed, avgSkills: 3 }, total_agents: total, totalAgents: total, verified, verifiedAgents: verified, claimed, on_chain: onChain, totalJobs: 0, totalVolume: 0 });
   } catch (e) {
     res.json({ agents: { total: 200, verified: 0 }, total_agents: 200, verified: 0, on_chain: 0 });
   }

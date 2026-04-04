@@ -63,6 +63,14 @@ async function main() {
         const desc = sanitize((h.description || h.profile?.bio || '')).slice(0, 500);
         if (!desc || desc.length < 10) { skipped++; continue; }
 
+        // Quality gate: must be an actual AI agent, not a business listing
+        const combined = (name + ' ' + desc).toLowerCase();
+        const AI_KEYWORDS = ['ai', 'agent', 'llm', 'model', 'bot', 'autonomous', 'protocol', 'swap', 'trade', 'chain', 'crypto', 'defi', 'nft', 'token', 'intelligence', 'neural', 'ml', 'deep learning', 'generative', 'assistant', 'sdk', 'api'];
+        const JUNK_KEYWORDS = ['llc', 'inc.', 'ltd', 'corporation', 'plumbing', 'roofing', 'dental', 'restaurant', 'real estate', 'law firm', 'insurance', 'accounting', 'photography studio', 'event planning'];
+        const hasAI = AI_KEYWORDS.some(k => combined.includes(k));
+        const isJunk = JUNK_KEYWORDS.some(k => combined.includes(k));
+        if (!hasAI || isJunk) { skipped++; console.log(`  ⏭️  Skipped (not AI): ${name}`); continue; }
+
         const meta = h.metadata || {};
         const capabilities = (meta.capabilityLabels || []).slice(0, 5);
         const skills = JSON.stringify(capabilities.length > 0 ? capabilities : ['ai-agent']);
