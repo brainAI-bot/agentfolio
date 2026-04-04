@@ -382,9 +382,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       console.warn('[Explorer] V3 score fetch failed for', agentId, e.message);
     }
     
-    // Use DB score as primary (authoritative), V3 on-chain as supplementary context
-    // V3 on-chain reputationScore uses a different scale (0-1M basis points) vs DB (0-1000)
-    // [CEO-URGENT 2026-04-04] V3 on-chain score is primary, DB fallback only
+    // [CEO-URGENT 2026-04-04] V3 on-chain score is authoritative. DB fallback only for agents without genesis.
     const trustScore = v3Data ? (v3Data.reputationScore > 10000 ? Math.round(v3Data.reputationScore / 1000) : v3Data.reputationScore) : scoreResult.score;
     const tier = v3Data ? (v3Data.verificationLabel || ['Unverified','Registered','Verified','Established','Trusted','Sovereign'][v3Data.verificationLevel] || 'Unverified') : (scoreResult.level || (trustScore >= 80 ? 'ELITE' : trustScore >= 60 ? 'PRO' : trustScore >= 40 ? 'VERIFIED' : trustScore >= 20 ? 'BASIC' : 'NEW'));
     
@@ -2085,22 +2083,64 @@ app.get('/api/score', async (req, res) => {
     solWallet = w?.solana || null;
   } catch (e) { /* no wallet */ }
   
+  // [CEO-URGENT] On-chain V3 is authoritative for display — no DB fallback
+  const resolvedId = row ? row.id : profileId;
+  let v3Score = null;
+  try { if (getV3Score) v3Score = await getV3Score(resolvedId); } catch (_) {}
+  
+  if (v3Score && v3Score.isBorn) {
+    const levelNames = ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'];
+    return res.json({
+      agentId: resolvedId,
+      score: v3Score.reputationScore,
+      level: v3Score.verificationLevel,
+      levelName: levelNames[v3Score.verificationLevel] || 'Unclaimed',
+      tier: levelNames[v3Score.verificationLevel] || 'Unclaimed',
+      source: 'v3-onchain',
+      verifications,
+      onChain: { reputationScore: v3Score.reputationScore, verificationLevel: v3Score.verificationLevel, isBorn: true },
+      payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.01' },
+    });
+  }
+
+  // Fallback for agents without on-chain genesis
   const onChainData = solWallet ? await fetchOnChainData(solWallet) : null;
   const score = computeScore(profile, onChainData);
   res.json({
     ...score,
+    source: 'legacy-computed',
     payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.01' },
   });
 });
 
 // Paid: Leaderboard with scores
-app.get('/api/leaderboard/scores', (req, res) => {
+app.get('/api/leaderboard/scores', async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 100);
 
-  // For now, return computed scores for known profiles
-  // In production this would query a real profile database
-  const profiles = [];
-  const leaderboard = computeLeaderboard(profiles, limit);
+  // [CEO-URGENT] Leaderboard from on-chain V3 scores only
+  const db = profileStore.getDb();
+  const allProfiles = db.prepare('SELECT id, name, avatar, handle FROM profiles').all();
+  const leaderboard = [];
+  let v3Svc_; try { v3Svc_ = require("./v3-score-service"); } catch(_){}
+  if (v3Svc_) {
+    // Batch-warm cache first
+    const ids = allProfiles.map(p => p.id);
+    try { await v3Svc_.getV3Scores(ids); } catch(_){}
+    for (const p of allProfiles) {
+      const v3 = v3Svc_._getFromCache(p.id);
+      if (v3 && v3.isBorn && v3.reputationScore > 0) {
+        const levelNames = ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'];
+        leaderboard.push({
+          agentId: p.id, name: p.name, avatar: p.avatar, handle: p.handle,
+          score: v3.reputationScore, level: v3.verificationLevel,
+          levelName: levelNames[v3.verificationLevel] || 'Unclaimed',
+          source: 'v3-onchain',
+        });
+      }
+    }
+  }
+  leaderboard.sort((a, b) => b.score - a.score);
+  leaderboard.splice(limit);
 
   res.json({
     leaderboard,
