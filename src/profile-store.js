@@ -420,6 +420,12 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
       .catch(err => console.error(`[ProfileStore] Memo attestation failed for ${profileId}/${platform}:`, err.message));
   }
 
+    // [CEO-URGENT 2026-04-04] ISR cache revalidation after verification
+  try {
+    const { revalidateProfileCache } = require('./post-verification-hook');
+    revalidateProfileCache(profileId).catch(e => console.warn('[PostVerify] ISR revalidation error:', e.message));
+  } catch (e) { /* post-verification-hook not available */ }
+
   // [REMOVED] Duplicate V3 update block — handled by the unified V3 block above (verification + reputation + recompute)
 
   // Notify CMD Center of verification
@@ -629,7 +635,7 @@ function enrichProfile(row) {
       positive: reviewStats.positive,
       negative: reviewStats.negative,
     },
-    trust_score,
+    trust_score: v3 ? { overall_score: v3.reputationScore > 10000 ? Math.round(v3.reputationScore / 1000) : v3.reputationScore, level: ["Unverified","Registered","Verified","Established","Trusted","Sovereign"][v3.verificationLevel] || "Unverified", score_breakdown: {}, source: "v3-onchain" } : trust_score,
     // Computed level/tier/score — chain-cache is primary source
     level: (trust_score && trust_score.level) ? trust_score.level : (v3 ? v3.verificationLevel : null),
     tier: (trust_score && trust_score.level) ? trust_score.level : (v3 ? (['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'][v3.verificationLevel] || v3.verificationLabel || 'Unclaimed') : null),
