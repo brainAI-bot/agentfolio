@@ -180,6 +180,14 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
     } catch (repErr) {
       console.warn(`[PostVerify] Reputation recompute skipped: ${repErr.message}`);
     }
+
+    // Step 4: Recompute on-chain verification level (CEO directive Apr 4)
+    try {
+      const lvlResult = await client.recomputeLevel(wallet, kp, 'mainnet');
+      console.log(`[PostVerify] ✅ Level recomputed: ${lvlResult.txSignature}`);
+    } catch (lvlErr) {
+      console.warn(`[PostVerify] Level recompute skipped: ${lvlErr.message}`);
+    }
   } catch (e) {
     console.error(`[PostVerify] On-chain attestation failed: ${e.message}`);
   }

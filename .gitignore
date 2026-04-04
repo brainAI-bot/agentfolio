@@ -13,3 +13,4 @@ logs/
 logs/
 *.bak-*
 sync-genesis-scores.js
+snapshots/

@@ -52,6 +52,10 @@ try {
 } catch (e) {
   console.warn('[SATP V3] SDK not available:', e.message);
 }
+// [CEO-URGENT Apr 4] postVerificationHook — single on-chain entry point
+let postVerificationHook;
+try { ({ postVerificationHook } = require('./post-verification-hook')); console.log('[PostVerify] postVerificationHook loaded'); } catch(e) { console.warn('[PostVerify] hook not available:', e.message); }
+
 
 // V3 Score Service — batch on-chain scoring
 let v3ScoreService;
@@ -398,10 +402,23 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
           console.log(`[SATP V3] Reputation updated for ${profileId}: ${genesis.reputationScore} → ${newTrustScore}, tx=${repSig}`);
         }
 
-        // V3 recompute DISABLED — on-chain recompute_reputation produces incorrect scores
-        // Re-enable once the Solana program's recompute logic matches the DB scoring engine
-        // (CEO directive 2026-04-03: DB is authoritative until on-chain is fixed)
-        console.log(`[SATP V3] Skipping recompute_reputation for ${profileId} (disabled — DB authoritative)`);
+        // V3 recompute CPI — fire-and-forget after direct updates (CEO directive Apr 4)
+        try {
+          const recomputeLevelTx = await satpV3.client.buildRecomputeLevel(signer.publicKey, profileId, []);
+          recomputeLevelTx.transaction.sign(signer);
+          const lvlSig = await satpV3.client.connection.sendRawTransaction(recomputeLevelTx.transaction.serialize());
+          console.log(`[SATP V3] recompute_level CPI for ${profileId}: tx=${lvlSig}`);
+        } catch (rcErr) {
+          console.warn(`[SATP V3] recompute_level CPI failed for ${profileId}: ${rcErr.message}`);
+        }
+        try {
+          const recomputeRepTx = await satpV3.client.buildRecomputeReputation(signer.publicKey, profileId, []);
+          recomputeRepTx.transaction.sign(signer);
+          const repRcSig = await satpV3.client.connection.sendRawTransaction(recomputeRepTx.transaction.serialize());
+          console.log(`[SATP V3] recompute_reputation CPI for ${profileId}: tx=${repRcSig}`);
+        } catch (rcErr) {
+          console.warn(`[SATP V3] recompute_reputation CPI failed for ${profileId}: ${rcErr.message}`);
+        }
         
       } catch (err) {
         console.error(`[SATP V3] On-chain update failed for ${profileId}:`, err.message);
@@ -410,6 +427,11 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
   }
 
     addActivity(profileId, 'verification', { platform, identifier });
+
+  // [CEO-URGENT Apr 4] Fire postVerificationHook (attestation + recompute CPI)
+  if (postVerificationHook) {
+    postVerificationHook(profileId, platform, identifier, proof).catch(err => console.error('[PostVerify] Hook error:', err.message));
+  }
 
   // Fire-and-forget: post on-chain Memo attestation
   if (postMemoAttestation) {
@@ -493,20 +515,22 @@ function enrichProfile(row) {
     FROM reviews WHERE ${rfk} = ?
   `).get(row.id);
   
-  // SATP Trust Score (from satp_trust_scores table)
+  // [CEO Apr 4] DB scoring removed from display — on-chain only via v3ScoreService/chain-cache
   let trust_score = null;
-  try {
-    const trustRow = d.prepare('SELECT overall_score, level, score_breakdown FROM satp_trust_scores WHERE agent_id = ?').get(row.id);
-    if (trustRow) {
-      trust_score = {
-        overall_score: trustRow.overall_score,
-        level: trustRow.level,
-        score_breakdown: parseJsonField(trustRow.score_breakdown, {}),
-      };
-    }
-  } catch (e) {
-    // satp_trust_scores table may not exist yet
-  }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
   // Resolve avatar: nft_avatar.image takes priority
   let resolvedAvatar = row.avatar;
@@ -635,13 +659,13 @@ function enrichProfile(row) {
       positive: reviewStats.positive,
       negative: reviewStats.negative,
     },
-    trust_score: v3 ? { overall_score: v3.reputationScore > 10000 ? Math.round(v3.reputationScore / 1000) : v3.reputationScore, level: ["Unverified","Registered","Verified","Established","Trusted","Sovereign"][v3.verificationLevel] || "Unverified", score_breakdown: {}, source: "v3-onchain" } : trust_score,
+    trust_score: v3 ? { overall_score: v3.reputationScore > 10000 ? Math.round(v3.reputationScore / 1000) : v3.reputationScore, level: ["Unverified","Registered","Verified","Established","Trusted","Sovereign"][v3.verificationLevel] || "Unverified", score_breakdown: {}, source: "v3-onchain" } : null, // [CEO-URGENT] on-chain only — no DB fallback
     // Computed level/tier/score — chain-cache is primary source
-    level: (trust_score && trust_score.level) ? trust_score.level : (v3 ? v3.verificationLevel : null),
-    tier: (trust_score && trust_score.level) ? trust_score.level : (v3 ? (['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'][v3.verificationLevel] || v3.verificationLabel || 'Unclaimed') : null),
-    score: v3 ? v3.reputationScore : (trust_score ? trust_score.overall_score : null),
-    verification_level: (trust_score && trust_score.level) ? ({'UNVERIFIED':0,'NEW':0,'REGISTERED':1,'VERIFIED':2,'ESTABLISHED':3,'TRUSTED':4,'SOVEREIGN':5,'ELITE':5}[trust_score.level] || 0) : (v3 ? v3.verificationLevel : 0),
-    reputation_score: v3 ? v3.reputationScore : (trust_score ? trust_score.overall_score : 0),
+    level: v3 ? v3.verificationLevel : null, // on-chain only
+    tier: v3 ? (["Unclaimed","Registered","Verified","Established","Trusted","Sovereign"][v3.verificationLevel] || v3.verificationLabel || "Unclaimed") : null, // on-chain only
+    score: v3 ? v3.reputationScore : null, // on-chain only
+    verification_level: v3 ? v3.verificationLevel : 0, // on-chain only
+    reputation_score: v3 ? v3.reputationScore : 0, // on-chain only
     // Top-level unclaimed flag for frontend (from metadata)
     unclaimed: (() => { try { const m = typeof row.metadata === 'string' ? JSON.parse(row.metadata || '{}') : (row.metadata || {}); return m.unclaimed === true || m.isPlaceholder === true || m.placeholder === true; } catch { return false; } })(),
   };
@@ -979,24 +1003,25 @@ function registerRoutes(app) {
           } catch {}
         }
       }
-      // DB is authoritative for scores until on-chain is fixed (CEO directive 2026-04-03)
-      if (record) {
-        try {
-          const d = getDb();
-          const dbScore = d.prepare('SELECT overall_score, level FROM satp_trust_scores WHERE agent_id = ?').get(rawId);
-          if (dbScore && dbScore.overall_score > 0) {
-            // Override on-chain score with DB score if they diverge significantly
-            if (Math.abs(record.reputationScore - dbScore.overall_score) > 100) {
-              console.log('[Genesis] Score mismatch for ' + rawId + ': chain=' + record.reputationScore + ' db=' + dbScore.overall_score + ' — using DB');
-              record.reputationScore = dbScore.overall_score;
-              record.reputationPct = (dbScore.overall_score / 1000 * 100).toFixed(2);
-              record._scoreSource = 'db_override';
-            }
-          }
-        } catch (dbErr) {
-          console.error('[Genesis] DB score lookup failed:', dbErr.message);
-        }
-      }
+      // [CEO Apr 4] DB score override REMOVED — on-chain is sole authority for display
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
       res.json({ genesis: record });
     } catch (e) {
       res.json({ genesis: null, error: e.message });
@@ -1075,11 +1100,11 @@ function registerRoutes(app) {
     let rows;
     try {
       rows = d.prepare(`
-        SELECT p.*, COALESCE(t.overall_score, 0) AS _trust_score, t.level AS _trust_level
+        SELECT p.*, 0 AS _trust_score, NULL AS _trust_level
         FROM profiles p
-        LEFT JOIN satp_trust_scores t ON t.agent_id = p.id
+        
         WHERE p.status = ? AND (p.hidden = 0 OR p.hidden IS NULL)
-        ORDER BY _trust_score DESC, p.created_at DESC
+        ORDER BY p.created_at DESC
 
       `).all(status);
     } catch (e) {
@@ -1180,11 +1205,11 @@ function registerRoutes(app) {
       for (const p of profiles) {
         if (!p.v3) {
           const ccScore = chainCache.getScore(p.id);
-          // DB is authoritative (CEO directive) — don't overwrite with chain score
+          // On-chain is authoritative (CEO directive Apr 4) — don't overwrite with chain score
           if (ccScore) {
             p.chain_cache_score = ccScore;
-            // Only use chain score if NO DB score exists
-            if (!p.trust_score && ccScore.reputationScore) {
+            // On-chain is authoritative — always use chain score
+            if (ccScore.reputationScore) {
               p.trust_score = ccScore.reputationScore;
             }
           }
@@ -1219,7 +1244,7 @@ function registerRoutes(app) {
         if (ccScore) {
           p.chain_score = ccScore.reputationScore || 0;
           p.chain_level = ccScore.verificationLevel || 0;
-          // DB is authoritative (CEO directive) — chain score as fallback only
+          // On-chain is authoritative (CEO directive Apr 4) — chain score as fallback only
           if (ccScore.reputationScore && !p.trust_score) {
             p.trust_score = ccScore.reputationScore;
           }
@@ -1302,33 +1327,16 @@ function registerRoutes(app) {
 
         if (hasGenesis) {
           enriched.onchain = v3Data;
-          // DB is authoritative for scores (CEO directive 2026-04-03)
-          const dbScore = enriched.trust_score;
-          const hasDbScore = dbScore && dbScore.overall_score != null;
-          const LEVEL_MAP = {'UNVERIFIED':0,'NEW':0,'REGISTERED':1,'VERIFIED':2,'ESTABLISHED':3,'TRUSTED':4,'SOVEREIGN':5,'ELITE':5};
+          // ON-CHAIN is authoritative for scores (CEO directive 2026-04-04)
           const levelLabels = ["Unverified","Registered","Verified","Established","Trusted","Sovereign"];
-          if (hasDbScore) {
-            // Preserve DB scores, add on-chain metadata
-            enriched.trust_score = { ...dbScore, source: "database", onchain: { reputationScore: v3Data.reputationScore, verificationLevel: v3Data.verificationLevel } };
-            enriched.score = dbScore.overall_score;
-            enriched.reputation_score = dbScore.overall_score;
-            const dbLevel = LEVEL_MAP[dbScore.level] != null ? LEVEL_MAP[dbScore.level] : v3Data.verificationLevel;
-            enriched.level = dbLevel;
-            enriched.verification_level = dbLevel;
-            enriched.verificationLevel = dbLevel;
-            enriched.levelName = dbScore.level || levelLabels[dbLevel] || "Unknown";
-            enriched.tier = dbScore.level || levelLabels[dbLevel] || "Unknown";
-          } else {
-            // No DB score — fallback to on-chain
-            enriched.trust_score = { source: "on-chain", reputationScore: v3Data.reputationScore, verificationLevel: v3Data.verificationLevel, isBorn: v3Data.isBorn, faceImage: v3Data.faceImage || null, authority: v3Data.authority || null };
-            enriched.level = v3Data.verificationLevel;
-            enriched.score = v3Data.reputationScore;
-            enriched.levelName = v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || "Unknown";
-            enriched.verificationLevel = v3Data.verificationLevel;
-            enriched.verification_level = v3Data.verificationLevel;
-            enriched.reputation_score = v3Data.reputationScore;
-            enriched.tier = v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || "Unknown";
-          }
+          enriched.trust_score = { source: "on-chain", reputationScore: v3Data.reputationScore, verificationLevel: v3Data.verificationLevel, isBorn: v3Data.isBorn, faceImage: v3Data.faceImage || null, authority: v3Data.authority || null };
+          enriched.level = v3Data.verificationLevel;
+          enriched.score = v3Data.reputationScore;
+          enriched.levelName = v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || "Unknown";
+          enriched.verificationLevel = v3Data.verificationLevel;
+          enriched.verification_level = v3Data.verificationLevel;
+          enriched.reputation_score = v3Data.reputationScore;
+          enriched.tier = v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || "Unknown";
           enriched.isBorn = v3Data.isBorn;
           if (v3Data.faceImage) enriched.faceImage = v3Data.faceImage;
           if (v3Data.authority) enriched.walletAddress = v3Data.authority;
