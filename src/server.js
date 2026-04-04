@@ -15,6 +15,7 @@ const satpReviews = require('./satp-reviews');
 // SATP On-Chain API (read + write)
 const { registerSATPRoutes } = require('./routes/satp-api');
 const { registerSATPWriteRoutes } = require('./routes/satp-write-api');
+const { registerSATPAutoIdentityRoutes } = require("./routes/satp-auto-identity");
 const { registerReviewsV2Routes } = require("./api/reviews-v2");
 
 // Profile Store (SQLite-backed persistent profiles, endorsements, reviews)
@@ -465,19 +466,31 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
       });
     }
     
-    // DB fallback when on-chain missing
-    try {
-      const mainDb = require("./profile-store").getDb();
-      const trustRow = mainDb.prepare("SELECT overall_score, level FROM satp_trust_scores WHERE agent_id = ?").get(resolvedId);
-      if (trustRow && trustRow.overall_score > 0) {
-        const levelLabels2 = {SOVEREIGN:5,TRUSTED:4,ESTABLISHED:3,VERIFIED:2,REGISTERED:1};
-        return res.json({ agentId: resolvedId, score: trustRow.overall_score, level: levelLabels2[trustRow.level]||0, levelName: trustRow.level||'Unclaimed', tier: trustRow.level||'Unclaimed', source: 'db-fallback' });
-      }
-    } catch(_) {}
-    res.json({ agentId: resolvedId, score: 0, level: 0, levelName: 'Unclaimed', tier: 'Unclaimed', source: 'none' });
+    // P0: DB fallback REMOVED — on-chain v3 only. If no on-chain score, return 0.
+    res.json({ agentId: resolvedId, score: 0, level: 0, levelName: "Unclaimed", tier: "Unclaimed", source: "none" });
   } catch (err) {
     console.error('[Trust Score] Error:', err);
     res.status(500).json({ error: 'Failed to compute trust score', details: err.message });
+  }
+});
+
+
+// ─── Badge SVG ──────────────────
+const { generateBadgeSVG } = require('./lib/badge-svg');
+app.get('/api/badge/:id.svg', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const db = profileStore.getDb();
+    const row = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(id);
+    if (!row) return res.status(404).type('text/plain').send('Profile not found');
+    const { getV3Score } = require('./v3-score-service');
+    const v3 = await getV3Score(id);
+    const level = v3 ? v3.verificationLevel : 0;
+    const score = v3 ? v3.reputationScore : 0;
+    const svg = generateBadgeSVG(row.name, level, score);
+    res.set('Content-Type', 'image/svg+xml').set('Cache-Control', 'public, max-age=300').send(svg);
+  } catch (e) {
+    res.status(500).type('text/plain').send('Error generating badge');
   }
 });
 
@@ -1766,6 +1779,7 @@ satpReviews.registerRoutes(app);
 // Register SATP on-chain routes (read + write)
 registerSATPRoutes(app);
 registerSATPWriteRoutes(app);
+registerSATPAutoIdentityRoutes(app);
 
 // Trust Credential API (credat integration)
 const { registerTrustCredentialRoutes } = require('./routes/trust-credential');
