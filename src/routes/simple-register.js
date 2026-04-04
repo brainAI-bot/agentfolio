@@ -8,6 +8,23 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 
+// [CEO Apr 4] On-chain genesis creation on registration
+let satpV3SDK, platformKeypair;
+try {
+  const { SATPV3SDK } = require('../satp-client/src/v3-sdk');
+  const { Keypair } = require('@solana/web3.js');
+  const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+  satpV3SDK = new SATPV3SDK({ rpcUrl: RPC_URL });
+  const kpPath = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/agentfolio/config/platform-keypair.json';
+  if (fs.existsSync(kpPath)) {
+    platformKeypair = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(kpPath, 'utf8'))));
+    console.log('[SimpleRegister] SATP V3 + platform keypair loaded for genesis creation');
+  }
+} catch (e) {
+  console.warn('[SimpleRegister] On-chain genesis not available:', e.message);
+}
+
+
 const simpleLimiter = rateLimit({
   validate: false,
   windowMs: 60 * 60 * 1000,
@@ -145,7 +162,7 @@ function registerSimpleRoutes(app, getDb) {
         const level = scoringData.verificationLevel?.name || 'NEW';
         const breakdown = JSON.stringify(scoringData);
         if (overallScore <= 10000 && overallScore >= 0) {
-          d.prepare("INSERT OR REPLACE INTO satp_trust_scores (agent_id, overall_score, level, score_breakdown, last_computed) VALUES (?, ?, ?, ?, datetime('now'))").run(id, overallScore, level, breakdown);
+          // P0: DB score writes removed — on-chain v3 is sole source
         } else {
           console.error('[SCORE GUARD] Blocked corrupt score in simple-register for ' + id + ': ' + overallScore);
         }
@@ -171,6 +188,29 @@ function registerSimpleRoutes(app, getDb) {
         notifReq.write(notifData);
         notifReq.end();
       } catch (_) {}
+
+
+      // [CEO Apr 4] Create on-chain genesis record (fire-and-forget)
+      if (satpV3SDK && platformKeypair) {
+        (async () => {
+          try {
+            const existing = await satpV3SDK.getGenesisRecord(id);
+            if (existing && !existing.error) {
+              console.log('[SimpleRegister] Genesis already exists for', id);
+              return;
+            }
+            const { transaction } = await satpV3SDK.buildCreateIdentity(
+              platformKeypair.publicKey, id,
+              { name: name.trim(), description: resolvedBio || '', category: 'agent', capabilities: resolvedSkills.map(s => s.name || s).slice(0, 5) }
+            );
+            transaction.sign(platformKeypair);
+            const sig = await satpV3SDK.connection.sendRawTransaction(transaction.serialize());
+            console.log('[SimpleRegister] Genesis created on-chain for', id, ':', sig);
+          } catch (e) {
+            console.error('[SimpleRegister] Genesis creation failed for', id, ':', e.message);
+          }
+        })();
+      }
 
       res.status(201).json({
         id,

@@ -121,18 +121,8 @@ function recomputeDBScore(profileId) {
     else if (score >= 20) level = 'REGISTERED';
     else level = 'UNVERIFIED';
 
-    db.prepare(`
-      INSERT INTO satp_trust_scores (agent_id, overall_score, level, score_breakdown, updated_at)
-      VALUES (?, ?, ?, ?, datetime('now'))
-      ON CONFLICT(agent_id) DO UPDATE SET
-        overall_score = excluded.overall_score, level = excluded.level,
-        score_breakdown = excluded.score_breakdown, updated_at = excluded.updated_at
-    `).run(profileId, score, level, JSON.stringify({
-      platforms: verifiedPlatforms,
-      perPlatform: Object.fromEntries(verifiedPlatforms.map(p => [p, scoreMap[p] || 20]))
-    }));
-
-    console.log(`[PostVerify] DB score updated: ${profileId} → ${score} (${level})`);
+    // P0: DB score writes removed — on-chain v3 is sole source
+    console.log(`[PostVerify] Score computed but NOT written to DB (P0): ${profileId} → ${score} (${level})`);
   } catch (e) {
     console.error('[PostVerify] DB score recompute failed:', e.message);
   }

@@ -217,7 +217,7 @@ app.get('/api/ecosystem/stats', (req, res) => {
       try { verified = db.prepare("SELECT COUNT(*) as c FROM profiles WHERE verification_data IS NOT NULL AND verification_data != '{}' AND verification_data != ''").get().c; } catch (__) {}
     }
     let onChain = 0;
-    try { onChain = db.prepare("SELECT COUNT(*) as c FROM satp_trust_scores WHERE overall_score > 0").get().c; } catch (_) {}
+    onChain = 0; // P0: DB score reads removed — on-chain v3 only
     res.json({ agents: { total, verified, claimed, avgSkills: 3 }, total_agents: total, totalAgents: total, verified, verifiedAgents: verified, claimed, on_chain: onChain, totalJobs: 0, totalVolume: 0 });
   } catch (e) {
     res.json({ agents: { total: 200, verified: 0 }, total_agents: 200, verified: 0, on_chain: 0 });
@@ -239,11 +239,8 @@ app.get('/api/stats', (req, res) => {
         verified = db.prepare("SELECT COUNT(*) as c FROM profiles WHERE verification_data IS NOT NULL AND verification_data != '{}' AND verification_data != ''").get().c;
       } catch (__) {}
     }
-    // Count on-chain attestations from satp_trust_scores
+    // P0: on-chain count from v3 only (DB reads removed)
     let onChain = 0;
-    try {
-      onChain = db.prepare("SELECT COUNT(*) as c FROM satp_trust_scores WHERE overall_score > 0").get().c;
-    } catch (_) {}
     res.json({ agents: { total, verified, claimed, avgSkills: 3 }, total_agents: total, totalAgents: total, verified, verifiedAgents: verified, claimed, on_chain: onChain, totalJobs: 0, totalVolume: 0 });
   } catch (e) {
     console.error('[/api/stats] Error:', e.message);
@@ -468,24 +465,7 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
       });
     }
     
-    // Fallback to DB trust score
-    const Database = require('better-sqlite3');
-    const path = require('path');
-    const mainDb = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
-    const trustRow = mainDb.prepare('SELECT overall_score, level, score_breakdown FROM satp_trust_scores WHERE agent_id = ?').get(resolvedId);
-    mainDb.close();
-    
-    if (trustRow) {
-      return res.json({
-        agentId: resolvedId,
-        score: trustRow.overall_score,
-        level: trustRow.level,
-        levelName: ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'][trustRow.level] || 'Unclaimed',
-        tier: trustRow.level >= 4 ? 'Elite' : trustRow.level >= 3 ? 'Established' : trustRow.level >= 2 ? 'Verified' : trustRow.level >= 1 ? 'Basic' : 'Unclaimed',
-        breakdown: JSON.parse(trustRow.score_breakdown || '{}'),
-        source: 'db',
-      });
-    }
+    // P0: DB fallback removed — v3 on-chain is sole source
     
     res.json({ agentId: resolvedId, score: 0, level: 0, levelName: 'Unclaimed', tier: 'Unclaimed', source: 'none' });
   } catch (err) {
@@ -1072,7 +1052,7 @@ app.get('/admin', (req, res) => {
   const claimed = db.prepare('SELECT COUNT(*) as c FROM profiles WHERE claimed = 1').get().c;
   const verified = db.prepare('SELECT COUNT(DISTINCT profile_id) as c FROM verifications').get().c;
   let onChain = 0;
-  try { onChain = db.prepare('SELECT COUNT(*) as c FROM satp_trust_scores WHERE overall_score > 0').get().c; } catch(e) {}
+  onChain = 0; // P0: DB reads removed
   
   const recentRegs = db.prepare("SELECT id, name, handle, created_at FROM profiles ORDER BY created_at DESC LIMIT 10").all();
   const recentVerifs = db.prepare("SELECT profile_id, platform, identifier, verified_at FROM verifications ORDER BY verified_at DESC LIMIT 10").all();
@@ -1137,7 +1117,7 @@ app.get('/admin', (req, res) => {
   const verified = db.prepare("SELECT COUNT(DISTINCT profile_id) as c FROM verifications").get().c;
   
   let onChain = 0;
-  try { onChain = db.prepare("SELECT COUNT(*) as c FROM satp_trust_scores WHERE overall_score > 0").get().c; } catch(e) {}
+  onChain = 0; // P0: DB reads removed
   
   // Recent registrations
   let recentRegs = [];
@@ -1279,18 +1259,15 @@ app.get('/profile/:id', async (req, res) => {
     }
   } catch (e) { /* skip — V3 data is optional */ }
 
-  // Fetch SATP trust score
+  // P0: DB trust score reads removed — v3 on-chain only
   let trustScore = null;
   try {
-    const Database = require('better-sqlite3');
-    const mainDb = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
-    const trustRow = mainDb.prepare('SELECT overall_score, level, score_breakdown FROM satp_trust_scores WHERE agent_id = ?').get(profileId);
-    mainDb.close();
-    if (trustRow) {
+    const v3Data = await getV3Score(profileId) || await getV3Score('agent_' + profileId);
+    if (v3Data) {
       trustScore = {
-        overall_score: trustRow.overall_score,
-        level: trustRow.level,
-        breakdown: JSON.parse(trustRow.score_breakdown || '{}'),
+        overall_score: v3Data.reputationScore,
+        level: v3Data.verificationLevel,
+        breakdown: { reputation: v3Data.reputationPct, verification: v3Data.verificationLabel },
       };
     }
   } catch (e) { /* skip */ }
@@ -1850,7 +1827,7 @@ app.get('/admin', (req, res) => {
   const verified = db.prepare("SELECT COUNT(DISTINCT profile_id) as c FROM verifications").get().c;
   
   let onChain = 0;
-  try { onChain = db.prepare("SELECT COUNT(*) as c FROM satp_trust_scores WHERE overall_score > 0").get().c; } catch(e){}
+  onChain = 0; // P0: DB reads removed
   
   const recentRegs = db.prepare("SELECT id, name, handle, created_at FROM profiles ORDER BY created_at DESC LIMIT 20").all();
   const recentVerifs = db.prepare("SELECT profile_id, platform, identifier, verified_at FROM verifications ORDER BY verified_at DESC LIMIT 20").all();
@@ -2196,7 +2173,7 @@ console.log(`[${new Date().toISOString()}] info: x402 payment layer initialized`
       let verifiedCount = 0;
       try { verifiedCount = db.prepare('SELECT COUNT(DISTINCT profile_id) as c FROM verifications').get().c; } catch(e) {}
       let onChainCount = 0;
-      try { onChainCount = db.prepare('SELECT COUNT(*) as c FROM satp_trust_scores WHERE overall_score > 0').get().c; } catch(e) {}
+      onChainCount = 0; // P0: DB reads removed
       let recentRegs = [];
       try { recentRegs = db.prepare('SELECT id, name, handle, created_at FROM profiles ORDER BY created_at DESC LIMIT 20').all(); } catch(e) {}
       let recentVer = [];

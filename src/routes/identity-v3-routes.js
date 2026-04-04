@@ -184,7 +184,7 @@ function parseGenesisRecord(data, pda) {
 }
 
 
-// Enrich from satp_trust_scores when V3 on-chain level is default (0)
+// P0: satp_trust_scores enrichment removed — V3 on-chain is sole source
 const Database = require('better-sqlite3');
 const pathMod = require('path');
 const LEVEL_MAP = { UNCLAIMED: 0, NEW: 0, REGISTERED: 1, VERIFIED: 2, ESTABLISHED: 3, TRUSTED: 4, SOVEREIGN: 5 };
@@ -217,8 +217,7 @@ function enrichFromDB(record) {
   try {
     const db = new Database(pathMod.join(__dirname, '..', '..', 'data', 'agentfolio.db'), { readonly: true });
     const agentId = 'agent_' + record.agentName.toLowerCase();
-    let row = db.prepare('SELECT overall_score, level FROM satp_trust_scores WHERE agent_id = ?').get(agentId);
-    if (!row) row = db.prepare('SELECT overall_score, level FROM satp_trust_scores WHERE agent_id = ?').get(record.agentName);
+    let row = null; // P0: DB reads removed — on-chain v3 only
     db.close();
     if (row) {
       const numLevel = typeof row.level === 'number' ? row.level : (LEVEL_MAP[String(row.level).toUpperCase()] || 0);

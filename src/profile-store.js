@@ -235,8 +235,10 @@ function validateScoreWrite(agentId, newScore, newLevel, source) {
   // P1: Level jump protection — reject if level changes by more than 2 steps
   if (newLevel) {
     try {
-      const db = getDb();
-      const existing = db.prepare('SELECT level FROM satp_trust_scores WHERE agent_id = ?').get(agentId);
+      // P0: DB reads removed — check v3 cache for level jump protection
+      const { _getFromCache } = require('./v3-score-service');
+      const v3Cached = _getFromCache(agentId);
+      const existing = v3Cached ? { level: v3Cached.verificationLabel } : null;
       if (existing && existing.level) {
         const LEVEL_ORDER = ['NEW', 'UNVERIFIED', 'REGISTERED', 'VERIFIED', 'ESTABLISHED', 'TRUSTED', 'SOVEREIGN', 'ELITE'];
         const oldIdx = LEVEL_ORDER.indexOf(existing.level);
@@ -778,7 +780,7 @@ function registerRoutes(app) {
         const level = scoringData.verificationLevel?.name || 'NEW';
         const breakdown = JSON.stringify(scoringData);
         if (validateScoreWrite(id, overallScore, level, 'registration')) {
-          d.prepare("INSERT OR REPLACE INTO satp_trust_scores (agent_id, overall_score, level, score_breakdown, last_computed) VALUES (?, ?, ?, ?, datetime('now'))").run(id, overallScore, level, breakdown);
+          // P0: DB score writes removed — on-chain v3 is sole source
         } else {
           console.error('[SCORE GUARD] Skipped corrupt score write for ' + id + ': score=' + overallScore + ' level=' + level);
         }

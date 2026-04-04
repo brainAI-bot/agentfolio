@@ -20,20 +20,11 @@ const stmts = {
   countAll: db.prepare('SELECT COUNT(*) as count FROM satp_attestations'),
   countByAgent: db.prepare('SELECT COUNT(*) as count FROM satp_attestations WHERE agent_id = ?'),
 
-  upsertTrustScore: db.prepare(`
-    INSERT INTO satp_trust_scores (agent_id, overall_score, verification_score, activity_score, social_score, last_computed)
-    VALUES (@agent_id, @overall_score, @verification_score, @activity_score, @social_score, @last_computed)
-    ON CONFLICT(agent_id) DO UPDATE SET
-      overall_score = @overall_score,
-      verification_score = @verification_score,
-      activity_score = @activity_score,
-      social_score = @social_score,
-      last_computed = @last_computed
-  `),
-  getTrustScore: db.prepare('SELECT * FROM satp_trust_scores WHERE agent_id = ?'),
-  allTrustScores: db.prepare('SELECT * FROM satp_trust_scores'),
-  avgScore: db.prepare('SELECT AVG(overall_score) as avg FROM satp_trust_scores'),
-  countScored: db.prepare('SELECT COUNT(*) as count FROM satp_trust_scores')
+  // P0: upsertTrustScore removed — on-chain v3 only
+  // P0: getTrustScore removed
+  // P0: allTrustScores removed
+  // P0: avgScore removed
+  // P0: countScored removed
 };
 
 // ===== Attestation Helpers =====
@@ -169,7 +160,7 @@ function syncAttestationsFromProfile(profile) {
 
 /**
  * Compute trust score for a profile, aggregating reputation + attestations.
- * Upserts into satp_trust_scores.
+ * P0: DB writes removed — on-chain v3 is sole source.
  */
 function computeTrustScore(profileId) {
   const profile = loadProfile(profileId);
@@ -215,7 +206,7 @@ function computeTrustScore(profileId) {
     last_computed: now
   };
 
-  stmts.upsertTrustScore.run(trustData);
+  // P0: DB write removed — stmts.upsertTrustScore.run(trustData);
 
   return {
     overall_score: trustData.overall_score,
@@ -279,16 +270,8 @@ function listAttestations(agentId, opts = {}) {
  * Get cached trust score for an agent (does NOT recompute).
  */
 function getTrustScore(agentId) {
-  const row = stmts.getTrustScore.get(agentId);
-  if (!row) return null;
-  return {
-    agentId: row.agent_id,
-    overall_score: row.overall_score,
-    verification_score: row.verification_score,
-    activity_score: row.activity_score,
-    social_score: row.social_score,
-    last_computed: row.last_computed
-  };
+  // P0: DB reads removed — return null, callers should use v3-score-service
+  return null;
 }
 
 /**
@@ -298,17 +281,10 @@ function getRegistryStats() {
   const profiles = listProfiles();
   const totalAgents = profiles.length;
   const totalAttestations = stmts.countAll.get().count;
-  const scoredCount = stmts.countScored.get().count;
-  const avgRow = stmts.avgScore.get();
-  const avgScore = avgRow.avg ? Math.round(avgRow.avg) : 0;
-
-  // Tier distribution
-  const allScores = stmts.allTrustScores.all();
+  // P0: DB score stats removed — on-chain v3 only
+  const scoredCount = 0;
+  const avgScore = 0;
   const tierDistribution = { elite: 0, verified: 0, established: 0, emerging: 0, newcomer: 0 };
-  for (const row of allScores) {
-    const tier = getReputationTier(row.overall_score);
-    tierDistribution[tier] = (tierDistribution[tier] || 0) + 1;
-  }
 
   return {
     totalAgents,

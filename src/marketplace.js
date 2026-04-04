@@ -82,12 +82,12 @@ function enrichApplication(app) {
         } catch {}
       }
       
-      // Get trust score from satp_trust_scores table
+      // P0: DB trust score reads removed — v3 on-chain only
       let trustScore = 0;
       let verificationLevel = 0;
       let verificationLevelName = 'Unverified';
       try {
-        const trustRow = db.prepare('SELECT overall_score, level FROM satp_trust_scores WHERE agent_id = ?').get(row.id);
+        // trustRow DB lookup removed (P0)
         if (trustRow) {
           trustScore = trustRow.overall_score || 0;
           // level can be a number or a string label
