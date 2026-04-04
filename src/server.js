@@ -1921,6 +1921,14 @@ registerReviewsV2Routes(app);
   console.warn("[Eligibility API] Failed to mount:", e.message);
 }
 
+// Frontend-Backend Route Bridge (P0: Fix 22+ broken endpoints)
+try {
+  const { registerFrontendBridge } = require("./routes/frontend-bridge");
+  registerFrontendBridge(app, profileStore);
+} catch (e) {
+  console.warn("[Frontend Bridge] Failed to mount:", e.message);
+}
+
 app.use((err, req, res, next) => {
   console.error(`[ERROR] ${err.message}`, { 
     path: req.path,
