@@ -31,6 +31,7 @@ export interface Agent {
     [key: string]: any;
   };
   unclaimed?: boolean;
+  claimed?: boolean;
   status: "online" | "offline" | "busy" | "unclaimed";
   jobsCompleted: number;
   rating: number;
