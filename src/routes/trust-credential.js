@@ -167,7 +167,7 @@ function registerTrustCredentialRoutes(app) {
       try { const t = JSON.parse(profile.tags || '[]'); parsed.tags = Array.isArray(t) ? t : []; } catch (_) {}
       try { const s = JSON.parse(profile.skills || '[]'); parsed.skills = Array.isArray(s) ? s : []; } catch (_) {}
 
-      // 3. Compute trust score — V3 on-chain > satp_trust_scores DB > V2 fallback
+      // 3. Compute trust score — V3 on-chain only (P0: DB reads removed)
       const scoreResult = await computeScoreWithOnChain(parsed);
       let v3Data = null;
       try {
@@ -176,18 +176,8 @@ function registerTrustCredentialRoutes(app) {
         console.warn('[TrustCredential] V3 score fetch failed for', agentId, e.message);
       }
 
-      // If no V3 on-chain record, check satp_trust_scores DB table
+      // P0: DB fallback removed — if no V3 on-chain record, score is 0
       let dbTrustScore = null;
-      if (!v3Data) {
-        try {
-          const trustRow = db.prepare('SELECT overall_score, level FROM satp_trust_scores WHERE agent_id = ?').get(agentId);
-          if (trustRow && trustRow.overall_score > 0) {
-            dbTrustScore = { score: trustRow.overall_score, level: trustRow.level };
-          }
-        } catch (e) {
-          console.warn('[TrustCredential] DB trust score lookup failed:', e.message);
-        }
-      }
 
       // 4. Build W3C Verifiable Credential payload
       const now = new Date();
