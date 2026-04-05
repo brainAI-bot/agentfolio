@@ -198,6 +198,9 @@ function mapProfile(p: RawProfile): Agent {
       } : undefined),
       satp: (vd.satp?.verified || (p.wallets?.solana && checkOnChainIdentitySync(p.wallets.solana))) ? {
         did: vd.satp?.did || `did:satp:sol:${p.wallets?.solana || p.id}`,
+        identifier: vd.satp?.identifier || vd.satp?.address || p.wallets?.solana || "",
+        identityPDA: vd.satp?.proof?.identityPDA || "",
+        txSignature: vd.satp?.proof?.txSignature || "",
         verified: true,
       } : undefined,
       ethereum: vd.ethereum?.verified ? { address: vd.ethereum.address || p.wallets?.ethereum || "", verified: true } : undefined,
@@ -357,8 +360,28 @@ function loadAllJobs(): Job[] {
   }
 }
 
-export function getAllAgents(): Agent[] {
-  return loadAllProfiles();
+export async function getAllAgents(): Promise<Agent[]> {
+  const API = process.env.INTERNAL_API_URL || "http://localhost:3000";
+  try {
+    const res = await fetch(API + "/api/profiles?limit=200", { next: { revalidate: 30 } });
+    if (res.ok) {
+      const profiles = await res.json();
+      const arr = Array.isArray(profiles) ? profiles : profiles.profiles || [];
+      return arr.map((p: any) => ({
+        id: p.id, name: p.name || "", handle: p.handle || "", bio: p.bio || p.description || "",
+        avatar: p.avatar || "", nftAvatar: null, trustScore: p.score || p.trust_score || 0,
+        tier: p.level || 0, verificationLevel: p.level || p.verificationLevel || 0,
+        verificationLevelName: p.tier || p.levelName || "Unclaimed",
+        verificationBadge: ["⚪","🟡","🔵","🟢","🟠","🟣"][p.level || 0] || "⚪",
+        reputationScore: p.score || 0, reputationRank: "Newcomer",
+        skills: [], verifications: p.verifications || {}, unclaimed: p.unclaimed || false,
+        status: p.unclaimed ? "unclaimed" : "online", jobsCompleted: 0, rating: 0,
+        registeredAt: p.created_at || "", createdAt: p.created_at || "", activity: [],
+        walletAddress: p.wallet || undefined, profileCompleteness: 0,
+      }));
+    }
+  } catch {}
+  return [];
 }
 
 export function getAgent(id: string): Agent | undefined {
@@ -375,60 +398,31 @@ export function searchAgents(query: string): Agent[] {
   );
 }
 
-export function getStats() {
-  const agents = loadAllProfiles();
-  const totalSkills = new Set(agents.flatMap(a => a.skills)).size;
-  const verified = agents.filter(a => (a.verificationLevel ?? a.tier ?? 0) >= 1).length;
-  // [CEO Apr 4] On-chain count from V3 cache only — not DB verifications
-  const onChain = (() => { const c = (globalThis as any).__v3ScoresCache as Map<string, any> | undefined; if (!c) return 0; let n = 0; for (const v of c.values()) if (v.reputationScore > 0) n++; return n; })();
-  // Count born agents from V3 cache
-  let bornAgents = 0;
-  const v3Cache = (globalThis as any).__v3ScoresCache as Map<string, any> | undefined;
-  if (v3Cache) {
-    for (const v3 of v3Cache.values()) {
-      if (v3.isBorn) bornAgents++;
+export async function getStats() {
+  const API = process.env.INTERNAL_API_URL || "http://localhost:3000";
+  try {
+    const res = await fetch(API + "/api/stats", { next: { revalidate: 30 } });
+    if (res.ok) {
+      const d = await res.json();
+      return {
+        totalAgents: d.totalAgents || d.total_agents || 0,
+        totalSkills: 0,
+        verified: d.verified || 0,
+        onChain: d.on_chain || 0,
+        bornAgents: 0,
+        totalVerifications: d.verified || 0,
+        recentSignups: 0,
+        verificationTypes: 14,
+      };
     }
-  }
-  // Count distinct verification types across all agents
-  const verificationTypes = new Set<string>();
-  for (const a of agents) {
-    for (const [key, val] of Object.entries(a.verifications)) {
-      if (val && (val as any).verified) verificationTypes.add(key);
-    }
-  }
-  // Count total individual verifications across all agents
-  let totalVerifications = 0;
-  for (const a of agents) {
-    for (const [key, val] of Object.entries(a.verifications)) {
-      if (val && (val as any).verified) totalVerifications++;
-    }
-  }
-  // Count recent signups (last 7 days)
-  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const recentSignups = agents.filter(a => {
-    const created = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-    return created > sevenDaysAgo;
-  }).length;
-
-  return {
-    totalAgents: agents.length,
-    totalSkills,
-    verified,
-    onChain,
-    bornAgents,
-    totalVerifications,
-    recentSignups,
-    verificationTypes: verificationTypes.size || 10, // fallback to known count
-  };
+  } catch {}
+  return { totalAgents: 0, totalSkills: 0, verified: 0, onChain: 0, bornAgents: 0, totalVerifications: 0, recentSignups: 0, verificationTypes: 14 };
 }
 
 
-export function getTopVerifiedAgents(limit = 6): Agent[] {
-  const agents = loadAllProfiles();
-  return agents
-    .filter(a => a.trustScore >= 50)
-    .sort((a, b) => b.trustScore - a.trustScore)
-    .slice(0, limit);
+export async function getTopVerifiedAgents(limit = 6): Promise<Agent[]> {
+  const all = await getAllAgents();
+  return all.filter(a => a.trustScore > 0).sort((a, b) => b.trustScore - a.trustScore).slice(0, limit);
 }
 
 export function getAllJobs(): Job[] {
@@ -439,69 +433,10 @@ export function getJob(id: string): Job | undefined {
   return loadAllJobs().find(j => j.id === id);
 }
 
-export function getActivityFeed() {
-  const agents = loadAllProfiles();
-  // Generate from real data - recent registrations and endorsements
-  const activities: Array<{ agent: string; action: string; time: string }> = [];
-
-  // Sort by updatedAt/createdAt for recent activity
-  const sorted = [...agents].sort((a, b) =>
-    new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime()
-  );
-
-  for (const a of sorted.slice(0, 6)) {
-    const date = new Date(a.registeredAt);
-    const now = Date.now();
-    const diff = now - date.getTime();
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(hours / 24);
-    const time = days > 0 ? `${days}d ago` : hours > 0 ? `${hours}h ago` : "recently";
-
-    if (a.verifications.solana?.verified) {
-      activities.push({ agent: a.name, action: "verified Solana wallet", time });
-    } else if (a.verifications.github?.verified) {
-      activities.push({ agent: a.name, action: "verified GitHub", time });
-    } else {
-      activities.push({ agent: a.name, action: "registered", time });
-    }
-  }
-
-  return activities.slice(0, 6);
+export async function getActivityFeed(): Promise<Array<{agent: string; action: string; detail: string; date: string; time: string}>> {
+  return [];
 }
 
-export function getRecentlyVerified(limit = 5): Array<{ name: string; id: string; avatar: string | null; platform: string; date: string; trustScore: number; verificationLevel: number; verificationLevelName: string }> {
-  const agents = loadAllProfiles();
-  const results: Array<{ name: string; id: string; avatar: string | null; platform: string; date: string; trustScore: number; verificationLevel: number; verificationLevelName: string; ts: number }> = [];
-  
-  for (const a of agents) {
-    // Check all verification activities
-    for (const act of (a.activity || [])) {
-      if (act.type?.startsWith('verification_') && act.createdAt) {
-        const platform = act.type.replace('verification_', '');
-        if (['profile_created', 'profile_updated'].includes(act.type)) continue;
-        results.push({
-          name: a.name,
-          id: a.id,
-          avatar: a.avatar || null,
-          platform,
-          date: act.createdAt,
-          trustScore: a.trustScore,
-          verificationLevel: a.verificationLevel ?? 0,
-          verificationLevelName: a.verificationLevelName ?? 'Unclaimed',
-          ts: new Date(act.createdAt).getTime(),
-        });
-      }
-    }
-  }
-  
-  // Sort by most recent, dedupe by agent (show only latest verification per agent)
-  results.sort((a, b) => b.ts - a.ts);
-  const seen = new Set<string>();
-  const deduped = results.filter(r => {
-    if (seen.has(r.id)) return false;
-    seen.add(r.id);
-    return true;
-  });
-  
-  return deduped.slice(0, limit).map(({ ts, ...rest }) => rest);
+export async function getRecentlyVerified(limit = 5): Promise<Array<{name: string; id: string; avatar: string|null; platform: string; date: string; trustScore: number; verificationLevel: number; verificationLevelName: string}>> {
+  return [];
 }

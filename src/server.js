@@ -221,7 +221,7 @@ app.get('/api/ecosystem/stats', (req, res) => {
       try { verified = db.prepare("SELECT COUNT(*) as c FROM profiles WHERE verification_data IS NOT NULL AND verification_data != '{}' AND verification_data != ''").get().c; } catch (__) {}
     }
     let onChain = 0;
-    onChain = 0; // P0: DB score reads removed — on-chain v3 only
+    try { onChain = db.prepare("SELECT COUNT(DISTINCT profile_id) as c FROM verifications WHERE platform = 'satp'").get().c; } catch (_) {}
     res.json({ agents: { total, verified, claimed, avgSkills: 3 }, total_agents: total, totalAgents: total, verified, verifiedAgents: verified, claimed, on_chain: onChain, totalJobs: 0, totalVolume: 0 });
   } catch (e) {
     res.json({ agents: { total: 200, verified: 0 }, total_agents: 200, verified: 0, on_chain: 0 });
@@ -243,8 +243,8 @@ app.get('/api/stats', (req, res) => {
         verified = db.prepare("SELECT COUNT(*) as c FROM profiles WHERE verification_data IS NOT NULL AND verification_data != '{}' AND verification_data != ''").get().c;
       } catch (__) {}
     }
-    // P0: on-chain count from v3 only (DB reads removed)
     let onChain = 0;
+    try { onChain = db.prepare("SELECT COUNT(DISTINCT profile_id) as c FROM verifications WHERE platform = 'satp'").get().c; } catch (_) {}
     res.json({ agents: { total, verified, claimed, avgSkills: 3 }, total_agents: total, totalAgents: total, verified, verifiedAgents: verified, claimed, on_chain: onChain, totalJobs: 0, totalVolume: 0 });
   } catch (e) {
     console.error('[/api/stats] Error:', e.message);
@@ -385,20 +385,16 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       return true;
     });
     
-    const parsed = { ...profile, verifications: dedupedVerifications, wallets, tags, skills };
-    const scoreResult = await computeScoreWithOnChain(parsed);
-    
-    // V3: Fetch authoritative on-chain Genesis Record score
-    let v3Data = null;
+    // A1: Single scoring function — compute from DB verifications
+    const { computeScore } = require('./lib/compute-score');
+    let dbVerifRowsForScore = [];
     try {
-      v3Data = await getV3Score(agentId);
-    } catch (e) {
-      console.warn('[Explorer] V3 score fetch failed for', agentId, e.message);
-    }
-    
-    // [CEO-URGENT 2026-04-04] V3 on-chain score is authoritative. DB fallback only for agents without genesis.
-    const trustScore = v3Data ? (v3Data.reputationScore > 10000 ? Math.round(v3Data.reputationScore / 1000) : v3Data.reputationScore) : (scoreResult.trustScore || scoreResult.score || 0);
-    const tier = v3Data ? (v3Data.verificationLabel || ['Unverified','Registered','Verified','Established','Trusted','Sovereign'][v3Data.verificationLevel] || 'Unverified') : (scoreResult.verificationLevelName || scoreResult.level || (trustScore >= 80 ? 'ELITE' : trustScore >= 60 ? 'PRO' : trustScore >= 40 ? 'VERIFIED' : trustScore >= 20 ? 'BASIC' : 'NEW'));
+      dbVerifRowsForScore = db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profile.id);
+    } catch (_) {}
+    const hasSatpId = dbVerifRowsForScore.some(v => v.platform === 'satp');
+    const computed = computeScore(dbVerifRowsForScore, { hasSatpIdentity: hasSatpId, claimed: !!profile.claimed });
+    const trustScore = computed.score;
+    const tier = computed.levelName;
     
     res.json({
       agentId: profile.id,
@@ -406,7 +402,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       did: `did:agentfolio:${profile.id}`,
       trustScore,
       tier,
-      scoreVersion: v3Data ? 'v3' : 'v2',
+      scoreVersion: 'v3',
       verifications: dedupedVerifications.map(v => ({
         platform: v.platform,
         verified: true,
@@ -417,21 +413,14 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       wallets,
       tags,
       skills,
-      onChainRegistered: v3Data ? v3Data.isBorn : (scoreResult.onChainRegistered || false),
-      ...(v3Data ? {
-        v3: {
-          reputationScore: v3Data.reputationScore > 10000 ? Math.round(v3Data.reputationScore / 1000) : v3Data.reputationScore,
-          rawReputationScore: v3Data.reputationScore,
-          reputationPct: v3Data.reputationPct,
-          verificationLevel: v3Data.verificationLevel,
-          verificationLabel: v3Data.verificationLabel,
-          isBorn: v3Data.isBorn,
-          bornAt: v3Data.bornAt,
-          faceImage: v3Data.faceImage,
-          faceMint: v3Data.faceMint,
-        },
-      } : {}),
-      breakdown: scoreResult.breakdown,
+      onChainRegistered: hasSatpId,
+      v3: {
+        reputationScore: computed.score,
+        verificationLevel: computed.level,
+        verificationLabel: computed.levelName,
+        isBorn: false,
+      },
+      breakdown: computed.breakdown,
       links: {
         profile: `https://agentfolio.bot/profile/${profile.id}`,
         trustCredential: `https://agentfolio.bot/api/trust-credential/${profile.id}`,
@@ -449,20 +438,40 @@ app.get('/api/explorer/:agentId', async (req, res) => {
 
 // ─── Trust Score API (dedicated endpoint) ────────────────
 app.get('/api/profile/:id/trust-score', async (req, res) => {
-  // x402 gated — return 402 Payment Required
-  // Clients should use /api/score?id=<profileId> with x402 payment header
-  const profileId = req.params.id;
-  res.status(402).json({
-    error: 'Payment Required',
-    message: 'Trust score lookup requires x402 payment. Use GET /api/score?id=' + profileId,
-    accepts: [{
-      scheme: 'exact',
-      price: '$0.01',
-      network: X402_NETWORK,
-      payTo: X402_RECEIVE_ADDRESS,
-    }],
-    x402Url: '/api/score?id=' + profileId,
-  });
+  // Return computed trust score for internal SSR and public use
+  try {
+    const profileId = req.params.id;
+    const db = profileStore.getDb();
+    const row = db.prepare('SELECT id, claimed FROM profiles WHERE id = ?').get(profileId);
+    if (!row) return res.status(404).json({ error: 'Profile not found' });
+    const { computeScore } = require('./lib/compute-score');
+    const verifs = db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profileId);
+    const hasSatp = verifs.some(v => v.platform === 'satp');
+    const computed = computeScore(verifs, { hasSatpIdentity: hasSatp, claimed: !!row.claimed });
+    let v3Score = null;
+    try {
+      const { getV3Score } = require('./lib/v3-score-service');
+      v3Score = await getV3Score(profileId);
+    } catch {}
+    const reputationScore = v3Score?.reputationScore || computed.score;
+    const verificationLevel = v3Score?.verificationLevel || computed.level;
+    const labels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
+    res.json({
+      ok: true,
+      data: {
+        profileId,
+        reputationScore,
+        verificationLevel,
+        verificationLabel: labels[verificationLevel] || 'Unknown',
+        isBorn: v3Score?.isBorn || false,
+        faceImage: v3Score?.faceImage || null,
+        breakdown: computed.breakdown,
+        source: v3Score ? 'v3+compute' : 'compute',
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Internal error' });
+  }
 });
 
 
@@ -474,10 +483,13 @@ app.get('/api/badge/:id.svg', async (req, res) => {
     const db = profileStore.getDb();
     const row = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(id);
     if (!row) return res.status(404).type('text/plain').send('Profile not found');
-    const { getV3Score } = require('./v3-score-service');
-    const v3 = await getV3Score(id);
-    const level = v3 ? v3.verificationLevel : 0;
-    const score = v3 ? v3.reputationScore : 0;
+    // A1: compute-score for badge consistency
+    const { computeScore } = require('./lib/compute-score');
+    const verifs = db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(id);
+    const hasSatp = verifs.some(v => v.platform === 'satp');
+    const computed = computeScore(verifs, { hasSatpIdentity: hasSatp, claimed: true });
+    const level = computed.level;
+    const score = computed.score;
     const svg = generateBadgeSVG(row.name, level, score);
     res.set('Content-Type', 'image/svg+xml').set('Cache-Control', 'public, max-age=300').send(svg);
   } catch (e) {
@@ -1063,7 +1075,7 @@ app.get('/admin', (req, res) => {
   const claimed = db.prepare('SELECT COUNT(*) as c FROM profiles WHERE claimed = 1').get().c;
   const verified = db.prepare('SELECT COUNT(DISTINCT profile_id) as c FROM verifications').get().c;
   let onChain = 0;
-  onChain = 0; // P0: DB reads removed
+  try { onChain = db.prepare("SELECT COUNT(DISTINCT profile_id) as c FROM verifications WHERE platform = 'satp'").get().c; } catch (_) {}
   
   const recentRegs = db.prepare("SELECT id, name, handle, created_at FROM profiles ORDER BY created_at DESC LIMIT 10").all();
   const recentVerifs = db.prepare("SELECT profile_id, platform, identifier, verified_at FROM verifications ORDER BY verified_at DESC LIMIT 10").all();
@@ -1128,7 +1140,7 @@ app.get('/admin', (req, res) => {
   const verified = db.prepare("SELECT COUNT(DISTINCT profile_id) as c FROM verifications").get().c;
   
   let onChain = 0;
-  onChain = 0; // P0: DB reads removed
+  try { onChain = db.prepare("SELECT COUNT(DISTINCT profile_id) as c FROM verifications WHERE platform = 'satp'").get().c; } catch (_) {}
   
   // Recent registrations
   let recentRegs = [];
@@ -1981,9 +1993,11 @@ app.get('/api/satp/score/:id', async (req, res) => {
       solWallet = w?.solana || null;
     } catch (e) { /* no wallet */ }
 
-    const onChainData = solWallet ? await fetchOnChainData(solWallet) : null;
-    const score = computeScore(profile, onChainData);
-    res.json({ ok: true, data: score });
+    // A1: compute-score
+    const { computeScore: _cs } = require('./lib/compute-score');
+    const _vRows = profileStore.getDb().prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profile.id);
+    const _comp = _cs(_vRows, { hasSatpIdentity: _vRows.some(v => v.platform === 'satp'), claimed: !!profile.claimed });
+    res.json({ ok: true, data: { score: _comp.score, level: _comp.level, levelName: _comp.levelName, breakdown: _comp.breakdown } });
   } catch (err) {
     console.error('[SATP Score] error:', err.message);
     res.status(500).json({ error: 'Score computation failed', detail: err.message });
@@ -2083,31 +2097,35 @@ app.get('/api/score', async (req, res) => {
     solWallet = w?.solana || null;
   } catch (e) { /* no wallet */ }
   
-  // [CEO-URGENT] On-chain V3 is authoritative for display — no DB fallback
+  // A1: Single scoring function
   const resolvedId = row ? row.id : profileId;
-  let v3Score = null;
-  try { if (getV3Score) v3Score = await getV3Score(resolvedId); } catch (_) {}
+  const { computeScore: _computeScore } = require('./lib/compute-score');
+  let _dbVerifs = [];
+  try {
+    const _sdb = new (require('better-sqlite3'))(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
+    _dbVerifs = _sdb.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(resolvedId);
+    _sdb.close();
+  } catch (_) {}
+  const _hasSatp = _dbVerifs.some(v => v.platform === 'satp');
+  const _computed = _computeScore(_dbVerifs, { hasSatpIdentity: _hasSatp, claimed: !!row?.claimed });
   
-  if (v3Score && v3Score.isBorn) {
-    const levelNames = ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'];
+  {
     return res.json({
       agentId: resolvedId,
-      score: v3Score.reputationScore,
-      level: v3Score.verificationLevel,
-      levelName: levelNames[v3Score.verificationLevel] || 'Unclaimed',
-      tier: levelNames[v3Score.verificationLevel] || 'Unclaimed',
-      source: 'v3-onchain',
+      score: _computed.score,
+      level: _computed.level,
+      levelName: _computed.levelName,
+      tier: _computed.levelName,
+      source: 'compute-score',
       verifications,
-      onChain: { reputationScore: v3Score.reputationScore, verificationLevel: v3Score.verificationLevel, isBorn: true },
+      onChain: { reputationScore: _computed.score, verificationLevel: _computed.level, isBorn: false },
       payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.01' },
     });
   }
 
-  // Fallback for agents without on-chain genesis
-  const onChainData = solWallet ? await fetchOnChainData(solWallet) : null;
-  const score = computeScore(profile, onChainData);
+  // Fallback — use compute-score
   res.json({
-    ...score,
+    agentId: resolvedId, score: _computed.score, level: _computed.level, levelName: _computed.levelName, tier: _computed.levelName,
     source: 'legacy-computed',
     payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.01' },
   });
@@ -2117,26 +2135,24 @@ app.get('/api/score', async (req, res) => {
 app.get('/api/leaderboard/scores', async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 100);
 
-  // [CEO-URGENT] Leaderboard from on-chain V3 scores only
+  // A1: Leaderboard via compute-score
   const db = profileStore.getDb();
-  const allProfiles = db.prepare('SELECT id, name, avatar, handle FROM profiles').all();
+  const allProfiles = db.prepare('SELECT id, name, avatar, handle, claimed FROM profiles').all();
+  const { computeScore: _lbScore } = require('./lib/compute-score');
+  const allVerifs = db.prepare('SELECT profile_id, platform, identifier FROM verifications').all();
+  const vMap = {};
+  for (const v of allVerifs) { if (!vMap[v.profile_id]) vMap[v.profile_id] = []; vMap[v.profile_id].push(v); }
   const leaderboard = [];
-  let v3Svc_; try { v3Svc_ = require("./v3-score-service"); } catch(_){}
-  if (v3Svc_) {
-    // Batch-warm cache first
-    const ids = allProfiles.map(p => p.id);
-    try { await v3Svc_.getV3Scores(ids); } catch(_){}
-    for (const p of allProfiles) {
-      const v3 = v3Svc_._getFromCache(p.id);
-      if (v3 && v3.isBorn && v3.reputationScore > 0) {
-        const levelNames = ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'];
-        leaderboard.push({
-          agentId: p.id, name: p.name, avatar: p.avatar, handle: p.handle,
-          score: v3.reputationScore, level: v3.verificationLevel,
-          levelName: levelNames[v3.verificationLevel] || 'Unclaimed',
-          source: 'v3-onchain',
-        });
-      }
+  for (const p of allProfiles) {
+    const verifs = vMap[p.id] || [];
+    const hasSatp = verifs.some(v => v.platform === 'satp');
+    const comp = _lbScore(verifs, { hasSatpIdentity: hasSatp, claimed: !!p.claimed });
+    if (comp.score > 0) {
+      leaderboard.push({
+        agentId: p.id, name: p.name, avatar: p.avatar, handle: p.handle,
+        score: comp.score, level: comp.level, levelName: comp.levelName,
+        source: 'compute-score',
+      });
     }
   }
   leaderboard.sort((a, b) => b.score - a.score);

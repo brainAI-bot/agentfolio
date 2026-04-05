@@ -110,10 +110,10 @@ export default function VerifyPage() {
     fetch(`/api/profile/${profileId}`)
       .then(r => r.json())
       .then(data => {
-        if (data.verificationData || data.verifications) {
-          setExistingVerifications(data.verificationData || data.verifications);
+        if (data.verificationData || data.verification_data || data.verifications) {
+          setExistingVerifications(data.verificationData || data.verification_data || data.verifications);
           // Pre-fill ETH address if already linked
-          const vData = data.verificationData || data.verifications || {}; if (vData.ethereum?.address) {
+          const vData = data.verificationData || data.verification_data || data.verifications || {}; if (vData.ethereum?.address) {
             setEthAddress(vData.ethereum.address);
           }
           if (vData.agentmail?.verified) {

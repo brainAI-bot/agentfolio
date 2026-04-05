@@ -34,9 +34,19 @@ function registerAdminRoutes(app, getDb) {
     // Delete related data
     try { db.prepare(`DELETE FROM endorsements WHERE profile_id = ?`).run(id); } catch (e) { }
     try { db.prepare(`DELETE FROM reviews WHERE profile_id = ? OR reviewee_id = ?`).run(id, id); } catch (e) { }
+    try { db.prepare(`DELETE FROM verifications WHERE profile_id = ?`).run(id); } catch (e) { }
+    try { db.prepare(`DELETE FROM attestations WHERE profile_id = ?`).run(id); } catch (e) { }
+    try { db.prepare(`DELETE FROM claim_tokens WHERE profile_id = ?`).run(id); } catch (e) { }
     db.prepare(`DELETE FROM profiles WHERE id = ?`).run(id);
+    // Clean disk JSON if it exists
+    try {
+      const jsonPath = require('path').join(__dirname, '..', '..', 'data', 'profiles', `${id}.json`);
+      if (require('fs').existsSync(jsonPath)) require('fs').unlinkSync(jsonPath);
+    } catch (_) {}
 
     console.log(`[Admin] Deleted profile: ${id} (${profile.name})`);
+    // Clean up disk JSON
+    try { const fs = require("fs"); const p = require("path").join(__dirname, "..", "..", "data", "profiles", id + ".json"); if (fs.existsSync(p)) fs.unlinkSync(p); } catch (_) {}
     res.json({ success: true, deleted: id, name: profile.name });
   });
 

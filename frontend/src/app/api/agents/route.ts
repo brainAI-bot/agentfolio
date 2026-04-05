@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   const sort = searchParams.get("sort") || "trustScore";
   const skill = searchParams.get("skill") || "";
 
-  let agents = getAllAgents();
+  let agents = await getAllAgents();
 
   // Filter
   if (search) {
@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
   }));
 
   // Collect all skills for filter dropdown
-  const allSkills = [...new Set(getAllAgents().flatMap(a => a.skills))].sort();
+  const allSkills = [...new Set((await getAllAgents()).flatMap(a => a.skills))].sort();
 
   return NextResponse.json({ agents: lite, total, totalPages, page, limit, allSkills });
 }

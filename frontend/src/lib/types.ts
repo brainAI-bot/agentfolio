@@ -18,7 +18,7 @@ export interface Agent {
     solana?: { address: string; txCount: number; balance: string; verified: boolean };
     hyperliquid?: { address: string; volume: string; verified: boolean };
     x?: { handle: string; verified: boolean };
-    satp?: { did: string; verified: boolean };
+    satp?: { did: string; identifier?: string; identityPDA?: string; txSignature?: string; verified: boolean };
     ethereum?: { address: string; verified: boolean };
     agentmail?: { email: string; verified: boolean };
     moltbook?: { username: string; verified: boolean };
@@ -39,6 +39,8 @@ export interface Agent {
   createdAt: string;
   activity: Array<{ type: string; createdAt: string }>;
   walletAddress?: string;
+  wallet?: string;
+  wallets?: Record<string, string>;
   profileCompleteness?: number;
   trustBreakdown?: { onChainReputation: number; verifications: number; socialProof: number; completeness: number; marketplace: number; tenure: number } | null;
 }

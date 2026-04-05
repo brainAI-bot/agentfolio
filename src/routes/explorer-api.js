@@ -19,6 +19,23 @@
 const express = require('express');
 const router = express.Router();
 
+// A1: Helper to compute score for any profile
+function getComputedScore(profileId) {
+  try {
+    const { computeScore } = require('../lib/compute-score');
+    const Database = require('better-sqlite3');
+    const path = require('path');
+    const db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+    const verifs = db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profileId);
+    db.close();
+    const hasSatp = verifs.some(v => v.platform === 'satp');
+    return computeScore(verifs, { hasSatpIdentity: hasSatp, claimed: true });
+  } catch (_) {
+    return null;
+  }
+}
+
+
 /**
  * GET /api/explorer/agents
  * 
@@ -114,10 +131,22 @@ router.get('/agents', async (req, res) => {
         description: a.description,
         category: a.category,
         capabilities: a.capabilities,
-        reputationScore: a.reputationScore,
-        verificationLevel: a.verificationLevel,
-        tier: a.tier,
-        tierLabel: a.tierLabel,
+        // A1: compute-score overlay for consistency across all surfaces
+        ...(() => {
+          try {
+            const { computeScore } = require('../lib/compute-score');
+            const Database = require('better-sqlite3');
+            const _path = require('path');
+            const _db = new Database(_path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+            const verifs = _db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profileId);
+            _db.close();
+            const hasSatp = verifs.some(v => v.platform === 'satp');
+            const result = computeScore(verifs, { hasSatpIdentity: hasSatp, claimed: true });
+            return { reputationScore: result.score, verificationLevel: result.level, tier: result.levelName, tierLabel: result.levelName };
+          } catch (_) {
+            return { reputationScore: a.reputationScore, verificationLevel: a.verificationLevel, tier: a.tier, tierLabel: a.tierLabel };
+          }
+        })(),
         platforms: [...platformSet],
         platformCount: platformSet.size,
         onChainAttestations: attestations.length,
@@ -249,10 +278,7 @@ router.get('/leaderboard', async (req, res) => {
         rank: i + 1,
         name: a.agentName,
         profileId,
-        reputationScore: a.reputationScore,
-        verificationLevel: a.verificationLevel,
-        tier: a.tier,
-        tierLabel: a.tierLabel,
+        ...(() => { const cs = getComputedScore(profileId); return cs ? { reputationScore: cs.score, verificationLevel: cs.level, tier: cs.levelName, tierLabel: cs.levelName } : { reputationScore: a.reputationScore, verificationLevel: a.verificationLevel, tier: a.tier, tierLabel: a.tierLabel }; })(),
         platforms,
         platformCount: platforms.length,
         nftImage: a.faceImage || null,
@@ -315,8 +341,7 @@ router.get('/search', async (req, res) => {
         profileId,
         description: a.description,
         category: a.category,
-        reputationScore: a.reputationScore,
-        verificationLevel: a.verificationLevel,
+        ...(() => { const pid = 'agent_' + a.agentName.toLowerCase(); const cs = getComputedScore(pid); return cs ? { reputationScore: cs.score, verificationLevel: cs.level } : { reputationScore: a.reputationScore, verificationLevel: a.verificationLevel }; })(),
         tierLabel: a.tierLabel,
         platforms,
         nftImage: a.faceImage || null,

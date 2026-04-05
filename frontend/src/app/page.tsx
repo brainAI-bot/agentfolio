@@ -1,11 +1,11 @@
-export const revalidate = 60;
+export const revalidate = 30;
 
 import type { Metadata } from "next";
 
 export async function generateMetadata(): Promise<Metadata> {
   let count = 50;
   try {
-    const stats = await fetch("http://localhost:3333/api/ecosystem/stats", { next: { revalidate: 300 } }).then(r => r.ok ? r.json() : null);
+    const stats = await fetch("http://localhost:3333/api/ecosystem/stats", { next: { revalidate: 60 } }).then(r => r.ok ? r.json() : null);
     count = stats?.total_agents || stats?.totalAgents || stats?.agents?.total || 50;
   } catch {}
   return {

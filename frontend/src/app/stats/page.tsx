@@ -1,4 +1,4 @@
-export const revalidate = 120;
+export const revalidate = 60;
 import { getAllAgents, getAllJobs } from "@/lib/data";
 import { BarChart3, Users, ShieldCheck, Fingerprint, Briefcase, DollarSign, ExternalLink, Wallet, TrendingUp, ArrowDownToLine, ArrowUpFromLine, AlertTriangle, Percent } from "lucide-react";
 import ProtocolActivity from "./ProtocolActivity";
@@ -37,7 +37,7 @@ async function getSolBalance(address: string): Promise<number> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getBalance', params: [address] }),
-      next: { revalidate: 300 },
+      next: { revalidate: 60 },
     });
     const data = await res.json();
     return (data.result?.value || 0) / 1e9;
@@ -54,7 +54,7 @@ async function getUsdcBalance(ownerAddress: string): Promise<number> {
         method: 'getTokenAccountsByOwner',
         params: [ownerAddress, { mint: USDC_MINT }, { encoding: 'jsonParsed' }],
       }),
-      next: { revalidate: 300 },
+      next: { revalidate: 60 },
     });
     const data = await res.json();
     const accounts = data.result?.value || [];

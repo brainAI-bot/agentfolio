@@ -167,17 +167,18 @@ function registerTrustCredentialRoutes(app) {
       try { const t = JSON.parse(profile.tags || '[]'); parsed.tags = Array.isArray(t) ? t : []; } catch (_) {}
       try { const s = JSON.parse(profile.skills || '[]'); parsed.skills = Array.isArray(s) ? s : []; } catch (_) {}
 
-      // 3. Compute trust score — V3 on-chain only (P0: DB reads removed)
-      const scoreResult = await computeScoreWithOnChain(parsed);
-      let v3Data = null;
+      // A1: Single scoring function
+      const { computeScore } = require('../lib/compute-score');
+      let dbVerifRows = [];
       try {
-        v3Data = await getV3Score(agentId);
-      } catch (e) {
-        console.warn('[TrustCredential] V3 score fetch failed for', agentId, e.message);
-      }
-
-      // P0: DB fallback removed — if no V3 on-chain record, score is 0
-      let dbTrustScore = null;
+        const Database = require('better-sqlite3');
+        const _path = require('path');
+        const _db = new Database(_path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+        dbVerifRows = _db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(agentId);
+        _db.close();
+      } catch (_) {}
+      const hasSatpId = dbVerifRows.some(v => v.platform === 'satp') || parsed.verifications?.some(v => v.platform === 'satp' && v.verified);
+      const computed = computeScore(dbVerifRows, { hasSatpIdentity: hasSatpId, claimed: !!profile.claimed });
 
       // 4. Build W3C Verifiable Credential payload
       const now = new Date();
@@ -187,65 +188,22 @@ function registerTrustCredentialRoutes(app) {
         id: `did:agentfolio:${agentId}`,
         agentId,
         name: profile.name,
-        trustScore: v3Data ? v3Data.reputationScore : dbTrustScore ? dbTrustScore.score : scoreResult.score,
-        maxScore: v3Data ? 800 : dbTrustScore ? 800 : scoreResult.maxScore,
-        tier: v3Data ? v3Data.verificationLabel.toUpperCase() : dbTrustScore ? dbTrustScore.level : (scoreResult.level || scoreTier(scoreResult.score)),
-        scoreVersion: v3Data ? 'v3' : dbTrustScore ? 'v3-db' : 'v2',
-        verificationCount: (() => {
-          // Merge DB verifications with chain-cache verifications for full count
-          const dbCount = parsed.verifications.filter(v => v.verified !== false).length;
-          try {
-            const chainCache = require('../lib/chain-cache');
-            const chainPlatforms = chainCache.getVerifiedPlatforms(agentId) || [];
-            // Union of DB verified platforms + chain-cache platforms
-            const allPlatforms = new Set([
-              ...parsed.verifications.filter(v => v.verified !== false).map(v => v.platform),
-              ...chainPlatforms
-            ]);
-            return Math.max(dbCount, allPlatforms.size);
-          } catch { return dbCount; }
-        })(),
-        onChainRegistered: (v3Data || dbTrustScore) ? true : (scoreResult.onChainRegistered || parsed.metadata?.registeredOnChain || parsed.verifications?.some(v => v.platform === 'satp' && v.verified) || false),
+        trustScore: computed.score,
+        maxScore: 300,
+        tier: computed.levelName.toUpperCase(),
+        scoreVersion: 'v3',
+        verificationCount: computed.verificationCount,
+        onChainRegistered: hasSatpId,
         breakdown: (() => {
-          // V3 scoring uses different category structure than V2
-          const cats = scoreResult.breakdown?.trustScore?.categories || {};
-          const verCount = scoreResult.verificationCount || scoreResult.breakdown?.verificationLevel?.count || 0;
-          const finalTotal = v3Data ? v3Data.reputationScore : (scoreResult.trustScore || scoreResult.score || 0);
-
-          // When V3 Genesis Record overrides, the difference is on-chain reputation premium
-          const v2Total = (cats.profileCompleteness || 0) + (cats.socialProof || 0) +
-                          (cats.marketplace || 0) + (cats.onchain || 0) + (cats.tenure || 0);
-          const onChainPremium = v3Data ? Math.max(finalTotal - v2Total, 0) : 0;
-
-          // Compute raw (uncapped) component scores
-          const raw = {
-            onChainReputation: onChainPremium + (cats.onchain || 0),
-            verifications: verCount * 15,
-            socialProof: cats.socialProof || 0,
-            completeness: cats.profileCompleteness || 0,
-            marketplace: cats.marketplace || 0,
-            tenure: cats.tenure || 0,
+          const bd = computed.breakdown || {};
+          return {
+            onChainReputation: bd.satp || bd.satp_identity || 0,
+            verifications: (bd.github || 0) + (bd.solana || 0) + (bd.x || 0) + (bd.ethereum || 0),
+            socialProof: (bd.moltbook || 0) + (bd.discord || 0) + (bd.telegram || 0),
+            completeness: 0,
+            marketplace: 0,
+            tenure: 0,
           };
-
-          // Normalize proportionally so breakdown sums exactly to finalTotal
-          const rawSum = Object.values(raw).reduce((a, b) => a + b, 0);
-          if (rawSum === 0 || finalTotal === 0) {
-            return { onChainReputation: 0, verifications: 0, socialProof: 0, completeness: 0, marketplace: 0, tenure: 0 };
-          }
-          const scale = finalTotal / rawSum;
-          const keys = Object.keys(raw);
-          const scaled = {};
-          let allocated = 0;
-          for (let i = 0; i < keys.length; i++) {
-            if (i === keys.length - 1) {
-              // Last component gets remainder to ensure exact sum
-              scaled[keys[i]] = finalTotal - allocated;
-            } else {
-              scaled[keys[i]] = Math.round(raw[keys[i]] * scale);
-              allocated += scaled[keys[i]];
-            }
-          }
-          return scaled;
         })(),
       };
 

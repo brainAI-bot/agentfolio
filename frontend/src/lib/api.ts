@@ -19,7 +19,7 @@ export interface APIProfile {
     solana?: { address: string; tx_count: number; balance: string; verified: boolean };
     hyperliquid?: { address: string; volume: string; verified: boolean };
     x?: { handle: string; verified: boolean };
-    satp?: { did: string; verified: boolean };
+    satp?: { did: string; identifier?: string; verified: boolean };
   };
 }
 
