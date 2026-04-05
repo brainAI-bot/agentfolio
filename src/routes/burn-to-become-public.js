@@ -678,7 +678,7 @@ function handleBurnToBecome(req, res, url) {
       try {
         const Database = require('better-sqlite3');
         const db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
-        const { getCompleteScore } = require('../lib/scoring-engine-v2'); const fs = require('fs');
+        let getCompleteScore; try { getCompleteScore = require('../lib/scoring-engine-v2').getCompleteScore; } catch(_) { getCompleteScore = () => ({ overall: 0, level: 'Unverified' }); } const fs = require('fs');
         const LEVEL_NAMES = ['Unregistered', 'Registered', 'Verified', 'On-Chain', 'Trusted', 'Sovereign'];
         const LEVEL_BADGES = ['⚪', '🟡', '🔵', '🟢', '🟠', '👑'];
         const profiles = db.prepare('SELECT * FROM profiles').all();
@@ -1326,7 +1326,7 @@ function handleBurnToBecome(req, res, url) {
             }
           } catch (e) { console.error('[BURN] V3 score lookup failed:', e.message); }
           try {
-            const { getCompleteScore } = require('../lib/scoring-engine-v2');
+            let getCompleteScore; try { getCompleteScore = require('../lib/scoring-engine-v2').getCompleteScore; } catch(_) { getCompleteScore = () => ({ overall: 0, level: 'Unverified' }); }
             const profile = checkDb.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
             if (profile) {
               const profileObj = {

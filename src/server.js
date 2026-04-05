@@ -16,6 +16,9 @@ const satpReviews = require('./satp-reviews');
 const { registerSATPRoutes } = require('./routes/satp-api');
 const { registerSATPWriteRoutes } = require('./routes/satp-write-api');
 const { registerSATPAutoIdentityRoutes } = require("./routes/satp-auto-identity");
+// V3 auto-identity + BOA linker (brainChain deploy 2026-04-05)
+const { registerSATPAutoIdentityV3Routes } = require("./routes/satp-auto-identity-v3");
+const { registerBoaLinkerV3Routes } = require("./routes/satp-boa-linker-v3");
 const { registerReviewsV2Routes } = require("./api/reviews-v2");
 
 // Profile Store (SQLite-backed persistent profiles, endorsements, reviews)
@@ -350,10 +353,23 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     try { const t = JSON.parse(profile.tags || '[]'); tags = Array.isArray(t) ? t : []; } catch (_) {}
     try { const s = JSON.parse(profile.skills || '[]'); skills = Array.isArray(s) ? s : []; } catch (_) {}
     
-    // Verifications from chain-cache attestations ONLY (on-chain source of truth)
-    const attestations = chainCache.getVerifications(profile.id) || chainCache.getVerifications(agentId) || [];
+    // Verifications from chain-cache attestations cross-referenced with DB verifications
+    // [P0 FIX Apr 5] Only show chain attestations that have a matching DB verification (filters old profile attestations)
+    // [FIX 4] Filter attestations by profile creation date
+    const attestations = (chainCache.getVerifications(profile.id, profile.created_at) || [])
+      .concat(profile.id !== agentId ? (chainCache.getVerifications(agentId, profile.created_at) || []) : []);
+    let dbVerifPlatforms = new Set();
+    try {
+      const vRows = db.prepare("SELECT platform FROM verifications WHERE profile_id = ? AND identifier IS NOT NULL AND identifier != ''").all(profile.id);
+      for (const vr of vRows) dbVerifPlatforms.add(vr.platform === 'twitter' ? 'x' : vr.platform);
+    } catch (_) {}
     const verifications = attestations
-      .filter(att => att.platform && att.platform !== 'review') // Exclude 'review' — reviews are attestations, not verifications
+      .filter(att => att.platform && att.platform !== 'review')
+      .filter(att => {
+        const plat = att.platform === 'twitter' ? 'x' : att.platform;
+        // Only include if DB has a real verification for this platform, OR it's satp/solana (wallet-based)
+        return dbVerifPlatforms.has(plat) || plat === 'satp' || plat === 'solana';
+      })
       .map(att => ({
         platform: att.platform,
         verified: true,
@@ -381,8 +397,8 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     }
     
     // [CEO-URGENT 2026-04-04] V3 on-chain score is authoritative. DB fallback only for agents without genesis.
-    const trustScore = v3Data ? (v3Data.reputationScore > 10000 ? Math.round(v3Data.reputationScore / 1000) : v3Data.reputationScore) : scoreResult.score;
-    const tier = v3Data ? (v3Data.verificationLabel || ['Unverified','Registered','Verified','Established','Trusted','Sovereign'][v3Data.verificationLevel] || 'Unverified') : (scoreResult.level || (trustScore >= 80 ? 'ELITE' : trustScore >= 60 ? 'PRO' : trustScore >= 40 ? 'VERIFIED' : trustScore >= 20 ? 'BASIC' : 'NEW'));
+    const trustScore = v3Data ? (v3Data.reputationScore > 10000 ? Math.round(v3Data.reputationScore / 1000) : v3Data.reputationScore) : (scoreResult.trustScore || scoreResult.score || 0);
+    const tier = v3Data ? (v3Data.verificationLabel || ['Unverified','Registered','Verified','Established','Trusted','Sovereign'][v3Data.verificationLevel] || 'Unverified') : (scoreResult.verificationLevelName || scoreResult.level || (trustScore >= 80 ? 'ELITE' : trustScore >= 60 ? 'PRO' : trustScore >= 40 ? 'VERIFIED' : trustScore >= 20 ? 'BASIC' : 'NEW'));
     
     res.json({
       agentId: profile.id,
@@ -433,45 +449,20 @@ app.get('/api/explorer/:agentId', async (req, res) => {
 
 // ─── Trust Score API (dedicated endpoint) ────────────────
 app.get('/api/profile/:id/trust-score', async (req, res) => {
+  // x402 gated — return 402 Payment Required
+  // Clients should use /api/score?id=<profileId> with x402 payment header
   const profileId = req.params.id;
-  const profileStore = require('./profile-store');
-  try {
-    const db = profileStore.getDb();
-    const row = db.prepare('SELECT id FROM profiles WHERE id = ? OR id = ?').get(profileId, 'agent_' + profileId);
-    if (!row) {
-      return res.status(404).json({ error: 'Agent not found', agentId: profileId });
-    }
-    const resolvedId = row.id;
-    
-    // V3 on-chain score (authoritative)
-    let v3Data = null;
-    try {
-      v3Data = await getV3Score(resolvedId);
-      if (!v3Data && !resolvedId.startsWith('agent_')) {
-        v3Data = await getV3Score('agent_' + resolvedId);
-      }
-    } catch (e) { /* skip */ }
-    
-    if (v3Data) {
-      const levelLabels = ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'];
-      return res.json({
-        agentId: resolvedId,
-        score: v3Data.reputationScore > 10000 ? Math.round(v3Data.reputationScore / 1000) : v3Data.reputationScore,
-        rawScore: v3Data.reputationScore,
-        level: v3Data.verificationLevel,
-        levelName: levelLabels[v3Data.verificationLevel] || 'Unclaimed',
-        tier: v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || 'Unclaimed',
-        isBorn: v3Data.isBorn,
-        source: 'v3-onchain',
-      });
-    }
-    
-    // P0: DB fallback REMOVED — on-chain v3 only. If no on-chain score, return 0.
-    res.json({ agentId: resolvedId, score: 0, level: 0, levelName: "Unclaimed", tier: "Unclaimed", source: "none" });
-  } catch (err) {
-    console.error('[Trust Score] Error:', err);
-    res.status(500).json({ error: 'Failed to compute trust score', details: err.message });
-  }
+  res.status(402).json({
+    error: 'Payment Required',
+    message: 'Trust score lookup requires x402 payment. Use GET /api/score?id=' + profileId,
+    accepts: [{
+      scheme: 'exact',
+      price: '$0.01',
+      network: X402_NETWORK,
+      payTo: X402_RECEIVE_ADDRESS,
+    }],
+    x402Url: '/api/score?id=' + profileId,
+  });
 });
 
 
@@ -1780,6 +1771,9 @@ satpReviews.registerRoutes(app);
 registerSATPRoutes(app);
 registerSATPWriteRoutes(app);
 registerSATPAutoIdentityRoutes(app);
+// V3 auto-identity + BOA linker routes (brainChain deploy 2026-04-05)
+registerSATPAutoIdentityV3Routes(app);
+registerBoaLinkerV3Routes(app);
 
 // Trust Credential API (credat integration)
 const { registerTrustCredentialRoutes } = require('./routes/trust-credential');
@@ -1969,7 +1963,7 @@ app.get('/api/satp/score/:id', async (req, res) => {
     if (!row) return res.status(404).json({ error: 'Profile not found', id: profileId });
 
     // Build verifications from chain-cache attestations (on-chain source of truth)
-    const attestations = chainCache.getVerifications(row.id) || [];
+    const attestations = chainCache.getVerifications(row.id, row.created_at) || [];
     const verifications = attestations
       .filter(att => att.platform && att.platform !== 'review')
       .map(att => ({ type: att.platform, verified: true, txSignature: att.txSignature, solscanUrl: att.solscanUrl || `https://solscan.io/tx/${att.txSignature}` }));
@@ -2039,7 +2033,7 @@ app.get('/api/score', async (req, res) => {
   scoreDb.close();
   
   // Build verifications from chain-cache attestations (on-chain source of truth)
-  const ccVerifications = row ? (chainCache.getVerifications(row.id) || []) : [];
+  const ccVerifications = row ? (chainCache.getVerifications(row.id, row.created_at) || []) : [];
   const verifications = ccVerifications
     .filter(att => att.platform && att.platform !== 'review')
     .map(att => ({ type: att.platform, verified: true, txSignature: att.txSignature, solscanUrl: att.solscanUrl || `https://solscan.io/tx/${att.txSignature}` }));
