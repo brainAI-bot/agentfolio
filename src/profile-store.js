@@ -69,7 +69,8 @@ try {
 // Scoring Engine V2 — 2D scoring (verification level + reputation)
 let scoringEngineV2;
 try {
-  scoringEngineV2 = require('./lib/scoring-engine-v2');
+  // [FIX 2] DISABLED
+  // scoringEngineV2 = require('./lib/scoring-engine-v2');
   console.log('[ProfileStore] Scoring Engine V2 loaded');
 } catch (e) {
   console.warn('[ProfileStore] Scoring Engine V2 not available:', e.message);
@@ -444,12 +445,15 @@ function enrichProfile(row) {
       // 2. Read chain-cache attestations (authoritative when available)
       try {
         const _cc = require('./lib/chain-cache');
-        const _atts = _cc.getVerifications(row.id);
+        const _atts = _cc.getVerifications(row.id, row.created_at);
         for (const att of _atts) {
           if (!att.platform || att.platform === 'review') continue;
           const plat = att.platform === 'twitter' ? 'x' : att.platform;
           if (vd[plat]) continue;
-          const displayId = dbVerifs[plat]?.identifier || '';
+          // [P0 FIX Apr 5] Skip chain attestations without real DB identifier
+          const dbInf = dbVerifs[plat];
+          if (!dbInf || !dbInf.identifier) continue;
+          const displayId = dbInf.identifier;
           vd[plat] = { verified: true, address: displayId, identifier: displayId, linked: true, verifiedAt: att.timestamp || null, source: 'on-chain' };
         }
       } catch (_) {}
@@ -482,12 +486,15 @@ function enrichProfile(row) {
       // 2. Chain-cache attestations (authoritative when available)
       try {
         const chainCache = require('./lib/chain-cache');
-        const atts = chainCache.getVerifications(row.id);
+        const atts = chainCache.getVerifications(row.id, row.created_at);
         for (const att of atts) {
           if (!att.platform || att.platform === 'review') continue;
           const platform = att.platform === 'twitter' ? 'x' : att.platform;
           if (vMap[platform]) continue;
-          const displayId = dbVerifs[platform]?.identifier || platform;
+          // [P0 FIX Apr 5] Skip chain attestations with no real DB identifier — old attestations leak
+          const dbInfo = dbVerifs[platform];
+          if (!dbInfo || !dbInfo.identifier || dbInfo.identifier === platform) continue;
+          const displayId = dbInfo.identifier;
           vMap[platform] = {
             verified: true,
             address: displayId,
@@ -709,10 +716,11 @@ function registerRoutes(app) {
 
       d.prepare(`INSERT INTO profiles (${insertCols.join(', ')}) VALUES (${insertPlaceholders.join(', ')})`).run(...insertVals);
 
-      // ── Write JSON profile file so Next.js frontend can find it ──
+      // ── Disk JSON DISABLED (DB is source of truth) ──
+      // Disk JSON files were never cleaned on deletion. DB is canonical.
       const profilesDir = path.join(__dirname, '..', 'data', 'profiles');
       const fs = require('fs');
-      fs.mkdirSync(profilesDir, { recursive: true });
+      // fs.mkdirSync(profilesDir, { recursive: true }); // DISABLED
       const profileJson = {
         id,
         name: name.trim(),
@@ -753,8 +761,19 @@ function registerRoutes(app) {
         createdAt: now,
         updatedAt: now,
       };
-      fs.writeFileSync(path.join(profilesDir, `${id}.json`), JSON.stringify(profileJson, null, 2));
-      console.log(`[ProfileStore] JSON profile written: ${profilesDir}/${id}.json`);
+      // fs.writeFileSync — DISABLED (disk JSON no longer created)
+      // profileJson kept in memory for scoring below
+      console.log(`[ProfileStore] Registration complete for ${id} (disk JSON disabled, DB is source of truth)`);
+
+      // Bug A fix: Auto-verify Solana wallet on registration
+      if (solanaWallet) {
+        try {
+          addVerification(id, "solana", solanaWallet, { method: "registration", auto: true });
+          console.log(`[ProfileStore] Auto-verified Solana wallet for ${id}: ${solanaWallet}`);
+        } catch (avErr) {
+          console.error(`[ProfileStore] Solana auto-verify failed for ${id}:`, avErr.message);
+        }
+      }
 
       // Fire-and-forget: create SATP V3 Genesis Record (skip if user will pay)
       if (satpV3 && !userPaidGenesis) {
@@ -1036,13 +1055,15 @@ function registerRoutes(app) {
           }
         } catch {}
       }
-      // P1: Determine claimed status from chain-cache (NOT DB verification_data)
-      let claimed = false;
-      try {
-        const _ccCl = require("./lib/chain-cache");
-        const _ccPl = _ccCl.getVerifiedPlatforms(rest.id);
-        claimed = _ccPl.length > 0;
-      } catch (_) {}
+      // [FIX 5a] Claimed = DB claimed field OR chain verifications
+      let claimed = rest.claimed === 1 || rest.claimed === '1' || rest.claimed === true;
+      if (!claimed) {
+        try {
+          const _ccCl = require("./lib/chain-cache");
+          const _ccPl = _ccCl.getVerifiedPlatforms(rest.id, rest.created_at);
+          claimed = _ccPl.length > 0;
+        } catch (_) {}
+      }
       const { _trust_score: ts, _trust_level: dbLevel, ...cleanRest } = rest;
       const _md = parseJsonField(cleanRest.metadata);
       const unclaimed = (cleanRest.claimed === 0 || cleanRest.claimed === "0") || _md.unclaimed === true || _md.isPlaceholder === true || _md.placeholder === true;
@@ -1111,60 +1132,10 @@ function registerRoutes(app) {
       }
     }
 
-    // Chain-cache score overlay: for agents without V3, compute from on-chain attestations
-    try {
-      const chainCache = require('./lib/chain-cache');
-      for (const p of profiles) {
-        if (!p.v3) {
-          const ccScore = chainCache.getScore(p.id);
-          // On-chain is authoritative (CEO directive Apr 4) — don't overwrite with chain score
-          if (ccScore) {
-            p.chain_cache_score = ccScore;
-            // On-chain is authoritative — always use chain score
-            if (ccScore.reputationScore) {
-              p.trust_score = ccScore.reputationScore;
-            }
-          }
-        }
-        // Add verification count from chain-cache (on-chain source of truth)
-        const ccPlatforms = chainCache.getVerifiedPlatforms(p.id);
-        if (ccPlatforms.length > 0) {
-          p.onchain_verification_count = ccPlatforms.length;
-          p.onchain_platforms = ccPlatforms;
-        }
-      }
-      // Re-sort after chain-cache overlay
-      profiles.sort((a, b) => (b.trust_score || 0) - (a.trust_score || 0));
-    } catch (e) {
-      // chain-cache may not be available yet
-    }
+    // [FIX 3] Chain-cache score overlay REMOVED — V3 genesis is sole score source
 
     // P0-13: Paginate after V3 overlay sort
-    // Chain-cache: overlay on-chain verification count + score for all profiles
-    try {
-      const chainCache = require('./lib/chain-cache');
-      for (const p of profiles) {
-        // On-chain verification count (from attestation memos)
-        const ccVerifications = chainCache.getVerifications(p.id);
-        if (ccVerifications && ccVerifications.length > 0) {
-          const ccPlatforms = [...new Set(ccVerifications.map(v => v.platform))];
-          p.onchain_verification_count = ccPlatforms.length;
-          p.onchain_platforms = ccPlatforms;
-        }
-        // On-chain score (from Genesis Record or computed)
-        const ccScore = chainCache.getScore(p.id);
-        if (ccScore) {
-          p.chain_score = ccScore.reputationScore || 0;
-          p.chain_level = ccScore.verificationLevel || 0;
-          // On-chain is authoritative (CEO directive Apr 4) — chain score as fallback only
-          if (ccScore.reputationScore && !p.trust_score) {
-            p.trust_score = ccScore.reputationScore;
-          }
-        }
-      }
-      // Final sort by trust_score after chain-cache overlay
-      profiles.sort((a, b) => (b.trust_score || 0) - (a.trust_score || 0));
-    } catch (e) { /* chain-cache may not be ready yet */ }
+    // [FIX 3] Second chain-cache overlay REMOVED — V3 genesis only
 
     // P0 FIX: Promote v3/chain-cache level+score to top-level fields for directory consumption
     const levelLabels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];

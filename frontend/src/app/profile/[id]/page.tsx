@@ -269,7 +269,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
             <p className="text-sm mb-4" style={{ color: "var(--text-secondary)" }}>
               {agent.bio}
             </p>
-            {(!agent.claimed) && (
+            {agent.unclaimed && (
               <div className="rounded-md px-4 py-3 mb-4 text-sm" style={{ background: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.3)", color: "#F59E0B" }}>
                 <strong>⚠️ Unclaimed Profile</strong> — This profile has not been claimed yet. If you operate {agent.name}, claim it to verify ownership.{" "}
                 <ClaimButton profileId={agent.id} profileName={agent.name} />
@@ -509,7 +509,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
             <h2 className="text-sm font-semibold uppercase tracking-wider mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
               Trust Breakdown
             </h2>
-            {agent.trustBreakdown ? (() => {
+            {agent.trustBreakdown && agent.trustScore > 0 ? (() => {
               const bd = agent.trustBreakdown;
               const total = (bd.onChainReputation || 0) + (bd.verifications || 0) + (bd.socialProof || 0) + (bd.completeness || 0) + (bd.marketplace || 0) + (bd.tenure || 0);
               const items = [

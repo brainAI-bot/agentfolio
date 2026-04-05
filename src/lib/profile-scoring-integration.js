@@ -3,7 +3,7 @@
  * Integrates new verification levels and reputation scores into profile display
  */
 
-const { getCompleteScore, calculateVerificationLevel, calculateReputationScore } = require('./scoring-engine-v2');
+const getCompleteScore = () => ({ overall: 0, level: 'Unverified' }); const calculateVerificationLevel = () => 0; const calculateReputationScore = () => 0; // scoring-engine-v2 disabled
 
 /**
  * Get complete scoring data for profile display

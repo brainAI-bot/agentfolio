@@ -6,7 +6,9 @@
 
 const path = require('path');
 const satpIdentity = require('./satp-identity-client');
-const { getProfileScoring, checkBoaEligibility } = require('./lib/scoring-v2');
+// [FIX 2] DB scoring-v2 DISABLED - stubs
+const getProfileScoring = () => ({ overallScore: 0, verificationLevel: 0, breakdown: {} });
+const checkBoaEligibility = () => ({ eligible: false, reason: 'disabled' });
 
 /**
  * Get activity data for a profile (placeholder - would be from database)

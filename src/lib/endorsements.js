@@ -4,7 +4,7 @@
  * v1.1 - Added verified endorser badges and weighted scoring
  */
 
-const { calculateVerificationLevel } = require('./scoring-engine-v2');
+const calculateVerificationLevel = () => 0; // scoring-engine-v2 disabled
 const fs = require('fs');
 const path = require('path');
 
