@@ -23,6 +23,21 @@ const nextConfig: NextConfig = {
     ];
   },
 
+  // Override stale-while-revalidate for profile-data pages
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 's-maxage=30, stale-while-revalidate=60',
+          },
+        ],
+      },
+    ];
+  },
+
   // Environment variables exposed to browser
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || '',

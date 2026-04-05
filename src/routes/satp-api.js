@@ -72,7 +72,7 @@ function registerSATPRoutes(app) {
       var network = req.query.network || 'mainnet';
       var scores = await satpIdentity.getAgentScores(wallet, network);
       if (!scores) {
-        return res.status(404).json({ error: 'Agent not found on-chain', wallet: wallet });
+        return res.json({ ok: true, data: { wallet: wallet, reputationScore: 0, reputationScoreRaw: 0, verificationLevel: 0, verificationLabel: "Unverified", reputationRank: "Newcomer", onChain: false, trustless: true } });
       }
       // Enrich with V3 on-chain scores (cached, from Solana V3 program)
       try {

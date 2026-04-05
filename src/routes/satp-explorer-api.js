@@ -110,7 +110,25 @@ async function getSatpAgents() {
     }
   }
 
-  // [CEO-URGENT 2026-04-04] DB score overrides REMOVED — on-chain is sole display source
+  // A1: Overlay compute-score for consistency across all surfaces
+  try {
+    const { computeScore } = require('../lib/compute-score');
+    const Database = require('better-sqlite3');
+    const path = require('path');
+    const _db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+    for (const agent of agents) {
+      const profile = _db.prepare('SELECT id, claimed FROM profiles WHERE LOWER(name) = LOWER(?)').get(agent.name);
+      if (profile) {
+        const verifs = _db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profile.id);
+        const hasSatp = verifs.some(v => v.platform === 'satp') || true;
+        const computed = computeScore(verifs, { hasSatpIdentity: hasSatp, claimed: !!profile.claimed });
+        agent.reputationScore = computed.score;
+        agent.verificationLevel = computed.level;
+        agent.verificationLabel = computed.levelName;
+      }
+    }
+    _db.close();
+  } catch (e) { console.warn('[SATP Explorer] compute-score overlay failed:', e.message); }
   const result = { agents, count: agents.length, source: "solana-mainnet-v3" };
   agentCache = { data: result, timestamp: Date.now() };
   return result;

@@ -30,11 +30,24 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
     const vd: Record<string, any> = raw.verifications || {};
 
     // V3 on-chain Genesis Record is canonical — prefer trust_score/v3 fields
-    const v3ts = raw.trust_score?.source === 'satp_v3_onchain' ? raw.trust_score : null;
-    const v3cache = raw.v3 || null;
-    const repScore = v3ts?.reputationScore ?? v3cache?.reputationScore ?? raw.trustScore ?? raw.score ?? 0;
-    const vLevel = v3ts?.verificationLevel ?? v3cache?.verificationLevel ?? raw.verificationLevel ?? 0;
-    const vLabel = v3ts?.verificationLabel ?? v3cache?.verificationLabel ?? ["Unclaimed","Registered","Verified","Established","Trusted","Sovereign"][vLevel] ?? "Unclaimed";
+    // A1: Single scoring source — computeScore via API
+    const repScore = raw.trustScore ?? raw.score ?? raw.trust_score?.overall_score ?? 0;
+    // Map tier string to numeric level (BUG 2 fix)
+    const tierToLevel: Record<string, number> = { "Unclaimed": 0, "NEW": 0, "Registered": 1, "Verified": 2, "Established": 3, "Trusted": 4, "Sovereign": 5 };
+    const vLevel = raw.verificationLevel ?? raw.level ?? (typeof raw.tier === 'string' ? tierToLevel[raw.tier] ?? 0 : 0);
+    const vLabel = raw.tier ?? ["Unclaimed","Registered","Verified","Established","Trusted","Sovereign"][vLevel] ?? "Unclaimed";
+    // Fallback: derive trustBreakdown from trust_score.score_breakdown if trust-credential failed
+    if (!trustBreakdown && raw.trust_score?.score_breakdown) {
+      const sb = raw.trust_score.score_breakdown;
+      trustBreakdown = {
+        onChainReputation: sb.satp || 0,
+        verifications: (sb.solana || 0) + (sb.github || 0) + (sb.x || 0) + (sb.hyperliquid || 0) + (sb.ethereum || 0) + (sb.discord || 0) + (sb.telegram || 0) + (sb.domain || 0) + (sb.mcp || 0) + (sb.a2a || 0),
+        socialProof: (sb.moltbook || 0) + (sb.agentmail || 0),
+        completeness: sb.completeness || 0,
+        marketplace: sb.marketplace || 0,
+        tenure: sb.tenure || 0,
+      };
+    }
 
     return {
       id: raw.id,
@@ -56,7 +69,7 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
         solana: vd.solana?.verified ? { address: vd.solana.address || raw.walletAddress || "", txCount: vd.solana.txCount || 0, balance: vd.solana.balance || "0 SOL", verified: true } : undefined,
         hyperliquid: vd.hyperliquid?.verified ? { address: vd.hyperliquid.address || "", volume: vd.hyperliquid.volume || "$0", verified: true } : undefined,
         x: vd.x?.verified || vd.twitter?.verified ? { handle: vd.x?.handle || vd.twitter?.handle || "", verified: true } : undefined,
-        satp: vd.satp?.verified ? { did: vd.satp.did || "", verified: true } : undefined,
+        satp: vd.satp?.verified ? { did: vd.satp.did || "", identifier: vd.satp.identifier || vd.satp.address || "", identityPDA: vd.satp.proof?.identityPDA || "", txSignature: vd.satp.proof?.txSignature || "", verified: true } : undefined,
         ethereum: vd.ethereum?.verified ? { address: vd.ethereum.address || "", verified: true } : undefined,
         agentmail: vd.agentmail?.verified ? { email: vd.agentmail.email || "", verified: true } : undefined,
         moltbook: vd.moltbook?.verified ? { username: vd.moltbook.username || "", verified: true } : undefined,
@@ -78,6 +91,8 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
       createdAt: raw.createdAt || "",
       activity: [],
       walletAddress: raw.walletAddress || raw.wallets?.solana || undefined,
+      wallet: raw.wallet || undefined,
+      wallets: raw.wallets || undefined,
       profileCompleteness: (() => {
         let filled = 0, total = 8;
         if (raw.name?.trim()) filled++;

@@ -775,14 +775,28 @@ class SATPSDK {
 // V3 SDK — now delegated to @brainai/satp-v3 (migrated 2026-03-29)
 const v3sdk = require('@brainai/satp-v3');
 
-// Legacy V3 SDK wrapper — maps old createSATPClient/SATPV3SDK to new SDK
+// Legacy V3 SDK wrapper — proxies to local SATPV3SDK (write) + @brainai/satp-v3 SatpV3Client (read)
 class SATPV3SDK {
   constructor(opts = {}) {
-    this.client = new v3sdk.SatpV3Client(opts.rpcUrl || opts);
+    const rpcUrl = opts.rpcUrl || (typeof opts === 'string' ? opts : undefined);
+    const network = opts.network || 'devnet';
+    // Local v3-sdk.js has write methods (buildCreateIdentity, etc.)
+    const { SATPV3SDK: LocalSDK } = require('./v3-sdk');
+    this._local = new LocalSDK({ rpcUrl, network });
+    // @brainai/satp-v3 has read methods (getGenesis, etc.)
+    this._reader = new v3sdk.SatpV3Client(rpcUrl);
+    // Proxy: prefer local SDK (write), then reader (read), then own props
+    return new Proxy(this, {
+      get(target, prop) {
+        if (prop === '_local' || prop === '_reader') return target[prop];
+        if (typeof target._local[prop] === 'function') return target._local[prop].bind(target._local);
+        if (target._local[prop] !== undefined) return target._local[prop];
+        if (typeof target._reader[prop] === 'function') return target._reader[prop].bind(target._reader);
+        if (target._reader[prop] !== undefined) return target._reader[prop];
+        return target[prop];
+      }
+    });
   }
-  async getGenesis(agentId) { return this.client.getGenesis ? this.client.getGenesis(agentId) : null; }
-  async getAttestation(pda) { return this.client.getAttestation ? this.client.getAttestation(pda) : null; }
-  async getReview(pda) { return this.client.getReview ? this.client.getReview(pda) : null; }
 }
 
 function createSATPClient(opts = {}) {

@@ -732,6 +732,8 @@ function deleteProfile(profileId) {
   db.prepare('DELETE FROM custom_proofs WHERE profile_id = ?').run(profileId);
   db.prepare('DELETE FROM follows WHERE follower_id = ? OR following_id = ?').run(profileId, profileId);
   profileStmts.delete.run(profileId);
+  // Clean up disk JSON file
+  try { const fs = require("fs"); const p = require("path").join(__dirname, "..", "..", "data", "profiles", profileId + ".json"); if (fs.existsSync(p)) fs.unlinkSync(p); } catch (_) {}
 }
 
 function getProfileCount() {

@@ -1,15 +1,15 @@
 /**
- * Profile Store — SQLite-backed persistent profiles, endorsements, and reviews
+ * Profile Store -- SQLite-backed persistent profiles, endorsements, and reviews
  * 
  * Endpoints registered:
- *   POST   /api/register              — Create a new agent profile
- *   GET    /api/profiles              — List profiles (paginated)
- *   GET    /api/profile/:id           — Get single profile (enriched)
- *   PATCH  /api/profile/:id           — Update profile fields
- *   POST   /api/profile/:id/endorsements — Add endorsement
- *   GET    /api/profile/:id/endorsements — List endorsements
- *   POST   /api/profile/:id/reviews     — Add review
- *   GET    /api/profile/:id/reviews     — List reviews
+ *   POST   /api/register              -- Create a new agent profile
+ *   GET    /api/profiles              -- List profiles (paginated)
+ *   GET    /api/profile/:id           -- Get single profile (enriched)
+ *   PATCH  /api/profile/:id           -- Update profile fields
+ *   POST   /api/profile/:id/endorsements -- Add endorsement
+ *   GET    /api/profile/:id/endorsements -- List endorsements
+ *   POST   /api/profile/:id/reviews     -- Add review
+ *   GET    /api/profile/:id/reviews     -- List reviews
  */
 
 const Database = require('better-sqlite3');
@@ -19,6 +19,7 @@ const bs58 = _bs58.default || _bs58;
 const path = require('path');
 const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
+const { computeScore } = require("./lib/compute-score");
 
 // Rate limiter for registration: 5 per hour per IP
 const registerLimiter = rateLimit({
@@ -40,24 +41,24 @@ try {
   console.warn('[ProfileStore] satp-write-client not available, on-chain registration disabled');
 }
 
-// SATP V3 SDK — Genesis Record creation + V3 identity reads
+// SATP V3 SDK -- Genesis Record creation + V3 identity reads
 let satpV3;
 try {
   const { createSATPClient, SATPV3SDK: WrapperSDK, hashAgentId, getGenesisPDA } = require('./satp-client/src');
   const { SATPV3SDK } = require('./satp-client/src/v3-sdk');
   const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY';
-  const v3Client = new SATPV3SDK({ rpcUrl: RPC_URL });
+  const v3Client = new SATPV3SDK({ rpcUrl: RPC_URL, network: "mainnet" });
   satpV3 = { client: v3Client, SATPV3SDK, hashAgentId, getGenesisPDA };
   console.log('[SATP V3] SDK loaded (v3-sdk SATPV3SDK with getGenesisRecord)');
 } catch (e) {
   console.warn('[SATP V3] SDK not available:', e.message);
 }
-// [CEO-URGENT Apr 4] postVerificationHook — single on-chain entry point
+// [CEO-URGENT Apr 4] postVerificationHook -- single on-chain entry point
 let postVerificationHook;
 try { ({ postVerificationHook } = require('./post-verification-hook')); console.log('[PostVerify] postVerificationHook loaded'); } catch(e) { console.warn('[PostVerify] hook not available:', e.message); }
 
 
-// V3 Score Service — batch on-chain scoring
+// V3 Score Service -- batch on-chain scoring
 let v3ScoreService;
 try {
   v3ScoreService = require('./v3-score-service');
@@ -66,7 +67,7 @@ try {
   console.warn('[V3 Scores] Score service not available:', e.message);
 }
 
-// Scoring Engine V2 — 2D scoring (verification level + reputation)
+// Scoring Engine V2 -- 2D scoring (verification level + reputation)
 let scoringEngineV2;
 try {
   // [FIX 2] DISABLED
@@ -189,7 +190,7 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_profiles_wallet ON profiles(wallet);
     CREATE INDEX IF NOT EXISTS idx_profiles_status ON profiles(status);
   `);
-  // reviews table may use reviewee_id (CEO fix) or profile_id — detect which
+  // reviews table may use reviewee_id (CEO fix) or profile_id -- detect which
   const reviewCols = db.prepare("PRAGMA table_info(reviews)").all().map(c => c.name);
   const reviewFk = reviewCols.includes('reviewee_id') ? 'reviewee_id' : 'profile_id';
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_reviews_fk ON reviews(${reviewFk})`); } catch {}
@@ -216,7 +217,7 @@ function parseJsonField(val, defaultVal = []) {
 }
 
 
-// Score protection guard — prevents corrupt scores from being written
+// Score protection guard -- prevents corrupt scores from being written
 const MAX_VALID_SCORE = 10000;
 const MAX_LEVEL_JUMP = 2;
 const VALID_LEVELS = ['NEW', 'UNVERIFIED', 'REGISTERED', 'VERIFIED', 'ESTABLISHED', 'TRUSTED', 'SOVEREIGN', 'ELITE'];
@@ -233,10 +234,10 @@ function validateScoreWrite(agentId, newScore, newLevel, source) {
     console.error('[SCORE GUARD] BLOCKED: invalid level "' + newLevel + '" for ' + agentId + ' (source: ' + source + ')');
     return false;
   }
-  // P1: Level jump protection — reject if level changes by more than 2 steps
+  // P1: Level jump protection -- reject if level changes by more than 2 steps
   if (newLevel) {
     try {
-      // P0: DB reads removed — check v3 cache for level jump protection
+      // P0: DB reads removed -- check v3 cache for level jump protection
       const { _getFromCache } = require('./v3-score-service');
       const v3Cached = _getFromCache(agentId);
       const existing = v3Cached ? { level: v3Cached.verificationLabel } : null;
@@ -292,7 +293,7 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
 
 
   // Post-verification pipeline: DB score + on-chain attestation + recompute CPI
-  // (CEO directive Apr 4 — single unified hook for all verification types)
+  // (CEO directive Apr 4 -- single unified hook for all verification types)
   if (postVerificationHook) postVerificationHook(profileId, platform, identifier, proof).catch(e =>
     console.error("[PostVerify] Hook error:", e.message)
   );
@@ -310,7 +311,7 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
   }
 
 
-  // [REMOVED] Duplicate V3 update block — handled by the unified V3 block above (verification + reputation + recompute)
+  // [REMOVED] Duplicate V3 update block -- handled by the unified V3 block above (verification + reputation + recompute)
 
   // Notify CMD Center of verification
   try {
@@ -367,7 +368,7 @@ function enrichProfile(row) {
   if (!row) return null;
   const d = getDb();
   const endorsements = d.prepare('SELECT * FROM endorsements WHERE profile_id = ? ORDER BY created_at DESC').all(row.id);
-  // [P0 FIX] DB verifications query REMOVED — chain-cache is sole source of truth
+  // [P0 FIX] DB verifications query REMOVED -- chain-cache is sole source of truth
   const activity = d.prepare('SELECT * FROM activity_feed WHERE profile_id = ? ORDER BY created_at DESC LIMIT 20').all(row.id);
   const rfk = module.exports._reviewFk || 'profile_id';
   const reviewStats = d.prepare(`
@@ -377,7 +378,7 @@ function enrichProfile(row) {
     FROM reviews WHERE ${rfk} = ?
   `).get(row.id);
   
-  // [CEO Apr 4] DB scoring removed from display — on-chain only via v3ScoreService/chain-cache
+  // [CEO Apr 4] DB scoring removed from display -- on-chain only via v3ScoreService/chain-cache
   let trust_score = null;
 
 
@@ -422,6 +423,7 @@ function enrichProfile(row) {
 
   return {
     ...row,
+    walletAddress: row.wallet || null,
     avatar: resolvedAvatar ? resolvedAvatar.replace('node1.irys.xyz', 'gateway.irys.xyz') : resolvedAvatar,
     v3,
     capabilities: parseJsonField(row.capabilities),
@@ -436,7 +438,7 @@ function enrichProfile(row) {
       let dbVerifs = {};
       try {
         const _d = getDb();
-        const _rows = _d.prepare('SELECT platform, identifier, verified_at FROM verifications WHERE profile_id = ?').all(row.id);
+        const _rows = _d.prepare('SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ?').all(row.id);
         for (const _r of _rows) {
           const plat = _r.platform === 'twitter' ? 'x' : _r.platform;
           dbVerifs[plat] = { identifier: _r.identifier || '', verifiedAt: _r.verified_at || null };
@@ -477,10 +479,10 @@ function enrichProfile(row) {
       let dbVerifs = {};
       try {
         const d = getDb();
-        const rows = d.prepare('SELECT platform, identifier, verified_at FROM verifications WHERE profile_id = ?').all(row.id);
+        const rows = d.prepare('SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ?').all(row.id);
         for (const r of rows) {
           const plat = r.platform === 'twitter' ? 'x' : r.platform;
-          dbVerifs[plat] = { identifier: r.identifier || '', verifiedAt: r.verified_at || null, rawPlatform: r.platform };
+          dbVerifs[plat] = { identifier: r.identifier || '', proof: r.proof || '{}', verifiedAt: r.verified_at || null, rawPlatform: r.platform };
         }
       } catch (_) {}
       // 2. Chain-cache attestations (authoritative when available)
@@ -491,7 +493,7 @@ function enrichProfile(row) {
           if (!att.platform || att.platform === 'review') continue;
           const platform = att.platform === 'twitter' ? 'x' : att.platform;
           if (vMap[platform]) continue;
-          // [P0 FIX Apr 5] Skip chain attestations with no real DB identifier — old attestations leak
+          // [P0 FIX Apr 5] Skip chain attestations with no real DB identifier -- old attestations leak
           const dbInfo = dbVerifs[platform];
           if (!dbInfo || !dbInfo.identifier || dbInfo.identifier === platform) continue;
           const displayId = dbInfo.identifier;
@@ -508,11 +510,14 @@ function enrichProfile(row) {
       // 3. DB fallback for platforms not yet on-chain
       for (const [plat, info] of Object.entries(dbVerifs)) {
         if (!vMap[plat]) {
+          // Parse stored proof JSON for SATP links etc
+          let parsedProof = {};
+          try { parsedProof = typeof info.proof === 'string' ? JSON.parse(info.proof) : (info.proof || {}); } catch {}
           vMap[plat] = {
             verified: true,
             address: info.identifier || plat,
             identifier: info.identifier || plat,
-            proof: {},
+            proof: parsedProof,
             verified_at: info.verifiedAt || null,
             source: 'db',
           };
@@ -527,13 +532,28 @@ function enrichProfile(row) {
       positive: reviewStats.positive,
       negative: reviewStats.negative,
     },
-    trust_score: v3 ? { overall_score: v3.reputationScore > 10000 ? Math.round(v3.reputationScore / 1000) : v3.reputationScore, level: ["Unverified","Registered","Verified","Established","Trusted","Sovereign"][v3.verificationLevel] || "Unverified", score_breakdown: {}, source: "v3-onchain" } : null, // [CEO-URGENT] on-chain only — no DB fallback
-    // Computed level/tier/score — chain-cache is primary source
-    level: v3 ? v3.verificationLevel : null, // on-chain only
-    tier: v3 ? (["Unclaimed","Registered","Verified","Established","Trusted","Sovereign"][v3.verificationLevel] || v3.verificationLabel || "Unclaimed") : null, // on-chain only
-    score: v3 ? v3.reputationScore : null, // on-chain only
-    verification_level: v3 ? v3.verificationLevel : 0, // on-chain only
-    reputation_score: v3 ? v3.reputationScore : 0, // on-chain only
+    // A1: Single scoring function -- compute from verifications on the fly
+    ...(() => {
+      const dbVerifs = [];
+      try {
+        const _d = getDb();
+        const _rows = _d.prepare("SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ?").all(row.id);
+        dbVerifs.push(..._rows);
+      } catch (_) {}
+      const hasSatpIdentity = dbVerifs.some(v => v.platform === "satp") || !!(v3 && v3.verificationLevel >= 1);
+      const computed = computeScore(dbVerifs, { hasSatpIdentity, claimed: !!row.claimed });
+      return {
+        trust_score: { overall_score: computed.score, level: computed.levelName, score_breakdown: computed.breakdown, source: "compute-score" },
+        level: computed.level,
+        tier: computed.levelName,
+        score: computed.score,
+        trustScore: computed.score,
+        trustBreakdown: (() => { const b = computed.breakdown || {}; return { onChainReputation: b.satp || 0, verifications: (b.solana || 0) + (b.github || 0) + (b.x || 0) + (b.ethereum || 0) + (b.hyperliquid || 0) + (b.polymarket || 0) + (b.discord || 0) + (b.telegram || 0) + (b.moltbook || 0) + (b.agentmail || 0) + (b.website || 0) + (b.domain || 0) + (b.mcp || 0) + (b.a2a || 0), socialProof: 0, completeness: b.completeness || 0, marketplace: 0, tenure: 0 }; })(),
+        verificationLevel: computed.level,
+        verification_level: computed.level,
+        reputation_score: computed.score,
+      };
+    })(),
     // Top-level unclaimed flag for frontend (from metadata)
     unclaimed: (() => { try { if (row.claimed === 0 || row.claimed === "0") return true; const m = typeof row.metadata === "string" ? JSON.parse(row.metadata || "{}") : (row.metadata || {}); return m.unclaimed === true || m.isPlaceholder === true || m.placeholder === true; } catch { return false; } })(),
   };
@@ -547,7 +567,7 @@ function registerRoutes(app) {
     req.url = '/api/register';
     app.handle(req, res);
   });
-  // ── PATCH /api/register — update wallet after registration ──
+  // ── PATCH /api/register -- update wallet after registration ──
   app.patch('/api/register', (req, res) => {
     const { profileId, walletAddress, signature, signedMessage } = req.body;
     if (!profileId || !walletAddress) {
@@ -611,7 +631,7 @@ function registerRoutes(app) {
         const msgBytes = new TextEncoder().encode(signedMessage);
         const valid = nacl.sign.detached.verify(msgBytes, sigBytes, pubkeyBytes);
         if (!valid) {
-          return res.status(401).json({ error: 'invalid wallet signature — proof of ownership failed' });
+          return res.status(401).json({ error: 'invalid wallet signature -- proof of ownership failed' });
         }
       } catch (sigErr) {
         return res.status(400).json({ error: `signature verification error: ${sigErr.message}` });
@@ -720,7 +740,7 @@ function registerRoutes(app) {
       // Disk JSON files were never cleaned on deletion. DB is canonical.
       const profilesDir = path.join(__dirname, '..', 'data', 'profiles');
       const fs = require('fs');
-      // fs.mkdirSync(profilesDir, { recursive: true }); // DISABLED
+      fs.mkdirSync(profilesDir, { recursive: true });
       const profileJson = {
         id,
         name: name.trim(),
@@ -761,9 +781,8 @@ function registerRoutes(app) {
         createdAt: now,
         updatedAt: now,
       };
-      // fs.writeFileSync — DISABLED (disk JSON no longer created)
-      // profileJson kept in memory for scoring below
-      console.log(`[ProfileStore] Registration complete for ${id} (disk JSON disabled, DB is source of truth)`);
+      fs.writeFileSync(path.join(profilesDir, `${id}.json`), JSON.stringify(profileJson, null, 2));
+      console.log(`[ProfileStore] Registration complete for ${id} (DB + disk JSON written)`);
 
       // Bug A fix: Auto-verify Solana wallet on registration
       if (solanaWallet) {
@@ -781,16 +800,17 @@ function registerRoutes(app) {
           const { Keypair } = require('@solana/web3.js');
           const signerKey = JSON.parse(require('fs').readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'));
           const signer = Keypair.fromSecretKey(Uint8Array.from(signerKey));
-          const hashBuf = satpV3.hashAgentId(id);
           try {
-            const { transaction, genesisPda } = await satpV3.client.buildCreateGenesisRecord(
+            const { transaction, genesisPda } = await satpV3.client.buildCreateIdentity(
               signer.publicKey,
-              hashBuf,
-              name.trim().substring(0, 32),
-              (resolvedBio || 'AgentFolio registered agent').substring(0, 256),
-              framework || 'general',
-              resolvedSkills.slice(0, 5).map(s => s.name || s),
-              ''
+              id,
+              {
+                name: name.trim().substring(0, 32),
+                description: (resolvedBio || 'AgentFolio registered agent').substring(0, 256),
+                category: framework || 'general',
+                capabilities: resolvedSkills.slice(0, 5).map(s => s.name || s),
+                metadataUri: ''
+              }
             );
             transaction.sign(signer);
             const sig = await satpV3.client.connection.sendRawTransaction(transaction.serialize());
@@ -801,13 +821,15 @@ function registerRoutes(app) {
             // Retry once after 3s (transient RPC failures are common)
             try {
               await new Promise(r => setTimeout(r, 3000));
-              const { transaction: tx2, genesisPda: pda2 } = await satpV3.client.buildCreateGenesisRecord(
-                signer.publicKey, hashBuf,
-                name.trim().substring(0, 32),
-                (resolvedBio || 'AgentFolio registered agent').substring(0, 256),
-                framework || 'general',
-                resolvedSkills.slice(0, 5).map(s => s.name || s),
-                ''
+              const { transaction: tx2, genesisPda: pda2 } = await satpV3.client.buildCreateIdentity(
+                signer.publicKey, id,
+                {
+                  name: name.trim().substring(0, 32),
+                  description: (resolvedBio || 'AgentFolio registered agent').substring(0, 256),
+                  category: framework || 'general',
+                  capabilities: resolvedSkills.slice(0, 5).map(s => s.name || s),
+                  metadataUri: ''
+                }
               );
               tx2.sign(signer);
               const sig2 = await satpV3.client.connection.sendRawTransaction(tx2.serialize(), { skipPreflight: true, maxRetries: 3 });
@@ -850,7 +872,7 @@ function registerRoutes(app) {
         const level = scoringData.verificationLevel?.name || 'NEW';
         const breakdown = JSON.stringify(scoringData);
         if (validateScoreWrite(id, overallScore, level, 'registration')) {
-          // P0: DB score writes removed — on-chain v3 is sole source
+          // P0: DB score writes removed -- on-chain v3 is sole source
         } else {
           console.error('[SCORE GUARD] Skipped corrupt score write for ' + id + ': score=' + overallScore + ' level=' + level);
         }
@@ -873,7 +895,7 @@ function registerRoutes(app) {
         const notifData = JSON.stringify({
           agent_id: 'agentfolio',
           project_id: 'agentfolio',
-          text: `🆕 New agent registered: ${name.trim()} (agent_${id.replace('agent_','')}) — ${(resolvedSkills || []).slice(0,3).map(s => s.name || s).join(', ') || 'no skills'}${solanaWallet ? ' • wallet: ' + solanaWallet.slice(0,8) + '...' : ''}`,
+          text: `🆕 New agent registered: ${name.trim()} (agent_${id.replace('agent_','')}) -- ${(resolvedSkills || []).slice(0,3).map(s => s.name || s).join(', ') || 'no skills'}${solanaWallet ? ' • wallet: ' + solanaWallet.slice(0,8) + '...' : ''}`,
           color: '#00BFFF',
         });
         const notifReq = http.request({
@@ -887,14 +909,23 @@ function registerRoutes(app) {
         notifReq.end();
       } catch (_) {} // Never fail registration due to notification
 
+      // Auto-verify Solana wallet on registration (Bug A fix)
+      if (solanaWallet) {
+        try {
+          const vId = require("crypto").randomUUID();
+          d.prepare("INSERT OR IGNORE INTO verifications (id, profile_id, platform, identifier, proof, verified_at) VALUES (?, ?, ?, ?, ?, datetime('now'))").run(vId, id, "solana", solanaWallet, JSON.stringify({ source: "registration", wallet: solanaWallet, signatureVerified: !!signature }));
+          console.log("[Register] Auto-verified Solana wallet for " + id);
+        } catch (vErr) { console.error("[Register] Solana auto-verify failed:", vErr.message); }
+      }
+
       res.status(201).json({
         id,
         profileId: id,
         profileUrl: `https://agentfolio.bot/profile/${id}`,
         verifyUrl: `https://agentfolio.bot/verify/${id}`,
         api_key: apiKey,
-        message: 'Profile registered successfully. Save your api_key — it authenticates write operations.',
-        satp: solanaWallet ? 'On-chain identity creation initiated' : 'No wallet provided — on-chain identity skipped',
+        message: 'Profile registered successfully. Save your api_key -- it authenticates write operations.',
+        satp: solanaWallet ? 'On-chain identity creation initiated' : 'No wallet provided -- on-chain identity skipped',
       });
     } catch (e) {
       console.error('Register error:', e.message);
@@ -903,7 +934,7 @@ function registerRoutes(app) {
   });
 
 
-  // ── GET /api/profile/:id/genesis — V3 Genesis Record (on-chain) ──
+  // ── GET /api/profile/:id/genesis -- V3 Genesis Record (on-chain) ──
   app.get('/api/profile/:id/genesis', async (req, res) => {
     if (!v3ScoreService) return res.json({ error: 'V3 score service not available', genesis: null });
     try {
@@ -934,7 +965,7 @@ function registerRoutes(app) {
           } catch {}
         }
       }
-      // [CEO Apr 4] DB score override REMOVED — on-chain is sole authority for display
+      // [CEO Apr 4] DB score override REMOVED -- on-chain is sole authority for display
 
 
 
@@ -960,7 +991,7 @@ function registerRoutes(app) {
   });
 
 
-  // ── POST /api/satp/genesis/prepare — User-paid Genesis Record (returns unsigned TX) ──
+  // ── POST /api/satp/genesis/prepare -- User-paid Genesis Record (returns unsigned TX) ──
   app.post('/api/satp/genesis/prepare', async (req, res) => {
     if (!satpV3) return res.status(503).json({ error: 'SATP V3 SDK not available' });
     try {
@@ -978,7 +1009,6 @@ function registerRoutes(app) {
       const skills = profile?.skills ? (typeof profile.skills === 'string' ? JSON.parse(profile.skills) : profile.skills).slice(0, 5).map(s => s.name || s) : [];
       const category = profile?.framework || 'general';
 
-      const hashBuf = satpV3.hashAgentId(agentId);
       const { PublicKey } = require('@solana/web3.js');
       const payerKey = new PublicKey(payer);
 
@@ -988,8 +1018,9 @@ function registerRoutes(app) {
       const deployerKey = JSON.parse(fs.readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'));
       const deployer = Keypair.fromSecretKey(Uint8Array.from(deployerKey));
 
-      const { transaction, genesisPda } = await satpV3.client.buildCreateGenesisRecord(
-        deployer.publicKey, hashBuf, name, bio || 'AgentFolio registered agent', category, skills, ''
+      const { transaction, genesisPda } = await satpV3.client.buildCreateIdentity(
+        deployer.publicKey, agentId,
+        { name, description: bio || 'AgentFolio registered agent', category, capabilities: skills, metadataUri: '' }
       );
 
       // User pays the transaction fee + rent
@@ -1070,72 +1101,40 @@ function registerRoutes(app) {
       return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: {} /* [P0] chain-cache only, no DB reads */, portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: _md, nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, _dbLevel: dbLevel || null, claimed, unclaimed };
     });
 
-    // V3 on-chain score overlay — authoritative
-    if (v3ScoreService) {
-      try {
-        // P0 FIX: Use display names for V3 lookup (chain records use names, not DB IDs)
-        const nameIds = profiles.map(p => p.name);
-        const dbIds = profiles.map(p => p.id);
-        const v3ByName = await v3ScoreService.getV3Scores(nameIds);
-        const v3ById = await v3ScoreService.getV3Scores(dbIds);
-        for (const p of profiles) {
-          // Try name first (chain uses display names), then DB ID
-          const v3 = v3ByName.get(p.name) || v3ById.get(p.id);
-          if (v3 && v3.verificationLevel > 0) {
-            p.v3 = {
-              level: v3.verificationLevel,
-              score: v3.reputationScore,
-              reputationScore: v3.reputationScore,
-              reputationPct: v3.reputationPct,
-              verificationLevel: v3.verificationLevel,
-              verificationLabel: v3.verificationLabel,
-              isBorn: v3.isBorn,
-            };
-            if (v3.reputationScore > (p.trust_score || 0)) { p.trust_score = v3.reputationScore; }
-          }
-        }
-        // REMOVED: // DB enrichment fallback for agents with chain defaults (level=0)
-        // REMOVED: const levelMap = { 'NEW': 0, 'UNVERIFIED': 0, 'REGISTERED': 1, 'BASIC': 2, 'VERIFIED': 2, 'ESTABLISHED': 3, 'TRUSTED': 4, 'SOVEREIGN': 5 };
-        // REMOVED: for (const p of profiles) {
-        // REMOVED: if (!p.v3 || !p.v3.level) {
-        // REMOVED: try {
-        // REMOVED: const d = getDb();
-        // REMOVED: let row = d.prepare('SELECT verification FROM profiles WHERE id = ?').get(p.id);
-        // REMOVED: if (row && row.verification) {
-        // REMOVED: const vData = typeof row.verification === 'string' ? JSON.parse(row.verification) : row.verification;
-        // REMOVED: // level can be a string label ("SOVEREIGN") or number
-        // REMOVED: const numLevel = typeof vData.level === 'number' ? vData.level : (levelMap[(vData.level || '').toUpperCase()] ?? 0);
-        // REMOVED: const numScore = vData.score || vData.reputationScore || 0;
-        // REMOVED: if (numLevel > 0 || numScore > 0) {
-        // REMOVED: const labels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
-        // REMOVED: p.v3 = {
-        // REMOVED: level: numLevel,
-        // REMOVED: score: numScore,
-        // REMOVED: reputationScore: numScore,
-        // REMOVED: reputationPct: (numScore / 100).toFixed(2),
-        // REMOVED: verificationLevel: numLevel,
-        // REMOVED: verificationLabel: labels[numLevel] || 'Unknown',
-        // REMOVED: isBorn: vData.isBorn || false,
-        // REMOVED: };
-        // REMOVED: if (numScore > (p.trust_score || 0)) {
-        // REMOVED: p.trust_score = numScore;
-        // REMOVED: }
-        // REMOVED: }
-        // REMOVED: }
-        // REMOVED: } catch (_) {}
-        // REMOVED: }
-        // REMOVED: }
-        // Re-sort by trust_score DESC after V3 overlay (DB sort may be stale)
-        profiles.sort((a, b) => (b.trust_score || 0) - (a.trust_score || 0));
-      } catch (e) {
-        console.warn('[V3 Scores] Batch profiles warm-up failed:', e.message);
+    // A1: Compute scores for all profiles using computeScore
+    {
+      const d = getDb();
+      const allVerifs = d.prepare('SELECT profile_id, platform, identifier FROM verifications').all();
+      const verifMap = {};
+      for (const v of allVerifs) {
+        if (!verifMap[v.profile_id]) verifMap[v.profile_id] = [];
+        verifMap[v.profile_id].push(v);
+      }
+      for (const p of profiles) {
+        const verifs = verifMap[p.id] || [];
+        const hasSatp = verifs.some(v => v.platform === 'satp');
+        const computed = computeScore(verifs, { hasSatpIdentity: hasSatp, claimed: !!p.claimed });
+        p.trust_score = computed.score;
+        p.score = computed.score;
+        p.level = computed.level;
+        p.tier = computed.levelName;
+        p.verificationLevel = computed.level;
+        p.v3 = {
+          level: computed.level,
+          score: computed.score,
+          reputationScore: computed.score,
+          reputationPct: '0.00',
+          verificationLevel: computed.level,
+          verificationLabel: computed.levelName,
+          isBorn: false,
+        };
       }
     }
-
-    // [FIX 3] Chain-cache score overlay REMOVED — V3 genesis is sole score source
+    // Re-sort by score DESC
+    profiles.sort((a, b) => (b.trust_score || 0) - (a.trust_score || 0));
 
     // P0-13: Paginate after V3 overlay sort
-    // [FIX 3] Second chain-cache overlay REMOVED — V3 genesis only
+    // [FIX 3] Second chain-cache overlay REMOVED -- V3 genesis only
 
     // P0 FIX: Promote v3/chain-cache level+score to top-level fields for directory consumption
     const levelLabels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
@@ -1198,47 +1197,28 @@ function registerRoutes(app) {
 
     const enriched = enrichProfile(safe);
 
-    // ON-CHAIN = TRUTH: Fetch genesis data via internal HTTP call to our own genesis endpoint
-    // This endpoint has the correct deserialization + DB enrichment for on-chain defaults
+    // A1: Score already computed by enrichProfile via computeScore — no genesis override needed
     if (enriched) {
+      // Fetch genesis data for display purposes only (on-chain metadata, NOT for scoring)
       try {
         const genesisUrl = "http://localhost:" + (process.env.PORT || 3000) + "/api/profile/" + encodeURIComponent(row.id) + "/genesis";
         const genesisResp = await fetch(genesisUrl);
         const genesisJson = await genesisResp.json();
         const v3Data = genesisJson && genesisJson.genesis ? genesisJson.genesis : genesisJson;
         const hasGenesis = v3Data && v3Data.agentName && !v3Data.error;
-
         if (hasGenesis) {
           enriched.onchain = v3Data;
-          // ON-CHAIN is authoritative for scores (CEO directive 2026-04-04)
-          const levelLabels = ["Unverified","Registered","Verified","Established","Trusted","Sovereign"];
-          enriched.trust_score = { source: "on-chain", reputationScore: v3Data.reputationScore, verificationLevel: v3Data.verificationLevel, isBorn: v3Data.isBorn, faceImage: v3Data.faceImage || null, authority: v3Data.authority || null };
-          enriched.level = v3Data.verificationLevel;
-          enriched.score = v3Data.reputationScore;
-          enriched.levelName = v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || "Unknown";
-          enriched.verificationLevel = v3Data.verificationLevel;
-          enriched.verification_level = v3Data.verificationLevel;
-          enriched.reputation_score = v3Data.reputationScore;
-          enriched.tier = v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || "Unknown";
           enriched.isBorn = v3Data.isBorn;
           if (v3Data.faceImage) enriched.faceImage = v3Data.faceImage;
           if (v3Data.authority) enriched.walletAddress = v3Data.authority;
         } else {
-          // P0: DB fallback REMOVED — on-chain v3 only. Display 0 if no on-chain data.
           enriched.onchain = null;
-          enriched.trust_score = { source: "none", overall_score: 0, level: "Unverified" };
-          enriched.score = 0;
-          enriched.level = 0;
-          enriched.levelName = "Unverified";
-          enriched.tier = "Unverified";
-          enriched.verificationLevel = 0;
-          enriched.verification_level = 0;
-          enriched.reputation_score = 0;
           enriched.isBorn = false;
+          // Score/level already set by enrichProfile -> computeScore — no override
         }
       } catch (e) {
         enriched.onchain = null;
-        enriched.trust_score = { source: "error", message: e.message };
+        // Score/level already set by enrichProfile -> computeScore — no override on error
       }
     }
     res.json(enriched);
@@ -1358,7 +1338,7 @@ function registerRoutes(app) {
     res.json({ endorsements: items, total: items.length });
   });
 
-  // ── POST /api/profile/:id/reviews/challenge — Get signing challenge ──
+  // ── POST /api/profile/:id/reviews/challenge -- Get signing challenge ──
   app.post('/api/profile/:id/reviews/challenge', (req, res) => {
     const { wallet } = req.body;
     if (!wallet) return res.status(400).json({ error: 'wallet (Solana address) required' });
@@ -1385,7 +1365,7 @@ function registerRoutes(app) {
     res.json({ nonce, message, expiresIn: REVIEW_CHALLENGE_TTL_MS / 1000 });
   });
 
-  // ── POST /api/profile/:id/reviews — Submit review (AUTHENTICATED) ──
+  // ── POST /api/profile/:id/reviews -- Submit review (AUTHENTICATED) ──
   app.post('/api/profile/:id/reviews', (req, res) => {
     const { wallet, signature, nonce, rating, title, comment, job_id } = req.body;
 
@@ -1433,7 +1413,7 @@ function registerRoutes(app) {
         sigValid = nacl.sign.detached.verify(msgBytes, sigBytes, pubkey.toBytes());
       } catch (sigErr) {
         console.error('[Reviews Auth] Signature verification failed:', sigErr.message);
-        sigValid = false; // Reject invalid signatures — no fallback
+        sigValid = false; // Reject invalid signatures -- no fallback
       }
 
       if (!sigValid) {
@@ -1492,7 +1472,7 @@ function registerRoutes(app) {
   });
 
 
-  // GET /api/wallet/lookup/:addr — find profile by Solana wallet (frontend format)
+  // GET /api/wallet/lookup/:addr -- find profile by Solana wallet (frontend format)
   app.get('/api/wallet/lookup/:addr', (req, res) => {
     const wallet = req.params.addr;
     if (!wallet) return res.status(400).json({ found: false, error: 'wallet address required' });
@@ -1520,7 +1500,7 @@ function registerRoutes(app) {
     }
   });
 
-  // GET /api/profile-by-wallet?wallet=<address> — find profile by Solana wallet
+  // GET /api/profile-by-wallet?wallet=<address> -- find profile by Solana wallet
   app.get('/api/profile-by-wallet', (req, res) => {
     const { wallet } = req.query;
     if (!wallet) return res.status(400).json({ error: 'wallet required' });
@@ -1534,7 +1514,7 @@ function registerRoutes(app) {
       const profiles = db.prepare('SELECT id, name, wallets FROM profiles').all();
       for (const p of profiles) {
         try {
-          // [P0 FIX] Check wallets column only — no DB verification_data
+          // [P0 FIX] Check wallets column only -- no DB verification_data
           const w = JSON.parse(p.wallets || '{}');
           if (w.solana === wallet) {
             return res.json({ id: p.id, name: p.name });
@@ -1546,9 +1526,44 @@ function registerRoutes(app) {
       return res.status(500).json({ error: e.message });
     }
   });
+
+  // B5: /api/search endpoint
+  app.get("/api/search", (req, res) => {
+    const q = (req.query.q || "").trim();
+    if (!q) return res.json({ results: [], total: 0 });
+    const lim = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+    const d = getDb();
+    const pattern = "%" + q + "%";
+    try {
+      const rows = d.prepare(
+        "SELECT id, name, description, avatar, framework FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL) AND (name LIKE ? OR description LIKE ? OR framework LIKE ? OR id LIKE ?) ORDER BY created_at DESC LIMIT ?"
+      ).all("active", pattern, pattern, pattern, pattern, lim);
+      res.json({ results: rows, total: rows.length, query: q });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
 }
 
 // addVerification IS the unified onVerificationComplete hook
 // Every verification handler calls it → DB persist + V3 on-chain update + memo attestation + recompute
 const onVerificationComplete = addVerification;
-module.exports = { registerRoutes, getDb, addVerification, onVerificationComplete, addActivity };
+module.exports = { registerRoutes, getDb, addVerification, onVerificationComplete, addActivity, deleteProfile };
+
+// Profile deletion -- also cleans disk JSON
+function deleteProfile(profileId) {
+  const d = getDb();
+  // Delete from all related tables
+  const tables = ['verifications', 'attestations', 'satp_attestations', 'satp_trust_scores', 'claims', 'claim_tokens', 'endorsements', 'reviews', 'activity', 'activity_feed'];
+  for (const table of tables) {
+    try {
+      const col = table === 'endorsements' ? 'from_profile_id' : 'profile_id';
+      d.prepare(`DELETE FROM ${table} WHERE ${col} = ? OR profile_id = ?`).run(profileId, profileId);
+    } catch {}
+  }
+  d.prepare('DELETE FROM profiles WHERE id = ?').run(profileId);
+  // Clean disk JSON
+  const jsonPath = require('path').join(__dirname, '..', 'data', 'profiles', profileId + '.json');
+  try { require('fs').unlinkSync(jsonPath); } catch {}
+  return { deleted: true, id: profileId };
+}

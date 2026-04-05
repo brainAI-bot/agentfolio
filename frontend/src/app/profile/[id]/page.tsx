@@ -21,6 +21,8 @@ import { SATPOnChainSection } from "@/components/SATPOnChainSection";
 import { V3ReputationCard } from "@/components/V3ReputationCard";
 import Link from "next/link";
 import { ClaimButton } from "@/components/ClaimButton";
+import { OwnerActions } from "@/components/OwnerActions";
+import { ProfileActions } from "@/components/ProfileActions";
 import { WriteReviewForm } from "./WriteReviewForm";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
@@ -128,6 +130,14 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     genesis.verificationLevel = v3Reputation.verificationLevel;
     genesis.verificationLabel = ["Unverified","Registered","Verified","Established","Trusted","Sovereign"][v3Reputation.verificationLevel] || genesis.verificationLabel;
     genesis.isBorn = v3Reputation.isBorn ?? genesis.isBorn;
+  }
+
+  // BUG 2 FIX: Use compute-score (from API enrichment) as the canonical display score.
+  // The agent.trustScore comes from compute-score (A1 architecture) which accounts for
+  // all verifications. V3 on-chain may lag behind or be 0. Compute-score is authoritative.
+  const displayScore = agent.trustScore || 0;
+  if (genesis) {
+    genesis.reputationScore = Math.max(genesis.reputationScore || 0, displayScore);
   }
   let githubStats: any = null;
   if (v?.github?.verified && v.github.username) {
@@ -292,20 +302,10 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
 
             {/* Actions */}
             <div className="flex gap-3">
-              {agent.unclaimed ? (
-                <ClaimButton profileId={agent.id} profileName={agent.name} />
-              ) : (
-              <a
-                href="/marketplace"
-                className="px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider inline-block"
-                style={{ fontFamily: "var(--font-mono)", background: "var(--accent)", color: "#fff", textDecoration: "none" }}
-              >
-                Hire Agent
-              </a>
-              )}
+              <ProfileActions profileId={agent.id} profileWallet={agent.walletAddress} profileWallets={[(agent as any).wallets?.solana, (agent as any).wallet, agent.walletAddress].filter(Boolean)} unclaimed={agent.unclaimed} />
               {v.satp?.verified || v.solana?.verified ? (
                 <a
-                  href={`https://explorer.solana.com/address/${v.solana?.address || ""}`}
+                  href={v.satp?.identityPDA ? `https://solscan.io/account/${v.satp.identityPDA}` : `https://explorer.solana.com/address/${v.solana?.address || ""}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider inline-block"
@@ -405,7 +405,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                   else if (t === "solana" && vEntry?.address) detail = `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)}`;
                   else if (t === "ethereum" && vEntry?.address) detail = `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)}`;
                   else if (t === "hyperliquid" && vEntry?.address) detail = vEntry?.volume && vEntry?.volume !== "$0" ? `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)} · ${vEntry?.volume} vol` : `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)} · Verified ✅`;
-                  else if (t === "satp" && vEntry?.did) detail = `${vEntry?.did.slice(0, 24)}...`;
+                  else if (t === "satp") detail = vEntry?.identifier ? `${vEntry.identifier.slice(0, 8)}...${vEntry.identifier.slice(-4)} ⛓️` : vEntry?.did ? `${vEntry.did.slice(0, 24)}...` : "On-Chain Identity ⛓️";
                   else if (t === "x" && vEntry?.handle) detail = `@${vEntry?.handle.replace("@","")}`;
                   else if (t === "agentmail" && vEntry?.email) detail = vEntry?.email;
                   else if (t === "moltbook" && vEntry?.username) detail = `@${vEntry?.username}`;
@@ -431,7 +431,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                       color={colorMap[t]}
                       href={
                         chainTx?.solscanUrl ? chainTx.solscanUrl :
-                        t === "satp" && (v as any)?.solana?.address ? `https://explorer.solana.com/address/${(v as any).solana.address}` :
+                        t === "satp" && ((v as any)?.satp?.proof?.identityPDA || (v as any)?.satp?.identifier || (v as any)?.solana?.address) ? `https://solscan.io/account/${(v as any)?.satp?.proof?.identityPDA || (v as any)?.satp?.identifier || (v as any)?.solana?.address}` :
                         t === "x" && vEntry?.handle ? `https://x.com/${vEntry?.handle.replace("@","")}` :
                         t === "moltbook" && vEntry?.username ? `https://moltbook.com/u/${vEntry?.username}` :
                         t === "website" && vEntry?.url ? vEntry?.url :
