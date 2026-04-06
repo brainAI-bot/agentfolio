@@ -552,6 +552,9 @@ function enrichProfile(row) {
         verificationLevel: computed.level,
         verification_level: computed.level,
         reputation_score: computed.score,
+        levelName: computed.levelName,
+        verificationBadge: computed.badge,
+        verificationLevelName: computed.levelName,
       };
     })(),
     // Top-level unclaimed flag for frontend (from metadata)
@@ -785,13 +788,16 @@ function registerRoutes(app) {
       console.log(`[ProfileStore] Registration complete for ${id} (DB + disk JSON written)`);
 
       // Bug A fix: Auto-verify Solana wallet on registration
+      console.log(`[ProfileStore] Auto-verify check for ${id}: solanaWallet="${solanaWallet}"`);
       if (solanaWallet) {
         try {
           addVerification(id, "solana", solanaWallet, { method: "registration", auto: true });
           console.log(`[ProfileStore] Auto-verified Solana wallet for ${id}: ${solanaWallet}`);
         } catch (avErr) {
-          console.error(`[ProfileStore] Solana auto-verify failed for ${id}:`, avErr.message);
+          console.error(`[ProfileStore] Solana auto-verify FAILED for ${id}:`, avErr.message, avErr.stack);
         }
+      } else {
+        console.warn(`[ProfileStore] No solana wallet for ${id} — skipping auto-verify`);
       }
 
       // Fire-and-forget: create SATP V3 Genesis Record (skip if user will pay)
@@ -1210,7 +1216,7 @@ function registerRoutes(app) {
           enriched.onchain = v3Data;
           enriched.isBorn = v3Data.isBorn;
           if (v3Data.faceImage) enriched.faceImage = v3Data.faceImage;
-          if (v3Data.authority) enriched.walletAddress = v3Data.authority;
+          if (v3Data.authority && !enriched.walletAddress) enriched.walletAddress = v3Data.authority;
         } else {
           enriched.onchain = null;
           enriched.isBorn = false;
