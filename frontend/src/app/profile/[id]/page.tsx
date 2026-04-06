@@ -305,7 +305,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
               <ProfileActions profileId={agent.id} profileWallet={agent.walletAddress} profileWallets={[(agent as any).wallets?.solana, (agent as any).wallet, agent.walletAddress].filter(Boolean)} unclaimed={agent.unclaimed} />
               {v.satp?.verified || v.solana?.verified ? (
                 <a
-                  href={v.satp?.identityPDA ? `https://solscan.io/account/${v.satp.identityPDA}` : `https://explorer.solana.com/address/${v.solana?.address || ""}`}
+                  href={(v.satp as any)?.proof?.identityPDA ? `https://solscan.io/account/${(v.satp as any).proof.identityPDA}` : `https://explorer.solana.com/address/${v.solana?.address || ""}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider inline-block"
@@ -322,15 +322,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                   View SATP
                 </a>
               )}
-              {!agent.unclaimed && (
-              <Link
-                href={`/profile/${agent.id}/edit`}
-                className="px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider inline-block"
-                style={{ fontFamily: "var(--font-mono)", background: "transparent", color: "var(--text-secondary)", border: "1px solid var(--border)", textDecoration: "none" }}
-              >
-                Edit Profile
-              </Link>
-              )}
+              {/* Edit Profile moved to ProfileActions (owner-only) */}
             </div>
           </div>
 
@@ -405,7 +397,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                   else if (t === "solana" && vEntry?.address) detail = `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)}`;
                   else if (t === "ethereum" && vEntry?.address) detail = `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)}`;
                   else if (t === "hyperliquid" && vEntry?.address) detail = vEntry?.volume && vEntry?.volume !== "$0" ? `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)} · ${vEntry?.volume} vol` : `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)} · Verified ✅`;
-                  else if (t === "satp") detail = vEntry?.identifier ? `${vEntry.identifier.slice(0, 8)}...${vEntry.identifier.slice(-4)} ⛓️` : vEntry?.did ? `${vEntry.did.slice(0, 24)}...` : "On-Chain Identity ⛓️";
+                  else if (t === "satp") detail = vEntry?.did ? `${vEntry.did}` : "On-Chain Identity ⛓️";
                   else if (t === "x" && vEntry?.handle) detail = `@${vEntry?.handle.replace("@","")}`;
                   else if (t === "agentmail" && vEntry?.email) detail = vEntry?.email;
                   else if (t === "moltbook" && vEntry?.username) detail = `@${vEntry?.username}`;
@@ -431,7 +423,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                       color={colorMap[t]}
                       href={
                         chainTx?.solscanUrl ? chainTx.solscanUrl :
-                        t === "satp" && ((v as any)?.satp?.proof?.identityPDA || (v as any)?.satp?.identifier || (v as any)?.solana?.address) ? `https://solscan.io/account/${(v as any)?.satp?.proof?.identityPDA || (v as any)?.satp?.identifier || (v as any)?.solana?.address}` :
+                        t === "satp" ? `https://agentfolio.bot/api/satp/score/${encodeURIComponent(id)}` :
                         t === "x" && vEntry?.handle ? `https://x.com/${vEntry?.handle.replace("@","")}` :
                         t === "moltbook" && vEntry?.username ? `https://moltbook.com/u/${vEntry?.username}` :
                         t === "website" && vEntry?.url ? vEntry?.url :

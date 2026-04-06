@@ -1388,7 +1388,7 @@ app.get('/profile/:id', async (req, res) => {
           </div>` : ''}
           <div style="flex:1;min-width:120px;background:#161b22;border:1px solid #21262d;border-radius:6px;padding:8px 12px">
             <div style="font-size:.75em;color:#8b949e">Authority</div>
-            <div style="font-size:.85em;font-weight:600;color:#8b949e;font-family:monospace">${esc(v3Rep.authority ? v3Rep.authority.slice(0,6) + '...' + v3Rep.authority.slice(-4) : '—')}</div>
+            <div style="font-size:.85em;font-weight:600;color:#8b949e;font-family:monospace">${esc(v3Rep.authority === '4St74qSyzuGyV2TA9gxej9GvXG2TgVSTvp1HEpzJbwcP' ? 'AgentFolio Platform' : (v3Rep.authority ? v3Rep.authority.slice(0,6) + '...' + v3Rep.authority.slice(-4) : '—'))}</div>
           </div>
           ${v3Rep.faceImage ? `<div style="flex:1;min-width:120px;background:#161b22;border:1px solid #21262d;border-radius:6px;padding:8px 12px">
             <div style="font-size:.75em;color:#8b949e">Face NFT</div>

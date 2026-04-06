@@ -214,6 +214,29 @@ function registerSimpleRoutes(app, getDb) {
         })();
       }
 
+      // Bug 1 Fix: Auto-verify Solana wallet on simple registration
+      if (walletAddress) {
+        try {
+          const vId = require('crypto').randomUUID();
+          d.prepare("INSERT OR IGNORE INTO verifications (id, profile_id, platform, identifier, proof, verified_at) VALUES (?, ?, ?, ?, ?, datetime('now'))").run(
+            vId, id, 'solana', walletAddress, JSON.stringify({ source: 'simple-registration', wallet: walletAddress })
+          );
+          console.log('[SimpleRegister] Auto-verified Solana wallet for', id);
+          
+          // Bug 5 Fix: Call postVerificationHook for recompute_score
+          try {
+            const { postVerificationHook } = require('../../post-verification-hook');
+            postVerificationHook(id, 'solana', walletAddress, { source: 'simple-registration', wallet: walletAddress }).catch(e => 
+              console.warn('[SimpleRegister] Post-verification hook failed:', e.message)
+            );
+          } catch (hookErr) {
+            console.warn('[SimpleRegister] Post-verification hook not available:', hookErr.message);
+          }
+        } catch (vErr) {
+          console.error('[SimpleRegister] Solana auto-verify failed:', vErr.message);
+        }
+      }
+
       res.status(201).json({
         id,
         api_key: apiKey,

@@ -48,8 +48,18 @@ function registerRestoredRoutes(app) {
   } catch (_) {}
 
   // On-chain helpers
-  let postVerificationMemo = async () => null;
-  try { postVerificationMemo = require('../lib/memo-attestation').postVerificationMemo; } catch (_) {}
+  let _rawPostVerificationMemo = async () => null;
+  let postVerificationMemo = async (profileId, platform, proofObj) => {
+    const memoResult = await _rawPostVerificationMemo(profileId, platform, proofObj);
+    // Also create V3 on-chain attestation + trigger score recompute
+    try {
+      if (postVerificationAttestation) {
+        postVerificationAttestation(profileId, platform, proofObj).catch(e => console.warn('[SATP V3 Bridge] attestation failed:', e.message));
+      }
+    } catch (_) {}
+    return memoResult;
+  };
+  try { _rawPostVerificationMemo = require('../lib/memo-attestation').postVerificationMemo; } catch (_) {}
   let postVerificationOnchain = async () => null, postReputationOnchain = async () => null;
   try {
     const vo = require('../lib/verification-onchain');
@@ -59,7 +69,15 @@ function registerRestoredRoutes(app) {
   let calculateReputation = () => ({ score: 0 });
   try { calculateReputation = require('../lib/reputation').calculateReputation; } catch (_) {}
 
+  // V3 SATP attestation bridge — creates on-chain attestations + triggers score recompute
+  let postVerificationAttestation = async () => null;
+  try { postVerificationAttestation = require('../lib/satp-verification-bridge').postVerificationAttestation; } catch (e) { console.warn('[Verify] V3 bridge not available:', e.message); }
+
   const logger = { info: console.log, error: console.error, warn: console.warn };
+
+  // Bug 5 Fix: Import postVerificationHook for on-chain recompute_score
+  let postVerificationHookFn = null;
+  try { postVerificationHookFn = require('../post-verification-hook').postVerificationHook; } catch (e) { console.warn('[RestoredRoutes] postVerificationHook not available:', e.message); }
 
   function postVerificationOnchainForProfile(profile, platform, proofData) {
     const wallet = profile?.wallets?.solana;
@@ -292,6 +310,8 @@ function registerRestoredRoutes(app) {
           profile.trustScore = trust.trustScore;
           profile.tier = trust.tier;
           dbSaveProfileFn(profile);
+          // Bug 5: trigger recompute_score
+          if (postVerificationHookFn) postVerificationHookFn(profileId, verifyChain, publicKey, { method: 'headless-sign' }).catch(() => {});
           addActivity(profileId, 'verification_wallet', { chain: verifyChain, address: publicKey.slice(0, 8) + '...' + publicKey.slice(-4), method: 'headless' }, DATA_DIR);
           triggerWebhooks(WEBHOOK_EVENTS.VERIFICATION_SOLANA, { agentId: profileId, platform: verifyChain, address: publicKey, method: 'headless-sign' }).catch(() => {});
         }
@@ -440,6 +460,8 @@ function registerRestoredRoutes(app) {
               dbSaveProfileFn(updatedProfile);
             }
           }).catch(() => {});
+          // Bug 5: trigger recompute_score
+          if (postVerificationHookFn) postVerificationHookFn(result.profileId, 'telegram', result.telegramHandle, { method: 'telegram-code' }).catch(() => {});
           postVerificationOnchainForProfile(updatedProfile, 'telegram', { handle: result.telegramHandle });
         }
       }
@@ -530,6 +552,8 @@ function registerRestoredRoutes(app) {
               dbSaveProfileFn(updatedProfile);
             }
           }).catch(() => {});
+          // Bug 5: trigger recompute_score
+          if (postVerificationHookFn) postVerificationHookFn(result.profileId, 'discord', result.discordUser.username, { method: 'discord-oauth' }).catch(() => {});
           postVerificationOnchainForProfile(updatedProfile, 'discord', { username: result.discordUser.username });
         }
         res.redirect(`/profile/${result.profileId}?discord_verified=1`);
@@ -664,6 +688,8 @@ function registerRestoredRoutes(app) {
         dbSaveProfileFn(profile);
         addActivityAndBroadcast(profileId, 'verification_moltbook', { username: moltbookUsername, karma: result.karma || 0 }, DATA_DIR);
         postVerificationMemo(profileId, 'moltbook', { username: moltbookUsername, karma: result.karma }).catch(() => {});
+        // Bug 5: trigger recompute_score
+        if (postVerificationHookFn) postVerificationHookFn(profileId, 'moltbook', moltbookUsername, { method: 'moltbook-bio' }).catch(() => {});
         postVerificationOnchainForProfile(profile, 'moltbook', { username: moltbookUsername });
       }
       res.status(result.verified ? 200 : 400).json(result);
@@ -687,6 +713,8 @@ function registerRestoredRoutes(app) {
         dbSaveProfileFn(profile);
         addActivityAndBroadcast(profileId, 'verification_mcp', { url: mcpUrl, method: result.method, tools: result.toolCount || 0 }, DATA_DIR);
         postVerificationMemo(profileId, 'mcp', { url: mcpUrl }).catch(() => {});
+        // Bug 5: trigger recompute_score
+        if (postVerificationHookFn) postVerificationHookFn(profileId, 'mcp', mcpUrl, { method: 'mcp-endpoint' }).catch(() => {});
         postVerificationOnchainForProfile(profile, 'mcp', { url: mcpUrl });
       }
       res.status(result.verified ? 200 : 400).json(result);
@@ -710,6 +738,8 @@ function registerRestoredRoutes(app) {
         dbSaveProfileFn(profile);
         addActivityAndBroadcast(profileId, 'verification_a2a', { url: agentUrl, agentName: result.agentName }, DATA_DIR);
         postVerificationMemo(profileId, 'a2a', { url: agentUrl }).catch(() => {});
+        // Bug 5: trigger recompute_score
+        if (postVerificationHookFn) postVerificationHookFn(profileId, 'a2a', agentUrl, { method: 'a2a-card' }).catch(() => {});
         postVerificationOnchainForProfile(profile, 'a2a', { url: agentUrl });
       }
       res.status(result.verified ? 200 : 400).json(result);
@@ -747,6 +777,8 @@ function registerRestoredRoutes(app) {
           dbSaveProfileFn(profile);
           addActivityAndBroadcast(result.profileId, 'verification_website', { url: result.websiteUrl }, DATA_DIR);
           postVerificationMemo(result.profileId, 'website', { url: result.websiteUrl }).catch(() => {});
+          // Bug 5: trigger recompute_score
+          if (postVerificationHookFn) postVerificationHookFn(result.profileId, 'website', result.websiteUrl, { method: 'website-dns' }).catch(() => {});
           postVerificationOnchainForProfile(profile, 'website', { url: result.websiteUrl });
         }
       }
