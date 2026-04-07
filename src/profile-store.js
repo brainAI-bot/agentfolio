@@ -87,7 +87,7 @@ try {
 }
 
 const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR ||
-  '/home/ubuntu/.config/solana/brainforge-personal.json';
+  '/home/ubuntu/agentfolio/config/platform-keypair.json';
 const SATP_NETWORK = process.env.SATP_NETWORK || 'mainnet';
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'agentfolio.db');
@@ -564,12 +564,6 @@ function enrichProfile(row) {
 
 function registerRoutes(app) {
   // ── POST /api/register ──────────────────────────────────────────
-  // Alias: /api/register/simple → same as /api/register
-  app.post('/api/register/simple', registerLimiter, (req, res) => {
-    // Forward to the same handler
-    req.url = '/api/register';
-    app.handle(req, res);
-  });
   // ── PATCH /api/register -- update wallet after registration ──
   app.patch('/api/register', (req, res) => {
     const { profileId, walletAddress, signature, signedMessage } = req.body;
@@ -605,6 +599,12 @@ function registerRoutes(app) {
         const wallets = JSON.parse(row.wallets || '{}');
         wallets.solana = walletAddress;
         db.prepare('UPDATE profiles SET wallets = ? WHERE id = ?').run(JSON.stringify(wallets), profileId);
+      }
+      try {
+        addVerification(profileId, "solana", walletAddress, { method: "register-patch", auto: true });
+        console.log(`[Register PATCH] Auto-verified Solana wallet for ${profileId}: ${walletAddress}`);
+      } catch (vErr) {
+        console.error(`[Register PATCH] Solana auto-verify failed for ${profileId}:`, vErr.message, vErr.stack);
       }
       res.json({ ok: true, wallet: walletAddress });
     } catch (e) {
