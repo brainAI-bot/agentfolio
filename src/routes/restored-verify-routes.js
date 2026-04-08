@@ -47,82 +47,12 @@ function registerRestoredRoutes(app) {
     triggerWebhooks = wh.triggerWebhooks || (async () => {});
   } catch (_) {}
 
-  // On-chain helpers
-  let _rawPostVerificationMemo = async () => null;
-  let postVerificationMemo = async (profileId, platform, proofObj) => {
-    const memoResult = await _rawPostVerificationMemo(profileId, platform, proofObj);
-    // Also create V3 on-chain attestation + trigger score recompute
-    try {
-      if (postVerificationAttestation) {
-        postVerificationAttestation(profileId, platform, proofObj).catch(e => console.warn('[SATP V3 Bridge] attestation failed:', e.message));
-      }
-    } catch (_) {}
-    return memoResult;
-  };
-  try { _rawPostVerificationMemo = require('../lib/memo-attestation').postVerificationMemo; } catch (_) {}
-  let postVerificationOnchain = async () => null, postReputationOnchain = async () => null;
-  try {
-    const vo = require('../lib/verification-onchain');
-    postVerificationOnchain = vo.postVerificationOnchain;
-    postReputationOnchain = vo.postReputationOnchain;
-  } catch (_) {}
-  let calculateReputation = () => ({ score: 0 });
-  try { calculateReputation = require('../lib/reputation').calculateReputation; } catch (_) {}
-
-  // V3 SATP attestation bridge — creates on-chain attestations + triggers score recompute
-  let postVerificationAttestation = async () => null;
-  try { postVerificationAttestation = require('../lib/satp-verification-bridge').postVerificationAttestation; } catch (e) { console.warn('[Verify] V3 bridge not available:', e.message); }
-
   const logger = { info: console.log, error: console.error, warn: console.warn };
 
   // Bug 5 Fix: Import postVerificationHook for on-chain recompute_score
   let postVerificationHookFn = null;
   try { postVerificationHookFn = require('../post-verification-hook').postVerificationHook; } catch (e) { console.warn('[RestoredRoutes] postVerificationHook not available:', e.message); }
 
-  function postVerificationOnchainForProfile(profile, platform, proofData) {
-    const wallet = profile?.wallets?.solana;
-    if (!wallet) return;
-    postVerificationOnchain(wallet, platform, proofData).then(result => {
-      if (result) logger.info(`[OnchainVerification] ${platform} for ${profile.id}: ${result.explorerUrl}`);
-    }).catch(() => {});
-    try {
-      const rep = calculateReputation(profile);
-      if (rep && rep.score > 0) {
-        postReputationOnchain(wallet, Math.round(rep.score * 100)).then(result => {
-          if (result) logger.info(`[OnchainReputation] ${profile.id} score=${rep.score}: ${result.explorerUrl}`);
-        }).catch(() => {});
-      }
-    } catch (_) {}
-
-    // V3: Trigger permissionless recompute of reputation + level on-chain
-    try {
-      const { createSATPClient } = require("../satp-client/src");
-      const v3Client = createSATPClient("mainnet");
-      const { Keypair, sendAndConfirmTransaction } = require("@solana/web3.js");
-      const { Connection } = require("@solana/web3.js");
-      const deployerKey = JSON.parse(require("fs").readFileSync(process.env.DEPLOYER_KEYPAIR || "/home/ubuntu/.config/solana/mainnet-deployer.json", "utf8"));
-      const deployer = Keypair.fromSecretKey(new Uint8Array(deployerKey));
-      const conn = new Connection(process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb", "confirmed");
-
-      // Recompute reputation (permissionless)
-      v3Client.buildRecomputeReputation(wallet).then(async tx => {
-        tx.feePayer = deployer.publicKey;
-        tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
-        const sig = await sendAndConfirmTransaction(conn, tx, [deployer]);
-        logger.info(`[V3 Recompute] reputation for ${profile.id}: ${sig}`);
-      }).catch(e => logger.warn(`[V3 Recompute] reputation failed: ${e.message}`));
-
-      // Recompute level (permissionless)
-      v3Client.buildRecomputeLevel(wallet).then(async tx => {
-        tx.feePayer = deployer.publicKey;
-        tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
-        const sig = await sendAndConfirmTransaction(conn, tx, [deployer]);
-        logger.info(`[V3 Recompute] level for ${profile.id}: ${sig}`);
-      }).catch(e => logger.warn(`[V3 Recompute] level failed: ${e.message}`));
-    } catch (v3Err) {
-      logger.warn(`[V3 Recompute] init failed: ${v3Err.message}`);
-    }
-  }
 
   // Verification providers
   const { verifyHyperliquidTrading } = require('../lib/hyperliquid-verify');
