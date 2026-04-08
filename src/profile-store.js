@@ -461,7 +461,7 @@ function enrichProfile(row) {
       const vd = {};
       try {
         const chainCache = require('./lib/chain-cache');
-        if (row.wallet && chainCache.isVerified(row.wallet)) {
+        if (row.wallet && (chainCache.isVerified(row.wallet) || (v3 && v3.verificationLevel >= 1))) {
           vd.satp = { verified: true, address: row.wallet, identifier: row.wallet, linked: true, source: 'on-chain-identity' };
           vd.solana = { verified: true, address: row.wallet, identifier: row.wallet, linked: true, source: 'on-chain-identity' };
         }
@@ -489,7 +489,7 @@ function enrichProfile(row) {
       const vMap = {};
       try {
         const chainCache = require('./lib/chain-cache');
-        if (row.wallet && chainCache.isVerified(row.wallet)) {
+        if (row.wallet && (chainCache.isVerified(row.wallet) || (v3 && v3.verificationLevel >= 1))) {
           const base = { verified: true, address: row.wallet, identifier: row.wallet, verified_at: null, source: 'on-chain-identity' };
           vMap.satp = { ...base };
           vMap.solana = { ...base };
@@ -520,7 +520,7 @@ function enrichProfile(row) {
       try {
         const platforms = new Set();
         const chainCache = require('./lib/chain-cache');
-        if (row.wallet && chainCache.isVerified(row.wallet)) {
+        if (row.wallet && (chainCache.isVerified(row.wallet) || (v3 && v3.verificationLevel >= 1))) {
           platforms.add('satp');
           platforms.add('solana');
         }
