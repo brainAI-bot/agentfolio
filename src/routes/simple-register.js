@@ -43,7 +43,7 @@ function genApiKey() {
 }
 
 function registerSimpleRoutes(app, getDb) {
-  app.post('/api/register/simple', simpleLimiter, (req, res) => {
+  app.post('/api/register/simple', simpleLimiter, async (req, res) => {
     const { name, tagline, github, website, skills, walletAddress } = req.body;
 
     if (!name || typeof name !== 'string' || name.trim().length < 1) {
