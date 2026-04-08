@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Menu, X, Terminal } from "lucide-react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { NavbarWalletButton, MobileWalletSection } from "@/components/NavbarWalletButton";
 
 const staticNavLinks = [
@@ -19,10 +19,24 @@ const staticNavLinks = [
 export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [myProfileId, setMyProfileId] = useState<string | null>(null);
+  const [isExplorerHost, setIsExplorerHost] = useState(false);
 
   const handleProfileId = useCallback((id: string | null) => {
     setMyProfileId(id);
   }, []);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setIsExplorerHost(window.location.hostname === "explorer.satp.bot");
+    }
+  }, []);
+
+  const externalizeHref = (href: string) => {
+    if (!isExplorerHost) return href;
+    if (href === "/satp/explorer") return href;
+    if (href.startsWith("/profile/")) return `https://agentfolio.bot${href}`;
+    return `https://agentfolio.bot${href}`;
+  };
 
   const navLinks = [
     staticNavLinks[0],
@@ -38,7 +52,7 @@ export function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-14">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2">
+          <Link href={externalizeHref("/")} className="flex items-center gap-2">
             <Terminal size={20} className="text-[var(--accent)]" />
             <span
               className="text-lg font-bold tracking-tight"
@@ -53,7 +67,7 @@ export function Navbar() {
             {navLinks.map((link) => (
               <Link
                 key={link.href}
-                href={link.href}
+                href={externalizeHref(link.href)}
                 className="text-sm uppercase tracking-widest transition-colors hover:text-[var(--accent-bright)]"
                 style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)", fontSize: "11px", fontWeight: 500, letterSpacing: "0.08em" }}
               >
@@ -83,7 +97,7 @@ export function Navbar() {
             {navLinks.map((link) => (
               <Link
                 key={link.href}
-                href={link.href}
+                href={externalizeHref(link.href)}
                 className="block px-3 py-2 rounded text-sm uppercase tracking-wider"
                 style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)", fontSize: "12px" }}
                 onClick={() => setMobileOpen(false)}
