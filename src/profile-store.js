@@ -459,21 +459,14 @@ function enrichProfile(row) {
     // [P0 FIX v2] verification_data: chain-cache first, DB fallback for recent verifications
     verification_data: (() => {
       const vd = {};
-      // 1. Read DB verifications (always available immediately after verify)
-      let dbVerifs = {};
       try {
-        const _d = getDb();
-        const _rows = _d.prepare('SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ?').all(row.id);
-        for (const _r of _rows) {
-          const plat = _r.platform === 'twitter' ? 'x' : _r.platform;
-          dbVerifs[plat] = { identifier: _r.identifier || '', verifiedAt: _r.verified_at || null };
+        const chainCache = require('./lib/chain-cache');
+        if (row.wallet && chainCache.isVerified(row.wallet)) {
+          vd.satp = { verified: true, address: row.wallet, identifier: row.wallet, linked: true, source: 'on-chain-identity' };
+          vd.solana = { verified: true, address: row.wallet, identifier: row.wallet, linked: true, source: 'on-chain-identity' };
         }
-      } catch (__) {}
-      // 2. Read chain-cache attestations (authoritative when available)
-      try {
-        const _cc = require('./lib/chain-cache');
-        const _atts = _cc.getVerifications(row.id, row.created_at);
-        for (const att of _atts) {
+        const atts = chainCache.getVerifications(row.id, row.created_at) || [];
+        for (const att of atts) {
           if (!att.platform || att.platform === 'review') continue;
           if (!chainAttestationMatchesWallet(att, row)) continue;
           const plat = att.platform === 'twitter' ? 'x' : att.platform;
@@ -484,12 +477,6 @@ function enrichProfile(row) {
           vd[plat] = { verified: true, address: displayId, identifier: displayId, linked: true, verifiedAt: att.timestamp || att.verifiedAt || null, source: 'on-chain' };
         }
       } catch (_) {}
-      // 3. Fill in DB-only verifications not yet on-chain (recent verifications pre-attestation)
-      for (const [plat, info] of Object.entries(dbVerifs)) {
-        if (!vd[plat]) {
-          vd[plat] = { verified: true, address: info.identifier, identifier: info.identifier, linked: true, verifiedAt: info.verifiedAt, source: 'db' };
-        }
-      }
       return vd;
     })(),
     portfolio: parseJsonField(row.portfolio),
@@ -500,20 +487,14 @@ function enrichProfile(row) {
     endorsements: { items: endorsements, total: endorsements.length },
     verifications: (() => {
       const vMap = {};
-      // 1. DB verifications (immediate persistence)
-      let dbVerifs = {};
-      try {
-        const d = getDb();
-        const rows = d.prepare('SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ?').all(row.id);
-        for (const r of rows) {
-          const plat = r.platform === 'twitter' ? 'x' : r.platform;
-          dbVerifs[plat] = { identifier: r.identifier || '', proof: r.proof || '{}', verifiedAt: r.verified_at || null, rawPlatform: r.platform };
-        }
-      } catch (_) {}
-      // 2. Chain-cache attestations (authoritative when available)
       try {
         const chainCache = require('./lib/chain-cache');
-        const atts = chainCache.getVerifications(row.id, row.created_at);
+        if (row.wallet && chainCache.isVerified(row.wallet)) {
+          const base = { verified: true, address: row.wallet, identifier: row.wallet, verified_at: null, source: 'on-chain-identity' };
+          vMap.satp = { ...base };
+          vMap.solana = { ...base };
+        }
+        const atts = chainCache.getVerifications(row.id, row.created_at) || [];
         for (const att of atts) {
           if (!att.platform || att.platform === 'review') continue;
           if (!chainAttestationMatchesWallet(att, row)) continue;
@@ -533,41 +514,21 @@ function enrichProfile(row) {
           };
         }
       } catch (e) { /* chain-cache not available */ }
-      // 3. DB fallback for platforms not yet on-chain
-      for (const [plat, info] of Object.entries(dbVerifs)) {
-        if (!vMap[plat]) {
-          // Parse stored proof JSON for SATP links etc
-          let parsedProof = {};
-          try { parsedProof = typeof info.proof === 'string' ? JSON.parse(info.proof) : (info.proof || {}); } catch {}
-          vMap[plat] = {
-            verified: true,
-            address: info.identifier || plat,
-            identifier: info.identifier || plat,
-            proof: parsedProof,
-            verified_at: info.verifiedAt || null,
-            source: 'db',
-          };
-        }
-      }
       return vMap;
     })(),
     onchain_verification_count: (() => {
       try {
         const platforms = new Set();
         const chainCache = require('./lib/chain-cache');
+        if (row.wallet && chainCache.isVerified(row.wallet)) {
+          platforms.add('satp');
+          platforms.add('solana');
+        }
         const atts = (chainCache.getVerifications(row.id, row.created_at) || []).filter(att => chainAttestationMatchesWallet(att, row));
         atts.forEach(att => {
           const platform = att.platform === 'twitter' ? 'x' : att.platform;
           if (platform) platforms.add(platform);
         });
-
-        const d = getDb();
-        const rows = d.prepare('SELECT platform FROM verifications WHERE profile_id = ?').all(row.id);
-        rows.forEach(info => {
-          const platform = info.platform === 'twitter' ? 'x' : info.platform;
-          if (platform) platforms.add(platform);
-        });
-        if (row.wallet) platforms.add('satp');
         return platforms.size;
       } catch (_) {
         return 0;
