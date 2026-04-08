@@ -48,7 +48,7 @@ const changes = [
       "Directory profiles enriched with on-chain level + score",
       "Genesis Record API fully functional",
       "DB→Chain migration for core profile routes",
-      "Updated all @agentfolioHQ → @0xagentfolio references",
+      "Standardized all social references to @0xagentfolio",
     ],
   },
   {
