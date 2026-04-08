@@ -267,31 +267,22 @@ function registerSimpleRoutes(app, getDb) {
         })();
       }
 
-      // Bug 1 Fix: Auto-verify Solana wallet on simple registration
+      // Chain-first: write on-chain first, cache only after success.
       if (walletAddress) {
         try {
-          const vId = require('crypto').randomUUID();
           const proof = { source: 'simple-registration', wallet: walletAddress };
-          const insert = d.prepare("INSERT OR IGNORE INTO verifications (id, profile_id, platform, identifier, proof, verified_at) VALUES (?, ?, ?, ?, ?, datetime('now'))");
-          const result = insert.run(
-            vId, id, 'solana', walletAddress, JSON.stringify(proof)
-          );
-          console.log('[SimpleRegister] Solana verification insert for', id, 'changes=', result.changes, 'wallet=', walletAddress);
-          if (result.changes > 0) {
-            try {
-              const { postVerificationHook } = require('../post-verification-hook');
-              const onchainProfileId = await resolveCanonicalOnchainProfileId(d, id, walletAddress);
-              const onchainSucceeded = await postVerificationHook(onchainProfileId, 'solana', walletAddress, proof);
-              if (onchainSucceeded) {
-                console.log('[SimpleRegister] VerificationHook completed for', id);
-              } else {
-                d.prepare("DELETE FROM verifications WHERE profile_id = ? AND platform = 'solana' AND identifier = ?").run(id, walletAddress);
-                console.warn('[SimpleRegister] Rolled back Solana verification cache for', id, 'because on-chain write failed');
-              }
-            } catch (hookErr) {
-              d.prepare("DELETE FROM verifications WHERE profile_id = ? AND platform = 'solana' AND identifier = ?").run(id, walletAddress);
-              console.error('[SimpleRegister] VerificationHook failed for', id, ':', hookErr.message);
-            }
+          const { postVerificationHook } = require('../post-verification-hook');
+          const onchainProfileId = await resolveCanonicalOnchainProfileId(d, id, walletAddress);
+          const onchainSucceeded = await postVerificationHook(onchainProfileId, 'solana', walletAddress, proof);
+          if (onchainSucceeded) {
+            const vId = require('crypto').randomUUID();
+            const insert = d.prepare("INSERT OR IGNORE INTO verifications (id, profile_id, platform, identifier, proof, verified_at) VALUES (?, ?, ?, ?, ?, datetime('now'))");
+            const result = insert.run(
+              vId, id, 'solana', walletAddress, JSON.stringify(proof)
+            );
+            console.log('[SimpleRegister] Cached Solana verification for', id, 'changes=', result.changes, 'wallet=', walletAddress);
+          } else {
+            console.warn('[SimpleRegister] Skipped Solana verification cache for', id, 'because on-chain write failed');
           }
         } catch (vErr) {
           console.error('[SimpleRegister] Solana auto-verify failed:', vErr.message);
