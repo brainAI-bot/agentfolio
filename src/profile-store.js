@@ -282,6 +282,40 @@ function validateScoreWrite(agentId, newScore, newLevel, source) {
   return true;
 }
 
+function rollbackVerificationCache(profileId, platform) {
+  const d = getDb();
+  try {
+    d.prepare('DELETE FROM verifications WHERE profile_id = ? AND platform = ?').run(profileId, platform);
+  } catch (e) {
+    console.error('[PostVerify] Failed to delete verification row during rollback:', e.message);
+  }
+
+  try {
+    const row = d.prepare('SELECT verification_data FROM profiles WHERE id = ?').get(profileId);
+    if (row) {
+      const vd = JSON.parse(row.verification_data || '{}');
+      delete vd[platform];
+      d.prepare('UPDATE profiles SET verification_data = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(vd), new Date().toISOString(), profileId);
+    }
+  } catch (e) {
+    console.error('[PostVerify] Failed to rollback verification_data:', e.message);
+  }
+
+  try {
+    const profileJsonPath = require('path').join('/home/ubuntu/agentfolio/data/profiles', profileId + '.json');
+    if (require('fs').existsSync(profileJsonPath)) {
+      const profileJson = JSON.parse(require('fs').readFileSync(profileJsonPath, 'utf-8'));
+      if (profileJson.verificationData && profileJson.verificationData[platform]) {
+        delete profileJson.verificationData[platform];
+        require('fs').writeFileSync(profileJsonPath, JSON.stringify(profileJson, null, 2));
+      }
+    }
+  } catch (e) {
+    console.error('[PostVerify] Failed to rollback verification JSON:', e.message);
+  }
+}
+
 function addVerification(profileId, platform, identifier, proof, userPaidGenesis = false) {
   const d = getDb();
   const id = genId('ver');
@@ -317,11 +351,20 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
   }
 
 
-  // Post-verification pipeline: DB score + on-chain attestation + recompute CPI
-  // (CEO directive Apr 4 -- single unified hook for all verification types)
-  if (postVerificationHook) postVerificationHook(profileId, platform, identifier, proof).catch(e =>
-    console.error("[PostVerify] Hook error:", e.message)
-  );
+  // Post-verification pipeline: DB cache must roll back if on-chain write fails.
+  if (postVerificationHook) {
+    postVerificationHook(profileId, platform, identifier, proof)
+      .then(onchainSucceeded => {
+        if (!onchainSucceeded) {
+          rollbackVerificationCache(profileId, platform);
+          console.warn(`[PostVerify] Rolled back DB cache for ${profileId}/${platform} because on-chain write did not succeed`);
+        }
+      })
+      .catch(e => {
+        rollbackVerificationCache(profileId, platform);
+        console.error('[PostVerify] Hook error:', e.message);
+      });
+  }
 
       addActivity(profileId, 'verification', { platform, identifier });
 
