@@ -153,6 +153,40 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
   // Step 1-3: On-chain work first. DB/cache update only after chain succeeds.
   let onchainWriteSucceeded = false;
   const kp = getPlatformKeypair();
+
+  try {
+    const client = getSATPWriteClient();
+    const existingIdentity = await client.readIdentity(wallet, 'mainnet');
+    if (!existingIdentity) {
+      const fs = require('fs');
+      const path = require('path');
+      const { registerAgentOnchain } = require('./lib/verification-onchain');
+      const profilePath = path.join(__dirname, '../data/profiles', `${profileId}.json`);
+      let profile = null;
+      if (fs.existsSync(profilePath)) {
+        profile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+      }
+      if (profile) {
+        console.log(`[PostVerify] No identity found for ${profileId}, bootstrapping on-chain identity for ${wallet}`);
+        const reg = await registerAgentOnchain(
+          wallet,
+          profile.name || profileId,
+          profile.bio || profile.description || '',
+          profile.links?.twitter || '',
+          profile.links?.website || `https://agentfolio.bot/profile/${profileId}`
+        );
+        if (reg) {
+          console.log(`[PostVerify] Identity bootstrap success for ${profileId}: ${reg.signature || reg.txSignature || 'ok'}`);
+        } else {
+          console.warn(`[PostVerify] Identity bootstrap returned null for ${profileId}`);
+        }
+      } else {
+        console.warn(`[PostVerify] Could not bootstrap identity, missing profile JSON for ${profileId}`);
+      }
+    }
+  } catch (bootstrapErr) {
+    console.warn(`[PostVerify] Identity bootstrap check failed for ${profileId}: ${bootstrapErr.message}`);
+  }
   if (!kp) {
     console.log('[PostVerify] No keypair — on-chain steps skipped');
     return;
