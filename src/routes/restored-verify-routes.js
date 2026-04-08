@@ -294,13 +294,16 @@ function registerRestoredRoutes(app) {
       delete global._afChallenges[key];
       if (verified) {
         const profile = loadProfile(profileId, DATA_DIR);
-        if (profile) {
+        let onchainSucceeded = true;
+        if (postVerificationHookFn) {
+          onchainSucceeded = await postVerificationHookFn(profileId, verifyChain, publicKey, { method: 'headless-sign' });
+        }
+        if (profile && onchainSucceeded) {
           profile.verificationData = profile.verificationData || {};
           profile.wallets = profile.wallets || {};
           if (verifyChain === 'solana') {
             profile.wallets.solana = publicKey;
             profile.verificationData.solana = { verified: true, address: publicKey, verifiedAt: new Date().toISOString(), method: 'headless-sign' };
-            postVerificationOnchainForProfile(profile, 'solana', { address: publicKey });
           } else if (verifyChain === 'evm') {
             profile.wallets.ethereum = publicKey;
             profile.verificationData.ethereum = { verified: true, address: publicKey, verifiedAt: new Date().toISOString(), method: 'headless-sign' };
@@ -310,13 +313,11 @@ function registerRestoredRoutes(app) {
           profile.trustScore = trust.trustScore;
           profile.tier = trust.tier;
           dbSaveProfileFn(profile);
-          // Bug 5: trigger recompute_score
-          if (postVerificationHookFn) postVerificationHookFn(profileId, verifyChain, publicKey, { method: 'headless-sign' }).catch(() => {});
           addActivity(profileId, 'verification_wallet', { chain: verifyChain, address: publicKey.slice(0, 8) + '...' + publicKey.slice(-4), method: 'headless' }, DATA_DIR);
           triggerWebhooks(WEBHOOK_EVENTS.VERIFICATION_SOLANA, { agentId: profileId, platform: verifyChain, address: publicKey, method: 'headless-sign' }).catch(() => {});
         }
         const updatedTrust = computeTrustData(profileId);
-        res.json({ verified: true, chain: verifyChain, address: publicKey, trustScore: updatedTrust.trustScore, tier: updatedTrust.tier, message: 'Wallet verified successfully' });
+        res.json({ verified: !!onchainSucceeded, chain: verifyChain, address: publicKey, trustScore: updatedTrust.trustScore, tier: updatedTrust.tier, message: onchainSucceeded ? 'Wallet verified successfully' : 'On-chain verification failed' });
       } else {
         res.status(400).json({ verified: false, error: 'Signature verification failed' });
       }
@@ -428,14 +429,18 @@ function registerRestoredRoutes(app) {
   });
 
   // POST /api/verify/telegram/confirm
-  app.post('/api/verify/telegram/confirm', express.json(), (req, res) => {
+  app.post('/api/verify/telegram/confirm', express.json(), async (req, res) => {
     try {
       const { code, telegramUserId, telegramUsername } = req.body;
       if (!code) return res.status(400).json({ error: 'code is required' });
       const result = verifyTelegramCode(code, telegramUserId, telegramUsername);
       if (result.verified) {
         const profile = loadProfile(result.profileId);
-        if (profile) {
+        let onchainSucceeded = true;
+        if (postVerificationHookFn) {
+          onchainSucceeded = await postVerificationHookFn(result.profileId, 'telegram', result.telegramHandle, { method: 'telegram-code' });
+        }
+        if (profile && onchainSucceeded) {
           const updatedProfile = { ...profile };
           updatedProfile.links = updatedProfile.links || {};
           updatedProfile.links.telegram = result.telegramHandle;
@@ -453,16 +458,6 @@ function registerRestoredRoutes(app) {
             agentId: result.profileId, platform: 'telegram', handle: result.telegramHandle,
             profileUrl: `https://agentfolio.bot/profile/${result.profileId}`
           }).catch(e => logger.error('Webhook error', { error: e.message }));
-          postVerificationMemo(result.profileId, 'telegram', { handle: result.telegramHandle }).then(memoResult => {
-            if (memoResult) {
-              updatedProfile.verificationData.telegram.memoTx = memoResult.signature;
-              updatedProfile.verificationData.telegram.explorerUrl = memoResult.explorerUrl;
-              dbSaveProfileFn(updatedProfile);
-            }
-          }).catch(() => {});
-          // Bug 5: trigger recompute_score
-          if (postVerificationHookFn) postVerificationHookFn(result.profileId, 'telegram', result.telegramHandle, { method: 'telegram-code' }).catch(() => {});
-          postVerificationOnchainForProfile(updatedProfile, 'telegram', { handle: result.telegramHandle });
         }
       }
       res.status(result.verified ? 200 : 400).json(result);
@@ -523,7 +518,11 @@ function registerRestoredRoutes(app) {
       const result = await handleDiscordCallback(code, state);
       if (result.verified) {
         const profile = loadProfile(result.profileId);
-        if (profile) {
+        let onchainSucceeded = true;
+        if (postVerificationHookFn) {
+          onchainSucceeded = await postVerificationHookFn(result.profileId, 'discord', result.discordUser.username, { method: 'discord-oauth' });
+        }
+        if (profile && onchainSucceeded) {
           const updatedProfile = { ...profile };
           updatedProfile.links = updatedProfile.links || {};
           updatedProfile.links.discord = formatDiscordUsername(result.discordUser.username, result.discordUser.discriminator);
@@ -545,18 +544,10 @@ function registerRestoredRoutes(app) {
             agentId: result.profileId, platform: 'discord', username: result.discordUser.username,
             profileUrl: `https://agentfolio.bot/profile/${result.profileId}`
           }).catch(e => logger.error('Webhook error', { error: e.message }));
-          postVerificationMemo(result.profileId, 'discord', { username: result.discordUser.username, id: result.discordUser.id }).then(memoResult => {
-            if (memoResult) {
-              updatedProfile.verificationData.discord.memoTx = memoResult.signature;
-              updatedProfile.verificationData.discord.explorerUrl = memoResult.explorerUrl;
-              dbSaveProfileFn(updatedProfile);
-            }
-          }).catch(() => {});
-          // Bug 5: trigger recompute_score
-          if (postVerificationHookFn) postVerificationHookFn(result.profileId, 'discord', result.discordUser.username, { method: 'discord-oauth' }).catch(() => {});
-          postVerificationOnchainForProfile(updatedProfile, 'discord', { username: result.discordUser.username });
+          res.redirect(`/profile/${result.profileId}?discord_verified=1`);
+        } else {
+          res.redirect(`/profile/${result.profileId}?discord_error=onchain_failed`);
         }
-        res.redirect(`/profile/${result.profileId}?discord_verified=1`);
       } else {
         res.redirect('/?discord_error=' + encodeURIComponent(result.error || 'Verification failed'));
       }
@@ -678,19 +669,21 @@ function registerRestoredRoutes(app) {
       if (!profile) return res.status(404).json({ error: 'Profile not found' });
       const result = await verifyMoltbookAccount(profileId, moltbookUsername);
       if (result.verified) {
-        profile.verificationData = profile.verificationData || {};
-        profile.verificationData.moltbook = {
-          verified: true, username: moltbookUsername, karma: result.karma || 0, verifiedAt: new Date().toISOString()
-        };
-        profile.links = profile.links || {};
-        profile.links.moltbook = moltbookUsername;
-        profile.updatedAt = new Date().toISOString();
-        dbSaveProfileFn(profile);
-        addActivityAndBroadcast(profileId, 'verification_moltbook', { username: moltbookUsername, karma: result.karma || 0 }, DATA_DIR);
-        postVerificationMemo(profileId, 'moltbook', { username: moltbookUsername, karma: result.karma }).catch(() => {});
-        // Bug 5: trigger recompute_score
-        if (postVerificationHookFn) postVerificationHookFn(profileId, 'moltbook', moltbookUsername, { method: 'moltbook-bio' }).catch(() => {});
-        postVerificationOnchainForProfile(profile, 'moltbook', { username: moltbookUsername });
+        let onchainSucceeded = true;
+        if (postVerificationHookFn) {
+          onchainSucceeded = await postVerificationHookFn(profileId, 'moltbook', moltbookUsername, { method: 'moltbook-bio' });
+        }
+        if (onchainSucceeded) {
+          profile.verificationData = profile.verificationData || {};
+          profile.verificationData.moltbook = {
+            verified: true, username: moltbookUsername, karma: result.karma || 0, verifiedAt: new Date().toISOString()
+          };
+          profile.links = profile.links || {};
+          profile.links.moltbook = moltbookUsername;
+          profile.updatedAt = new Date().toISOString();
+          dbSaveProfileFn(profile);
+          addActivityAndBroadcast(profileId, 'verification_moltbook', { username: moltbookUsername, karma: result.karma || 0 }, DATA_DIR);
+        }
       }
       res.status(result.verified ? 200 : 400).json(result);
     } catch (e) { res.status(500).json({ error: e.message }); }
