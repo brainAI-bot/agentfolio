@@ -227,11 +227,16 @@ function registerSimpleRoutes(app, getDb) {
           if (result.changes > 0) {
             try {
               const { postVerificationHook } = require('../post-verification-hook');
-              postVerificationHook(id, 'solana', walletAddress, proof)
-                .then(() => console.log('[SimpleRegister] VerificationHook completed for', id))
-                .catch((hookErr) => console.error('[SimpleRegister] VerificationHook failed for', id, ':', hookErr.message));
+              const onchainSucceeded = await postVerificationHook(id, 'solana', walletAddress, proof);
+              if (onchainSucceeded) {
+                console.log('[SimpleRegister] VerificationHook completed for', id);
+              } else {
+                d.prepare("DELETE FROM verifications WHERE profile_id = ? AND platform = 'solana' AND identifier = ?").run(id, walletAddress);
+                console.warn('[SimpleRegister] Rolled back Solana verification cache for', id, 'because on-chain write failed');
+              }
             } catch (hookErr) {
-              console.error('[SimpleRegister] VerificationHook import failed:', hookErr.message);
+              d.prepare("DELETE FROM verifications WHERE profile_id = ? AND platform = 'solana' AND identifier = ?").run(id, walletAddress);
+              console.error('[SimpleRegister] VerificationHook failed for', id, ':', hookErr.message);
             }
           }
         } catch (vErr) {

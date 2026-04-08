@@ -182,6 +182,7 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
   }
 
   console.log(`[PostVerify] ═══ Pipeline complete for ${profileId}/${platform} ═══`);
+  return onchainWriteSucceeded;
 }
 
 module.exports = { postVerificationHook, recomputeDBScore, revalidateProfileCache };
