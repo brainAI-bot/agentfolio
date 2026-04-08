@@ -308,6 +308,58 @@ async function refreshAttestationsFromChain() {
   }
 }
 
+function normalizeAttestationPlatform(attestationType) {
+  if (!attestationType) return null;
+  let platform = attestationType;
+  if (platform.startsWith('verification_')) platform = platform.slice('verification_'.length);
+  if (platform.endsWith('_verification')) platform = platform.slice(0, -'_verification'.length);
+  if (platform === 'solana_wallet') return 'solana';
+  if (platform === 'eth_wallet') return 'eth';
+  return platform;
+}
+
+function upsertAttestation(map, profileId, entry) {
+  if (!profileId || !entry?.platform) return;
+  if (!map.has(profileId)) map.set(profileId, []);
+  const list = map.get(profileId);
+  const idx = list.findIndex(item => item.platform === entry.platform);
+  if (idx >= 0) list[idx] = { ...list[idx], ...entry };
+  else list.push(entry);
+}
+
+async function mergeProgramAttestationsIntoMap(newAttestations) {
+  try {
+    const conn = getConnection();
+    const programAccounts = await conn.getProgramAccounts(V3_PROGRAM_IDS.attestations);
+    let discovered = 0;
+    for (const { pubkey, account } of programAccounts) {
+      try {
+        const parsed = deserializeAttestation(account.data);
+        if (!parsed?.agentId || !parsed?.verified || parsed?.isRevoked) continue;
+        const platform = normalizeAttestationPlatform(parsed.attestationType);
+        if (!platform) continue;
+        upsertAttestation(newAttestations, parsed.agentId, {
+          platform,
+          txSignature: null,
+          memo: `ATTESTATION|${parsed.attestationType}`,
+          proofHash: null,
+          signer: parsed.issuer || null,
+          timestamp: parsed.createdAt ? new Date(Number(parsed.createdAt) * 1000).toISOString() : new Date().toISOString(),
+          solscanUrl: `https://solscan.io/account/${pubkey.toBase58()}`,
+          pda: pubkey.toBase58(),
+          source: 'attestation-program',
+        });
+        discovered += 1;
+      } catch (_) {}
+    }
+    console.log(`[ChainCache] Loaded ${discovered} verified attestation-program accounts`);
+    return discovered;
+  } catch (e) {
+    console.warn('[ChainCache] Program attestation read failed:', e.message);
+    return 0;
+  }
+}
+
 /**
 * Read attestations from the existing DB table (memo-attestation.js writes here)
  * This is faster and more reliable than scanning TXs on-chain
@@ -350,6 +402,7 @@ async function refreshAttestationsFromDB() {
       });
     }
     
+    await mergeProgramAttestationsIntoMap(newAttestations);
     cache.attestations = newAttestations;
     db.close();
     return newAttestations.size;
