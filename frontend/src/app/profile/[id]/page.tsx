@@ -305,7 +305,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
               <ProfileActions profileId={agent.id} profileWallet={agent.walletAddress} profileWallets={[(agent as any).wallets?.solana, (agent as any).wallet, agent.walletAddress].filter(Boolean)} unclaimed={agent.unclaimed} />
               {v.satp?.verified || v.solana?.verified ? (
                 <a
-                  href={(v.satp as any)?.proof?.identityPDA ? `https://solscan.io/account/${(v.satp as any).proof.identityPDA}` : `https://explorer.solana.com/address/${v.solana?.address || ""}`}
+                  href={((v.satp as any)?.identityPDA || (v.satp as any)?.proof?.identityPDA) ? `https://solscan.io/account/${(v.satp as any)?.identityPDA || (v.satp as any)?.proof?.identityPDA}` : `https://agentfolio.bot/api/satp/score/${encodeURIComponent(id)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider inline-block"
