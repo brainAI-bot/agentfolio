@@ -138,19 +138,21 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     genesis.isBorn = v3Reputation.isBorn ?? genesis.isBorn;
   }
 
-  // BUG 2 FIX: Use compute-score (from API enrichment) as the canonical display score.
-  // The agent.trustScore comes from compute-score (A1 architecture) which accounts for
-  // all verifications. V3 on-chain may lag behind or be 0. Compute-score is authoritative.
-  const displayScore = agent.trustScore || 0;
+  // P0 architecture: on-chain reputation is the source of truth.
+  // Fall back to API-enriched score only when chain data is missing/zero.
+  const fallbackScore = agent.trustScore || agent.reputationScore || 0;
+  const normalizedFallbackScore = typeof fallbackScore === "number" && fallbackScore > 10000
+    ? Math.round(fallbackScore / 10000)
+    : fallbackScore;
   if (genesis) {
     const normalizedGenesisScore = typeof genesis.reputationScore === "number" && genesis.reputationScore > 10000
       ? Math.round(genesis.reputationScore / 10000)
       : (genesis.reputationScore || 0);
-    genesis.reputationScore = displayScore || normalizedGenesisScore;
+    genesis.reputationScore = normalizedGenesisScore || normalizedFallbackScore;
   }
-  const badgeRawScore = genesis ? genesis.reputationScore : agent.trustScore;
+  const badgeRawScore = genesis ? genesis.reputationScore : normalizedFallbackScore;
   const badgeScore = typeof badgeRawScore === "number" && badgeRawScore > 10000 ? Math.round(badgeRawScore / 10000) : badgeRawScore;
-  const badgeRawReputation = genesis ? genesis.reputationScore : agent.reputationScore;
+  const badgeRawReputation = genesis ? genesis.reputationScore : normalizedFallbackScore;
   const badgeReputationScore = typeof badgeRawReputation === "number" && badgeRawReputation > 10000 ? Math.round(badgeRawReputation / 10000) : badgeRawReputation;
   let githubStats: any = null;
   if (v?.github?.verified && v.github.username) {

@@ -71,6 +71,16 @@ function getGenesisPDA(agentId) {
   return getCanonicalGenesisPDA(agentId, 'mainnet');
 }
 
+function logBridgeError(context, error) {
+  const message = error?.message || String(error);
+  const logs = Array.isArray(error?.logs) ? error.logs : [];
+  console.error('[SATP Bridge] ' + context + ': ' + message.slice(0, 300));
+  logs.slice(-20).forEach(l => console.error('  ', l));
+  if (error?.stack) {
+    console.error(error.stack.split('\n').slice(0, 6).join('\n'));
+  }
+}
+
 /**
  * Full verification flow in ONE transaction:
  *   IX 1: create_attestation (verified=false)
@@ -114,7 +124,7 @@ async function postVerificationAttestation(agentId, platform, proofObj) {
   }
 
   // Build 3-instruction TX
-  console.log(`[SATP Bridge] Creating verified attestation + recompute for ${agentId}/${platform}`);
+  console.log(`[SATP Bridge] Creating verified attestation + recompute for ${agentId}/${platform} (proofBytes=${Buffer.byteLength(proofData, 'utf8')}, attPDA=${attPDA.toBase58()})`);
   
   const tx = new Transaction();
   tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400000 }));
@@ -176,9 +186,8 @@ async function postVerificationAttestation(agentId, platform, proofObj) {
     return { txSignature: sig, attestationPDA: attPDA.toBase58() };
   } catch (e) {
     const logs = Array.isArray(e?.logs) ? e.logs : [];
-    console.error(`[SATP Bridge] TX failed for ${agentId}/${platform}: ${(e.message || e).slice(0, 300)}`);
-    logs.slice(-10).forEach(l => console.error('  ', l));
-    const lower = `${e?.message || ''} ${logs.join(' ')}`.toLowerCase();
+    logBridgeError(`TX failed for ${agentId}/${platform}`, e);
+    const lower = ((e?.message || '') + ' ' + logs.join(' ')).toLowerCase();
     if (lower.includes('already in use')) {
       return await triggerRecomputeOnly(agentId, keypair, conn);
     }
@@ -214,6 +223,7 @@ async function getAgentAttestations(agentId, conn) {
  * Create attestation only (no genesis → can't recompute)
  */
 async function createAttestationOnly(agentId, attestationType, proofData, attPDA, keypair, conn) {
+  console.log(`[SATP Bridge] createAttestationOnly start for ${agentId}/${attestationType} (proofBytes=${Buffer.byteLength(proofData, 'utf8')}, attPDA=${attPDA.toBase58()})`);
   const tx = new Transaction();
   tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 150000 }));
   tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5000 }));
@@ -249,7 +259,13 @@ async function createAttestationOnly(agentId, attestationType, proofData, attPDA
     console.log(`[SATP Bridge] Created + verified (no recompute — no genesis): TX ${sig}`);
     return { txSignature: sig, attestationPDA: attPDA.toBase58() };
   } catch (e) {
-    console.error(`[SATP Bridge] createAttestationOnly failed:`, e.message?.slice(0, 200));
+    const logs = Array.isArray(e?.logs) ? e.logs : [];
+    logBridgeError(`createAttestationOnly failed for ${agentId}/${attestationType}`, e);
+    const lower = ((e?.message || '') + ' ' + logs.join(' ')).toLowerCase();
+    if (lower.includes('already in use')) {
+      console.warn(`[SATP Bridge] Attestation already exists for ${agentId}/${attestationType} while in create-only mode`);
+      return { txSignature: null, attestationPDA: attPDA.toBase58(), alreadyExisted: true };
+    }
     return null;
   }
 }
@@ -292,9 +308,7 @@ async function triggerRecomputeOnly(agentId, keypair, conn) {
     console.log(`[SATP Bridge] Recomputed score for ${agentId}: TX ${sig}`);
     return { txSignature: sig };
   } catch (e) {
-    const logs = Array.isArray(e?.logs) ? e.logs : [];
-    console.error(`[SATP Bridge] recompute failed: ${(e.message || e).slice(0, 300)}`);
-    logs.slice(-10).forEach(l => console.error('  ', l));
+    logBridgeError(`recompute failed for ${agentId}`, e);
     throw e;
   }
 }
