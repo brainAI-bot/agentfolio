@@ -174,9 +174,9 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
       challengeId: proof?.challengeId || 'direct',
     }).slice(0, 200);
 
-    console.log(`[PostVerify] Creating attestation: ${attestationType} for profile ${profileId}`);
+    console.log(`[PostVerify] Creating attestation: ${attestationType} for ${wallet}`);
     const result = await client.createAttestation({
-      agentId: profileId, attestationType, proofData,
+      agentId: wallet, attestationType, proofData,
     }, kp, 'mainnet');
     console.log(`[PostVerify] ✅ Attestation TX: ${result.txSignature}`);
     onchainWriteSucceeded = true;
@@ -187,7 +187,7 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
   // Step 4: Recompute on-chain reputation
   try {
     const client = getSATPWriteClient();
-    const repResult = await client.recomputeReputation(profileId, kp, 'mainnet');
+    const repResult = await client.recomputeReputation(wallet, kp, 'mainnet');
     console.log(`[PostVerify] ✅ Reputation recomputed: ${repResult.txSignature}`);
   } catch (e) {
     console.warn(`[PostVerify] ⚠️ Reputation recompute skipped: ${e.message}`);
