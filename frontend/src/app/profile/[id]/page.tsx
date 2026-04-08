@@ -25,6 +25,11 @@ import { OwnerActions } from "@/components/OwnerActions";
 import { ProfileActions } from "@/components/ProfileActions";
 import { WriteReviewForm } from "./WriteReviewForm";
 
+function normalizeScore(value: any) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return value > 10000 ? Math.round(value / 10000) : value;
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   const agent = await fetchAgent(id);
@@ -84,7 +89,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
 
   // Override genesis raw values with trust-score normalized values
   if (genesis && trustScoreData) {
-    genesis.reputationScore = trustScoreData.reputationScore ?? genesis.reputationScore;
+    genesis.reputationScore = normalizeScore(trustScoreData.reputationScore ?? genesis.reputationScore);
     genesis.verificationLevel = trustScoreData.verificationLevel ?? genesis.verificationLevel;
     genesis.verificationLabel = trustScoreData.verificationLabel || genesis.verificationLabel;
     genesis.isBorn = trustScoreData.isBorn ?? genesis.isBorn;
@@ -141,13 +146,9 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   // P0 architecture: on-chain reputation is the source of truth.
   // Fall back to API-enriched score only when chain data is missing/zero.
   const fallbackScore = agent.trustScore || agent.reputationScore || 0;
-  const normalizedFallbackScore = typeof fallbackScore === "number" && fallbackScore > 10000
-    ? Math.round(fallbackScore / 10000)
-    : fallbackScore;
+  const normalizedFallbackScore = normalizeScore(fallbackScore);
   if (genesis) {
-    const normalizedGenesisScore = typeof genesis.reputationScore === "number" && genesis.reputationScore > 10000
-      ? Math.round(genesis.reputationScore / 10000)
-      : (genesis.reputationScore || 0);
+    const normalizedGenesisScore = normalizeScore(genesis.reputationScore || 0);
     genesis.reputationScore = normalizedGenesisScore || normalizedFallbackScore;
   }
   const badgeRawScore = genesis ? genesis.reputationScore : normalizedFallbackScore;
