@@ -369,48 +369,19 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     try { const t = JSON.parse(profile.tags || '[]'); tags = Array.isArray(t) ? t : []; } catch (_) {}
     try { const s = JSON.parse(profile.skills || '[]'); skills = Array.isArray(s) ? s : []; } catch (_) {}
     
-    // Verifications from chain-cache attestations cross-referenced with DB verifications
-    // [P0 FIX Apr 5] Only show chain attestations that have a matching DB verification (filters old profile attestations)
-    // [FIX 4] Filter attestations by profile creation date
-    const attestations = (chainCache.getVerifications(profile.id, profile.created_at) || [])
-      .concat(profile.id !== agentId ? (chainCache.getVerifications(agentId, profile.created_at) || []) : []);
-    let dbVerifPlatforms = new Set();
-    try {
-      const vRows = db.prepare("SELECT platform FROM verifications WHERE profile_id = ? AND identifier IS NOT NULL AND identifier != ''").all(profile.id);
-      for (const vr of vRows) dbVerifPlatforms.add(vr.platform === 'twitter' ? 'x' : vr.platform);
-    } catch (_) {}
-    const verifications = attestations
-      .filter(att => att.platform && att.platform !== 'review')
-      .filter(att => {
-        const plat = att.platform === 'twitter' ? 'x' : att.platform;
-        // Only include if DB has a real verification for this platform, OR it's satp/solana (wallet-based)
-        return dbVerifPlatforms.has(plat) || plat === 'satp' || plat === 'solana';
-      })
-      .map(att => ({
-        platform: att.platform,
-        verified: true,
-        txSignature: att.txSignature,
-        solscanUrl: att.solscanUrl || `https://solscan.io/tx/${att.txSignature}`,
-        timestamp: att.timestamp,
-      }));
-    // Deduplicate by platform (keep first = most recent from chain-cache)
-    const seenPlatforms = new Set();
-    const dedupedVerifications = verifications.filter(v => {
-      if (seenPlatforms.has(v.platform)) return false;
-      seenPlatforms.add(v.platform);
-      return true;
-    });
-    
-    // A1: Single scoring function — compute from DB verifications
-    const { computeScore } = require('./lib/compute-score');
-    let dbVerifRowsForScore = [];
-    try {
-      dbVerifRowsForScore = db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profile.id);
-    } catch (_) {}
-    const hasSatpId = dbVerifRowsForScore.some(v => v.platform === 'satp');
-    const computed = computeScore(dbVerifRowsForScore, { hasSatpIdentity: hasSatpId, claimed: !!profile.claimed });
-    const trustScore = computed.score;
-    const tier = computed.levelName;
+    const fullProfile = profileStore.getProfile(profile.id);
+    const verificationsMap = fullProfile?.verifications || {};
+    const dedupedVerifications = Object.entries(verificationsMap).map(([platform, info]) => ({
+      platform,
+      verified: true,
+      txSignature: info?.proof?.txSignature || null,
+      solscanUrl: info?.proof?.url || null,
+      timestamp: info?.verified_at || info?.proof?.timestamp || null,
+    }));
+    const trustScore = typeof fullProfile?.trust_score?.overall_score === 'number'
+      ? fullProfile.trust_score.overall_score
+      : (fullProfile?.trustScore || 0);
+    const tier = fullProfile?.tier || fullProfile?.levelName || fullProfile?.trust_score?.level || 'Unverified';
     
     res.json({
       agentId: profile.id,
@@ -465,18 +436,11 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
       if (byHandle) { row = byHandle; profileId = byHandle.id; }
     }
     if (!row) return res.status(404).json({ error: 'Profile not found' });
-    const { computeScore } = require('./lib/compute-score');
-    const verifs = db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profileId);
-    const hasSatp = verifs.some(v => v.platform === 'satp');
-    const computed = computeScore(verifs, { hasSatpIdentity: hasSatp, claimed: !!row.claimed });
-    let v3Score = null;
-    try {
-      // Use top-level getV3Score (already imported)
-      v3Score = await getV3Score(profileId);
-    } catch {}
-    const rawReputationScore = v3Score?.reputationScore;
-    const reputationScore = rawReputationScore != null ? Math.round(rawReputationScore / 10000) : computed.score;
-    const verificationLevel = v3Score?.verificationLevel || computed.level;
+    const fullProfile = profileStore.getProfile(profileId);
+    const reputationScore = typeof fullProfile?.trust_score?.overall_score === 'number'
+      ? fullProfile.trust_score.overall_score
+      : (fullProfile?.trustScore || 0);
+    const verificationLevel = fullProfile?.verification_level || fullProfile?.verificationLevel || 0;
     const labels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
     res.json({
       ok: true,
@@ -485,9 +449,9 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
         reputationScore,
         verificationLevel,
         verificationLabel: labels[verificationLevel] || 'Unknown',
-        isBorn: v3Score?.isBorn || false,
-        faceImage: v3Score?.faceImage || null,
-        breakdown: computed.breakdown,
+        isBorn: verificationLevel >= 1,
+        faceImage: null,
+        breakdown: fullProfile?.trust_score?.score_breakdown || fullProfile?.trustBreakdown || {},
         source: v3Score ? 'v3+compute' : 'compute',
       }
     });
