@@ -516,11 +516,12 @@ function enrichProfile(row) {
         const atts = chainCache.getVerifications(row.id, row.created_at);
         for (const att of atts) {
           if (!att.platform || att.platform === 'review') continue;
+          if (!chainAttestationMatchesWallet(att, row)) continue;
           const platform = att.platform === 'twitter' ? 'x' : att.platform;
           if (vMap[platform]) continue;
           let proofData = {};
           try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
-          const displayId = att.identifier || proofData.identifier || proofData.address || proofData.wallet || proofData.username || proofData.url || proofData.handle || att.pda || platform;
+          const displayId = att.identifier || proofData.identifier || proofData.address || proofData.wallet || att.signer || platform;
           const proofUrl = att.txSignature ? ('https://solana.fm/tx/' + att.txSignature) : (att.solscanUrl || null);
           vMap[platform] = {
             verified: true,

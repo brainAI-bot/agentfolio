@@ -1,6 +1,11 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 
+function normalizeDisplayScore(score: number) {
+  if (typeof score !== "number" || !Number.isFinite(score)) return 0;
+  return score > 10000 ? Math.round(score / 10000) : score;
+}
+
 interface TrustBadgeProps {
   tier: number;
   score: number;
