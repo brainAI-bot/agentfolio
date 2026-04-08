@@ -1276,7 +1276,6 @@ ${unclaimed.map(u => `<tr><td><a href="/profile/${u.id}">${escapeHtml(u.id)}</a>
 
 // ── Profile Store routes (register, profiles, endorsements, reviews) ──
 profileStore.registerRoutes(app);
-registerSimpleRoutes(app, profileStore.getDb);
 
 // NOTE: GET /api/profile/:id is now handled by profileStore.registerRoutes above
 
@@ -1863,7 +1862,6 @@ registerBoaLinkerV3Routes(app);
 
 // Trust Credential API (credat integration)
 const { registerTrustCredentialRoutes } = require('./routes/trust-credential');
-const { registerSimpleRoutes } = require('./routes/simple-register');
 registerTrustCredentialRoutes(app);
 
 // Batch Registration API (enterprise import)
