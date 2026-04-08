@@ -218,19 +218,21 @@ function registerSimpleRoutes(app, getDb) {
       if (walletAddress) {
         try {
           const vId = require('crypto').randomUUID();
-          d.prepare("INSERT OR IGNORE INTO verifications (id, profile_id, platform, identifier, proof, verified_at) VALUES (?, ?, ?, ?, ?, datetime('now'))").run(
-            vId, id, 'solana', walletAddress, JSON.stringify({ source: 'simple-registration', wallet: walletAddress })
+          const proof = { source: 'simple-registration', wallet: walletAddress };
+          const insert = d.prepare("INSERT OR IGNORE INTO verifications (id, profile_id, platform, identifier, proof, verified_at) VALUES (?, ?, ?, ?, ?, datetime('now'))");
+          const result = insert.run(
+            vId, id, 'solana', walletAddress, JSON.stringify(proof)
           );
-          console.log('[SimpleRegister] Auto-verified Solana wallet for', id);
-          
-          // Bug 5 Fix: Call postVerificationHook for recompute_score
-          try {
-            const { postVerificationHook } = require('../../post-verification-hook');
-            postVerificationHook(id, 'solana', walletAddress, { source: 'simple-registration', wallet: walletAddress }).catch(e => 
-              console.warn('[SimpleRegister] Post-verification hook failed:', e.message)
-            );
-          } catch (hookErr) {
-            console.warn('[SimpleRegister] Post-verification hook not available:', hookErr.message);
+          console.log('[SimpleRegister] Solana verification insert for', id, 'changes=', result.changes, 'wallet=', walletAddress);
+          if (result.changes > 0) {
+            try {
+              const { postVerificationHook } = require('../post-verification-hook');
+              postVerificationHook(id, 'solana', walletAddress, proof)
+                .then(() => console.log('[SimpleRegister] VerificationHook completed for', id))
+                .catch((hookErr) => console.error('[SimpleRegister] VerificationHook failed for', id, ':', hookErr.message));
+            } catch (hookErr) {
+              console.error('[SimpleRegister] VerificationHook import failed:', hookErr.message);
+            }
           }
         } catch (vErr) {
           console.error('[SimpleRegister] Solana auto-verify failed:', vErr.message);
