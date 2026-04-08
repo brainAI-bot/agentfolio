@@ -77,15 +77,6 @@ try {
   console.warn('[ProfileStore] Scoring Engine V2 not available:', e.message);
 }
 
-// Memo attestation for on-chain verification records
-let postMemoAttestation;
-try {
-  postMemoAttestation = require('./lib/memo-attestation').postVerificationMemo;
-  console.log('[ProfileStore] Memo attestation loaded');
-} catch (e) {
-  console.warn('[ProfileStore] Memo attestation not available:', e.message);
-}
-
 const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR ||
   '/home/ubuntu/agentfolio/config/platform-keypair.json';
 const SATP_NETWORK = process.env.SATP_NETWORK || 'mainnet';

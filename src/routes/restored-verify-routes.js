@@ -826,7 +826,7 @@ function registerRestoredRoutes(app) {
       const { PublicKey, Keypair } = require('@solana/web3.js');
       const payerKey = new PublicKey(payer);
 
-      const KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/brainforge-personal.json';
+      const KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/mainnet-deployer.json';
       const deployerKey = JSON.parse(fs.readFileSync(KEYPAIR_PATH, 'utf-8'));
       const deployer = Keypair.fromSecretKey(Uint8Array.from(deployerKey));
 
