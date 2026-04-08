@@ -420,10 +420,8 @@ const { transaction, identityPDA } = await sdk.buildRegisterIdentity(
           </h2>
           <div className="space-y-2">
             {[
-              { name: "Identity", addr: "BY4jzmnrui1K5gZ5z5xRQkVfEEMXYHYugtH1Ua867eyr" },
-              { name: "Reputation", addr: "TQ4P9R2Y5FRyw1TZfwoWQ2Mf6XeohbGdhYNcDxh6YYh" },
-              { name: "Validation", addr: "AdDWFa9oEmZdrTrhu8YTWu4ozbTP7e6qa9rvyqfAvM7N" },
-              { name: "Escrow", addr: "STyY8w4ZHws3X1AMoocWuDYBoogVDwvymPy8Wifx5TH" },
+              { name: "Identity V2", addr: "97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq" },
+              { name: "Genesis V3", addr: "GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG" },
             ].map(({ name, addr }) => (
               <div
                 key={name}
