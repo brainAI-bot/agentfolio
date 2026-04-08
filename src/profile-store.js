@@ -475,13 +475,13 @@ function enrichProfile(row) {
         const _atts = _cc.getVerifications(row.id, row.created_at);
         for (const att of _atts) {
           if (!att.platform || att.platform === 'review') continue;
+          if (!chainAttestationMatchesWallet(att, row)) continue;
           const plat = att.platform === 'twitter' ? 'x' : att.platform;
           if (vd[plat]) continue;
-          // [P0 FIX Apr 5] Skip chain attestations without real DB identifier
-          const dbInf = dbVerifs[plat];
-          if (!dbInf || !dbInf.identifier) continue;
-          const displayId = dbInf.identifier;
-          vd[plat] = { verified: true, address: displayId, identifier: displayId, linked: true, verifiedAt: att.timestamp || null, source: 'on-chain' };
+          let proofData = {};
+          try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
+          const displayId = att.identifier || proofData.identifier || proofData.address || proofData.wallet || att.signer || plat;
+          vd[plat] = { verified: true, address: displayId, identifier: displayId, linked: true, verifiedAt: att.timestamp || att.verifiedAt || null, source: 'on-chain' };
         }
       } catch (_) {}
       // 3. Fill in DB-only verifications not yet on-chain (recent verifications pre-attestation)
@@ -560,7 +560,6 @@ function enrichProfile(row) {
           const platform = att.platform === 'twitter' ? 'x' : att.platform;
           if (platform) platforms.add(platform);
         });
-        if (platforms.size) return platforms.size;
 
         const d = getDb();
         const rows = d.prepare('SELECT platform FROM verifications WHERE profile_id = ?').all(row.id);
