@@ -114,9 +114,12 @@ async function getSatpAgents() {
     });
 
     const filteredAgents = [];
+    const seenProfileIds = new Set();
     for (const agent of agents) {
       const profile = matchesProfile(agent);
       if (!profile) continue;
+      if (seenProfileIds.has(profile.id)) continue;
+      seenProfileIds.add(profile.id);
       agent.profileId = profile.id;
       filteredAgents.push(agent);
     }
