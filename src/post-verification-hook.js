@@ -152,90 +152,24 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
 
   // Step 1-3: On-chain work first. DB/cache update only after chain succeeds.
   let onchainWriteSucceeded = false;
-  const kp = getPlatformKeypair();
+  // Step 1-3: On-chain work first via the V3 bridge. DB/cache update only after chain succeeds.
+  let onchainWriteSucceeded = false;
+  const attestationType = platformToAttestationType(platform);
+  const proofData = {
+    platform,
+    identifier,
+    ...proof,
+    verifiedAt: new Date().toISOString(),
+  };
 
+  console.log(`[PostVerify] Creating attestation via V3 bridge: ${attestationType} for ${profileId}`);
   try {
-    const client = getSATPWriteClient();
-    const existingIdentity = await client.readIdentity(wallet, 'mainnet');
-    if (!existingIdentity) {
-      const fs = require('fs');
-      const path = require('path');
-      const { registerAgentOnchain } = require('./lib/verification-onchain');
-      const profilePath = path.join(__dirname, '../data/profiles', `${profileId}.json`);
-      let profile = null;
-      if (fs.existsSync(profilePath)) {
-        profile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
-      }
-      if (profile) {
-        console.log(`[PostVerify] No identity found for ${profileId}, bootstrapping on-chain identity for ${wallet}`);
-        const reg = await registerAgentOnchain(
-          wallet,
-          profile.name || profileId,
-          profile.bio || profile.description || '',
-          profile.links?.twitter || '',
-          profile.links?.website || `https://agentfolio.bot/profile/${profileId}`
-        );
-        if (reg) {
-          console.log(`[PostVerify] Identity bootstrap success for ${profileId}: ${reg.signature || reg.txSignature || 'ok'}`);
-        } else {
-          console.warn(`[PostVerify] Identity bootstrap returned null for ${profileId}`);
-        }
-      } else {
-        console.warn(`[PostVerify] Could not bootstrap identity, missing profile JSON for ${profileId}`);
-      }
-    }
-  } catch (bootstrapErr) {
-    console.warn(`[PostVerify] Identity bootstrap check failed for ${profileId}: ${bootstrapErr.message}`);
-  }
-  if (!kp) {
-    console.log('[PostVerify] No keypair — on-chain steps skipped');
-    return;
-  }
-
-  const wallet = getProfileWallet(profileId);
-  if (!wallet) {
-    console.log(`[PostVerify] No Solana wallet for ${profileId} — on-chain attestation deferred`);
-    return;
-  }
-
-  // Step 3: Create on-chain attestation
-  try {
-    const client = getSATPWriteClient();
-    const attestationType = platformToAttestationType(platform);
-    const proofData = JSON.stringify({
-      platform, identifier,
-      verifiedAt: proof?.verifiedAt || new Date().toISOString(),
-      challengeId: proof?.challengeId || 'direct',
-    }).slice(0, 200);
-
-    console.log(`[PostVerify] Creating attestation: ${attestationType} for ${wallet}`);
-    const result = await client.createAttestation({
-      agentId: wallet, attestationType, proofData,
-    }, kp, 'mainnet');
-    console.log(`[PostVerify] ✅ Attestation TX: ${result.txSignature}`);
+    const bridge = require('./lib/satp-verification-bridge');
+    const result = await bridge.postVerificationAttestation(profileId, platform, proofData);
+    console.log(`[PostVerify] ✅ Bridge result for ${profileId}: ${JSON.stringify(result)}`);
     onchainWriteSucceeded = true;
   } catch (e) {
-    console.error(`[PostVerify] ❌ Attestation failed: ${e.message}`);
-  }
-
-  // Step 4: Recompute on-chain reputation
-  try {
-    const client = getSATPWriteClient();
-    const repResult = await client.recomputeReputation(wallet, kp, 'mainnet');
-    console.log(`[PostVerify] ✅ Reputation recomputed: ${repResult.txSignature}`);
-  } catch (e) {
-    console.warn(`[PostVerify] ⚠️ Reputation recompute skipped: ${e.message}`);
-  }
-
-  // Step 5: Recompute on-chain verification level via V3 SDK
-  try {
-    const sdk = getV3SDK();
-    const { transaction } = await sdk.buildRecomputeLevel(kp.publicKey, profileId);
-    transaction.sign(kp);
-    const sig = await sdk.connection.sendRawTransaction(transaction.serialize());
-    console.log(`[PostVerify] ✅ Level recomputed: ${sig}`);
-  } catch (e) {
-    console.warn(`[PostVerify] ⚠️ Level recompute skipped: ${e.message}`);
+    console.warn(`[PostVerify] ⚠️ V3 bridge failed for ${profileId}: ${e.message}`);
   }
 
   if (onchainWriteSucceeded) {
