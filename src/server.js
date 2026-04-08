@@ -9,6 +9,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const rateLimit = require('express-rate-limit');
 
 // SATP Reviews integration
 const satpReviews = require('./satp-reviews');
@@ -165,6 +166,15 @@ app.set("trust proxy", 1);
 const PORT = process.env.PORT || 3333;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
+const registerApiLimiter = rateLimit({
+  validate: false,
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many registration attempts. Try again in 1 hour.' },
+});
+
 // Basic middleware
 app.use(cors({
   origin: NODE_ENV === 'production' 
@@ -175,6 +185,7 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use('/api/register', registerApiLimiter);
 
 // Security logging middleware
 app.use((req, res, next) => {
