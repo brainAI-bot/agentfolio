@@ -93,42 +93,68 @@ async function getSatpAgents() {
     } catch (e) {}
   }
 
-  // Batch NFT lookups
-  const nftResults = await Promise.all(
-    agents.filter(a => a.authority).map(agent => lookupNFT(conn, agent.authority))
-  );
-  for (let i = 0; i < agents.length; i++) {
-    if (nftResults[i]) {
-      agents[i].nftMint = nftResults[i].nftMint;
-      agents[i].nftImage = nftResults[i].nftImage;
-      agents[i].soulbound = nftResults[i].soulbound;
-      agents[i].nftName = nftResults[i].nftName || null;
-    } else {
-      agents[i].nftMint = null;
-      agents[i].nftImage = null;
-      agents[i].soulbound = false;
-    }
-  }
-
-  // A1: Overlay compute-score for consistency across all surfaces
   try {
-    const { computeScore } = require('../lib/compute-score');
     const Database = require('better-sqlite3');
     const path = require('path');
+    const { computeScore } = require('../lib/compute-score');
     const _db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+    const profiles = _db.prepare('SELECT id, name, wallet, claimed, claimed_by, wallets FROM profiles').all();
+
+    const matchesProfile = (agent) => profiles.find((profile) => {
+      let wallets = {};
+      try { wallets = JSON.parse(profile.wallets || '{}'); } catch (_) {}
+      const agentName = String(agent.name || '').toLowerCase();
+      const authority = String(agent.authority || '');
+      return (
+        String(profile.name || '').toLowerCase() == agentName ||
+        String(profile.wallet || '') == authority ||
+        String(profile.claimed_by || '') == authority ||
+        String(wallets.solana || '') == authority
+      );
+    });
+
+    const filteredAgents = [];
     for (const agent of agents) {
-      const profile = _db.prepare('SELECT id, claimed FROM profiles WHERE LOWER(name) = LOWER(?)').get(agent.name);
-      if (profile) {
-        const verifs = _db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profile.id);
-        const hasSatp = verifs.some(v => v.platform === 'satp') || true;
-        const computed = computeScore(verifs, { hasSatpIdentity: hasSatp, claimed: !!profile.claimed });
-        agent.reputationScore = computed.score;
-        agent.verificationLevel = computed.level;
-        agent.verificationLabel = computed.levelName;
+      const profile = matchesProfile(agent);
+      if (!profile) continue;
+      agent.profileId = profile.id;
+      filteredAgents.push(agent);
+    }
+
+    const nftResults = await Promise.all(
+      filteredAgents.map(agent => agent.authority ? lookupNFT(conn, agent.authority) : Promise.resolve(null))
+    );
+    for (let i = 0; i < filteredAgents.length; i++) {
+      if (nftResults[i]) {
+        filteredAgents[i].nftMint = nftResults[i].nftMint;
+        filteredAgents[i].nftImage = nftResults[i].nftImage;
+        filteredAgents[i].soulbound = nftResults[i].soulbound;
+        filteredAgents[i].nftName = nftResults[i].nftName || null;
+      } else {
+        filteredAgents[i].nftMint = null;
+        filteredAgents[i].nftImage = null;
+        filteredAgents[i].soulbound = false;
       }
     }
+
+    for (const agent of filteredAgents) {
+      const profile = profiles.find((p) => p.id === agent.profileId);
+      if (!profile) continue;
+      const verifs = _db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profile.id);
+      const computed = computeScore(verifs, { hasSatpIdentity: true, claimed: !!profile.claimed });
+      agent.reputationScore = computed.score;
+      agent.verificationLevel = computed.level;
+      agent.verificationLabel = computed.levelName;
+    }
     _db.close();
-  } catch (e) { console.warn('[SATP Explorer] compute-score overlay failed:', e.message); }
+
+    const result = { agents: filteredAgents, count: filteredAgents.length, source: "solana-mainnet-v3" };
+    agentCache = { data: result, timestamp: Date.now() };
+    return result;
+  } catch (e) {
+    console.warn('[SATP Explorer] DB filter/overlay failed:', e.message);
+  }
+
   const result = { agents, count: agents.length, source: "solana-mainnet-v3" };
   agentCache = { data: result, timestamp: Date.now() };
   return result;
