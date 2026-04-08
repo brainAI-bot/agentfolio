@@ -254,6 +254,13 @@ function registerSimpleRoutes(app, getDb) {
             transaction.sign(platformKeypair);
             const sig = await satpV3SDK.connection.sendRawTransaction(transaction.serialize());
             console.log('[SimpleRegister] Genesis created on-chain for', onchainProfileId, '(requested profile', id + '):', sig);
+            try {
+              const chainCache = require('../lib/chain-cache');
+              await chainCache.forceRefresh();
+              console.log('[SimpleRegister] Chain-cache force refreshed after genesis create for', onchainProfileId);
+            } catch (refreshErr) {
+              console.warn('[SimpleRegister] Chain-cache refresh failed after genesis create for', onchainProfileId, ':', refreshErr.message);
+            }
           } catch (e) {
             console.error('[SimpleRegister] Genesis creation failed for', id, ':', e.message);
           }

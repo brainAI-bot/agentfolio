@@ -217,6 +217,13 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
   if (onchainWriteSucceeded) {
     recomputeDBScore(profileId);
     revalidateProfileCache(profileId).catch(() => {});
+    try {
+      const chainCache = require('./lib/chain-cache');
+      await chainCache.forceRefresh();
+      console.log(`[PostVerify] ✅ Chain-cache force refreshed after on-chain success for ${profileId}`);
+    } catch (e) {
+      console.warn(`[PostVerify] Chain-cache refresh failed for ${profileId}: ${e.message}`);
+    }
     console.log(`[PostVerify] ✅ DB/cache refreshed after on-chain success for ${profileId}`);
   } else {
     console.warn(`[PostVerify] ⚠️ Skipped DB/cache refresh because on-chain write did not succeed for ${profileId}`);
