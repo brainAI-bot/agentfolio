@@ -326,15 +326,8 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
       addActivity(profileId, 'verification', { platform, identifier });
 
 
-  // Fire-and-forget: post on-chain Memo attestation
-  if (postMemoAttestation) {
-    postMemoAttestation(profileId, platform, { identifier, verified_at: new Date().toISOString() })
-      .then(result => {
-        if (result) console.log(`[ProfileStore] Memo attestation posted for ${profileId}/${platform}: ${result.explorerUrl}`);
-      })
-      .catch(err => console.error(`[ProfileStore] Memo attestation failed for ${profileId}/${platform}:`, err.message));
-  }
-
+  // Legacy memo attestation path removed.
+  // Chain-first verification writes now go through postVerificationHook only.
 
   // [REMOVED] Duplicate V3 update block -- handled by the unified V3 block above (verification + reputation + recompute)
 
