@@ -20,7 +20,8 @@ const MAX_SCORE = 800;
 
 export function V3ReputationCard({ data }: { data: V3ReputationData }) {
   const level = data.verificationLevel ?? 0;
-  const score = data.reputationScore ?? 0;
+  const rawScore = data.reputationScore ?? 0;
+  const score = rawScore > 10000 ? Math.round(rawScore / 10000) : rawScore;
   const levelLabel = LEVEL_LABELS[level] || "Unknown";
   const levelColor = LEVEL_COLORS[level] || "#64748B";
   const scorePct = Math.min(100, Math.round((score / MAX_SCORE) * 100));
