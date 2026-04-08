@@ -126,7 +126,10 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
 
   // V3 reputation (freshly deserialized) overrides genesis values for TrustBadge/sidebar
   if (v3Reputation && genesis) {
-    genesis.reputationScore = v3Reputation.reputationScore;
+    const normalizedV3Score = v3Reputation.reputationScore > 10000
+      ? Math.round(v3Reputation.reputationScore / 10000)
+      : v3Reputation.reputationScore;
+    genesis.reputationScore = normalizedV3Score;
     genesis.verificationLevel = v3Reputation.verificationLevel;
     genesis.verificationLabel = ["Unverified","Registered","Verified","Established","Trusted","Sovereign"][v3Reputation.verificationLevel] || genesis.verificationLabel;
     genesis.isBorn = v3Reputation.isBorn ?? genesis.isBorn;
