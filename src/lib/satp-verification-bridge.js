@@ -24,7 +24,10 @@ const [ATTESTATIONS_AUTHORITY] = PublicKey.findProgramAddressSync(
   ATTESTATIONS_PROGRAM
 );
 
-const KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/satp-mainnet-platform.json';
+const CONFIGURED_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/satp-mainnet-platform.json';
+const KEYPAIR_PATH = CONFIGURED_KEYPAIR_PATH === '/home/ubuntu/.config/solana/satp-mainnet-platform.json'
+  ? '/home/ubuntu/.config/solana/mainnet-deployer.json'
+  : CONFIGURED_KEYPAIR_PATH;
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
 
 let _keypair = null;
