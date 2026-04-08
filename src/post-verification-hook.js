@@ -95,6 +95,43 @@ function getProfileWallet(profileId) {
   }
 }
 
+
+async function resolveCanonicalOnchainProfileId(profileId) {
+  const wallet = getProfileWallet(profileId);
+  if (!wallet) return profileId;
+
+  try {
+    const current = await getV3SDK().getGenesisRecord(profileId);
+    if (current && !current.error) return profileId;
+  } catch (_) {}
+
+  try {
+    const db = getProfileStore().getDb();
+    const candidates = db.prepare(`
+      SELECT id, wallet, wallets
+      FROM profiles
+      WHERE id != ? AND (
+        wallet = ? OR wallet LIKE ? OR wallets LIKE ? OR verification_data LIKE ?
+      )
+      ORDER BY CASE WHEN id LIKE 'agent_%' THEN 0 ELSE 1 END, created_at ASC
+    `).all(profileId, wallet, `%${wallet}%`, `%${wallet}%`, `%${wallet}%`);
+
+    for (const candidate of candidates) {
+      try {
+        const existing = await getV3SDK().getGenesisRecord(candidate.id);
+        if (existing && !existing.error) {
+          console.log(`[PostVerify] Resolved canonical on-chain profile ${profileId} -> ${candidate.id} for wallet ${wallet}`);
+          return candidate.id;
+        }
+      } catch (_) {}
+    }
+  } catch (e) {
+    console.warn('[PostVerify] Canonical profile resolution failed:', e.message);
+  }
+
+  return profileId;
+}
+
 function recomputeDBScore(profileId) {
   try {
     const db = getProfileStore().getDb();
@@ -159,11 +196,15 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
     ...proof,
     verifiedAt: new Date().toISOString(),
   };
+  const onchainProfileId = await resolveCanonicalOnchainProfileId(profileId);
+  if (onchainProfileId !== profileId) {
+    console.log(`[PostVerify] Using canonical on-chain profile ${onchainProfileId} instead of ${profileId}`);
+  }
 
-  console.log(`[PostVerify] Creating attestation via V3 bridge: ${attestationType} for ${profileId}`);
+  console.log(`[PostVerify] Creating attestation via V3 bridge: ${attestationType} for ${onchainProfileId}`);
   try {
     const bridge = require('./lib/satp-verification-bridge');
-    const result = await bridge.postVerificationAttestation(profileId, platform, proofData);
+    const result = await bridge.postVerificationAttestation(onchainProfileId, platform, proofData);
     console.log(`[PostVerify] ✅ Bridge result for ${profileId}: ${JSON.stringify(result)}`);
     onchainWriteSucceeded = !!result;
     if (!result) {

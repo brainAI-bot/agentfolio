@@ -42,6 +42,36 @@ function genApiKey() {
   return 'af_' + crypto.randomBytes(24).toString('hex');
 }
 
+async function resolveCanonicalOnchainProfileId(db, profileId, walletAddress) {
+  if (!walletAddress || !satpV3SDK) return profileId;
+
+  try {
+    const current = await satpV3SDK.getGenesisRecord(profileId);
+    if (current && !current.error) return profileId;
+  } catch (_) {}
+
+  const candidates = db.prepare(`
+    SELECT id, wallet, wallets
+    FROM profiles
+    WHERE id != ? AND (
+      wallet = ? OR wallet LIKE ? OR wallets LIKE ? OR verification_data LIKE ?
+    )
+    ORDER BY CASE WHEN id LIKE 'agent_%' THEN 0 ELSE 1 END, created_at ASC
+  `).all(profileId, walletAddress, `%${walletAddress}%`, `%${walletAddress}%`, `%${walletAddress}%`);
+
+  for (const candidate of candidates) {
+    try {
+      const existing = await satpV3SDK.getGenesisRecord(candidate.id);
+      if (existing && !existing.error) {
+        console.log(`[SimpleRegister] Resolved canonical on-chain profile ${profileId} -> ${candidate.id} for wallet ${walletAddress}`);
+        return candidate.id;
+      }
+    } catch (_) {}
+  }
+
+  return profileId;
+}
+
 function registerSimpleRoutes(app, getDb) {
   app.post('/api/register/simple', simpleLimiter, async (req, res) => {
     const { name, tagline, github, website, skills, walletAddress } = req.body;
@@ -196,18 +226,19 @@ function registerSimpleRoutes(app, getDb) {
       if (satpV3SDK && platformKeypair) {
         (async () => {
           try {
-            const existing = await satpV3SDK.getGenesisRecord(id);
+            const onchainProfileId = await resolveCanonicalOnchainProfileId(d, id, walletAddress);
+            const existing = await satpV3SDK.getGenesisRecord(onchainProfileId);
             if (existing && !existing.error) {
-              console.log('[SimpleRegister] Genesis already exists for', id);
+              console.log('[SimpleRegister] Genesis already exists for', onchainProfileId, '(requested profile', id + ')');
               return;
             }
             const { transaction } = await satpV3SDK.buildCreateIdentity(
-              platformKeypair.publicKey, id,
+              platformKeypair.publicKey, onchainProfileId,
               { name: name.trim(), description: resolvedBio || '', category: 'agent', capabilities: resolvedSkills.map(s => s.name || s).slice(0, 5) }
             );
             transaction.sign(platformKeypair);
             const sig = await satpV3SDK.connection.sendRawTransaction(transaction.serialize());
-            console.log('[SimpleRegister] Genesis created on-chain for', id, ':', sig);
+            console.log('[SimpleRegister] Genesis created on-chain for', onchainProfileId, '(requested profile', id + '):', sig);
           } catch (e) {
             console.error('[SimpleRegister] Genesis creation failed for', id, ':', e.message);
           }
@@ -227,7 +258,8 @@ function registerSimpleRoutes(app, getDb) {
           if (result.changes > 0) {
             try {
               const { postVerificationHook } = require('../post-verification-hook');
-              const onchainSucceeded = await postVerificationHook(id, 'solana', walletAddress, proof);
+              const onchainProfileId = await resolveCanonicalOnchainProfileId(d, id, walletAddress);
+              const onchainSucceeded = await postVerificationHook(onchainProfileId, 'solana', walletAddress, proof);
               if (onchainSucceeded) {
                 console.log('[SimpleRegister] VerificationHook completed for', id);
               } else {
