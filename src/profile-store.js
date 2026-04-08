@@ -217,6 +217,31 @@ function parseJsonField(val, defaultVal = []) {
 }
 
 
+function chainAttestationMatchesWallet(att, row) {
+  try {
+    const currentWallets = new Set();
+    if (row?.wallet) currentWallets.add(String(row.wallet));
+    try {
+      const wallets = typeof row?.wallets === 'string' ? JSON.parse(row.wallets || '{}') : (row?.wallets || {});
+      if (wallets?.solana) currentWallets.add(String(wallets.solana));
+    } catch {}
+    try {
+      const vd = typeof row?.verification_data === 'string' ? JSON.parse(row.verification_data || '{}') : (row?.verification_data || {});
+      if (vd?.solana?.address) currentWallets.add(String(vd.solana.address));
+    } catch {}
+    if (!currentWallets.size) return false;
+
+    let proofData = {};
+    try { proofData = typeof att?.proofData === 'string' ? JSON.parse(att.proofData) : (att?.proofData || {}); } catch {}
+    const candidates = [att?.signer, att?.identifier, proofData?.wallet, proofData?.address, proofData?.identifier]
+      .filter(Boolean)
+      .map(v => String(v));
+    return candidates.some(v => currentWallets.has(v));
+  } catch {
+    return false;
+  }
+}
+
 // Score protection guard -- prevents corrupt scores from being written
 const MAX_VALID_SCORE = 10000;
 const MAX_LEVEL_JUMP = 2;
@@ -528,7 +553,7 @@ function enrichProfile(row) {
     onchain_verification_count: (() => {
       try {
         const chainCache = require('./lib/chain-cache');
-        const atts = chainCache.getVerifications(row.id, row.created_at) || [];
+        const atts = (chainCache.getVerifications(row.id, row.created_at) || []).filter(att => chainAttestationMatchesWallet(att, row));
         return new Set(atts.map(att => att.platform === 'twitter' ? 'x' : att.platform).filter(Boolean)).size;
       } catch (_) {
         return 0;
