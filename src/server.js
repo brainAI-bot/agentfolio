@@ -161,6 +161,7 @@ try {
 
 // App configuration
 const app = express();
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 3333;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
@@ -440,9 +441,14 @@ app.get('/api/explorer/:agentId', async (req, res) => {
 app.get('/api/profile/:id/trust-score', async (req, res) => {
   // Return computed trust score for internal SSR and public use
   try {
-    const profileId = req.params.id;
+    let profileId = req.params.id;
     const db = profileStore.getDb();
-    const row = db.prepare('SELECT id, claimed FROM profiles WHERE id = ?').get(profileId);
+    // Handle -> ID fallback (trust-score)
+    let row = db.prepare('SELECT id, claimed FROM profiles WHERE id = ?').get(profileId);
+    if (!row) {
+      const byHandle = db.prepare('SELECT id, claimed FROM profiles WHERE handle = ?').get(profileId);
+      if (byHandle) { row = byHandle; profileId = byHandle.id; }
+    }
     if (!row) return res.status(404).json({ error: 'Profile not found' });
     const { computeScore } = require('./lib/compute-score');
     const verifs = db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profileId);
@@ -450,10 +456,11 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
     const computed = computeScore(verifs, { hasSatpIdentity: hasSatp, claimed: !!row.claimed });
     let v3Score = null;
     try {
-      const { getV3Score } = require('./lib/v3-score-service');
+      // Use top-level getV3Score (already imported)
       v3Score = await getV3Score(profileId);
     } catch {}
-    const reputationScore = v3Score?.reputationScore || computed.score;
+    const rawReputationScore = v3Score?.reputationScore;
+    const reputationScore = rawReputationScore != null ? Math.round(rawReputationScore / 10000) : computed.score;
     const verificationLevel = v3Score?.verificationLevel || computed.level;
     const labels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
     res.json({
@@ -474,6 +481,57 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
   }
 });
 
+
+
+
+// ─── Genesis Record API (Bug 2 fix — Apr 6) ────────────────
+app.get('/api/profile/:id/genesis', async (req, res) => {
+  try {
+    let profileId = req.params.id;
+    const db = profileStore.getDb();
+    let row = db.prepare('SELECT id FROM profiles WHERE id = ?').get(profileId);
+    if (!row) {
+      row = db.prepare('SELECT id FROM profiles WHERE handle = ?').get(profileId);
+      if (row) profileId = row.id;
+    }
+    if (!row) return res.status(404).json({ error: 'Profile not found' });
+
+    const v3Score = await getV3Score(profileId);
+    if (!v3Score) return res.json({ genesis: null, message: 'No on-chain genesis record' });
+
+    let pda = null;
+    try {
+      const crypto = require('crypto');
+      const { PublicKey } = require('@solana/web3.js');
+      const PROGRAM_ID = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
+      const hash = crypto.createHash('sha256').update(profileId).digest();
+      pda = PublicKey.findProgramAddressSync([Buffer.from('genesis'), hash], PROGRAM_ID)[0].toBase58();
+    } catch (e) { console.warn('[Genesis] PDA derivation failed:', e.message); }
+
+    res.json({
+      genesis: {
+        pda,
+        agentName: v3Score.agentName || '',
+        description: '',
+        category: 'agent',
+        verificationLevel: v3Score.verificationLevel || 0,
+        verificationLabel: v3Score.verificationLabel || 'Unknown',
+        reputationScore: v3Score.reputationScore || 0,
+        reputationPct: v3Score.reputationPct || '0.00',
+        isBorn: v3Score.isBorn || false,
+        bornAt: v3Score.genesisRecord || null,
+        faceImage: v3Score.faceImage || '',
+        faceMint: v3Score.faceMint || '',
+        faceBurnTx: '',
+        createdAt: v3Score.createdAt || null,
+        authority: v3Score.authority || '',
+      }
+    });
+  } catch (e) {
+    console.error('[Genesis API]', e.message);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
 
 // ─── Badge SVG ──────────────────
 const { generateBadgeSVG } = require('./lib/badge-svg');
