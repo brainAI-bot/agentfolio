@@ -580,18 +580,30 @@ function enrichProfile(row) {
       positive: reviewStats.positive,
       negative: reviewStats.negative,
     },
-    // A1: Single scoring function -- compute from verifications on the fly
+    // A1: Single scoring function -- compute from chain-cache attestations, not DB verifications
     ...(() => {
-      const dbVerifs = [];
+      const chainVerifs = [];
       try {
-        const _d = getDb();
-        const _rows = _d.prepare("SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ?").all(row.id);
-        dbVerifs.push(..._rows);
+        const chainCache = require('./lib/chain-cache');
+        const atts = (chainCache.getVerifications(row.id, row.created_at) || []).filter(att => chainAttestationMatchesWallet(att, row));
+        for (const att of atts) {
+          const platform = att.platform === 'twitter' ? 'x' : att.platform;
+          if (!platform || platform === 'review') continue;
+          let proofData = {};
+          try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
+          const identifier = att.identifier || proofData.identifier || proofData.address || proofData.wallet || att.signer || platform;
+          chainVerifs.push({
+            platform,
+            identifier,
+            proof: JSON.stringify(proofData || {}),
+            verified_at: att.timestamp || att.verifiedAt || null,
+          });
+        }
       } catch (_) {}
-      const hasSatpIdentity = dbVerifs.some(v => v.platform === "satp") || !!(v3 && v3.verificationLevel >= 1);
-      const computed = computeScore(dbVerifs, { hasSatpIdentity, claimed: !!row.claimed });
+      const hasSatpIdentity = !!row.wallet || !!(v3 && v3.verificationLevel >= 1);
+      const computed = computeScore(chainVerifs, { hasSatpIdentity, claimed: !!row.claimed });
       return {
-        trust_score: { overall_score: computed.score, level: computed.levelName, score_breakdown: computed.breakdown, source: "compute-score" },
+        trust_score: { overall_score: computed.score, level: computed.levelName, score_breakdown: computed.breakdown, source: "compute-score-chain-cache" },
         level: computed.level,
         tier: computed.levelName,
         score: computed.score,
