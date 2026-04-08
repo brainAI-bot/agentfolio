@@ -119,7 +119,10 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     if (v3RepRes.ok) {
       const v3Data = await v3RepRes.json();
       if (v3Data && v3Data.reputationScore !== undefined) {
-        v3Reputation = v3Data;
+        v3Reputation = {
+          ...v3Data,
+          reputationScore: v3Data.reputationScore > 10000 ? Math.round(v3Data.reputationScore / 10000) : v3Data.reputationScore,
+        };
       }
     }
   } catch {}
