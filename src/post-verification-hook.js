@@ -150,13 +150,8 @@ async function revalidateProfileCache(profileId) {
 async function postVerificationHook(profileId, platform, identifier, proof) {
   console.log(`[PostVerify] ═══ Hook fired: ${profileId} verified ${platform} (${identifier}) ═══`);
 
-  // Step 1: Recompute DB trust score (fast, sync)
-  recomputeDBScore(profileId);
-
-  // Step 2: Revalidate frontend cache (async, non-blocking)
-  revalidateProfileCache(profileId).catch(() => {});
-
-  // Step 3-5: On-chain work (async)
+  // Step 1-3: On-chain work first. DB/cache update only after chain succeeds.
+  let onchainWriteSucceeded = false;
   const kp = getPlatformKeypair();
   if (!kp) {
     console.log('[PostVerify] No keypair — on-chain steps skipped');
@@ -184,6 +179,7 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
       agentId: profileId, attestationType, proofData,
     }, kp, 'mainnet');
     console.log(`[PostVerify] ✅ Attestation TX: ${result.txSignature}`);
+    onchainWriteSucceeded = true;
   } catch (e) {
     console.error(`[PostVerify] ❌ Attestation failed: ${e.message}`);
   }
@@ -206,6 +202,14 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
     console.log(`[PostVerify] ✅ Level recomputed: ${sig}`);
   } catch (e) {
     console.warn(`[PostVerify] ⚠️ Level recompute skipped: ${e.message}`);
+  }
+
+  if (onchainWriteSucceeded) {
+    recomputeDBScore(profileId);
+    revalidateProfileCache(profileId).catch(() => {});
+    console.log(`[PostVerify] ✅ DB/cache refreshed after on-chain success for ${profileId}`);
+  } else {
+    console.warn(`[PostVerify] ⚠️ Skipped DB/cache refresh because on-chain write did not succeed for ${profileId}`);
   }
 
   console.log(`[PostVerify] ═══ Pipeline complete for ${profileId}/${platform} ═══`);
