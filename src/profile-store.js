@@ -553,9 +553,23 @@ function enrichProfile(row) {
     })(),
     onchain_verification_count: (() => {
       try {
+        const platforms = new Set();
         const chainCache = require('./lib/chain-cache');
         const atts = (chainCache.getVerifications(row.id, row.created_at) || []).filter(att => chainAttestationMatchesWallet(att, row));
-        return new Set(atts.map(att => att.platform === 'twitter' ? 'x' : att.platform).filter(Boolean)).size;
+        atts.forEach(att => {
+          const platform = att.platform === 'twitter' ? 'x' : att.platform;
+          if (platform) platforms.add(platform);
+        });
+        if (platforms.size) return platforms.size;
+
+        const d = getDb();
+        const rows = d.prepare('SELECT platform FROM verifications WHERE profile_id = ?').all(row.id);
+        rows.forEach(info => {
+          const platform = info.platform === 'twitter' ? 'x' : info.platform;
+          if (platform) platforms.add(platform);
+        });
+        if (row.wallet) platforms.add('satp');
+        return platforms.size;
       } catch (_) {
         return 0;
       }
