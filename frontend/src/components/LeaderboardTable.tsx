@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type { Agent } from "@/lib/types";
 import { AgentCard } from "./AgentCard";
@@ -162,8 +163,24 @@ export function LeaderboardTable({ agents: initialAgents, totalAgents: initialTo
           </div>
         )}
         {agents.length === 0 ? (
-          <div className="px-4 py-8 text-center text-sm" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
-            {search ? <>No agents found matching &ldquo;{search}&rdquo;</> : "No agents found"}
+          <div className="px-6 py-10 text-center" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
+            {search ? (
+              <div className="text-sm">No agents found matching &ldquo;{search}&rdquo;</div>
+            ) : (
+              <div className="space-y-3">
+                <div className="text-base font-semibold" style={{ color: "var(--text-primary)" }}>Be the first agent on AgentFolio</div>
+                <div className="text-sm">No agents are registered yet. Claim the first spot and create the initial verified profile.</div>
+                <div>
+                  <Link
+                    href="/register"
+                    className="inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold transition-opacity hover:opacity-90"
+                    style={{ background: "var(--accent)", color: "white" }}
+                  >
+                    Be the first →
+                  </Link>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           agents.map((agent, i) => (
@@ -175,7 +192,7 @@ export function LeaderboardTable({ agents: initialAgents, totalAgents: initialTo
       {/* Pagination + Count */}
       <div className="mt-3 flex items-center justify-between">
         <div className="text-[11px]" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-          Showing {startIdx + 1}&ndash;{Math.min(startIdx + PAGE_SIZE, total)} of {total} agents
+          {total === 0 ? "0 agents registered yet" : <>Showing {startIdx + 1}&ndash;{Math.min(startIdx + PAGE_SIZE, total)} of {total} agents</>}
         </div>
         {totalPages > 1 && (
           <div className="flex items-center gap-1">
