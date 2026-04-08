@@ -12,6 +12,7 @@
 const { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction, ComputeBudgetProgram } = require('@solana/web3.js');
 const crypto = require('crypto');
 const fs = require('fs');
+const { getV3AttestationPDA, getGenesisPDA: getCanonicalGenesisPDA } = require('../satp-client/src/v3-pda');
 
 // V3 Program IDs (mainnet)
 const ATTESTATIONS_PROGRAM = new PublicKey('6Xd1dAQJPvQRJ4Ntr6LtPTjDjPUZ8nfnmYLZaZ2DtrdD');
@@ -63,18 +64,11 @@ function hashAgentId(agentId) {
 }
 
 function getAttestationPDA(agentId, issuer, attestationType) {
-  const agentHash = hashAgentId(agentId);
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from('attestation'), agentHash, new PublicKey(issuer).toBuffer(), Buffer.from(attestationType)],
-    ATTESTATIONS_PROGRAM
-  );
+  return getV3AttestationPDA(agentId, new PublicKey(issuer), attestationType, 'mainnet');
 }
 
 function getGenesisPDA(agentId) {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from('genesis'), hashAgentId(agentId)],
-    IDENTITY_PROGRAM
-  );
+  return getCanonicalGenesisPDA(agentId, 'mainnet');
 }
 
 /**
