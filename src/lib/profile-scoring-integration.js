@@ -30,24 +30,41 @@ function getProfileScoringData(profile) {
     };
   }
 
-  const scoring = getCompleteScore(profile);
+  const rawScoring = getCompleteScore(profile) || {};
+  const verificationLevel = rawScoring.verificationLevel || {
+    level: typeof rawScoring.level === 'number' ? rawScoring.level : 0,
+    name: rawScoring.levelName || rawScoring.level || 'Unverified',
+    description: 'No verification requirements met yet',
+    progress: null,
+  };
+  const reputationScore = rawScoring.reputationScore || {
+    score: typeof rawScoring.overall === 'number' ? rawScoring.overall : 0,
+    rank: rawScoring.rank || 'Newcomer',
+    breakdown: rawScoring.breakdown || null,
+  };
+  const overall = rawScoring.overall && typeof rawScoring.overall === 'object'
+    ? rawScoring.overall
+    : {
+        tier: rawScoring.tier || verificationLevel.name || 'Unverified',
+        summary: rawScoring.summary || 'Fallback scoring active',
+      };
   
   return {
     verificationLevel: {
-      level: scoring.verificationLevel.level,
-      name: scoring.verificationLevel.name,
-      description: scoring.verificationLevel.description,
-      progress: scoring.verificationLevel.progress,
-      badge: getVerificationBadge(scoring.verificationLevel.level),
-      color: getVerificationColor(scoring.verificationLevel.level)
+      level: verificationLevel.level,
+      name: verificationLevel.name,
+      description: verificationLevel.description,
+      progress: verificationLevel.progress,
+      badge: getVerificationBadge(verificationLevel.level),
+      color: getVerificationColor(verificationLevel.level)
     },
     reputationScore: {
-      score: scoring.reputationScore.score,
-      rank: scoring.reputationScore.rank,
-      breakdown: scoring.reputationScore.breakdown,
-      color: getReputationColor(scoring.reputationScore.score)
+      score: reputationScore.score,
+      rank: reputationScore.rank,
+      breakdown: reputationScore.breakdown,
+      color: getReputationColor(reputationScore.score)
     },
-    overall: scoring.overall,
+    overall,
     // Keep legacy scores for backward compatibility during transition
     legacy: {
       trustScore: getLegacyTrustScore(profile),
