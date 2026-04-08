@@ -369,19 +369,31 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     try { const t = JSON.parse(profile.tags || '[]'); tags = Array.isArray(t) ? t : []; } catch (_) {}
     try { const s = JSON.parse(profile.skills || '[]'); skills = Array.isArray(s) ? s : []; } catch (_) {}
     
-    const fullProfile = profileStore.getProfile(profile.id);
-    const verificationsMap = fullProfile?.verifications || {};
-    const dedupedVerifications = Object.entries(verificationsMap).map(([platform, info]) => ({
-      platform,
-      verified: true,
-      txSignature: info?.proof?.txSignature || null,
-      solscanUrl: info?.proof?.url || null,
-      timestamp: info?.verified_at || info?.proof?.timestamp || null,
-    }));
-    const trustScore = typeof fullProfile?.trust_score?.overall_score === 'number'
-      ? fullProfile.trust_score.overall_score
-      : (fullProfile?.trustScore || 0);
-    const tier = fullProfile?.tier || fullProfile?.levelName || fullProfile?.trust_score?.level || 'Unverified';
+    const v3Score = await getV3Score(profile.id).catch(() => null);
+    const identityVerified = !!profile.wallet && (chainCache.isVerified(profile.wallet) || !!(v3Score && v3Score.verificationLevel >= 1));
+    const attestations = (chainCache.getVerifications(profile.id, profile.created_at) || []).filter(att => att.platform && att.platform !== 'review');
+    const dedupedMap = new Map();
+    if (identityVerified && profile.wallet) {
+      dedupedMap.set('satp', { platform: 'satp', verified: true, txSignature: null, solscanUrl: null, timestamp: null });
+      dedupedMap.set('solana', { platform: 'solana', verified: true, txSignature: null, solscanUrl: null, timestamp: null });
+    }
+    for (const att of attestations) {
+      const platform = att.platform === 'twitter' ? 'x' : att.platform;
+      if (!platform || dedupedMap.has(platform)) continue;
+      dedupedMap.set(platform, {
+        platform,
+        verified: true,
+        txSignature: att.txSignature || null,
+        solscanUrl: att.solscanUrl || (att.txSignature ? `https://solscan.io/tx/${att.txSignature}` : null),
+        timestamp: att.timestamp || att.verifiedAt || null,
+      });
+    }
+    const dedupedVerifications = Array.from(dedupedMap.values());
+    const { computeScore } = require('./lib/compute-score');
+    const chainVerifs = dedupedVerifications.map(v => ({ platform: v.platform, identifier: v.platform === 'satp' || v.platform === 'solana' ? profile.wallet : v.platform }));
+    const computed = computeScore(chainVerifs, { hasSatpIdentity: identityVerified, claimed: !!profile.claimed });
+    const trustScore = computed.score;
+    const tier = computed.levelName;
     
     res.json({
       agentId: profile.id,
@@ -430,17 +442,30 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
     let profileId = req.params.id;
     const db = profileStore.getDb();
     // Handle -> ID fallback (trust-score)
-    let row = db.prepare('SELECT id, claimed FROM profiles WHERE id = ?').get(profileId);
+    let row = db.prepare('SELECT id, claimed, wallet, created_at FROM profiles WHERE id = ?').get(profileId);
     if (!row) {
-      const byHandle = db.prepare('SELECT id, claimed FROM profiles WHERE handle = ?').get(profileId);
+      const byHandle = db.prepare('SELECT id, claimed, wallet, created_at FROM profiles WHERE handle = ?').get(profileId);
       if (byHandle) { row = byHandle; profileId = byHandle.id; }
     }
     if (!row) return res.status(404).json({ error: 'Profile not found' });
-    const fullProfile = profileStore.getProfile(profileId);
-    const reputationScore = typeof fullProfile?.trust_score?.overall_score === 'number'
-      ? fullProfile.trust_score.overall_score
-      : (fullProfile?.trustScore || 0);
-    const verificationLevel = fullProfile?.verification_level || fullProfile?.verificationLevel || 0;
+    const v3Score = await getV3Score(profileId).catch(() => null);
+    const chainCache = require('./lib/chain-cache');
+    const identityVerified = !!row.wallet && (chainCache.isVerified(row.wallet) || !!(v3Score && v3Score.verificationLevel >= 1));
+    const { computeScore } = require('./lib/compute-score');
+    const attRows = (chainCache.getVerifications(profileId, row.created_at) || []).filter(att => att.platform && att.platform !== 'review');
+    const chainVerifs = [];
+    if (identityVerified && row.wallet) {
+      chainVerifs.push({ platform: 'satp', identifier: row.wallet });
+      chainVerifs.push({ platform: 'solana', identifier: row.wallet });
+    }
+    for (const att of attRows) {
+      const platform = att.platform === 'twitter' ? 'x' : att.platform;
+      if (!platform) continue;
+      chainVerifs.push({ platform, identifier: att.identifier || platform });
+    }
+    const computed = computeScore(chainVerifs, { hasSatpIdentity: identityVerified, claimed: !!row.claimed });
+    const reputationScore = computed.score;
+    const verificationLevel = v3Score?.verificationLevel || computed.level;
     const labels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
     res.json({
       ok: true,
@@ -451,7 +476,7 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
         verificationLabel: labels[verificationLevel] || 'Unknown',
         isBorn: verificationLevel >= 1,
         faceImage: null,
-        breakdown: fullProfile?.trust_score?.score_breakdown || fullProfile?.trustBreakdown || {},
+        breakdown: computed.breakdown,
         source: v3Score ? 'v3+compute' : 'compute',
       }
     });
