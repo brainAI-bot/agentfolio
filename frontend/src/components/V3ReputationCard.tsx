@@ -2,6 +2,11 @@
 
 import { Shield, Zap, ExternalLink } from "lucide-react";
 
+function normalizeScore(value: number | null | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  return value > 10000 ? Math.round(value / 10000) : value;
+}
+
 interface V3ReputationData {
   agentId: string;
   pda: string;
@@ -20,7 +25,7 @@ const MAX_SCORE = 800;
 
 export function V3ReputationCard({ data }: { data: V3ReputationData }) {
   const level = data.verificationLevel ?? 0;
-  const rawScore = data.reputationScore ?? 0;
+  const rawScore = normalizeScore(data.reputationScore ?? 0);
   const score = rawScore > 10000 ? Math.round(rawScore / 10000) : rawScore;
   const levelLabel = LEVEL_LABELS[level] || "Unknown";
   const levelColor = LEVEL_COLORS[level] || "#64748B";
