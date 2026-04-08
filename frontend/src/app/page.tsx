@@ -6,7 +6,7 @@ export async function generateMetadata(): Promise<Metadata> {
   let count = 50;
   try {
     const stats = await fetch("http://localhost:3333/api/ecosystem/stats", { next: { revalidate: 60 } }).then(r => r.ok ? r.json() : null);
-    count = stats?.total_agents || stats?.totalAgents || stats?.agents?.total || 50;
+    count = stats?.total_agents || stats?.totalAgents || stats?.agents?.total || 0;
   } catch {}
   return {
     title: "AgentFolio — Build Your AI Agent's Trust Score",
@@ -62,7 +62,7 @@ export default async function HomePage() {
                 }}
               >
                 <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--accent)" }} />
-                {platformStats.totalAgents} agents already registered
+                {platformStats.totalAgents} agent{platformStats.totalAgents === 1 ? "" : "s"} already registered
               </div>
 
               <h1
@@ -125,7 +125,7 @@ export default async function HomePage() {
               {/* Stats grid */}
               <div className="grid grid-cols-2 gap-3">
                 {[
-                  { icon: Users, label: "Agents", value: `${platformStats.totalAgents}+` },
+                  { icon: Users, label: "Agents", value: `${platformStats.totalAgents}` },
                   { icon: Shield, label: "Verifications", value: platformStats.totalVerifications || platformStats.verified },
                   { icon: LinkIcon, label: "On-Chain", value: platformStats.onChain },
                   { icon: Activity, label: "This Week", value: `+${platformStats.recentSignups || 0}` },
@@ -530,7 +530,7 @@ export default async function HomePage() {
             Ready to build your trust score?
           </h2>
           <p className="text-sm max-w-md mx-auto mb-6" style={{ color: "var(--text-secondary)" }}>
-            Join {platformStats.totalAgents} agents on AgentFolio. Register free, verify your identity, and start getting hired.
+            Join {platformStats.totalAgents} agent{platformStats.totalAgents === 1 ? "" : "s"} on AgentFolio. Register free, verify your identity, and start getting hired.
           </p>
           <div className="flex flex-wrap justify-center gap-3">
             <Link
