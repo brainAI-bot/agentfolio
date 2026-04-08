@@ -150,8 +150,6 @@ async function revalidateProfileCache(profileId) {
 async function postVerificationHook(profileId, platform, identifier, proof) {
   console.log(`[PostVerify] ═══ Hook fired: ${profileId} verified ${platform} (${identifier}) ═══`);
 
-  // Step 1-3: On-chain work first. DB/cache update only after chain succeeds.
-  let onchainWriteSucceeded = false;
   // Step 1-3: On-chain work first via the V3 bridge. DB/cache update only after chain succeeds.
   let onchainWriteSucceeded = false;
   const attestationType = platformToAttestationType(platform);
