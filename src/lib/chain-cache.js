@@ -86,7 +86,7 @@ async function refreshFromChain() {
     // Run fetches in parallel
     const results = await Promise.allSettled([
       refreshIdentities(),
-      refreshAttestationsFromDB().then(() => refreshAttestationsFromChain()), // DB first, then on-chain scan
+      refreshAttestationsFromProgramOnly(),
     ]);
     
     results.forEach((r, i) => {
@@ -325,6 +325,14 @@ function upsertAttestation(map, profileId, entry) {
   const idx = list.findIndex(item => item.platform === entry.platform);
   if (idx >= 0) list[idx] = { ...list[idx], ...entry };
   else list.push(entry);
+}
+
+async function refreshAttestationsFromProgramOnly() {
+  const newAttestations = new Map();
+  const discovered = await mergeProgramAttestationsIntoMap(newAttestations);
+  cache.attestations = newAttestations;
+  console.log(`[ChainCache] Using attestation-program only source, ${newAttestations.size} profiles with attestations`);
+  return discovered;
 }
 
 async function mergeProgramAttestationsIntoMap(newAttestations) {
