@@ -972,12 +972,23 @@ function registerRoutes(app) {
         notifReq.end();
       } catch (_) {} // Never fail registration due to notification
 
-      // Auto-verify Solana wallet on registration (Bug A fix)
+      // Chain-first Solana verification on registration: cache only after on-chain success.
       if (solanaWallet) {
         try {
-          const vId = require("crypto").randomUUID();
-          d.prepare("INSERT OR IGNORE INTO verifications (id, profile_id, platform, identifier, proof, verified_at) VALUES (?, ?, ?, ?, ?, datetime('now'))").run(vId, id, "solana", solanaWallet, JSON.stringify({ source: "registration", wallet: solanaWallet, signatureVerified: !!signature }));
-          console.log("[Register] Auto-verified Solana wallet for " + id);
+          const proof = { source: "registration", wallet: solanaWallet, signatureVerified: !!signature };
+          if (postVerificationHook) {
+            Promise.resolve(postVerificationHook(id, "solana", solanaWallet, proof))
+              .then((onchainSucceeded) => {
+                if (onchainSucceeded) {
+                  const vId = require("crypto").randomUUID();
+                  d.prepare("INSERT OR IGNORE INTO verifications (id, profile_id, platform, identifier, proof, verified_at) VALUES (?, ?, ?, ?, ?, datetime('now'))").run(vId, id, "solana", solanaWallet, JSON.stringify(proof));
+                  console.log("[Register] Cached Solana verification after on-chain success for " + id);
+                } else {
+                  console.warn("[Register] Skipped Solana verification cache for " + id + " because on-chain write failed");
+                }
+              })
+              .catch((vErr) => console.error("[Register] Solana auto-verify failed:", vErr.message));
+          }
         } catch (vErr) { console.error("[Register] Solana auto-verify failed:", vErr.message); }
       }
 
