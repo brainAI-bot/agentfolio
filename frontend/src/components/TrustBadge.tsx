@@ -53,7 +53,8 @@ export function TrustBadge({ tier, score, verificationLevel, verificationBadge, 
 
   if (verificationLevel !== undefined) {
     const lc = levelColors[verificationLevel] || levelColors[0];
-    const trustScore = reputationScore ?? 0;
+    const rawTrustScore = reputationScore ?? 0;
+    const trustScore = rawTrustScore > 10000 ? Math.round(rawTrustScore / 10000) : rawTrustScore;
     const trustPercent = Math.min((trustScore / 800) * 100, 100);
     const displayName = verificationLevelName || levelNames[verificationLevel] || 'Unknown';
 
