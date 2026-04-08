@@ -1324,21 +1324,23 @@ export default function VerifyPage() {
                 >
                   Connect Wallet <ArrowRight size={12} />
                 </button>
-              ) : (
+              ) : !(satpState.success || existingVerifications?.satp?.registered || existingVerifications?.satp?.verified) ? (
                 <button
                   onClick={registerSATP}
-                  disabled={!profileId || satpState.loading || satpState.success || existingVerifications?.satp?.registered}
+                  disabled={!profileId || satpState.loading}
                   className="mt-4 flex items-center gap-2 px-4 py-2 rounded-lg text-[11px] font-semibold uppercase tracking-wider transition-all disabled:opacity-40"
-                  style={{ fontFamily: "var(--font-mono)", background: (satpState.success || existingVerifications?.satp?.registered) ? "var(--success)" : "var(--accent)", color: "#fff" }}
+                  style={{ fontFamily: "var(--font-mono)", background: "var(--accent)", color: "#fff" }}
                 >
                   {satpState.loading ? (
                     <>Registering... <Loader2 size={12} className="animate-spin" /></>
-                  ) : (satpState.success || existingVerifications?.satp?.registered) ? (
-                    <>Registered <CheckCircle size={12} /></>
                   ) : (
                     <>Register On-Chain <ArrowRight size={12} /></>
                   )}
                 </button>
+              ) : (
+                <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-[11px] font-semibold uppercase tracking-wider" style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.15)", color: "var(--success)", border: "1px solid rgba(16,185,129,0.3)" }}>
+                  SATP already exists <CheckCircle size={12} />
+                </div>
               )}
             </div>
           </div>
