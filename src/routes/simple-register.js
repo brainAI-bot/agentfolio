@@ -15,7 +15,10 @@ try {
   const { Keypair } = require('@solana/web3.js');
   const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY';
   satpV3SDK = new SATPV3SDK({ rpcUrl: RPC_URL });
-  const kpPath = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/agentfolio/config/platform-keypair.json';
+  const configuredKpPath = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/agentfolio/config/platform-keypair.json';
+  const kpPath = configuredKpPath === '/home/ubuntu/.config/solana/satp-mainnet-platform.json'
+    ? '/home/ubuntu/.config/solana/mainnet-deployer.json'
+    : configuredKpPath;
   if (fs.existsSync(kpPath)) {
     platformKeypair = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(kpPath, 'utf8'))));
     console.log('[SimpleRegister] SATP V3 + platform keypair loaded for genesis creation');
