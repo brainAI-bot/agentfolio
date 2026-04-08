@@ -3,6 +3,11 @@
 import { useEffect, useState } from "react";
 import { Shield, ExternalLink, Flame } from "lucide-react";
 
+function normalizeScore(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return value > 10000 ? Math.round(value / 10000) : value;
+}
+
 interface GenesisData {
   pda: string;
   agentName: string;
@@ -48,7 +53,7 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
           g.faceMint = tsRes.data.faceMint || g.faceMint || "";
           g.verificationLevel = tsRes.data.verificationLevel ?? g.verificationLevel;
           g.verificationLabel = tsRes.data.verificationLabel || g.verificationLabel;
-          g.reputationScore = tsRes.data.reputationScore ?? g.reputationScore;
+          g.reputationScore = normalizeScore(tsRes.data.reputationScore ?? g.reputationScore);
         }
         setGenesis(g);
       }).catch(() => {});
@@ -67,6 +72,8 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
     : null;
 
   // Level color coding
+  genesis.reputationScore = normalizeScore(genesis.reputationScore);
+
   const levelColor = genesis.verificationLevel >= 5 ? "#A855F7" :
                      genesis.verificationLevel >= 4 ? "#3B82F6" :
                      genesis.verificationLevel >= 3 ? "#10B981" :

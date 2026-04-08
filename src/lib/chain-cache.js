@@ -336,6 +336,10 @@ async function mergeProgramAttestationsIntoMap(newAttestations) {
       try {
         const parsed = deserializeAttestation(account.data);
         if (!parsed?.agentId || !parsed?.verified || parsed?.isRevoked) continue;
+        let parsedProof = {};
+        try { parsedProof = typeof parsed.proofData === 'string' ? JSON.parse(parsed.proofData) : (parsed.proofData || {}); } catch {}
+        const testSource = String(parsedProof.source || '');
+        if (testSource.startsWith('post-restart-proof')) continue;
         const platform = normalizeAttestationPlatform(parsed.attestationType);
         if (!platform) continue;
         upsertAttestation(newAttestations, parsed.agentId, {
@@ -343,7 +347,9 @@ async function mergeProgramAttestationsIntoMap(newAttestations) {
           txSignature: null,
           memo: `ATTESTATION|${parsed.attestationType}`,
           proofHash: null,
+          proofData: parsed.proofData || JSON.stringify(parsedProof || {}),
           signer: parsed.issuer || null,
+          verifiedAt: parsed.createdAt ? new Date(Number(parsed.createdAt) * 1000).toISOString() : null,
           timestamp: parsed.createdAt ? new Date(Number(parsed.createdAt) * 1000).toISOString() : new Date().toISOString(),
           solscanUrl: `https://solscan.io/account/${pubkey.toBase58()}`,
           pda: pubkey.toBase58(),
