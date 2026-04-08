@@ -705,17 +705,19 @@ function registerRestoredRoutes(app) {
       if (!profile) return res.status(404).json({ error: 'Profile not found' });
       const result = await verifyMcpEndpoint(mcpUrl, profileId);
       if (result.verified) {
-        profile.verificationData = profile.verificationData || {};
-        profile.verificationData.mcp = {
-          verified: true, url: mcpUrl, method: result.method, toolCount: result.toolCount || 0, verifiedAt: new Date().toISOString()
-        };
-        profile.updatedAt = new Date().toISOString();
-        dbSaveProfileFn(profile);
-        addActivityAndBroadcast(profileId, 'verification_mcp', { url: mcpUrl, method: result.method, tools: result.toolCount || 0 }, DATA_DIR);
-        postVerificationMemo(profileId, 'mcp', { url: mcpUrl }).catch(() => {});
-        // Bug 5: trigger recompute_score
-        if (postVerificationHookFn) postVerificationHookFn(profileId, 'mcp', mcpUrl, { method: 'mcp-endpoint' }).catch(() => {});
-        postVerificationOnchainForProfile(profile, 'mcp', { url: mcpUrl });
+        let onchainSucceeded = true;
+        if (postVerificationHookFn) {
+          onchainSucceeded = await postVerificationHookFn(profileId, 'mcp', mcpUrl, { method: 'mcp-endpoint' });
+        }
+        if (onchainSucceeded) {
+          profile.verificationData = profile.verificationData || {};
+          profile.verificationData.mcp = {
+            verified: true, url: mcpUrl, method: result.method, toolCount: result.toolCount || 0, verifiedAt: new Date().toISOString()
+          };
+          profile.updatedAt = new Date().toISOString();
+          dbSaveProfileFn(profile);
+          addActivityAndBroadcast(profileId, 'verification_mcp', { url: mcpUrl, method: result.method, tools: result.toolCount || 0 }, DATA_DIR);
+        }
       }
       res.status(result.verified ? 200 : 400).json(result);
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -730,17 +732,19 @@ function registerRestoredRoutes(app) {
       if (!profile) return res.status(404).json({ error: 'Profile not found' });
       const result = await verifyA2aAgentCard(agentUrl, profileId);
       if (result.verified) {
-        profile.verificationData = profile.verificationData || {};
-        profile.verificationData.a2a = {
-          verified: true, url: agentUrl, agentName: result.agentName, verifiedAt: new Date().toISOString()
-        };
-        profile.updatedAt = new Date().toISOString();
-        dbSaveProfileFn(profile);
-        addActivityAndBroadcast(profileId, 'verification_a2a', { url: agentUrl, agentName: result.agentName }, DATA_DIR);
-        postVerificationMemo(profileId, 'a2a', { url: agentUrl }).catch(() => {});
-        // Bug 5: trigger recompute_score
-        if (postVerificationHookFn) postVerificationHookFn(profileId, 'a2a', agentUrl, { method: 'a2a-card' }).catch(() => {});
-        postVerificationOnchainForProfile(profile, 'a2a', { url: agentUrl });
+        let onchainSucceeded = true;
+        if (postVerificationHookFn) {
+          onchainSucceeded = await postVerificationHookFn(profileId, 'a2a', agentUrl, { method: 'a2a-card' });
+        }
+        if (onchainSucceeded) {
+          profile.verificationData = profile.verificationData || {};
+          profile.verificationData.a2a = {
+            verified: true, url: agentUrl, agentName: result.agentName, verifiedAt: new Date().toISOString()
+          };
+          profile.updatedAt = new Date().toISOString();
+          dbSaveProfileFn(profile);
+          addActivityAndBroadcast(profileId, 'verification_a2a', { url: agentUrl, agentName: result.agentName }, DATA_DIR);
+        }
       }
       res.status(result.verified ? 200 : 400).json(result);
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -767,19 +771,21 @@ function registerRestoredRoutes(app) {
       if (result.verified) {
         const profile = loadProfile(result.profileId, DATA_DIR);
         if (profile) {
-          profile.verificationData = profile.verificationData || {};
-          profile.verificationData.website = {
-            verified: true, url: result.websiteUrl, verifiedAt: new Date().toISOString()
-          };
-          profile.links = profile.links || {};
-          profile.links.website = result.websiteUrl;
-          profile.updatedAt = new Date().toISOString();
-          dbSaveProfileFn(profile);
-          addActivityAndBroadcast(result.profileId, 'verification_website', { url: result.websiteUrl }, DATA_DIR);
-          postVerificationMemo(result.profileId, 'website', { url: result.websiteUrl }).catch(() => {});
-          // Bug 5: trigger recompute_score
-          if (postVerificationHookFn) postVerificationHookFn(result.profileId, 'website', result.websiteUrl, { method: 'website-dns' }).catch(() => {});
-          postVerificationOnchainForProfile(profile, 'website', { url: result.websiteUrl });
+          let onchainSucceeded = true;
+          if (postVerificationHookFn) {
+            onchainSucceeded = await postVerificationHookFn(result.profileId, 'website', result.websiteUrl, { method: 'website-dns' });
+          }
+          if (onchainSucceeded) {
+            profile.verificationData = profile.verificationData || {};
+            profile.verificationData.website = {
+              verified: true, url: result.websiteUrl, verifiedAt: new Date().toISOString()
+            };
+            profile.links = profile.links || {};
+            profile.links.website = result.websiteUrl;
+            profile.updatedAt = new Date().toISOString();
+            dbSaveProfileFn(profile);
+            addActivityAndBroadcast(result.profileId, 'verification_website', { url: result.websiteUrl }, DATA_DIR);
+          }
         }
       }
       res.status(result.verified ? 200 : 400).json(result);
