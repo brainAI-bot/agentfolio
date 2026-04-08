@@ -165,7 +165,10 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
     const bridge = require('./lib/satp-verification-bridge');
     const result = await bridge.postVerificationAttestation(profileId, platform, proofData);
     console.log(`[PostVerify] ✅ Bridge result for ${profileId}: ${JSON.stringify(result)}`);
-    onchainWriteSucceeded = true;
+    onchainWriteSucceeded = !!result;
+    if (!result) {
+      console.warn(`[PostVerify] ⚠️ Bridge returned null for ${profileId}`);
+    }
   } catch (e) {
     console.warn(`[PostVerify] ⚠️ V3 bridge failed for ${profileId}: ${e.message}`);
   }
