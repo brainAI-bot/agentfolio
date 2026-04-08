@@ -6,7 +6,6 @@ import ProtocolActivity from "./ProtocolActivity";
 const IDENTITY_REGISTRY = "CV5Wd9YGFX5A4dvuaFuEDuKQWp14NfnLrSdxY7EHFyeB";
 const ESCROW_PROGRAM = "4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a";
 const TREASURY_WALLET = "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be";
-const DEPLOYER_WALLET = "Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const PLATFORM_FEE_RATE = 0.05;
 
@@ -108,9 +107,8 @@ export default async function StatsPage() {
   }, 0);
 
   // Fetch on-chain balances
-  const [treasuryBalance, deployerBalance, treasuryUsdc] = await Promise.all([
+  const [treasuryBalance, treasuryUsdc] = await Promise.all([
     getSolBalance(TREASURY_WALLET),
-    getSolBalance(DEPLOYER_WALLET),
     getUsdcBalance(TREASURY_WALLET),
   ]);
 
@@ -244,7 +242,6 @@ export default async function StatsPage() {
             { label: "Total Escrow Volume", value: escrowVolume > 0 ? `$${escrowVolume.toLocaleString()}` : "—", icon: <ArrowDownToLine size={18} /> },
             { label: "Protocol Revenue (5%)", value: protocolRevenue > 0 ? `$${protocolRevenue.toLocaleString()}` : "—", icon: <TrendingUp size={18} /> },
             { label: "Treasury Balance", value: `${treasuryBalance.toFixed(4)} SOL`, icon: <Wallet size={18} /> },
-            { label: "Deployer Balance", value: `${deployerBalance.toFixed(4)} SOL`, icon: <Wallet size={18} /> },
             { label: "Average Job Value", value: avgJobValue > 0 ? `$${avgJobValue.toFixed(2)}` : "—", icon: <DollarSign size={18} /> },
             { label: "Active Escrows", value: activeEscrows, icon: <Briefcase size={18} /> },
           ].map((card) => (
@@ -324,7 +321,6 @@ export default async function StatsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {[
               { label: "Treasury", address: TREASURY_WALLET, sol: treasuryBalance, usdc: treasuryUsdc },
-              { label: "Deployer", address: DEPLOYER_WALLET, sol: deployerBalance, usdc: null },
             ].map((w) => (
               <div key={w.label} className="rounded-lg p-4" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
                 <div className="text-xs font-semibold mb-1" style={{ color: "var(--text-primary)" }}>{w.label}</div>
