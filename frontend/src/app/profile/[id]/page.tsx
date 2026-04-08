@@ -62,10 +62,6 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
 
   const v = agent.verifications;
   const statusColor = agent.unclaimed ? "#F59E0B" : agent.status === "online" ? "#10B981" : agent.status === "busy" ? "#F59E0B" : "#64748B";
-  const badgeRawScore = genesis ? genesis.reputationScore : agent.trustScore;
-  const badgeScore = typeof badgeRawScore === "number" && badgeRawScore > 10000 ? Math.round(badgeRawScore / 10000) : badgeRawScore;
-  const badgeRawReputation = genesis ? genesis.reputationScore : agent.reputationScore;
-  const badgeReputationScore = typeof badgeRawReputation === "number" && badgeRawReputation > 10000 ? Math.round(badgeRawReputation / 10000) : badgeRawReputation;
   // Fetch V3 on-chain Genesis Record for trust scores
   let genesis: any = null;
   try {
@@ -147,8 +143,15 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   // all verifications. V3 on-chain may lag behind or be 0. Compute-score is authoritative.
   const displayScore = agent.trustScore || 0;
   if (genesis) {
-    genesis.reputationScore = Math.max(genesis.reputationScore || 0, displayScore);
+    const normalizedGenesisScore = typeof genesis.reputationScore === "number" && genesis.reputationScore > 10000
+      ? Math.round(genesis.reputationScore / 10000)
+      : (genesis.reputationScore || 0);
+    genesis.reputationScore = displayScore || normalizedGenesisScore;
   }
+  const badgeRawScore = genesis ? genesis.reputationScore : agent.trustScore;
+  const badgeScore = typeof badgeRawScore === "number" && badgeRawScore > 10000 ? Math.round(badgeRawScore / 10000) : badgeRawScore;
+  const badgeRawReputation = genesis ? genesis.reputationScore : agent.reputationScore;
+  const badgeReputationScore = typeof badgeRawReputation === "number" && badgeRawReputation > 10000 ? Math.round(badgeRawReputation / 10000) : badgeRawReputation;
   let githubStats: any = null;
   if (v?.github?.verified && v.github.username) {
     try {
