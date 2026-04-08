@@ -181,9 +181,14 @@ async function postVerificationAttestation(agentId, platform, proofObj) {
     console.log(`[SATP Bridge] ✅ Created + verified + recomputed for ${agentId}/${platform} TX: ${sig}`);
     return { txSignature: sig, attestationPDA: attPDA.toBase58() };
   } catch (e) {
-    console.error(`[SATP Bridge] TX failed for ${agentId}/${platform}:`, e.message?.slice(0, 300));
-    if (e.logs) e.logs.slice(-5).forEach(l => console.error('  ', l));
-    return null;
+    const logs = Array.isArray(e?.logs) ? e.logs : [];
+    console.error(`[SATP Bridge] TX failed for ${agentId}/${platform}: ${(e.message || e).slice(0, 300)}`);
+    logs.slice(-10).forEach(l => console.error('  ', l));
+    const lower = `${e?.message || ''} ${logs.join(' ')}`.toLowerCase();
+    if (lower.includes('already in use')) {
+      return await triggerRecomputeOnly(agentId, keypair, conn);
+    }
+    throw e;
   }
 }
 
@@ -293,8 +298,10 @@ async function triggerRecomputeOnly(agentId, keypair, conn) {
     console.log(`[SATP Bridge] Recomputed score for ${agentId}: TX ${sig}`);
     return { txSignature: sig };
   } catch (e) {
-    console.error(`[SATP Bridge] recompute failed:`, e.message?.slice(0, 200));
-    return null;
+    const logs = Array.isArray(e?.logs) ? e.logs : [];
+    console.error(`[SATP Bridge] recompute failed: ${(e.message || e).slice(0, 300)}`);
+    logs.slice(-10).forEach(l => console.error('  ', l));
+    throw e;
   }
 }
 
