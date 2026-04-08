@@ -36,7 +36,7 @@ function getProfileStore() {
   return profileStore;
 }
 
-const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/agentfolio/keys/platform-keypair.json';
+const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/agentfolio/config/platform-keypair.json';
 
 function getPlatformKeypair() {
   if (!keypair) {
@@ -179,9 +179,9 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
       challengeId: proof?.challengeId || 'direct',
     }).slice(0, 200);
 
-    console.log(`[PostVerify] Creating attestation: ${attestationType} for ${wallet}`);
+    console.log(`[PostVerify] Creating attestation: ${attestationType} for profile ${profileId}`);
     const result = await client.createAttestation({
-      agentId: wallet, attestationType, proofData,
+      agentId: profileId, attestationType, proofData,
     }, kp, 'mainnet');
     console.log(`[PostVerify] ✅ Attestation TX: ${result.txSignature}`);
   } catch (e) {
@@ -191,7 +191,7 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
   // Step 4: Recompute on-chain reputation
   try {
     const client = getSATPWriteClient();
-    const repResult = await client.recomputeReputation(wallet, kp, 'mainnet');
+    const repResult = await client.recomputeReputation(profileId, kp, 'mainnet');
     console.log(`[PostVerify] ✅ Reputation recomputed: ${repResult.txSignature}`);
   } catch (e) {
     console.warn(`[PostVerify] ⚠️ Reputation recompute skipped: ${e.message}`);
