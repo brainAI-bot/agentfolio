@@ -397,7 +397,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                   else if (t === "solana" && vEntry?.address) detail = `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)}`;
                   else if (t === "ethereum" && vEntry?.address) detail = `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)}`;
                   else if (t === "hyperliquid" && vEntry?.address) detail = vEntry?.volume && vEntry?.volume !== "$0" ? `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)} · ${vEntry?.volume} vol` : `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)} · Verified ✅`;
-                  else if (t === "satp") detail = vEntry?.did ? `${vEntry.did}` : "On-Chain Identity ⛓️";
+                  else if (t === "satp") detail = vEntry?.did ? `${vEntry.did}` : "SATP";
                   else if (t === "x" && vEntry?.handle) detail = `@${vEntry?.handle.replace("@","")}`;
                   else if (t === "agentmail" && vEntry?.email) detail = vEntry?.email;
                   else if (t === "moltbook" && vEntry?.username) detail = `@${vEntry?.username}`;
@@ -422,13 +422,14 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                       verified
                       color={colorMap[t]}
                       href={
+                        t === "satp" && vEntry?.proof?.identityPDA ? `https://solana.fm/address/${vEntry?.proof?.identityPDA}` :
                         chainTx?.solscanUrl ? chainTx.solscanUrl :
                         t === "satp" ? `https://agentfolio.bot/api/satp/score/${encodeURIComponent(id)}` :
                         t === "x" && vEntry?.handle ? `https://x.com/${vEntry?.handle.replace("@","")}` :
                         t === "moltbook" && vEntry?.username ? `https://moltbook.com/u/${vEntry?.username}` :
                         t === "website" && vEntry?.url ? vEntry?.url :
                         t === "github" && vEntry?.username ? `https://github.com/${vEntry?.username}` :
-                        t === "solana" && vEntry?.address ? `https://explorer.solana.com/address/${vEntry?.address}` :
+                        t === "solana" && vEntry?.address ? `https://solana.fm/address/${vEntry?.address}` :
                         t === "ethereum" && vEntry?.address ? `https://etherscan.io/address/${vEntry?.address}` :
                         t === "domain" && vEntry?.domain ? `https://${vEntry?.domain}` :
                         undefined
