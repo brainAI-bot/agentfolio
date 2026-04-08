@@ -493,16 +493,16 @@ function enrichProfile(row) {
           if (!att.platform || att.platform === 'review') continue;
           const platform = att.platform === 'twitter' ? 'x' : att.platform;
           if (vMap[platform]) continue;
-          // [P0 FIX Apr 5] Skip chain attestations with no real DB identifier -- old attestations leak
-          const dbInfo = dbVerifs[platform];
-          if (!dbInfo || !dbInfo.identifier || dbInfo.identifier === platform) continue;
-          const displayId = dbInfo.identifier;
+          let proofData = {};
+          try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
+          const displayId = att.identifier || proofData.identifier || proofData.address || proofData.wallet || proofData.username || proofData.url || proofData.handle || att.pda || platform;
+          const proofUrl = att.txSignature ? ('https://solana.fm/tx/' + att.txSignature) : (att.solscanUrl || null);
           vMap[platform] = {
             verified: true,
             address: displayId,
             identifier: displayId,
-            proof: { txSignature: att.txSignature, timestamp: att.timestamp, url: 'https://solana.fm/tx/' + att.txSignature },
-            verified_at: att.timestamp || null,
+            proof: { txSignature: att.txSignature || null, timestamp: att.timestamp || att.verifiedAt || null, url: proofUrl },
+            verified_at: att.timestamp || att.verifiedAt || null,
             source: 'on-chain',
           };
         }
@@ -524,6 +524,15 @@ function enrichProfile(row) {
         }
       }
       return vMap;
+    })(),
+    onchain_verification_count: (() => {
+      try {
+        const chainCache = require('./lib/chain-cache');
+        const atts = chainCache.getVerifications(row.id, row.created_at) || [];
+        return new Set(atts.map(att => att.platform === 'twitter' ? 'x' : att.platform).filter(Boolean)).size;
+      } catch (_) {
+        return 0;
+      }
     })(),
     activity: activity.map(a => ({ ...a, type: a.event_type, detail: parseJsonField(a.detail) })),
     reviews: {
