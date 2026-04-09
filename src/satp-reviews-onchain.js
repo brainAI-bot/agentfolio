@@ -24,8 +24,10 @@ const _bulkCache = {
   byReviewer: new Map(),    // reviewerDid -> [reviews]
   lastFetch: 0,
   loading: null,            // Promise (dedup concurrent loads)
+  lastFailure: 0,          // cooldown after cold-start RPC failures
 };
 const BULK_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes — reviews change very rarely
+const BULK_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
 
 // Reputation cache (individual lookups, longer TTL)
 const _repCache = new Map(); // key -> { data, expires }
@@ -57,6 +59,9 @@ async function ensureBulkCache() {
   const now = Date.now();
   if (_bulkCache.lastFetch && (now - _bulkCache.lastFetch) < BULK_CACHE_TTL_MS) {
     return; // Cache is fresh
+  }
+  if (_bulkCache.lastFailure && (now - _bulkCache.lastFailure) < BULK_FAILURE_COOLDOWN_MS) {
+    return; // Recent cold-start failure, avoid hammering RPC
   }
 
   // Dedup: if already loading, wait for that promise
@@ -114,9 +119,14 @@ async function _loadBulkReviews() {
     if (_bulkCache.allReviews.length > 0) {
       console.warn(`[SATP Reviews] Bulk refresh failed (serving stale ${_bulkCache.allReviews.length} reviews):`, err.message);
       _bulkCache.lastFetch = Date.now() - BULK_CACHE_TTL_MS + 5 * 60 * 1000; // Retry in 5min
+      _bulkCache.lastFailure = Date.now();
     } else {
-      console.error('[SATP Reviews] Bulk load failed with no fallback:', err.message);
-      throw err;
+      console.warn('[SATP Reviews] Bulk load unavailable on cold start, serving empty cache temporarily:', err.message);
+      _bulkCache.allReviews = [];
+      _bulkCache.byReviewed = new Map();
+      _bulkCache.byReviewer = new Map();
+      _bulkCache.lastFetch = Date.now();
+      _bulkCache.lastFailure = Date.now();
     }
   }
 }
