@@ -563,9 +563,6 @@ app.get('/api/profile/:id/genesis', async (req, res) => {
           const normalizedScore = normalized.reputationScore ?? genesis.reputationScore ?? 0;
           genesis = {
             ...genesis,
-            rawReputationScore: genesis.reputationScore,
-            rawVerificationLevel: genesis.verificationLevel,
-            rawVerificationLabel: genesis.verificationLabel || null,
             reputationScore: normalizedScore,
             verificationLevel: normalized.verificationLevel ?? genesis.verificationLevel,
             verificationLabel: normalized.verificationLabel || genesis.verificationLabel,
