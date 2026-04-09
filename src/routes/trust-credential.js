@@ -84,6 +84,7 @@ function registerTrustCredentialRoutes(app) {
   const profileStore = require('../profile-store');
   const { getV3Score } = require('../../v3-score-service');
   const chainCache = require('../lib/chain-cache');
+  const { computeScore } = require('../lib/compute-score');
 
   // ── Verify route MUST come before :agentId to avoid parameter capture ──
 
@@ -183,12 +184,21 @@ function registerTrustCredentialRoutes(app) {
         seenPlatforms.add(platform);
         if (platform === 'x') seenPlatforms.add('twitter');
       }
-      const normalizedTrustScore = v3Score
-        ? (v3Score.reputationScore > 10000 ? Math.round(v3Score.reputationScore / 10000) : (v3Score.reputationScore || 0))
-        : 0;
-      const normalizedVerificationLevel = v3Score?.verificationLevel ?? 0;
-      const normalizedTier = (v3Score?.verificationLabel || 'Unverified').toUpperCase();
-      const onChainRegistered = !!(profile.wallet && chainCache.isVerified(profile.wallet));
+      const identityVerified = !!(profile.wallet && (chainCache.isVerified(profile.wallet) || !!(v3Score && v3Score.verificationLevel >= 1)));
+      const chainScoreInputs = [];
+      if (identityVerified && profile.wallet) {
+        chainScoreInputs.push({ platform: 'satp', identifier: profile.wallet });
+        chainScoreInputs.push({ platform: 'solana', identifier: profile.wallet });
+      }
+      for (const att of realAttestations) chainScoreInputs.push(att);
+      const computed = computeScore(chainScoreInputs, {
+        hasSatpIdentity: identityVerified,
+        claimed: profile.claimed === 1 || profile.claimed === true,
+      });
+      const normalizedTrustScore = computed.score || 0;
+      const normalizedVerificationLevel = computed.level || 0;
+      const normalizedTier = (computed.levelName || 'Unverified').toUpperCase();
+      const onChainRegistered = identityVerified;
 
       // 4. Build W3C Verifiable Credential payload
       const now = new Date();
@@ -202,12 +212,12 @@ function registerTrustCredentialRoutes(app) {
         maxScore: 800,
         tier: normalizedTier,
         verificationLevel: normalizedVerificationLevel,
-        scoreVersion: v3Score ? 'v3' : 'none',
+        scoreVersion: 'attestation-compute',
         verificationCount: realAttestations.length,
         onChainRegistered,
         breakdown: {
-          onChainReputation: normalizedTrustScore,
-          verifications: realAttestations.length,
+          onChainReputation: computed.breakdown?.satp_identity || 0,
+          verifications: normalizedTrustScore - (computed.breakdown?.satp_identity || 0),
           socialProof: 0,
           completeness: 0,
           marketplace: 0,
