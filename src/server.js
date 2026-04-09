@@ -11,6 +11,8 @@ const path = require('path');
 const fs = require('fs');
 const rateLimit = require('express-rate-limit');
 
+const SITE_URL = process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || 'https://agentfolio.bot';
+
 // SATP Reviews integration
 const satpReviews = require('./satp-reviews');
 // SATP On-Chain API (read + write)
@@ -436,9 +438,9 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       },
       breakdown: v3Score ? computed.breakdown : {},
       links: {
-        profile: 'https://agentfolio.bot/profile/' + profile.id,
-        trustCredential: 'https://agentfolio.bot/api/trust-credential/' + profile.id,
-        api: 'https://agentfolio.bot/api/profile/' + profile.id,
+        profile: SITE_URL + '/profile/' + profile.id,
+        trustCredential: SITE_URL + '/api/trust-credential/' + profile.id,
+        api: SITE_URL + '/api/profile/' + profile.id,
       },
       createdAt: profile.created_at,
       updatedAt: profile.updated_at,
