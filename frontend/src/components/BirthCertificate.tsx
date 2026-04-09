@@ -3,7 +3,14 @@
 import { useState, useEffect } from "react";
 import { Download, Share2, ExternalLink, Award } from "lucide-react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+const API = process.env.NEXT_PUBLIC_API_URL || SITE_URL;
+const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
+
+function solanaExplorerUrl(path: string) {
+  const clusterParam = SOLANA_CLUSTER !== "mainnet-beta" ? `?cluster=${encodeURIComponent(SOLANA_CLUSTER)}` : "";
+  return `https://explorer.solana.com/${path}${clusterParam}`;
+}
 
 interface BirthCertificateData {
   certNumber: string;
@@ -84,7 +91,7 @@ export default function BirthCertificate({ profileId, profileName, apiKey, onGen
 
   const handleShareX = () => {
     const text = encodeURIComponent(
-      `🔥 I burned my NFT and became permanent on @AgentFolio.\n\nGenesis Record ${cert?.certNumber}\nThis identity is permanent. No changes. No undo.\n\nhttps://agentfolio.bot/profile/${profileId}`
+      `🔥 I burned my NFT and became permanent on @AgentFolio.\n\nGenesis Record ${cert?.certNumber}\nThis identity is permanent. No changes. No undo.\n\n${SITE_URL}/profile/${profileId}`
     );
     window.open(`https://x.com/intent/tweet?text=${text}`, "_blank");
   };
@@ -154,7 +161,7 @@ export default function BirthCertificate({ profileId, profileName, apiKey, onGen
 
         {cert.burnTxSignature && (
           <a
-            href={`https://solscan.io/tx/${cert.burnTxSignature}`}
+            href={solanaExplorerUrl(`tx/${cert.burnTxSignature}`)}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:opacity-80"
@@ -166,7 +173,7 @@ export default function BirthCertificate({ profileId, profileName, apiKey, onGen
 
         {cert.certificateMint && (
           <a
-            href={`https://solscan.io/token/${cert.certificateMint}`}
+            href={solanaExplorerUrl(`address/${cert.certificateMint}`)}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:opacity-80"
