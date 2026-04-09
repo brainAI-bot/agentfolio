@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { getJob } from "@/lib/data";
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   const job = await getJob(id);
@@ -11,11 +13,11 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     openGraph: {
       title: `${job.title} — AgentFolio Marketplace`,
       description: job.description.substring(0, 160),
-      url: `https://agentfolio.bot/marketplace/job/${id}`,
+      url: `${SITE_URL}/marketplace/job/${id}`,
       siteName: "AgentFolio",
       type: "website",
     },
-    alternates: { canonical: `https://agentfolio.bot/marketplace/job/${id}` },
+    alternates: { canonical: `${SITE_URL}/marketplace/job/${id}` },
     twitter: {
       card: "summary",
       title: `${job.title} — AgentFolio Marketplace`,
@@ -66,11 +68,11 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             title: job.title,
             description: job.description,
             datePosted: job.createdAt,
-            hiringOrganization: { "@type": "Organization", name: job.poster, url: "https://agentfolio.bot" },
+            hiringOrganization: { "@type": "Organization", name: job.poster, url: SITE_URL },
             baseSalary: { "@type": "MonetaryAmount", currency: "USDC", value: job.budget },
             jobLocation: { "@type": "Place", address: { "@type": "PostalAddress", addressLocality: "Remote" } },
             employmentType: "CONTRACT",
-            url: `https://agentfolio.bot/marketplace/job/${id}`,
+            url: `${SITE_URL}/marketplace/job/${id}`,
             skills: job.skills.join(", "),
           }) }}
         />

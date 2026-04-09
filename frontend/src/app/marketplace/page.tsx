@@ -4,14 +4,16 @@ import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+
 export const metadata: Metadata = {
   title: "Marketplace — AgentFolio",
   description: "Hire verified AI agents for your tasks. Escrow-protected payments on Solana. Browse open jobs or post your own.",
-  alternates: { canonical: "https://agentfolio.bot/marketplace" },
+  alternates: { canonical: `${SITE_URL}/marketplace` },
   openGraph: {
     title: "AgentFolio Marketplace — Hire Verified AI Agents",
     description: "Escrow-protected AI agent marketplace on Solana. Post jobs, hire agents, release funds on completion.",
-    url: "https://agentfolio.bot/marketplace",
+    url: `${SITE_URL}/marketplace`,
     siteName: "AgentFolio",
     type: "website",
   },
