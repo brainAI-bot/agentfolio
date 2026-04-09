@@ -1167,42 +1167,44 @@ function registerRoutes(app) {
     {
       const chainCache = require('./lib/chain-cache');
       for (const p of profiles) {
-        const chainVerifs = [];
-        const identityVerified = !!p.wallet && chainCache.isVerified(p.wallet);
-        if (identityVerified && p.wallet) {
-          chainVerifs.push({ platform: 'satp', identifier: p.wallet });
-          chainVerifs.push({ platform: 'solana', identifier: p.wallet });
-        }
-        const atts = (chainCache.getVerifications(p.id, p.created_at) || []).filter(att => att.platform && att.platform !== 'review');
-        const seenPlatforms = new Set(chainVerifs.map(v => v.platform));
-        for (const att of atts) {
-          const platform = att.platform === 'twitter' ? 'x' : att.platform;
-          if (!platform || seenPlatforms.has(platform)) continue;
-          chainVerifs.push({ platform, identifier: att.identifier || platform });
-          seenPlatforms.add(platform);
-        }
-        const computed = computeScore(chainVerifs, { hasSatpIdentity: identityVerified, claimed: !!p.claimed });
-        p.trust_score = computed.score;
-        p.score = computed.score;
-        p.level = computed.level;
-        p.tier = computed.levelName;
-        p.verificationLevel = computed.level;
-        p.verificationLabel = computed.levelName;
+        // Clean start: directory score display is genesis-only. No synthetic score from identity/attestations.
+        p.trust_score = 0;
+        p.trustScore = 0;
+        p.score = 0;
+        p.reputation_score = 0;
+        p.level = 0;
+        p.tier = 'Unverified';
+        p.verificationLevel = 0;
+        p.verificationLabel = 'Unverified';
       }
     }
-    // Re-sort by score DESC
+    // Clean start: default scores stay at 0 unless V3 genesis exists.
     profiles.sort((a, b) => (b.trust_score || 0) - (a.trust_score || 0));
 
     // P0-13: Paginate after V3 overlay sort
     // [FIX 3] Second chain-cache overlay REMOVED -- V3 genesis only
 
-    // P0 FIX: Promote v3/chain-cache level+score to top-level fields for directory consumption
+    // Clean start: promote live V3 genesis to top-level fields, otherwise keep zero.
     const levelLabels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
+    let v3ScoresById = new Map();
+    try {
+      const { getV3Scores } = require('./v3-score-service');
+      v3ScoresById = await getV3Scores(profiles.map(p => p.id));
+    } catch (_) {}
     for (const p of profiles) {
-      const v = p.v3 || {};
+      const v = v3ScoresById.get(p.id) || p.v3 || {};
+      const v3Score = v.reputationScore > 10000 ? Math.round(v.reputationScore / 10000) : (v.reputationScore || 0);
+      p.v3 = Object.keys(v).length ? v : p.v3;
+      p.trust_score = v3Score;
+      p.trustScore = v3Score;
+      p.score = v3Score;
+      p.reputation_score = v3Score;
       p.level = v.verificationLevel || 0;
-      p.score = v.reputationScore || 0;
-      p.levelName = v.verificationLabel || levelLabels[p.level] || 'Unverified';
+      p.verificationLevel = p.level;
+      p.tier = v.verificationLabel || levelLabels[p.level] || 'Unverified';
+      p.levelName = p.tier;
+      p.verificationLabel = p.tier;
+      p.verificationLevelName = p.tier;
     }
     // Sort parameter: trust_desc (default), trust_asc, name_asc, name_desc, newest, oldest
     const sortParam = (req.query.sort || "trust_desc").toLowerCase();
@@ -1255,9 +1257,17 @@ function registerRoutes(app) {
 
     const enriched = enrichProfile(safe);
 
-    // A1: Score already computed by enrichProfile via computeScore — no genesis override needed
+    // Clean start: single-profile score display is V3 genesis only, otherwise 0.
     if (enriched) {
-      // Fetch genesis data for display purposes only (on-chain metadata, NOT for scoring)
+      enriched.trust_score = { overall_score: 0, level: 'Unverified', score_breakdown: {}, source: 'onchain-only' };
+      enriched.score = 0;
+      enriched.trustScore = 0;
+      enriched.reputation_score = 0;
+      enriched.level = 0;
+      enriched.tier = 'Unverified';
+      enriched.levelName = 'Unverified';
+      enriched.verificationLevel = 0;
+      enriched.verificationLevelName = 'Unverified';
       try {
         const genesisUrl = "http://localhost:" + (process.env.PORT || 3000) + "/api/profile/" + encodeURIComponent(row.id) + "/genesis";
         const genesisResp = await fetch(genesisUrl);
@@ -1265,18 +1275,26 @@ function registerRoutes(app) {
         const v3Data = genesisJson && genesisJson.genesis ? genesisJson.genesis : genesisJson;
         const hasGenesis = v3Data && v3Data.agentName && !v3Data.error;
         if (hasGenesis) {
+          const v3Score = v3Data.reputationScore > 10000 ? Math.round(v3Data.reputationScore / 10000) : (v3Data.reputationScore || 0);
           enriched.onchain = v3Data;
           enriched.isBorn = v3Data.isBorn;
           if (v3Data.faceImage) enriched.faceImage = v3Data.faceImage;
           if (v3Data.authority && !enriched.walletAddress) enriched.walletAddress = v3Data.authority;
+          enriched.trust_score = { overall_score: v3Score, level: v3Data.verificationLabel || 'Unverified', score_breakdown: {}, source: 'v3-genesis' };
+          enriched.score = v3Score;
+          enriched.trustScore = v3Score;
+          enriched.reputation_score = v3Score;
+          enriched.level = v3Data.verificationLevel || 0;
+          enriched.tier = v3Data.verificationLabel || 'Unverified';
+          enriched.levelName = enriched.tier;
+          enriched.verificationLevel = enriched.level;
+          enriched.verificationLevelName = enriched.tier;
         } else {
           enriched.onchain = null;
           enriched.isBorn = false;
-          // Score/level already set by enrichProfile -> computeScore — no override
         }
       } catch (e) {
         enriched.onchain = null;
-        // Score/level already set by enrichProfile -> computeScore — no override on error
       }
     }
     res.json(enriched);
