@@ -207,6 +207,38 @@ function parseJsonField(val, defaultVal = []) {
   try { return JSON.parse(val); } catch { return defaultVal; }
 }
 
+async function loadPreferredSatpSignerKeypair() {
+  const fs = require('fs');
+  const { Connection, Keypair } = require('@solana/web3.js');
+  const rpcUrl = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY';
+  const conn = new Connection(rpcUrl, 'confirmed');
+  const candidatePaths = [
+    process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/agentfolio/config/platform-keypair.json',
+    '/home/ubuntu/.config/solana/brainforge-personal.json',
+  ].filter(Boolean);
+  let best = null;
+  for (const signerPath of candidatePaths) {
+    try {
+      if (!fs.existsSync(signerPath)) continue;
+      const raw = JSON.parse(fs.readFileSync(signerPath, 'utf-8'));
+      const signer = Keypair.fromSecretKey(Uint8Array.from(raw));
+      const lamports = await conn.getBalance(signer.publicKey);
+      if (!best || lamports > best.lamports) best = { signerPath, signer, lamports };
+      if (lamports >= 10_000_000) {
+        if (signerPath != candidatePaths[0]) console.warn('[SATP] Using funded fallback signer for registration:', signer.publicKey.toBase58(), 'path=' + signerPath);
+        return signer;
+      }
+    } catch (e) {
+      console.warn('[SATP] Failed to inspect signer ' + signerPath + ':', e.message);
+    }
+  }
+  if (best) {
+    console.warn('[SATP] No well-funded signer found, using highest-balance signer', best.signer.publicKey.toBase58(), 'lamports=' + best.lamports);
+    return best.signer;
+  }
+  throw new Error('No SATP signer keypair available');
+}
+
 
 function chainAttestationMatchesWallet(att, row) {
   try {
@@ -849,11 +881,11 @@ function registerRoutes(app) {
       if (satpV3 && !userPaidGenesis) {
         (async () => {
           const { Keypair } = require('@solana/web3.js');
-          const signerKey = JSON.parse(require('fs').readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'));
-          const signer = Keypair.fromSecretKey(Uint8Array.from(signerKey));
+          const signer = await loadPreferredSatpSignerKeypair();
+          const authorityWallet = new PublicKey(solanaWallet);
           try {
             const { transaction, genesisPda } = await satpV3.client.buildCreateIdentity(
-              signer.publicKey,
+              authorityWallet,
               id,
               {
                 name: name.trim().substring(0, 32),
@@ -867,13 +899,14 @@ function registerRoutes(app) {
             const sig = await satpV3.client.connection.sendRawTransaction(transaction.serialize());
             await satpV3.client.connection.confirmTransaction(sig, 'confirmed');
             console.log(`[SATP V3] Genesis Record confirmed for ${id}: pda=${genesisPda.toBase58()} tx=${sig}`);
+            try { require('./v3-score-service').clearV3Cache(); } catch {}
           } catch (err) {
             console.error(`[SATP V3] Genesis Record attempt 1 failed for ${id}:`, err.message);
             // Retry once after 3s (transient RPC failures are common)
             try {
               await new Promise(r => setTimeout(r, 3000));
               const { transaction: tx2, genesisPda: pda2 } = await satpV3.client.buildCreateIdentity(
-                signer.publicKey, id,
+                authorityWallet, id,
                 {
                   name: name.trim().substring(0, 32),
                   description: (resolvedBio || 'AgentFolio registered agent').substring(0, 256),
@@ -886,6 +919,7 @@ function registerRoutes(app) {
               const sig2 = await satpV3.client.connection.sendRawTransaction(tx2.serialize(), { skipPreflight: true, maxRetries: 3 });
               await satpV3.client.connection.confirmTransaction(sig2, 'confirmed');
               console.log(`[SATP V3] Genesis Record confirmed (retry) for ${id}: pda=${pda2.toBase58()} tx=${sig2}`);
+              try { require('./v3-score-service').clearV3Cache(); } catch {}
             } catch (retryErr) {
               console.error(`[SATP V3] Genesis Record retry also failed for ${id}:`, retryErr.message);
             }
@@ -968,8 +1002,7 @@ function registerRoutes(app) {
             Promise.resolve(postVerificationHook(id, "solana", solanaWallet, proof))
               .then((onchainSucceeded) => {
                 if (onchainSucceeded) {
-                  const vId = require("crypto").randomUUID();
-                  d.prepare("INSERT OR IGNORE INTO verifications (id, profile_id, platform, identifier, proof, verified_at) VALUES (?, ?, ?, ?, ?, datetime('now'))").run(vId, id, "solana", solanaWallet, JSON.stringify(proof));
+                  addVerification(id, 'solana', solanaWallet, proof);
                   console.log("[Register] Cached Solana verification after on-chain success for " + id);
                 } else {
                   console.warn("[Register] Skipped Solana verification cache for " + id + " because on-chain write failed");

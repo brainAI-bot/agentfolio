@@ -153,10 +153,13 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     genesis.isBorn = v3Reputation.isBorn ?? genesis.isBorn;
   }
 
-  // Profile header is on-chain only. If there is no Genesis/V3 score yet, show 0.
-  const onChainBadgeScore = genesis
-    ? normalizeScore(genesis.reputationScore || 0)
-    : (v3Reputation ? normalizeScore(v3Reputation.reputationScore || 0) : 0);
+  // Profile header prefers V3/Genesis, but falls back to real attestation-derived trust score when Genesis is missing.
+  const onChainBadgeScore = (() => {
+    const genesisScore = genesis ? normalizeScore(genesis.reputationScore || 0) : 0;
+    const v3Score = v3Reputation ? normalizeScore(v3Reputation.reputationScore || 0) : 0;
+    const trustScoreFallback = trustScoreData ? normalizeScore(trustScoreData.reputationScore || 0) : 0;
+    return genesisScore || v3Score || trustScoreFallback;
+  })();
   if (genesis) {
     genesis.reputationScore = onChainBadgeScore;
   }
