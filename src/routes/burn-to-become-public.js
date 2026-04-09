@@ -656,7 +656,7 @@ function handleBurnToBecome(req, res, url) {
 
   // GET /api/burn-to-become/wallet-nfts
   if (url.pathname === '/api/burn-to-become/wallet-nfts' && req.method === 'GET') {
-    const wallet = req.query.wallet || new URL(req.protocol + '://' + req.get('host') + req.originalUrl).searchParams.get('wallet');
+    const wallet = req?.query?.wallet || url.searchParams.get('wallet');
     if (!wallet) return sendJson(400, { error: 'wallet required' });
     getWalletNFTs(wallet).then(nfts => sendJson(200, { nfts })).catch(e => sendJson(500, { error: e.message }));
     return true;
@@ -664,7 +664,7 @@ function handleBurnToBecome(req, res, url) {
 
   // GET /api/burn-to-become/satp-score
   if (url.pathname === '/api/burn-to-become/satp-score' && req.method === 'GET') {
-    const wallet = req.query.wallet || new URL(req.protocol + '://' + req.get('host') + req.originalUrl).searchParams.get('wallet');
+    const wallet = req?.query?.wallet || url.searchParams.get('wallet');
     if (!wallet) return sendJson(400, { error: 'wallet required' });
     getSatpScore(wallet).then(score => sendJson(200, { score, free: score >= FREE_SCORE_THRESHOLD })).catch(e => sendJson(500, { error: e.message }));
     return true;
@@ -672,7 +672,7 @@ function handleBurnToBecome(req, res, url) {
 
   // GET /api/burn-to-become/eligibility?wallet=... — check BOA mint eligibility (Level + Rep)
   if (url.pathname === '/api/burn-to-become/eligibility' && req.method === 'GET') {
-    const wallet = req.query.wallet || new URL(req.protocol + '://' + req.get('host') + req.originalUrl).searchParams.get('wallet');
+    const wallet = req?.query?.wallet || url.searchParams.get('wallet');
     if (!wallet) return sendJson(400, { error: 'wallet required' });
     (async () => {
       try {
