@@ -121,6 +121,7 @@ async function getSatpAgents() {
       if (seenProfileIds.has(profile.id)) continue;
       seenProfileIds.add(profile.id);
       agent.profileId = profile.id;
+      agent.agentId = profile.id;
       filteredAgents.push(agent);
     }
 
