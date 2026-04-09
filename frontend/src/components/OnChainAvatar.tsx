@@ -11,6 +11,10 @@ interface OnChainAvatarData {
   source: string;
 }
 
+const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
+const SOLANA_EXPLORER_SUFFIX = SOLANA_CLUSTER === "mainnet-beta" ? "" : `?cluster=${SOLANA_CLUSTER}`;
+const solanaExplorerUrl = (path: string) => `https://solscan.io/${path}${SOLANA_EXPLORER_SUFFIX}`;
+
 interface Props {
   walletAddress: string | null;
   fallbackImage: string | null;
@@ -66,9 +70,9 @@ export function OnChainAvatar({ walletAddress, fallbackImage, agentName, size = 
   const borderColor = isPermanent ? "#9945FF" : avatarData ? "var(--accent)" : "var(--border-bright)";
   
   const solscanUrl = nftAvatar?.soulboundMint 
-    ? `https://solscan.io/token/${nftAvatar.soulboundMint}` 
+    ? solanaExplorerUrl(`token/${nftAvatar.soulboundMint}`) 
     : avatarData?.mint 
-      ? `https://solscan.io/token/${avatarData.mint}` 
+      ? solanaExplorerUrl(`token/${avatarData.mint}`) 
       : null;
 
   const arweaveUrl = nftAvatar?.arweaveUrl || nftAvatar?.image || avatarData?.image || null;

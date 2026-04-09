@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { Send, Package, CheckCircle, AlertCircle } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || SITE_URL;
 
 interface SubmitWorkFormProps {
   jobId: string;
