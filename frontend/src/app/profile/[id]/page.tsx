@@ -181,7 +181,8 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     genesis.isBorn = v3Reputation.isBorn ?? genesis.isBorn;
   }
 
-  // Profile header should prefer the attestation-derived trust score, then Genesis/V3 fallback.
+  // Profile header and reputation card should use the same normalized trust-score source
+  // so profiles do not show 50/Verified in one place and 11/Established in another.
   const onChainBadgeScore = (() => {
     const trustScoreFallback = trustScoreData ? normalizeScore(trustScoreData.reputationScore || 0) : 0;
     const genesisScore = genesis ? normalizeScore(genesis.reputationScore || 0) : 0;
@@ -191,6 +192,15 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   if (genesis) {
     genesis.reputationScore = onChainBadgeScore;
   }
+  const displayReputationCard = v3Reputation
+    ? {
+        ...v3Reputation,
+        reputationScore: trustScoreData ? normalizeScore(trustScoreData.reputationScore ?? v3Reputation.reputationScore) : v3Reputation.reputationScore,
+        verificationLevel: trustScoreData?.verificationLevel ?? v3Reputation.verificationLevel,
+        tier: trustScoreData?.verificationLabel || v3Reputation.tier,
+        tierLabel: trustScoreData?.verificationLabel || v3Reputation.tierLabel,
+      }
+    : null;
   const badgeScore = onChainBadgeScore;
   const badgeReputationScore = onChainBadgeScore;
   const badgeTier = trustScoreData?.verificationLabel || genesis?.verificationLabel || (badgeScore > 0 ? agent.tier : "Unverified");
@@ -504,7 +514,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
           <GenesisRecordCard agentId={agent.id} nftAvatar={(agent as any).nftAvatar || (agent as any).nft_avatar} />
 
 
-          {v3Reputation && <V3ReputationCard data={v3Reputation} />}
+          {displayReputationCard && <V3ReputationCard data={displayReputationCard} />}
           <SATPOnChainSection walletAddress={solWallet} />
 
           {/* Skills */}
