@@ -110,9 +110,9 @@ export default function VerifyPage() {
     fetch(`/api/profile/${profileId}`)
       .then(r => r.json())
       .then(data => {
-        if (data.verificationData || data.verification_data || data.verifications) {
-          setExistingVerifications(data.verificationData || data.verification_data || data.verifications);
-          const vData = data.verificationData || data.verification_data || data.verifications || {};
+        if (data.verifications) {
+          setExistingVerifications(data.verifications);
+          const vData = data.verifications || {};
           const linkedSolana = vData.solana?.address || data.walletAddress || data.wallet || data.wallets?.solana || "";
           if (linkedSolana) {
             setSolanaAddress(linkedSolana);
