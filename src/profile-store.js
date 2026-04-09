@@ -1221,7 +1221,7 @@ function registerRoutes(app) {
     for (const p of profiles) {
       const v = v3ScoresById.get(p.id) || p.v3 || {};
       const v3Score = v.reputationScore > 10000 ? Math.round(v.reputationScore / 10000) : (v.reputationScore || 0);
-      let computedScore = 0;
+      let computed = { score: 0, level: 0, levelName: 'Unverified' };
       try {
         const chainCache = require('./lib/chain-cache');
         const { computeScore } = require('./lib/compute-score');
@@ -1241,20 +1241,24 @@ function registerRoutes(app) {
           if (!identifier) continue;
           chainVerifs.push({ platform, identifier });
         }
-        computedScore = computeScore(chainVerifs, { hasSatpIdentity: identityVerified, claimed: !!p.claimed }).score || 0;
+        computed = computeScore(chainVerifs, { hasSatpIdentity: identityVerified, claimed: !!p.claimed }) || computed;
       } catch (_) {}
+      const computedScore = computed.score || 0;
+      const useComputedLevel = computedScore > v3Score;
       const displayScore = Math.max(v3Score, computedScore);
+      const displayLevel = useComputedLevel ? (computed.level || 0) : (v.verificationLevel || computed.level || 0);
+      const displayLabel = useComputedLevel ? (computed.levelName || levelLabels[displayLevel] || 'Unverified') : (v.verificationLabel || computed.levelName || levelLabels[displayLevel] || 'Unverified');
       p.v3 = Object.keys(v).length ? v : p.v3;
       p.trust_score = displayScore;
       p.trustScore = displayScore;
       p.score = displayScore;
       p.reputation_score = displayScore;
-      p.level = v.verificationLevel || 0;
-      p.verificationLevel = p.level;
-      p.tier = v.verificationLabel || levelLabels[p.level] || 'Unverified';
-      p.levelName = p.tier;
-      p.verificationLabel = p.tier;
-      p.verificationLevelName = p.tier;
+      p.level = displayLevel;
+      p.verificationLevel = displayLevel;
+      p.tier = displayLabel;
+      p.levelName = displayLabel;
+      p.verificationLabel = displayLabel;
+      p.verificationLevelName = displayLabel;
     }
     // Sort parameter: trust_desc (default), trust_asc, name_asc, name_desc, newest, oldest
     const sortParam = (req.query.sort || "trust_desc").toLowerCase();
