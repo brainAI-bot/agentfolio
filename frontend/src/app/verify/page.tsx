@@ -124,8 +124,8 @@ export default function VerifyPage() {
           if (vData.agentmail?.verified) {
             setAgentmailState({ loading: false, success: true, error: "", result: { verified: true } });
           }
-          if (vData.satp?.registered) {
-            setSatpState({ loading: false, success: true, error: "", result: { registered: true } });
+          if (vData.satp?.registered || vData.satp?.verified || (data?.onchain?.verificationLevel ?? 0) >= 1) {
+            setSatpState({ loading: false, success: true, error: "", result: { verified: true, registered: true } });
           }
           if (vData.solana?.verified) {
             setSolanaState({ loading: false, success: true, error: "", result: { verified: true } });

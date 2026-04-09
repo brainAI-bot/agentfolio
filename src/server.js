@@ -409,11 +409,11 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     );
 
     const v3Score = await getV3Score(profile.id).catch(() => null);
-    const displayScore = v3Score
-      ? (v3Score.reputationScore > 10000 ? Math.round(v3Score.reputationScore / 10000) : (v3Score.reputationScore || 0))
-      : 0;
-    const displayLevel = v3Score && v3Score.verificationLevel != null ? v3Score.verificationLevel : 0;
-    const displayLabel = (v3Score && v3Score.verificationLabel) || 'Unverified';
+    const displayScore = (v3Score && v3Score.reputationScore > 0)
+      ? (v3Score.reputationScore > 10000 ? Math.round(v3Score.reputationScore / 10000) : v3Score.reputationScore)
+      : computed.score;
+    const displayLevel = (v3Score && v3Score.verificationLevel != null) ? v3Score.verificationLevel : computed.level;
+    const displayLabel = (v3Score && v3Score.verificationLabel) || computed.levelName;
 
     res.json({
       agentId: profile.id,
@@ -487,10 +487,10 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
 
     const computed = computeScore(chainVerifs, { hasSatpIdentity: false, claimed: chainVerifs.length > 0 });
     const v3Score = await getV3Score(profileId).catch(() => null);
-    const reputationScore = v3Score
-      ? (v3Score.reputationScore > 10000 ? Math.round(v3Score.reputationScore / 10000) : (v3Score.reputationScore || 0))
-      : 0;
-    const verificationLevel = v3Score && v3Score.verificationLevel != null ? v3Score.verificationLevel : 0;
+    const reputationScore = (v3Score && v3Score.reputationScore > 0)
+      ? (v3Score.reputationScore > 10000 ? Math.round(v3Score.reputationScore / 10000) : v3Score.reputationScore)
+      : computed.score;
+    const verificationLevel = (v3Score && v3Score.verificationLevel != null) ? v3Score.verificationLevel : computed.level;
     const labels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
 
     res.json({
@@ -502,8 +502,8 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
         verificationLabel: (v3Score && v3Score.verificationLabel) || labels[verificationLevel] || 'Unknown',
         isBorn: !!(v3Score && v3Score.isBorn),
         faceImage: (v3Score && v3Score.faceImage) || null,
-        breakdown: v3Score ? computed.breakdown : {},
-        source: v3Score ? 'v3' : 'none',
+        breakdown: computed.breakdown,
+        source: (v3Score && v3Score.reputationScore > 0) ? 'v3' : 'attestations',
       }
     });
   } catch (e) {
