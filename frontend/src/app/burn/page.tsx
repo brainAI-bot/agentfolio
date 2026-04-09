@@ -3,7 +3,9 @@
 import { useState, useEffect, useRef } from "react";
 import { Flame, TrendingDown, BarChart3, ExternalLink, Clock } from "lucide-react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot";
+const API = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
+const solanaExplorerUrl = (path: string) => SOLANA_CLUSTER === "mainnet-beta" ? `https://explorer.solana.com/${path}` : `https://explorer.solana.com/${path}?cluster=${SOLANA_CLUSTER}`;
 
 function formatNumber(n: number) {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M";
@@ -196,7 +198,7 @@ export default function BurnPage() {
                   <td className="py-2">
                     {b.txHash ? (
                       <a
-                        href={`https://solscan.io/tx/${b.txHash}`}
+                        href={solanaExplorerUrl(`tx/${b.txHash}`)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-1 hover:underline"
