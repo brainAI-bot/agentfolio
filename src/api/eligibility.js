@@ -38,6 +38,29 @@ function parseJsonField(val, fallback) {
  * then fall back to compute-score + chain-cache if no V3 record exists.
  */
 async function resolveAgentScore(agentId, profile) {
+  // Profile-facing eligibility should prefer the same normalized trust source
+  // used by public profile/burn endpoints, then fall back to raw V3/compute logic.
+  if (profile?.id) {
+    try {
+      const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
+      const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(profile.id)}/trust-score`);
+      if (trustRes.ok) {
+        const trustJson = await trustRes.json();
+        const trust = trustJson?.data;
+        if (trust && typeof trust.reputationScore === 'number') {
+          return {
+            level: trust.verificationLevel || 0,
+            reputation: trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore,
+            source: 'normalized_profile_trust',
+            label: trust.verificationLabel || trust.levelName || 'Unknown',
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('[Eligibility] normalized trust lookup failed for', agentId, e.message);
+    }
+  }
+
   // Try V3 on-chain data first (correct deserialization)
   if (v3ScoreService) {
     try {
