@@ -488,10 +488,6 @@ function enrichProfile(row) {
       const vd = {};
       try {
         const chainCache = require('./lib/chain-cache');
-        if (row.wallet && (chainCache.isVerified(row.wallet) || (v3 && v3.verificationLevel >= 1))) {
-          vd.satp = { verified: true, address: row.wallet, identifier: row.wallet, linked: true, source: 'on-chain-identity' };
-          vd.solana = { verified: true, address: row.wallet, identifier: row.wallet, linked: true, source: 'on-chain-identity' };
-        }
         const atts = chainCache.getVerifications(row.id, row.created_at) || [];
         for (const att of atts) {
           if (!att.platform || att.platform === 'review') continue;
@@ -500,8 +496,9 @@ function enrichProfile(row) {
           if (vd[plat]) continue;
           let proofData = {};
           try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
-          const displayId = att.identifier || proofData.identifier || proofData.address || proofData.wallet || att.signer || plat;
-          vd[plat] = { verified: true, address: displayId, identifier: displayId, linked: true, verifiedAt: att.timestamp || att.verifiedAt || null, source: 'on-chain' };
+          const displayId = att.identifier || proofData.identifier || proofData.address || proofData.wallet || null;
+          if (!displayId) continue;
+          vd[plat] = { verified: true, address: displayId, identifier: displayId, linked: true, verifiedAt: att.timestamp || att.verifiedAt || null, source: 'on-chain-attestation' };
         }
       } catch (_) {}
       return vd;
@@ -516,11 +513,6 @@ function enrichProfile(row) {
       const vMap = {};
       try {
         const chainCache = require('./lib/chain-cache');
-        if (row.wallet && (chainCache.isVerified(row.wallet) || (v3 && v3.verificationLevel >= 1))) {
-          const base = { verified: true, address: row.wallet, identifier: row.wallet, verified_at: null, source: 'on-chain-identity' };
-          vMap.satp = { ...base };
-          vMap.solana = { ...base };
-        }
         const atts = chainCache.getVerifications(row.id, row.created_at) || [];
         for (const att of atts) {
           if (!att.platform || att.platform === 'review') continue;
@@ -529,7 +521,8 @@ function enrichProfile(row) {
           if (vMap[platform]) continue;
           let proofData = {};
           try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
-          const displayId = att.identifier || proofData.identifier || proofData.address || proofData.wallet || att.signer || platform;
+          const displayId = att.identifier || proofData.identifier || proofData.address || proofData.wallet || null;
+          if (!displayId) continue;
           const proofUrl = att.txSignature ? ('https://solana.fm/tx/' + att.txSignature) : (att.solscanUrl || null);
           vMap[platform] = {
             verified: true,
@@ -537,7 +530,7 @@ function enrichProfile(row) {
             identifier: displayId,
             proof: { txSignature: att.txSignature || null, timestamp: att.timestamp || att.verifiedAt || null, url: proofUrl },
             verified_at: att.timestamp || att.verifiedAt || null,
-            source: 'on-chain',
+            source: 'on-chain-attestation',
           };
         }
       } catch (e) { /* chain-cache not available */ }
@@ -547,14 +540,13 @@ function enrichProfile(row) {
       try {
         const platforms = new Set();
         const chainCache = require('./lib/chain-cache');
-        if (row.wallet && (chainCache.isVerified(row.wallet) || (v3 && v3.verificationLevel >= 1))) {
-          platforms.add('satp');
-          platforms.add('solana');
-        }
         const atts = (chainCache.getVerifications(row.id, row.created_at) || []).filter(att => chainAttestationMatchesWallet(att, row));
         atts.forEach(att => {
           const platform = att.platform === 'twitter' ? 'x' : att.platform;
-          if (platform) platforms.add(platform);
+          let proofData = {};
+          try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
+          const displayId = att.identifier || proofData.identifier || proofData.address || proofData.wallet || null;
+          if (platform && displayId) platforms.add(platform);
         });
         return platforms.size;
       } catch (_) {
@@ -588,8 +580,7 @@ function enrichProfile(row) {
           });
         }
       } catch (_) {}
-      const hasSatpIdentity = !!row.wallet || !!(v3 && v3.verificationLevel >= 1);
-      const computed = computeScore(chainVerifs, { hasSatpIdentity, claimed: !!row.claimed });
+      const computed = computeScore(chainVerifs, { hasSatpIdentity: false, claimed: chainVerifs.length > 0 });
       return {
         trust_score: { overall_score: computed.score, level: computed.levelName, score_breakdown: computed.breakdown, source: "compute-score-chain-cache" },
         level: computed.level,

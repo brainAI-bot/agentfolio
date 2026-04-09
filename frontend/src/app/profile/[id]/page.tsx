@@ -143,18 +143,18 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     genesis.isBorn = v3Reputation.isBorn ?? genesis.isBorn;
   }
 
-  // P0 architecture: on-chain reputation is the source of truth.
-  // Fall back to API-enriched score only when chain data is missing/zero.
-  const fallbackScore = agent.trustScore || agent.reputationScore || 0;
-  const normalizedFallbackScore = normalizeScore(fallbackScore);
+  // Profile header is on-chain only. If there is no Genesis/V3 score yet, show 0.
+  const onChainBadgeScore = genesis
+    ? normalizeScore(genesis.reputationScore || 0)
+    : (v3Reputation ? normalizeScore(v3Reputation.reputationScore || 0) : 0);
   if (genesis) {
-    const normalizedGenesisScore = normalizeScore(genesis.reputationScore || 0);
-    genesis.reputationScore = normalizedGenesisScore || normalizedFallbackScore;
+    genesis.reputationScore = onChainBadgeScore;
   }
-  const badgeRawScore = genesis ? genesis.reputationScore : normalizedFallbackScore;
-  const badgeScore = typeof badgeRawScore === "number" && badgeRawScore > 10000 ? Math.round(badgeRawScore / 10000) : badgeRawScore;
-  const badgeRawReputation = genesis ? genesis.reputationScore : normalizedFallbackScore;
-  const badgeReputationScore = typeof badgeRawReputation === "number" && badgeRawReputation > 10000 ? Math.round(badgeRawReputation / 10000) : badgeRawReputation;
+  const badgeScore = onChainBadgeScore;
+  const badgeReputationScore = onChainBadgeScore;
+  const badgeTier = genesis?.verificationLabel || (badgeScore > 0 ? agent.tier : "Unverified");
+  const badgeVerificationLevel = genesis?.verificationLevel ?? (badgeScore > 0 ? agent.verificationLevel : 0);
+  const badgeVerificationLevelName = genesis?.verificationLabel || (badgeScore > 0 ? agent.verificationLevelName : "Unverified");
   let githubStats: any = null;
   if (v?.github?.verified && v.github.username) {
     try {
@@ -244,7 +244,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     "operatingSystem": "Blockchain",
     "aggregateRating": {
       "@type": "AggregateRating",
-      "ratingValue": genesis ? String(Math.min(5, genesis.reputationScore / 200)) : String(Math.min(5, agent.trustScore / 20)),
+      "ratingValue": String(Math.min(5, badgeScore / 20)),
       "bestRating": "5",
       "worstRating": "0",
       "ratingCount": String(Math.max(1, Object.values(agent.verifications || {}).filter(v => v?.verified).length)),
@@ -287,7 +287,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
               <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
                 {agent.name}
               </h1>
-              <TrustBadge tier={agent.tier} score={badgeScore} verificationLevel={agent.verificationLevel} verificationBadge={agent.verificationBadge} verificationLevelName={agent.verificationLevelName} reputationScore={badgeReputationScore} reputationRank={genesis?.verificationLabel || agent.reputationRank} />
+              <TrustBadge tier={badgeTier} score={badgeScore} verificationLevel={badgeVerificationLevel} verificationBadge={agent.verificationBadge} verificationLevelName={badgeVerificationLevelName} reputationScore={badgeReputationScore} reputationRank={genesis?.verificationLabel || agent.reputationRank} />
             </div>
             <div className="text-sm mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
               {agent.handle}
@@ -403,12 +403,12 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                 const chainTxMap = new Map(chainAttestations.map(a => [a.platform, a]));
                 
                 for (const t of priority) {
-                  // Use chain-cache attestations as source of truth, fallback to DB
+                  // Profile page must only show real chain-cache attestations.
                   const vEntry = (v as any)?.[t] || (t === "x" ? (v as any)?.twitter : null);
                   const hasChainAttestation = chainPlatforms.has(t) || (t === "x" && chainPlatforms.has("twitter"));
-                  if (!hasChainAttestation && !vEntry?.verified) continue;
+                  if (!hasChainAttestation) continue;
                   const chainTx = chainTxMap.get(t) || (t === "x" ? chainTxMap.get("twitter") : null);
-                  let detail = hasChainAttestation ? "On-Chain ⛓️" : "Verified";
+                  let detail = "On-Chain ⛓️";
                   if (t === "github") detail = `@${githubStats?.username || vEntry?.username || vEntry?.identifier || vEntry?.address || "?"} — ${githubStats?.repos ?? vEntry?.repos ?? 0} repos, ${(githubStats?.stars ?? vEntry?.stars ?? 0).toLocaleString()}⭐`;
                   else if (t === "solana" && vEntry?.address) detail = `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)}`;
                   else if (t === "ethereum" && vEntry?.address) detail = `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)}`;
