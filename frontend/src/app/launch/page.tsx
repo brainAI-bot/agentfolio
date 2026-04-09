@@ -7,7 +7,7 @@ import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { Rocket, Link2, ArrowLeft, Loader2, ExternalLink, CheckCircle2, Copy, Check } from "lucide-react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot";
+const API = process.env.NEXT_PUBLIC_API_URL || "";
 
 type Platform = "virtuals" | "pumpfun" | "existing" | null;
 
