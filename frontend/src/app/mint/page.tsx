@@ -12,6 +12,8 @@ const API = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_SITE_URL 
 const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
 const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || (SOLANA_CLUSTER === "devnet" ? "https://api.devnet.solana.com" : SOLANA_CLUSTER === "testnet" ? "https://api.testnet.solana.com" : "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb");
 const MINT_TREASURY = process.env.NEXT_PUBLIC_MINT_TREASURY || "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be";
+const EXPLORER_CLUSTER_QUERY = SOLANA_CLUSTER === "mainnet-beta" ? "" : `?cluster=${encodeURIComponent(SOLANA_CLUSTER)}`;
+const solanaExplorerUrl = (path: string) => `https://explorer.solana.com/${path}${EXPLORER_CLUSTER_QUERY}`;
 
 const GENESIS_REGISTRY: Record<string, { name: string; image: string; metadata: string; role: string }> = {
   "BP9TPSoo6LXpy2YvRTZnPg1kLA9ndnKxa6eHYxkdVMWE": {
@@ -849,13 +851,13 @@ export default function MintPage() {
 
               <div className="space-y-2">
                 {burnTx && (
-                  <a href={`https://solscan.io/tx/${burnTx}`} target="_blank" rel="noopener noreferrer"
+                  <a href={solanaExplorerUrl(`tx/${burnTx}`)} target="_blank" rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 text-sm hover:underline" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
                     Burn TX: {burnTx.slice(0, 16)}... <ExternalLink size={12} />
                   </a>
                 )}
                 {soulboundMint && (
-                  <a href={`https://solscan.io/token/${soulboundMint}`} target="_blank" rel="noopener noreferrer"
+                  <a href={solanaExplorerUrl(`address/${soulboundMint}`)} target="_blank" rel="noopener noreferrer"
                     className="flex items-center justify-center gap-2 text-sm hover:underline" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
                     Soulbound: {soulboundMint.slice(0, 16)}... <ExternalLink size={12} />
                   </a>
