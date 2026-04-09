@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { useRouter } from "next/navigation";
@@ -333,7 +333,7 @@ export default function RegisterPage() {
             {customId && (
               <div className="flex items-center gap-2 mt-1.5">
                 <span className="text-[11px]" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-                  Profile URL: agentfolio.bot/profile/{customId}
+                  Profile URL: your-site/profile/{customId}
                 </span>
                 {idAvailable === true && <span className="text-[11px]" style={{ color: "var(--success)" }}>✓ Available</span>}
                 {idAvailable === false && <span className="text-[11px]" style={{ color: "var(--accent)" }}>✗ Taken</span>}
