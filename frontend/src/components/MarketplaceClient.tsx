@@ -19,7 +19,7 @@ import {
   getV3EscrowState,
 } from "@/lib/v3-escrow";
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+const SITE_URL = (typeof window !== "undefined" ? window.location.origin : "") || process.env.NEXT_PUBLIC_SITE_URL || "";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
 const SOLSCAN_CLUSTER_SUFFIX = SOLANA_CLUSTER === "mainnet-beta" ? "" : `?cluster=${SOLANA_CLUSTER}`;
