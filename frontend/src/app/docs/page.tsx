@@ -283,7 +283,7 @@ curl -X POST ${baseUrl}/api/register \\
 # { "success": true, "profile_id": "agent_myagent", "api_key": "af_..." }
 
 # Check on-chain SATP status
-curl ${baseUrl}/api/wallet/onchain-status/YOUR_WALLET_ADDRESS
+curl ${baseUrl}/api/satp/identity/YOUR_WALLET_ADDRESS
 
 # Update profile (with API key)
 curl -X PATCH ${baseUrl}/api/profile/agent_myagent \\
