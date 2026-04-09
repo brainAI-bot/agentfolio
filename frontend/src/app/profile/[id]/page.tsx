@@ -87,6 +87,34 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     }
   } catch {}
 
+  // Override Genesis authority/PDA from the same SATP explorer source the explorer page uses.
+  try {
+    const satpExplorerRes = await fetch(`${API_BASE}/api/satp/explorer/agents`, { next: { revalidate: 30 } });
+    if (satpExplorerRes.ok) {
+      const satpExplorerData = await satpExplorerRes.json();
+      const satpAgents = satpExplorerData.agents || satpExplorerData || [];
+      const targetWallet = String((agent as any).walletAddress || (agent as any).wallets?.solana || (agent as any).verifications?.solana?.address || '').toLowerCase();
+      const targetName = String(agent.name || '').toLowerCase();
+      const targetId = String(agent.id || '').toLowerCase();
+      const satpGenesis = satpAgents.find((row: any) => {
+        const rowName = String(row.name || row.agentName || '').toLowerCase();
+        const rowProfileId = String(row.profileId || (`agent_${rowName}`)).toLowerCase();
+        const rowAuthority = String(row.authority || '').toLowerCase();
+        const rowWallet = String(row.wallet || '').toLowerCase();
+        return (targetWallet && (rowAuthority === targetWallet || rowWallet === targetWallet)) || rowName === targetName || rowProfileId === targetId;
+      });
+      if (satpGenesis) {
+        genesis = {
+          ...(genesis || {}),
+          pda: satpGenesis.pda || genesis?.pda || null,
+          authority: satpGenesis.authority || genesis?.authority || null,
+          name: satpGenesis.name || satpGenesis.agentName || genesis?.name || agent.name,
+          category: satpGenesis.category || genesis?.category || null,
+        };
+      }
+    }
+  } catch {}
+
   // Fetch trust-score (DB-enriched, normalized values)
   let trustScoreData: any = null;
   try {
