@@ -5,8 +5,8 @@ import { useWallet } from '@solana/wallet-adapter-react';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { Transaction } from '@solana/web3.js';
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://agentfolio.bot';
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || SITE_URL;
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || '';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || SITE_URL || '';
 
 interface WriteReviewFormProps {
   targetProfileId: string;

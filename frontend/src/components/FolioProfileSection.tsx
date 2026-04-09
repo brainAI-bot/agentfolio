@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Coins, Flame, TrendingUp, ExternalLink } from "lucide-react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot";
+const API = process.env.NEXT_PUBLIC_API_URL || "";
 
 function formatNumber(n: number) {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
