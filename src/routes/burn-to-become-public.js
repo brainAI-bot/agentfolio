@@ -677,7 +677,7 @@ function handleBurnToBecome(req, res, url) {
     try {
       const Database = require('better-sqlite3');
       const { computeScore } = require('../lib/compute-score');
-      const db = new Database(dbPath, { readonly: true });
+      const db = new Database(require('path').join(__dirname, '../../data/agentfolio.db'), { readonly: true });
       const rows = db.prepare('SELECT * FROM profiles').all();
       let matchedProfile = null;
       for (const row of rows) {
