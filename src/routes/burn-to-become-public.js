@@ -675,14 +675,15 @@ function handleBurnToBecome(req, res, url) {
     const wallet = req?.query?.wallet || url.searchParams.get('wallet');
     if (!wallet) { sendJson(400, { error: 'wallet required' }); return true; }
     Promise.resolve().then(async () => {
-      const db = new Database(dbPath, { readonly: true });
       try {
-        const rows = db.prepare('SELECT * FROM profiles').all();
+        const profilesDir = path.join(__dirname, '..', '..', 'data', 'profiles');
         let matchedProfile = null;
-        for (const row of rows) {
+        for (const file of fs.readdirSync(profilesDir)) {
+          if (!file.endsWith('.json')) continue;
           try {
-            const wallets = row.wallets ? JSON.parse(row.wallets) : {};
-            const vd = row.verification_data ? JSON.parse(row.verification_data) : {};
+            const row = JSON.parse(fs.readFileSync(path.join(profilesDir, file), 'utf8'));
+            const wallets = row.wallets || {};
+            const vd = row.verificationData || row.verification_data || {};
             const solWallet = wallets.solana || row.wallet || vd?.solana?.address;
             if (solWallet === wallet) { matchedProfile = row; break; }
           } catch {}
@@ -723,8 +724,6 @@ function handleBurnToBecome(req, res, url) {
       } catch (e) {
         console.error('[BurnPublic] profile error:', e);
         return sendJson(500, { error: e.message });
-      } finally {
-        try { db.close(); } catch {}
       }
     });
     return true;
