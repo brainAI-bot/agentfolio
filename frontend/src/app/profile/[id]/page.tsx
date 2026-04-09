@@ -32,6 +32,13 @@ function normalizeScore(value: any) {
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || SITE_URL;
+const SOLANA_EXPLORER_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_EXPLORER_CLUSTER || process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
+
+function solanaExplorerUrl(path: string) {
+  return SOLANA_EXPLORER_CLUSTER === "mainnet-beta"
+    ? `https://explorer.solana.com/${path}`
+    : `https://explorer.solana.com/${path}?cluster=${encodeURIComponent(SOLANA_EXPLORER_CLUSTER)}`;
+}
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
@@ -324,7 +331,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
               <ProfileActions profileId={agent.id} profileWallet={agent.walletAddress} profileWallets={[(agent as any).wallets?.solana, (agent as any).wallet, agent.walletAddress].filter(Boolean)} unclaimed={agent.unclaimed} />
               {v.satp?.verified || v.solana?.verified ? (
                 <a
-                  href={((v.satp as any)?.identityPDA || (v.satp as any)?.proof?.identityPDA) ? `https://solscan.io/account/${(v.satp as any)?.identityPDA || (v.satp as any)?.proof?.identityPDA}` : `https://agentfolio.bot/api/satp/score/${encodeURIComponent(id)}`}
+                  href={((v.satp as any)?.identityPDA || (v.satp as any)?.proof?.identityPDA) ? solanaExplorerUrl(`address/${(v.satp as any)?.identityPDA || (v.satp as any)?.proof?.identityPDA}`) : `${SITE_URL}/api/satp/score/${encodeURIComponent(id)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider inline-block"
@@ -441,14 +448,15 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                       verified
                       color={colorMap[t]}
                       href={
-                        t === "satp" && vEntry?.proof?.identityPDA ? `https://solana.fm/address/${vEntry?.proof?.identityPDA}` :
+                        t === "satp" && vEntry?.proof?.identityPDA ? solanaExplorerUrl(`address/${vEntry?.proof?.identityPDA}`) :
+                        chainTx?.txSignature ? solanaExplorerUrl(`tx/${chainTx.txSignature}`) :
                         chainTx?.solscanUrl ? chainTx.solscanUrl :
-                        t === "satp" ? `https://agentfolio.bot/api/satp/score/${encodeURIComponent(id)}` :
+                        t === "satp" ? `${SITE_URL}/api/satp/score/${encodeURIComponent(id)}` :
                         t === "x" && vEntry?.handle ? `https://x.com/${vEntry?.handle.replace("@","")}` :
                         t === "moltbook" && vEntry?.username ? `https://moltbook.com/u/${vEntry?.username}` :
                         t === "website" && vEntry?.url ? vEntry?.url :
                         t === "github" && vEntry?.username ? `https://github.com/${vEntry?.username}` :
-                        t === "solana" && vEntry?.address ? `https://solana.fm/address/${vEntry?.address}` :
+                        t === "solana" && vEntry?.address ? solanaExplorerUrl(`address/${vEntry?.address}`) :
                         t === "ethereum" && vEntry?.address ? `https://etherscan.io/address/${vEntry?.address}` :
                         t === "domain" && vEntry?.domain ? `https://${vEntry?.domain}` :
                         undefined
@@ -625,7 +633,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                     </div>
                   )}
                   {r.tx_signature && (
-                    <a href={`https://explorer.solana.com/tx/${r.tx_signature}?cluster=devnet`} target="_blank" rel="noopener noreferrer" 
+                    <a href={solanaExplorerUrl(`tx/${r.tx_signature}`)} target="_blank" rel="noopener noreferrer" 
                        className="text-[10px] mt-1 inline-flex items-center gap-1" style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
                       ⛓️ View on Solana
                     </a>

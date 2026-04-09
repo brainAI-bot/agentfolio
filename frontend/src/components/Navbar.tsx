@@ -5,6 +5,8 @@ import { Menu, X, Terminal } from "lucide-react";
 import { useState, useCallback, useEffect } from "react";
 import { NavbarWalletButton, MobileWalletSection } from "@/components/NavbarWalletButton";
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+
 const staticNavLinks = [
   { href: "/", label: "Directory" },
   { href: "/marketplace", label: "Marketplace" },
@@ -34,8 +36,8 @@ export function Navbar() {
   const externalizeHref = (href: string) => {
     if (!isExplorerHost) return href;
     if (href === "/satp/explorer") return href;
-    if (href.startsWith("/profile/")) return `https://agentfolio.bot${href}`;
-    return `https://agentfolio.bot${href}`;
+    if (href.startsWith("/profile/")) return `${SITE_URL}${href}`;
+    return `${SITE_URL}${href}`;
   };
 
   const navLinks = [
