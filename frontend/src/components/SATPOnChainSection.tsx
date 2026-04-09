@@ -12,6 +12,10 @@ interface Props {
   agentId?: string | null;
 }
 
+const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
+const SOLANA_EXPLORER_SUFFIX = SOLANA_CLUSTER === "mainnet-beta" ? "" : `?cluster=${SOLANA_CLUSTER}`;
+const solanaExplorerUrl = (path: string) => `https://solscan.io/${path}${SOLANA_EXPLORER_SUFFIX}`;
+
 export function SATPOnChainSection({ walletAddress, agentId }: Props) {
   const [scores, setScores] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -78,7 +82,7 @@ export function SATPOnChainSection({ walletAddress, agentId }: Props) {
 
       {scores?.txSignature && (
         <a
-          href={`https://solscan.io/tx/${scores.txSignature}`}
+          href={solanaExplorerUrl(`tx/${scores.txSignature}`)}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 text-xs text-[var(--accent)] hover:underline"

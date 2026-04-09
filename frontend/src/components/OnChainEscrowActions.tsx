@@ -5,7 +5,11 @@ import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { Transaction } from "@solana/web3.js";
 import { Shield, Wallet, ArrowRight, CheckCircle, AlertTriangle, Loader2 } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || SITE_URL;
+const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
+const SOLANA_EXPLORER_SUFFIX = SOLANA_CLUSTER === "mainnet-beta" ? "" : `?cluster=${SOLANA_CLUSTER}`;
+const solanaExplorerUrl = (path: string) => `https://solscan.io/${path}${SOLANA_EXPLORER_SUFFIX}`;
 
 interface Props {
   jobId: string;
@@ -122,7 +126,7 @@ export function OnChainEscrowActions({
         <div className="mt-4 p-4 rounded-xl" style={{ background: "rgba(153,69,255,0.06)", border: "1px solid rgba(153,69,255,0.15)" }}>
           <div className="flex items-center gap-2 text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
             <Shield size={14} style={{ color: "#9945ff" }} />
-            On-chain escrow: <a href={`https://solscan.io/account/${onchainEscrowPDA}`} target="_blank" rel="noopener" className="underline" style={{ color: "#9945ff" }}>{onchainEscrowPDA.slice(0, 8)}...{onchainEscrowPDA.slice(-4)}</a>
+            On-chain escrow: <a href={`${solanaExplorerUrl(`account/${onchainEscrowPDA}`)}`} target="_blank" rel="noopener" className="underline" style={{ color: "#9945ff" }}>{onchainEscrowPDA.slice(0, 8)}...{onchainEscrowPDA.slice(-4)}</a>
           </div>
         </div>
       );
@@ -152,7 +156,7 @@ export function OnChainEscrowActions({
 
       {onchainEscrowPDA && (
         <div className="mb-3 text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-          PDA: <a href={`https://solscan.io/account/${onchainEscrowPDA}`} target="_blank" rel="noopener" className="underline" style={{ color: "#9945ff" }}>{onchainEscrowPDA.slice(0, 12)}...{onchainEscrowPDA.slice(-6)}</a>
+          PDA: <a href={`${solanaExplorerUrl(`account/${onchainEscrowPDA}`)}`} target="_blank" rel="noopener" className="underline" style={{ color: "#9945ff" }}>{onchainEscrowPDA.slice(0, 12)}...{onchainEscrowPDA.slice(-6)}</a>
         </div>
       )}
 
