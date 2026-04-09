@@ -1257,7 +1257,17 @@ function registerRoutes(app) {
       const displayScore = Math.max(v3Score, computedScore);
       const displayLevel = useComputedLevel ? (computed.level || 0) : (v.verificationLevel || computed.level || 0);
       const displayLabel = useComputedLevel ? (computed.levelName || levelLabels[displayLevel] || 'Unverified') : (v.verificationLabel || computed.levelName || levelLabels[displayLevel] || 'Unverified');
-      p.v3 = Object.keys(v).length ? v : p.v3;
+      p.v3 = Object.keys(v).length ? {
+        ...v,
+        rawReputationScore: v.reputationScore ?? null,
+        rawVerificationLevel: v.verificationLevel ?? null,
+        rawVerificationLabel: v.verificationLabel || null,
+        reputationScore: displayScore,
+        reputationPct: (displayScore / 10).toFixed(2),
+        verificationLevel: displayLevel,
+        verificationLabel: displayLabel,
+        source: 'normalized-profile-trust',
+      } : p.v3;
       p.trust_score = displayScore;
       p.trustScore = displayScore;
       p.score = displayScore;
