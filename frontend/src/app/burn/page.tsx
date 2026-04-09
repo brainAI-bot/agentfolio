@@ -5,7 +5,8 @@ import { Flame, TrendingDown, BarChart3, ExternalLink, Clock } from "lucide-reac
 
 const API = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_SITE_URL || "";
 const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
-const solanaExplorerUrl = (path: string) => SOLANA_CLUSTER === "mainnet-beta" ? `https://explorer.solana.com/${path}` : `https://explorer.solana.com/${path}?cluster=${SOLANA_CLUSTER}`;
+const SOLANA_EXPLORER_BASE = process.env.NEXT_PUBLIC_SOLANA_EXPLORER_BASE || "https://explorer.solana.com";
+const solanaExplorerUrl = (path: string) => SOLANA_CLUSTER === "mainnet-beta" ? `${SOLANA_EXPLORER_BASE}/${path}` : `${SOLANA_EXPLORER_BASE}/${path}?cluster=${SOLANA_CLUSTER}`;
 
 function formatNumber(n: number) {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M";
