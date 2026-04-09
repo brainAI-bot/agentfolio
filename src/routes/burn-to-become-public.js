@@ -670,6 +670,66 @@ function handleBurnToBecome(req, res, url) {
     return true;
   }
 
+  // GET /api/burn-to-become/profile?wallet=... — resolve linked profile and normalized trust data
+  if (url.pathname === '/api/burn-to-become/profile' && req.method === 'GET') {
+    const wallet = req?.query?.wallet || url.searchParams.get('wallet');
+    if (!wallet) { sendJson(400, { error: 'wallet required' }); return true; }
+    Promise.resolve().then(async () => {
+      const db = new Database(dbPath, { readonly: true });
+      try {
+        const rows = db.prepare('SELECT * FROM profiles').all();
+        let matchedProfile = null;
+        for (const row of rows) {
+          try {
+            const wallets = row.wallets ? JSON.parse(row.wallets) : {};
+            const vd = row.verification_data ? JSON.parse(row.verification_data) : {};
+            const solWallet = wallets.solana || row.wallet || vd?.solana?.address;
+            if (solWallet === wallet) { matchedProfile = row; break; }
+          } catch {}
+        }
+        if (!matchedProfile) return sendJson(200, { found: false, wallet });
+
+        let level = 0;
+        let reputation = 0;
+        let levelName = 'Unverified';
+        let badge = '⚪';
+        try {
+          const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
+          const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(matchedProfile.id)}/trust-score`);
+          if (trustRes.ok) {
+            const trustJson = await trustRes.json();
+            const trust = trustJson?.data;
+            if (trust) {
+              level = trust.verificationLevel || 0;
+              reputation = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : (trust.reputationScore || 0);
+              levelName = trust.verificationLabel || LEVEL_NAMES[level] || 'Unverified';
+              badge = LEVEL_BADGES[level] || '⚪';
+            }
+          }
+        } catch {}
+
+        return sendJson(200, {
+          found: true,
+          wallet,
+          profileId: matchedProfile.id,
+          agent: matchedProfile.id,
+          name: matchedProfile.name,
+          handle: matchedProfile.handle,
+          level,
+          levelName,
+          badge,
+          reputation,
+        });
+      } catch (e) {
+        console.error('[BurnPublic] profile error:', e);
+        return sendJson(500, { error: e.message });
+      } finally {
+        try { db.close(); } catch {}
+      }
+    });
+    return true;
+  }
+
   // GET /api/burn-to-become/eligibility?wallet=... — check BOA mint eligibility (Level + Rep)
   if (url.pathname === '/api/burn-to-become/eligibility' && req.method === 'GET') {
     const wallet = req?.query?.wallet || url.searchParams.get('wallet');
