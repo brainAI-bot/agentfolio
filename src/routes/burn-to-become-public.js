@@ -710,24 +710,40 @@ function handleBurnToBecome(req, res, url) {
             profileObj.moltbookStats = pf.moltbookStats || {};
           }
         } catch (e) {}
-        // Use best-of V3 on-chain + V2 computed scores (fixes stale Genesis Record bug)
+        // Profile-facing burn eligibility should use the same normalized trust source as the
+        // rest of the public API, with old best-of logic only as a fallback.
+        let level = 0, reputation = 0;
         let v3Lev = 0, v3Rp = 0, v2Lev = 0, v2Rp = 0;
         try {
-          const { getV3Score } = require('../v3-score-service');
-          const v3 = await getV3Score(matchedProfile.id);
-          if (v3) {
-            v3Lev = v3.verificationLevel || 0;
-            v3Rp = v3.reputationScore || 0;
+          const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
+          const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(matchedProfile.id)}/trust-score`);
+          if (trustRes.ok) {
+            const trustJson = await trustRes.json();
+            const trust = trustJson?.data;
+            if (trust && typeof trust.reputationScore === 'number') {
+              level = trust.verificationLevel || 0;
+              reputation = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
+            }
           }
         } catch {}
-        try {
-          const scoreResult = getCompleteScore(profileObj);
-          v2Lev = scoreResult.verificationLevel ? scoreResult.verificationLevel.level : 0;
-          v2Rp = scoreResult.reputationScore ? scoreResult.reputationScore.score : 0;
-        } catch {}
-        const level = Math.max(v3Lev, v2Lev);
-        const reputation = Math.max(v3Rp, v2Rp);
-        console.log('[ELIGIBILITY] Score for', matchedProfile.id, 'V3:', v3Lev+'/'+v3Rp, 'V2:', v2Lev+'/'+v2Rp, 'Final:', level+'/'+reputation);
+        if (!level && !reputation) {
+          try {
+            const { getV3Score } = require('../v3-score-service');
+            const v3 = await getV3Score(matchedProfile.id);
+            if (v3) {
+              v3Lev = v3.verificationLevel || 0;
+              v3Rp = v3.reputationScore || 0;
+            }
+          } catch {}
+          try {
+            const scoreResult = getCompleteScore(profileObj);
+            v2Lev = scoreResult.verificationLevel ? scoreResult.verificationLevel.level : 0;
+            v2Rp = scoreResult.reputationScore ? scoreResult.reputationScore.score : 0;
+          } catch {}
+          level = Math.max(v3Lev, v2Lev);
+          reputation = Math.max(v3Rp, v2Rp);
+        }
+        console.log('[ELIGIBILITY] Score for', matchedProfile.id, 'normalized/fallback =>', level+'/'+reputation, 'V3:', v3Lev+'/'+v3Rp, 'V2:', v2Lev+'/'+v2Rp);
         const eligible = level >= 3 && reputation >= 50;
         db.close();
         // Check isBorn from Genesis Record — free first mint only if not already born
