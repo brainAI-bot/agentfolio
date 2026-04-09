@@ -3,7 +3,7 @@ import path from "path";
 import type { Agent, Job } from "./types";
 import { fetchV3Scores, v3ToComputedScores } from "./v3-scores";
 
-const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || "http://127.0.0.1:3333";
 
 const PROFILES_DIR = "/home/ubuntu/agentfolio/data/profiles";
 const JOBS_DIR = "/home/ubuntu/agentfolio/data/marketplace/jobs";
