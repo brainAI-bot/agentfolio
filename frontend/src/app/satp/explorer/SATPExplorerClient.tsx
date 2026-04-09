@@ -27,7 +27,10 @@ interface AgentCard {
   programId: string;
   profileId: string | null;
   isBorn: boolean;
-  attestationMemos: Array<{ platform: string; txSignature: string | null; timestamp: string | null; solscanUrl: string | null }>;
+  verificationBadge?: string;
+  verificationLevelName?: string;
+  trustCredentialUrl?: string | null;
+  attestationMemos: Array<{ platform: string; txSignature: string | null; timestamp: string | null; solscanUrl: string | null; memo?: string | null; displayType?: string | null }>;
 }
 
 const TIER_COLORS: Record<string, string> = {
@@ -69,6 +72,33 @@ function formatDateFull(dateStr: string | null | undefined): string {
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return "On-chain genesis";
   return d.toLocaleDateString();
+}
+
+function normalizePlatformLabel(value: string | null | undefined): string {
+  const normalized = String(value || "")
+    .replace(/^verification_/, "")
+    .replace(/_wallet_verification$/, "")
+    .replace(/_verification$/, "")
+    .replace(/_/g, " ")
+    .trim();
+  if (!normalized) return "Unknown";
+  return normalized.split(" ").map(part => part ? part[0].toUpperCase() + part.slice(1) : "").join(" ");
+}
+
+function normalizeAttestation(att: any) {
+  let proofData: any = {};
+  try { proofData = typeof att?.proofData === "string" ? JSON.parse(att.proofData) : (att?.proofData || {}); } catch {}
+  const txSignature = att?.txSignature || proofData?.txSignature || proofData?.signature || proofData?.transactionSignature || null;
+  const rawPlatform = att?.platform || att?.type || att?.attestationType || proofData?.platform || "attestation";
+  return {
+    ...att,
+    platform: String(rawPlatform).toLowerCase(),
+    displayType: normalizePlatformLabel(rawPlatform),
+    memo: att?.memo || proofData?.memo || proofData?.identifier || proofData?.wallet || proofData?.address || null,
+    txSignature,
+    solscanUrl: txSignature ? `https://solscan.io/tx/${txSignature}` : (att?.solscanUrl || att?.url || att?.proof?.url || (att?.pda ? `https://solscan.io/account/${att.pda}` : null)),
+    timestamp: att?.timestamp || att?.verifiedAt || att?.verified_at || att?.createdAt || null,
+  };
 }
 
 export default function SATPExplorerPage() {
@@ -149,6 +179,9 @@ export default function SATPExplorerPage() {
             const displayName = profile?.name || agent.name || "Unknown Agent";
             const profileId = scores?.data?.profileId || scores?.profileId || profile?.id || null;
 
+            const verificationLevel = agent.verificationLevel || scores?.data?.verificationLevel || scores?.verificationLevel || 0;
+            const verificationLevelName = agent.verificationLevelName || agent.verificationLabel || scores?.data?.verificationLabel || scores?.data?.levelName || ['Unverified','Registered','Verified','Established','Trusted','Sovereign'][verificationLevel] || 'Unverified';
+            const verificationBadge = agent.verificationBadge || ['⚪','🟡','🔵','🟢','🟠','🟣'][verificationLevel] || '⚪';
             return {
               id: agent.pda, // Use PDA as unique ID
               name: displayName,
@@ -158,7 +191,9 @@ export default function SATPExplorerPage() {
               pda: agent.pda,
               trustScore: agent.reputationScore || scores?.data?.trustScore || scores?.trustScore || 0,
               tier: (agent.tier || scores?.data?.tier || scores?.tier || "unverified").toLowerCase(),
-              verificationLevel: agent.verificationLevel || scores?.data?.verificationLevel || scores?.verificationLevel || 0,
+              verificationLevel,
+              verificationLevelName,
+              verificationBadge,
               platforms,
               reviewCount: reviewData?.data?.stats?.total || reviewData?.stats?.total || 0,
               reviewAvg: reviewData?.data?.stats?.avg_rating || reviewData?.stats?.avg_rating || 0,
@@ -170,10 +205,11 @@ export default function SATPExplorerPage() {
               nftMint: nftAvatar?.soulboundMint || nftAvatar?.identifier || agent.nftMint || null,
               soulbound: !!nftAvatar?.soulboundMint || !!agent.soulbound,
               isBorn: !!agent.isBorn,
-              attestationMemos: agent.attestationMemos || [],
+              attestationMemos: Array.isArray(agent.attestationMemos) ? agent.attestationMemos.map(normalizeAttestation) : [],
               description: agent.description || profile?.tagline || "",
               programId: agent.programId,
               profileId,
+              trustCredentialUrl: agent.trustCredentialUrl || (profileId ? `/api/trust-credential/${profileId}` : null),
             };
           })
         );
@@ -202,12 +238,18 @@ export default function SATPExplorerPage() {
       
       // Show all attestation memos (no dedup — multiple per platform is valid)
       const rawAtts = attData?.data?.attestations || [];
+      const normalizedAttestations = rawAtts.map(normalizeAttestation);
+      const normalizedExplorer = explorerData ? {
+        ...explorerData,
+        verifications: Array.isArray(explorerData.verifications) ? explorerData.verifications.map((item: any) => normalizeAttestation(item)) : [],
+        attestationMemos: Array.isArray(explorerData.attestationMemos) ? explorerData.attestationMemos.map((item: any) => normalizeAttestation(item)) : normalizedAttestations,
+      } : { verifications: [], attestationMemos: normalizedAttestations };
 
       setDetailData(prev => ({
         ...prev,
         [profileId]: {
-          attestations: rawAtts,
-          explorer: explorerData,
+          attestations: normalizedAttestations,
+          explorer: normalizedExplorer,
         },
       }));
     } catch (e) {
@@ -427,7 +469,7 @@ export default function SATPExplorerPage() {
 
               {/* Stats row */}
               <div className="flex gap-4 text-[10px]" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-                <span>L{agent.verificationLevel}</span>
+                <span>{agent.verificationBadge || '⚪'} L{agent.verificationLevel}{agent.verificationLevelName ? ` · ${agent.verificationLevelName}` : ''}</span>
                 <span>{agent.attestationMemos.length || agent.platforms.length} attestations</span>
                 {agent.reviewCount > 0 && <span>★{agent.reviewAvg.toFixed(1)} ({agent.reviewCount})</span>}
                 <span>{formatDate(agent.registeredAt)}</span>
@@ -561,7 +603,7 @@ export default function SATPExplorerPage() {
                     )}
                     {agent.profileId && (
                       <a
-                        href={`/api/trust-credential/${agent.profileId}`}
+                        href={agent.trustCredentialUrl || `/api/trust-credential/${agent.profileId}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex-1 block text-center py-2 rounded-lg text-[11px] font-semibold uppercase tracking-wider"
