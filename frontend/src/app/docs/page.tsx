@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 };
 
 export default async function DocsPage() {
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+  const baseUrl = process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || "";
 
   const endpoints = [
     {
