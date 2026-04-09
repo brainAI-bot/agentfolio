@@ -1,12 +1,11 @@
 /**
  * BOA & Mint Eligibility Endpoints
- * Uses V3 on-chain data (v3-score-service) as primary source.
- * Falls back to scoring-engine-v2 for agents without on-chain records.
+ * Uses V3 on-chain data as primary source.
+ * Falls back to compute-score + chain-cache for agents without V3 records.
  */
 
 const Database = require('better-sqlite3');
 const path = require('path');
-const fs = require('fs');
 
 let v3ScoreService;
 try {
@@ -15,20 +14,28 @@ try {
   console.warn('[Eligibility] V3 score service not available:', e.message);
 }
 
-let getCompleteScore;
+let computeScore;
+let chainCache;
 try {
-  ({ getCompleteScore } = require('../lib/scoring-engine-v2'));
+  ({ computeScore } = require('../lib/compute-score'));
+  chainCache = require('../lib/chain-cache');
 } catch (e) {
-  console.warn('[Eligibility] Scoring engine V2 not available:', e.message);
+  console.warn('[Eligibility] compute-score/chain-cache not available:', e.message);
 }
 
 function getDb() {
   return new Database(path.join(__dirname, '..', '..', 'data', 'agentfolio.db'), { readonly: true });
 }
 
+function parseJsonField(val, fallback) {
+  if (val === null || val === undefined || val === '') return fallback;
+  if (typeof val === 'object') return val;
+  try { return JSON.parse(val); } catch { return fallback; }
+}
+
 /**
  * Resolve agent level + reputation from V3 on-chain data first,
- * then fall back to scoring-engine-v2 if no on-chain record.
+ * then fall back to compute-score + chain-cache if no V3 record exists.
  */
 async function resolveAgentScore(agentId, profile) {
   // Try V3 on-chain data first (correct deserialization)
@@ -52,38 +59,44 @@ async function resolveAgentScore(agentId, profile) {
     }
   }
 
-  // Fallback to scoring-engine-v2
-  if (getCompleteScore && profile) {
+  // Fallback to current chain-cache + compute-score path
+  if (computeScore && chainCache && profile) {
     try {
-      const profileObj = {
-        id: profile.id, name: profile.name, handle: profile.handle,
-        bio: profile.bio, avatar: profile.avatar,
-        skills: JSON.parse(profile.skills || '[]'),
-        verification: JSON.parse(profile.verification || '{}'),
-        endorsements: JSON.parse(profile.endorsements || '[]'),
-        portfolio: JSON.parse(profile.portfolio || '[]'),
-        track_record: JSON.parse(profile.track_record || '{}'),
-      };
-      // Try to enrich from JSON file
-      try {
-        const pPath = path.join(__dirname, '..', '..', 'data', 'profiles', profile.id + '.json');
-        if (fs.existsSync(pPath)) {
-          const pf = JSON.parse(fs.readFileSync(pPath, 'utf8'));
-          profileObj.verificationData = pf.verificationData || {};
-          profileObj.stats = pf.stats || {};
-          profileObj.endorsements = pf.endorsements || profileObj.endorsements || [];
-          profileObj.moltbookStats = pf.moltbookStats || {};
-        }
-      } catch (e) {}
-      const scoreResult = getCompleteScore(profileObj);
+      const wallet = profile.wallet || parseJsonField(profile.wallets, {}).solana || null;
+      const identityVerified = !!wallet && chainCache.isVerified(wallet);
+      const attRows = (chainCache.getVerifications(profile.id, profile.created_at) || []).filter(att => att.platform && att.platform !== 'review');
+      const seen = new Set();
+      const chainVerifs = [];
+      if (identityVerified && wallet) {
+        chainVerifs.push({ platform: 'satp', identifier: wallet });
+        chainVerifs.push({ platform: 'solana', identifier: wallet });
+        seen.add('satp');
+        seen.add('solana');
+      }
+      for (const att of attRows) {
+        const platform = att.platform === 'twitter' ? 'x' : att.platform;
+        if (!platform || seen.has(platform)) continue;
+        let proofData = {};
+        try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
+        const identifier = att.identifier || proofData.identifier || proofData.address || proofData.wallet || null;
+        if (!identifier) continue;
+        chainVerifs.push({ platform, identifier });
+        seen.add(platform);
+        if (platform === 'x') seen.add('twitter');
+        if (platform === 'twitter') seen.add('x');
+      }
+      const computed = computeScore(chainVerifs, {
+        hasSatpIdentity: identityVerified,
+        claimed: !!profile.claimed,
+      });
       return {
-        level: scoreResult.verificationLevel ? scoreResult.verificationLevel.level : 0,
-        reputation: scoreResult.reputationScore ? scoreResult.reputationScore.score : 0,
-        source: 'scoring_engine_v2',
-        label: scoreResult.verificationLevel ? scoreResult.verificationLevel.name : 'Unknown',
+        level: computed.level || 0,
+        reputation: computed.score || 0,
+        source: 'compute_score_chain_cache',
+        label: computed.levelName || 'Unknown',
       };
     } catch (e) {
-      console.warn('[Eligibility] Scoring engine fallback failed for', agentId, e.message);
+      console.warn('[Eligibility] compute-score fallback failed for', agentId, e.message);
     }
   }
 
