@@ -96,9 +96,10 @@ export default function SATPExplorerPage() {
         try {
           const profilesRes = await fetch("/api/profiles?limit=200");
           if (profilesRes.ok) {
-            const profiles = await profilesRes.json();
+            const profilesPayload = await profilesRes.json();
+            const profiles = profilesPayload?.profiles || profilesPayload || [];
             for (const p of profiles) {
-              const wallet = p.wallets?.solana || p.verificationData?.solana?.address;
+              const wallet = p.wallets?.solana || p.wallet || p.verifications?.solana?.address || p.verifications?.solana?.identifier;
               if (wallet) {
                 profilesByWallet[wallet] = p;
               }
@@ -139,8 +140,8 @@ export default function SATPExplorerPage() {
             
             // Platforms: use on-chain agent.platforms as primary, merge with profile verifications
             const onChainPlatforms: string[] = agent.platforms || [];
-            const profilePlatforms = profile ? Object.keys(profile.verificationData || {}).filter((k: string) => 
-              profile.verificationData?.[k]?.verified
+            const profilePlatforms = profile ? Object.keys(profile.verifications || {}).filter((k: string) => 
+              profile.verifications?.[k]?.verified
             ) : [];
             const platforms = [...new Set([...onChainPlatforms, ...profilePlatforms])];
 
