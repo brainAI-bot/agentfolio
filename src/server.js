@@ -534,25 +534,48 @@ app.get('/api/profile/:id/genesis', async (req, res) => {
       pda = PublicKey.findProgramAddressSync([Buffer.from('genesis'), hash], PROGRAM_ID)[0].toBase58();
     } catch (e) { console.warn('[Genesis] PDA derivation failed:', e.message); }
 
-    res.json({
-      genesis: {
-        pda,
-        agentName: v3Score.agentName || '',
-        description: '',
-        category: 'agent',
-        verificationLevel: v3Score.verificationLevel || 0,
-        verificationLabel: v3Score.verificationLabel || 'Unknown',
-        reputationScore: v3Score.reputationScore || 0,
-        reputationPct: v3Score.reputationPct || '0.00',
-        isBorn: v3Score.isBorn || false,
-        bornAt: v3Score.genesisRecord || null,
-        faceImage: v3Score.faceImage || '',
-        faceMint: v3Score.faceMint || '',
-        faceBurnTx: '',
-        createdAt: v3Score.createdAt || null,
-        authority: v3Score.authority || '',
+    let genesis = {
+      pda,
+      agentName: v3Score.agentName || '',
+      description: '',
+      category: 'agent',
+      verificationLevel: v3Score.verificationLevel || 0,
+      verificationLabel: v3Score.verificationLabel || 'Unknown',
+      reputationScore: v3Score.reputationScore || 0,
+      reputationPct: v3Score.reputationPct || '0.00',
+      isBorn: v3Score.isBorn || false,
+      bornAt: v3Score.genesisRecord || null,
+      faceImage: v3Score.faceImage || '',
+      faceMint: v3Score.faceMint || '',
+      faceBurnTx: '',
+      createdAt: v3Score.createdAt || null,
+      authority: v3Score.authority || '',
+    };
+
+    try {
+      const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
+      const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(profileId)}/trust-score`);
+      if (trustRes.ok) {
+        const trustPayload = await trustRes.json();
+        const normalized = trustPayload?.data || null;
+        if (normalized) {
+          const normalizedScore = normalized.reputationScore ?? genesis.reputationScore ?? 0;
+          genesis = {
+            ...genesis,
+            rawReputationScore: genesis.reputationScore,
+            rawVerificationLevel: genesis.verificationLevel,
+            rawVerificationLabel: genesis.verificationLabel || null,
+            reputationScore: normalizedScore,
+            verificationLevel: normalized.verificationLevel ?? genesis.verificationLevel,
+            verificationLabel: normalized.verificationLabel || genesis.verificationLabel,
+            reputationPct: (normalizedScore / 10).toFixed(2),
+            source: 'normalized-profile-trust',
+          };
+        }
       }
-    });
+    } catch (_) {}
+
+    res.json({ genesis });
   } catch (e) {
     console.error('[Genesis API]', e.message);
     res.status(500).json({ error: 'Internal error' });
