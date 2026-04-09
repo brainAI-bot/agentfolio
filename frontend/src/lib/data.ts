@@ -45,6 +45,7 @@ interface RawProfile {
   trackRecord?: any;
   verification: { tier: string; score: number; lastVerified?: string | null };
   verificationData?: Record<string, any>;
+  verifications?: Record<string, any>;
   moltbookStats?: any;
   endorsements?: Array<{ fromId: string; fromName: string; fromHandle: string; message?: string | null; skills?: string[]; createdAt: string }>;
   endorsementsGiven?: any[];
@@ -122,7 +123,7 @@ function mapProfile(p: RawProfile): Agent {
   const v3 = (globalThis as any).__v3ScoresCache?.get(p.id);
   // Trust Score: SATP on-chain is source of truth (synced by backend score engine)
   const trustScore = p.score || p.trust_score || (v3 ? v3.reputationScore : 0) || 0;
-  const vd = p.verificationData || {};
+  const vd = p.verifications || p.verificationData || {};
   const tier: number = p.verificationLevel || p.level || (v3 ? v3.verificationLevel : 0) || 0;
 
   return {
