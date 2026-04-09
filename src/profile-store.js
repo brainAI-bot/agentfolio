@@ -509,7 +509,9 @@ function enrichProfile(row) {
     ...row,
     walletAddress: row.wallet || null,
     avatar: resolvedAvatar ? resolvedAvatar.replace('node1.irys.xyz', 'gateway.irys.xyz') : resolvedAvatar,
-    v3,
+    // Raw V3/genesis data is exposed via dedicated endpoints.
+    // Omitting it here prevents contradictory profile payloads for API consumers.
+    v3: undefined,
     capabilities: parseJsonField(row.capabilities),
     tags: parseJsonField(row.tags),
     links: parseJsonField(row.links, {}),
