@@ -1,5 +1,10 @@
 export const revalidate = 60;
 import { getAllAgents, getAllJobs } from "@/lib/data";
+
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || SITE_URL;
+const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
+const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || (SOLANA_CLUSTER === "devnet" ? "https://api.devnet.solana.com" : SOLANA_CLUSTER === "testnet" ? "https://api.testnet.solana.com" : "https://api.mainnet-beta.solana.com");
 import { BarChart3, Users, ShieldCheck, Fingerprint, Briefcase, DollarSign, ExternalLink, Wallet, TrendingUp, ArrowDownToLine, ArrowUpFromLine, AlertTriangle, Percent } from "lucide-react";
 import ProtocolActivity from "./ProtocolActivity";
 
@@ -27,12 +32,13 @@ const FEE_TIERS = [
 ];
 
 function explorerUrl(address: string) {
-  return `https://explorer.solana.com/address/${address}`;
+  const clusterParam = SOLANA_CLUSTER && SOLANA_CLUSTER !== "mainnet-beta" ? `?cluster=${encodeURIComponent(SOLANA_CLUSTER)}` : "";
+  return `https://explorer.solana.com/address/${address}${clusterParam}`;
 }
 
 async function getSolBalance(address: string): Promise<number> {
   try {
-    const res = await fetch('https://api.mainnet-beta.solana.com', {
+    const res = await fetch(SOLANA_RPC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getBalance', params: [address] }),
@@ -45,7 +51,7 @@ async function getSolBalance(address: string): Promise<number> {
 
 async function getUsdcBalance(ownerAddress: string): Promise<number> {
   try {
-    const res = await fetch('https://api.mainnet-beta.solana.com', {
+    const res = await fetch(SOLANA_RPC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

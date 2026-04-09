@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { useRouter } from "next/navigation";
@@ -224,7 +226,7 @@ export default function RegisterPage() {
             </a>
 
             <button
-              onClick={() => { navigator.clipboard.writeText(`https://agentfolio.bot/profile/${createdProfileId}`); }}
+              onClick={() => { navigator.clipboard.writeText(`${SITE_URL}/profile/${createdProfileId}`); }}
               className="flex items-center gap-3 p-3 rounded-lg transition-colors hover:opacity-80 w-full text-left"
               style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}
             >
