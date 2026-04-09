@@ -3,6 +3,13 @@
 import { useEffect, useState } from "react";
 import { Shield, Zap } from "lucide-react";
 
+const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
+
+function solanaExplorerUrl(path: string) {
+  const clusterQuery = SOLANA_CLUSTER && SOLANA_CLUSTER !== "mainnet-beta" ? `?cluster=${encodeURIComponent(SOLANA_CLUSTER)}` : "";
+  return `https://explorer.solana.com/${path}${clusterQuery}`;
+}
+
 interface GenesisData {
   pda: string;
   agentName: string;
@@ -60,7 +67,7 @@ export function V3OnChainBadge({ agentId }: { agentId: string }) {
         <div className="col-span-2">
           <div style={{ color: "var(--text-tertiary)" }}>PDA</div>
           <a
-            href={`https://explorer.solana.com/address/${genesis.pda}`}
+            href={solanaExplorerUrl(`address/${genesis.pda}`)}
             target="_blank"
             rel="noopener noreferrer"
             className="hover:underline"

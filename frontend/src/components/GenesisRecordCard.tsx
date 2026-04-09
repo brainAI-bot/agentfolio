@@ -3,6 +3,13 @@
 import { useEffect, useState } from "react";
 import { Shield, ExternalLink, Flame } from "lucide-react";
 
+const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
+
+function solanaExplorerUrl(path: string) {
+  const clusterQuery = SOLANA_CLUSTER && SOLANA_CLUSTER !== "mainnet-beta" ? `?cluster=${encodeURIComponent(SOLANA_CLUSTER)}` : "";
+  return `https://explorer.solana.com/${path}${clusterQuery}`;
+}
+
 function normalizeScore(value: number | null | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;
   return value > 10000 ? Math.round(value / 10000) : value;
@@ -174,7 +181,7 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
             <div className="flex items-center justify-between text-[10px]" style={{ fontFamily: "var(--font-mono)" }}>
               <span style={{ color: "var(--text-tertiary)" }}>Authority</span>
               <a
-                href={`https://explorer.solana.com/address/${genesis.authority}`}
+                href={solanaExplorerUrl(`address/${genesis.authority}`)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-1 hover:underline"
@@ -187,7 +194,7 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
           <div className="flex items-center justify-between text-[10px]" style={{ fontFamily: "var(--font-mono)" }}>
             <span style={{ color: "var(--text-tertiary)" }}>PDA</span>
             <a
-              href={`https://explorer.solana.com/address/${genesis.pda}`}
+              href={solanaExplorerUrl(`address/${genesis.pda}`)}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1 hover:underline"
@@ -200,7 +207,7 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
             <div className="flex items-center justify-between text-[10px]" style={{ fontFamily: "var(--font-mono)" }}>
               <span style={{ color: "var(--text-tertiary)" }}>Burn TX</span>
               <a
-                href={`https://solscan.io/tx/${burnTx}`}
+                href={solanaExplorerUrl(`tx/${burnTx}`)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-1 hover:underline"
