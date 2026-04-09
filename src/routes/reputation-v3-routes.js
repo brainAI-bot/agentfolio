@@ -293,15 +293,28 @@ router.get('/validation/:agentId', requireSDK, async (req, res) => {
     }
 
     const LEVEL_LABELS = ['Unverified', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
+    const normalized = applyNormalizedTrust({
+      agentId,
+      pda: identity.pda,
+      reputationScore: identity.reputationScore || 0,
+      verificationLevel: identity.verificationLevel || 0,
+      verificationLabel: identity.tierLabel || LEVEL_LABELS[identity.verificationLevel] || 'Unknown',
+      authority: identity.authority,
+      isBorn: identity.isBorn || false,
+      network: NETWORK,
+    }, await getNormalizedProfileTrust(agentId));
 
     res.json({
       agentId,
       pda: identity.pda,
-      verificationLevel: identity.verificationLevel || 0,
-      levelLabel: LEVEL_LABELS[identity.verificationLevel] || 'Unknown',
-      isBorn: identity.isBorn || false,
+      verificationLevel: normalized.verificationLevel || 0,
+      levelLabel: normalized.verificationLabel || LEVEL_LABELS[normalized.verificationLevel] || 'Unknown',
+      isBorn: normalized.isBorn || false,
       authority: identity.authority,
       network: NETWORK,
+      rawVerificationLevel: identity.verificationLevel || 0,
+      rawLevelLabel: LEVEL_LABELS[identity.verificationLevel] || 'Unknown',
+      source: normalized.source || 'v3-onchain',
     });
   } catch (err) {
     console.error('[Validation V3] get error:', err.message);
