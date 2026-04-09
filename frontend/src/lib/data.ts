@@ -5,6 +5,8 @@ import type { Agent, Job } from "./types";
 import { getAgentProfilePDA, AGENT_PROFILE_DISCRIMINATOR, SOLANA_RPC } from "./identity-registry";
 import { fetchV3Scores, v3ToComputedScores } from "./v3-scores";
 
+const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+
 // Cache on-chain lookups to avoid rate limiting during builds
 const _onChainCache = new Map<string, boolean>();
 
@@ -54,7 +56,7 @@ if (typeof (globalThis as any).__v3WarmupDone === 'undefined') {
     const _initFiles = require('fs').readdirSync(PROFILES_DIR).filter((f: string) => f.endsWith('.json'));
     const _initIds = _initFiles.map((f: string) => f.replace('.json', ''));
     // Backend API is authoritative (reads from on-chain via v3-score-service)
-    fetch("http://localhost:3333/api/profiles?limit=300").then(r => r.json()).then((data: any) => {
+    fetch(`${API_BASE}/api/profiles?limit=300`).then(r => r.json()).then((data: any) => {
       const profiles = Array.isArray(data) ? data : (data.profiles || []);
       const scoreMap = new Map();
       for (const p of profiles) {
