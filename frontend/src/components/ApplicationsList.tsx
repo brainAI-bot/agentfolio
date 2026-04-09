@@ -5,7 +5,7 @@ import { Shield, CheckCircle, Star, ExternalLink } from "lucide-react";
 import Link from "next/link";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || SITE_URL;
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 interface Application {
   id: string;

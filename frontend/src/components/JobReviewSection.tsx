@@ -5,7 +5,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { CheckCircle, AlertTriangle, FileText, ArrowRight } from "lucide-react";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || SITE_URL;
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 interface Props {
   jobId: string;
