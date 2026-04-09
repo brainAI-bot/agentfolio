@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 };
 
 export default async function DocsPage() {
-  const baseUrl = "https://agentfolio.bot";
+  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 
   const endpoints = [
     {
@@ -60,27 +60,6 @@ export default async function DocsPage() {
       desc: "Build unsigned SATP registration transaction",
       body: '{ "walletAddress": "...", "profileId": "..." }',
       returns: "{ transaction (base64), agentPDA }",
-    },
-    {
-      method: "GET",
-      path: "/api/profile/:id/onchain-status",
-      desc: "Get SATP on-chain verification status for a profile",
-      body: null,
-      returns: "{ verified, did, identity, reputation }",
-    },
-    {
-      method: "GET",
-      path: "/api/agent/:id/avatar",
-      desc: "Resolve agent avatar (redirects to image URL)",
-      body: null,
-      returns: "302 redirect to avatar image",
-    },
-    {
-      method: "GET",
-      path: "/api/agent/:id/avatar/image",
-      desc: "Embeddable avatar image (use in img tags)",
-      body: null,
-      returns: "Image (PNG/JPEG)",
     },
     {
       method: "GET",
