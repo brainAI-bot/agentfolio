@@ -113,6 +113,16 @@ async function getSatpAgents() {
       );
     });
 
+    const levelLabels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
+    const levelBadges = ['⚪','🟡','🔵','🟢','🟠','🟣'];
+    const normalizePlatform = (value) => String(value || '')
+      .replace(/^verification_/, '')
+      .replace(/_wallet_verification$/, '')
+      .replace(/_verification$/, '')
+      .replace(/_/g, ' ')
+      .trim()
+      .toLowerCase();
+
     const filteredAgents = [];
     const seenProfileIds = new Set();
     for (const agent of agents) {
@@ -141,18 +151,56 @@ async function getSatpAgents() {
       }
     }
 
-    for (const agent of filteredAgents) {
+    const explorerBase = process.env.INTERNAL_API_URL || 'http://127.0.0.1:3333';
+    const enrichedAgents = await Promise.all(filteredAgents.map(async (agent) => {
       const profile = profiles.find((p) => p.id === agent.profileId);
-      if (!profile) continue;
+      if (!profile) return agent;
+
       const verifs = _db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profile.id);
       const computed = computeScore(verifs, { hasSatpIdentity: true, claimed: !!profile.claimed });
-      agent.reputationScore = computed.score;
-      agent.verificationLevel = computed.level;
-      agent.verificationLabel = computed.levelName;
-    }
+
+      let explorerData = null;
+      let byAgentData = null;
+      try {
+        const res = await globalThis.fetch(`${explorerBase}/api/explorer/${encodeURIComponent(profile.id)}`);
+        if (res.ok) explorerData = await res.json();
+      } catch (_) {}
+      try {
+        const res = await globalThis.fetch(`${explorerBase}/api/satp/attestations/by-agent/${encodeURIComponent(profile.id)}`);
+        if (res.ok) byAgentData = await res.json();
+      } catch (_) {}
+
+      const explorerVerifications = Array.isArray(explorerData?.verifications) ? explorerData.verifications : [];
+      const explorerAttestations = Array.isArray(explorerData?.attestationMemos) && explorerData.attestationMemos.length
+        ? explorerData.attestationMemos
+        : (Array.isArray(byAgentData?.data?.attestations) ? byAgentData.data.attestations : []);
+      const platforms = [...new Set([
+        ...(Array.isArray(agent.platforms) ? agent.platforms : []),
+        ...explorerVerifications.map(v => normalizePlatform(v.platform || v.type || v.label)),
+        ...explorerAttestations.map(a => normalizePlatform(a.platform || a.type || a.attestationType)),
+      ].filter(Boolean))];
+
+      const verificationLevel = computed.level;
+      const verificationLabel = computed.levelName;
+      return {
+        ...agent,
+        profileId: profile.id,
+        agentId: profile.id,
+        reputationScore: computed.score,
+        verificationLevel,
+        verificationLabel,
+        verificationLevelName: verificationLabel || levelLabels[verificationLevel] || 'Unverified',
+        verificationBadge: levelBadges[verificationLevel] || '⚪',
+        trustCredentialUrl: `/api/trust-credential/${encodeURIComponent(profile.id)}`,
+        verifications: explorerVerifications,
+        attestationMemos: explorerAttestations,
+        platforms,
+        onChainAttestations: explorerAttestations.length || explorerVerifications.length || platforms.length || 0,
+      };
+    }));
     _db.close();
 
-    const result = { agents: filteredAgents, count: filteredAgents.length, source: "solana-mainnet-v3" };
+    const result = { agents: enrichedAgents, count: filteredAgents.length, source: "solana-mainnet-v3" };
     agentCache = { data: result, timestamp: Date.now() };
     return result;
   } catch (e) {
