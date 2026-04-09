@@ -1166,33 +1166,31 @@ function registerRoutes(app) {
       return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: {} /* [P0] chain-cache only, no DB reads */, portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: _md, nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, _dbLevel: dbLevel || null, claimed, unclaimed };
     });
 
-    // A1: Compute scores for all profiles using computeScore
+    // A1: Compute scores for all profiles using chain-cache-derived verifications
     {
-      const d = getDb();
-      const allVerifs = d.prepare('SELECT profile_id, platform, identifier FROM verifications').all();
-      const verifMap = {};
-      for (const v of allVerifs) {
-        if (!verifMap[v.profile_id]) verifMap[v.profile_id] = [];
-        verifMap[v.profile_id].push(v);
-      }
+      const chainCache = require('./lib/chain-cache');
       for (const p of profiles) {
-        const verifs = verifMap[p.id] || [];
-        const hasSatp = verifs.some(v => v.platform === 'satp');
-        const computed = computeScore(verifs, { hasSatpIdentity: hasSatp, claimed: !!p.claimed });
+        const chainVerifs = [];
+        const identityVerified = !!p.wallet && chainCache.isVerified(p.wallet);
+        if (identityVerified && p.wallet) {
+          chainVerifs.push({ platform: 'satp', identifier: p.wallet });
+          chainVerifs.push({ platform: 'solana', identifier: p.wallet });
+        }
+        const atts = (chainCache.getVerifications(p.id, p.created_at) || []).filter(att => att.platform && att.platform !== 'review');
+        const seenPlatforms = new Set(chainVerifs.map(v => v.platform));
+        for (const att of atts) {
+          const platform = att.platform === 'twitter' ? 'x' : att.platform;
+          if (!platform || seenPlatforms.has(platform)) continue;
+          chainVerifs.push({ platform, identifier: att.identifier || platform });
+          seenPlatforms.add(platform);
+        }
+        const computed = computeScore(chainVerifs, { hasSatpIdentity: identityVerified, claimed: !!p.claimed });
         p.trust_score = computed.score;
         p.score = computed.score;
         p.level = computed.level;
         p.tier = computed.levelName;
         p.verificationLevel = computed.level;
-        p.v3 = {
-          level: computed.level,
-          score: computed.score,
-          reputationScore: computed.score,
-          reputationPct: '0.00',
-          verificationLevel: computed.level,
-          verificationLabel: computed.levelName,
-          isBorn: false,
-        };
+        p.verificationLabel = computed.levelName;
       }
     }
     // Re-sort by score DESC
