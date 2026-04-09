@@ -19,6 +19,11 @@ const bs58 = _bs58.default || _bs58;
 const fs = require('fs');
 const path = require('path');
 
+const SITE_URL = process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || 'https://agentfolio.bot';
+const SITE_HOSTNAME = (() => {
+  try { return new URL(SITE_URL).hostname; } catch { return 'agentfolio.bot'; }
+})();
+
 // ─── Key Management ─────────────────────────────────────
 const KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR ||
   process.env.SATP_KEYPAIR_PATH || './config/platform-keypair.json';
@@ -57,10 +62,10 @@ function getSigningKey() {
 }
 
 // ─── W3C VC Constants ───────────────────────────────────
-const ISSUER_DID = 'did:web:agentfolio.bot';
+const ISSUER_DID = 'did:web:' + SITE_HOSTNAME;
 const CREDENTIAL_CONTEXT = [
   'https://www.w3.org/2018/credentials/v1',
-  'https://agentfolio.bot/schemas/trust-credential/v1',
+  SITE_URL + '/schemas/trust-credential/v1',
 ];
 const CREDENTIAL_TYPE = ['VerifiableCredential', 'AgentFolioTrustCredential'];
 const CREDENTIAL_TTL_SECONDS = 86400; // 24 hours
@@ -147,7 +152,7 @@ function registerTrustCredentialRoutes(app) {
         return res.status(404).json({
           error: 'Agent not found',
           agentId,
-          hint: 'Register at https://agentfolio.bot first',
+          hint: 'Register at ' + SITE_URL + ' first',
         });
       }
 
@@ -216,7 +221,7 @@ function registerTrustCredentialRoutes(app) {
         issuer: {
           id: ISSUER_DID,
           name: 'AgentFolio',
-          url: 'https://agentfolio.bot',
+          url: SITE_URL,
         },
         issuanceDate: now.toISOString(),
         expirationDate: expiresAt.toISOString(),
