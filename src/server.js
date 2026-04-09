@@ -1598,7 +1598,7 @@ app.post('/api/burn-to-become/collections', (req, res) => {
 const burnToBecomePublic = require('./routes/burn-to-become-public');
 // Mount burn-to-become as middleware (handles /api/burn-to-become/* routes)
 app.use((req, res, next) => {
-  const url = require('url').parse(req.url);
+  const url = new URL(req.originalUrl || req.url, `${req.protocol || 'http'}://${req.get('host') || 'localhost'}`);
   if (url.pathname && url.pathname.startsWith('/api/burn-to-become')) {
     const handled = burnToBecomePublic.handleBurnToBecome(req, res, url);
     if (handled) return;
