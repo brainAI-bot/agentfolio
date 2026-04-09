@@ -20,7 +20,7 @@ import {
 } from "@/lib/v3-escrow";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || SITE_URL;
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
 const SOLSCAN_CLUSTER_SUFFIX = SOLANA_CLUSTER === "mainnet-beta" ? "" : `?cluster=${SOLANA_CLUSTER}`;
 const solscanTxUrl = (tx: string) => `https://solscan.io/tx/${tx}${SOLSCAN_CLUSTER_SUFFIX}`;
