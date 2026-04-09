@@ -882,10 +882,9 @@ function registerRoutes(app) {
         (async () => {
           const { Keypair } = require('@solana/web3.js');
           const signer = await loadPreferredSatpSignerKeypair();
-          const authorityWallet = new PublicKey(solanaWallet);
           try {
             const { transaction, genesisPda } = await satpV3.client.buildCreateIdentity(
-              authorityWallet,
+              signer.publicKey,
               id,
               {
                 name: name.trim().substring(0, 32),
@@ -906,7 +905,7 @@ function registerRoutes(app) {
             try {
               await new Promise(r => setTimeout(r, 3000));
               const { transaction: tx2, genesisPda: pda2 } = await satpV3.client.buildCreateIdentity(
-                authorityWallet, id,
+                signer.publicKey, id,
                 {
                   name: name.trim().substring(0, 32),
                   description: (resolvedBio || 'AgentFolio registered agent').substring(0, 256),
