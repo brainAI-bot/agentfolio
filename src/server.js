@@ -412,7 +412,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       wallets,
       tags,
       skills,
-      onChainRegistered: hasSatpId,
+      onChainRegistered: identityVerified,
       v3: {
         reputationScore: computed.score,
         verificationLevel: computed.level,
