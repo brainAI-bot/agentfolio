@@ -77,8 +77,8 @@ function scoreTier(score) {
 // ─── Route Registration ─────────────────────────────────
 function registerTrustCredentialRoutes(app) {
   const profileStore = require('../profile-store');
-  const { computeScoreWithOnChain } = require('../scoring');
   const { getV3Score } = require('../../v3-score-service');
+  const chainCache = require('../lib/chain-cache');
 
   // ── Verify route MUST come before :agentId to avoid parameter capture ──
 
@@ -138,7 +138,11 @@ function registerTrustCredentialRoutes(app) {
     try {
       // 1. Fetch profile from DB
       const db = profileStore.getDb();
-      const profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId);
+      let profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId);
+      // Bug 3 fix: handle fallback
+      if (!profile) {
+        profile = db.prepare('SELECT * FROM profiles WHERE handle = ?').get(agentId);
+      }
       if (!profile) {
         return res.status(404).json({
           error: 'Agent not found',
@@ -147,38 +151,39 @@ function registerTrustCredentialRoutes(app) {
         });
       }
 
-      // 2. Parse stored JSON fields
+      // 2. Parse non-score profile fields only
       const parsed = {
         ...profile,
-        verifications: [],
         wallets: {},
         tags: [],
         skills: [],
       };
-      try {
-        let vData = JSON.parse(profile.verification_data || '[]');
-        // verification_data may be object-keyed (e.g. {twitter: {...}, github: {...}})
-        if (vData && typeof vData === 'object' && !Array.isArray(vData)) {
-          vData = Object.entries(vData).map(([platform, info]) => ({ platform, ...info }));
-        }
-        parsed.verifications = Array.isArray(vData) ? vData : [];
-      } catch (_) { parsed.verifications = []; }
       try { parsed.wallets = JSON.parse(profile.wallets || '{}'); } catch (_) {}
       try { const t = JSON.parse(profile.tags || '[]'); parsed.tags = Array.isArray(t) ? t : []; } catch (_) {}
       try { const s = JSON.parse(profile.skills || '[]'); parsed.skills = Array.isArray(s) ? s : []; } catch (_) {}
 
-      // A1: Single scoring function
-      const { computeScore } = require('../lib/compute-score');
-      let dbVerifRows = [];
-      try {
-        const Database = require('better-sqlite3');
-        const _path = require('path');
-        const _db = new Database(_path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
-        dbVerifRows = _db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(agentId);
-        _db.close();
-      } catch (_) {}
-      const hasSatpId = dbVerifRows.some(v => v.platform === 'satp') || parsed.verifications?.some(v => v.platform === 'satp' && v.verified);
-      const computed = computeScore(dbVerifRows, { hasSatpIdentity: hasSatpId, claimed: !!profile.claimed });
+      // 3. Clean-start scoring: on-chain only. No DB verification fallback.
+      const v3Score = await getV3Score(profile.id).catch(() => null);
+      const rawChainAttestations = chainCache.getVerifications(profile.id, profile.created_at) || [];
+      const seenPlatforms = new Set();
+      const realAttestations = [];
+      for (const att of rawChainAttestations) {
+        const platform = att.platform === 'twitter' ? 'x' : att.platform;
+        if (!platform || platform === 'review' || seenPlatforms.has(platform)) continue;
+        let proofData = {};
+        try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch (_) {}
+        const identifier = att.identifier || proofData.identifier || proofData.address || proofData.wallet || null;
+        if (!identifier) continue;
+        realAttestations.push({ platform, identifier });
+        seenPlatforms.add(platform);
+        if (platform === 'x') seenPlatforms.add('twitter');
+      }
+      const normalizedTrustScore = v3Score
+        ? (v3Score.reputationScore > 10000 ? Math.round(v3Score.reputationScore / 10000) : (v3Score.reputationScore || 0))
+        : 0;
+      const normalizedVerificationLevel = v3Score?.verificationLevel ?? 0;
+      const normalizedTier = (v3Score?.verificationLabel || 'Unverified').toUpperCase();
+      const onChainRegistered = !!(profile.wallet && chainCache.isVerified(profile.wallet));
 
       // 4. Build W3C Verifiable Credential payload
       const now = new Date();
@@ -188,23 +193,21 @@ function registerTrustCredentialRoutes(app) {
         id: `did:agentfolio:${agentId}`,
         agentId,
         name: profile.name,
-        trustScore: computed.score,
-        maxScore: 300,
-        tier: computed.levelName.toUpperCase(),
-        scoreVersion: 'v3',
-        verificationCount: computed.verificationCount,
-        onChainRegistered: hasSatpId,
-        breakdown: (() => {
-          const bd = computed.breakdown || {};
-          return {
-            onChainReputation: bd.satp || bd.satp_identity || 0,
-            verifications: (bd.github || 0) + (bd.solana || 0) + (bd.x || 0) + (bd.ethereum || 0),
-            socialProof: (bd.moltbook || 0) + (bd.discord || 0) + (bd.telegram || 0),
-            completeness: 0,
-            marketplace: 0,
-            tenure: 0,
-          };
-        })(),
+        trustScore: normalizedTrustScore,
+        maxScore: 800,
+        tier: normalizedTier,
+        verificationLevel: normalizedVerificationLevel,
+        scoreVersion: v3Score ? 'v3' : 'none',
+        verificationCount: realAttestations.length,
+        onChainRegistered,
+        breakdown: {
+          onChainReputation: normalizedTrustScore,
+          verifications: realAttestations.length,
+          socialProof: 0,
+          completeness: 0,
+          marketplace: 0,
+          tenure: 0,
+        },
       };
 
       const vcPayload = {
