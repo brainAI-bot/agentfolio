@@ -12,7 +12,7 @@
 
 import { Transaction, Connection, PublicKey } from '@solana/web3.js';
 
-const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || 'https://agentfolio.bot';
+const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || '';
 
 interface V3EscrowCreateParams {
   clientWallet: string;
