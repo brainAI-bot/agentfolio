@@ -338,19 +338,26 @@ async function verifyExistingAttestation(agentId, platform, attestationType, att
         { pubkey: attPDA, isSigner: false, isWritable: true },
         { pubkey: keypair.publicKey, isSigner: true, isWritable: true },
       ],
-      data: discriminatorMap.verify_attestation,
+      data: anchorDisc('verify_attestation'),
     }));
   }
 
   if (hasGenesis) {
+    const existingAtts = await getAgentAttestations(agentId, conn);
+    const allAtts = [...new Set([attPDA.toBase58(), ...existingAtts.map(a => a.toBase58())])].map(a => new PublicKey(a));
+    const recomputeKeys = [
+      { pubkey: genesisPDA, isSigner: false, isWritable: true },
+      { pubkey: ATTESTATIONS_AUTHORITY, isSigner: false, isWritable: false },
+      { pubkey: IDENTITY_PROGRAM, isSigner: false, isWritable: false },
+      { pubkey: keypair.publicKey, isSigner: true, isWritable: true },
+    ];
+    for (const att of allAtts.slice(0, 20)) {
+      recomputeKeys.push({ pubkey: att, isSigner: false, isWritable: false });
+    }
     tx.add(new TransactionInstruction({
       programId: ATTESTATIONS_PROGRAM,
-      keys: [
-        { pubkey: genesisPDA, isSigner: false, isWritable: true },
-        { pubkey: attPDA, isSigner: false, isWritable: false },
-        { pubkey: keypair.publicKey, isSigner: true, isWritable: false },
-      ],
-      data: discriminatorMap.recompute_score,
+      keys: recomputeKeys,
+      data: anchorDisc('recompute_score'),
     }));
   }
 
