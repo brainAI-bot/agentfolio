@@ -79,6 +79,7 @@ async function getNormalizedProfileTrust(agentId) {
 function applyNormalizedTrust(raw, normalized) {
   if (!raw || !normalized) return raw;
   const normalizedScore = normalized.reputationScore ?? raw.reputationScore ?? 0;
+  const normalizedLabel = normalized.verificationLabel || raw.verificationLabel || raw.tierLabel || null;
   return {
     ...raw,
     rawReputationScore: raw.reputationScore,
@@ -86,8 +87,9 @@ function applyNormalizedTrust(raw, normalized) {
     rawVerificationLabel: raw.verificationLabel || raw.tierLabel || null,
     reputationScore: normalizedScore,
     verificationLevel: normalized.verificationLevel ?? raw.verificationLevel,
-    verificationLabel: normalized.verificationLabel || raw.verificationLabel || raw.tierLabel || null,
-    tierLabel: normalized.verificationLabel || raw.tierLabel || raw.verificationLabel || null,
+    verificationLabel: normalizedLabel,
+    tier: normalizedLabel,
+    tierLabel: normalizedLabel,
     reputationPct: (normalizedScore / 10).toFixed(2),
     source: 'normalized-profile-trust',
   };
