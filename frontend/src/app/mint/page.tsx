@@ -8,7 +8,10 @@ import { Flame, Wallet, Shield, AlertTriangle, CheckCircle, ExternalLink, Loader
 
 const MINTING_PAUSED = false;
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot";
+const API = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
+const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || (SOLANA_CLUSTER === "devnet" ? "https://api.devnet.solana.com" : SOLANA_CLUSTER === "testnet" ? "https://api.testnet.solana.com" : "https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY");
+const MINT_TREASURY = process.env.NEXT_PUBLIC_MINT_TREASURY || "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be";
 
 const GENESIS_REGISTRY: Record<string, { name: string; image: string; metadata: string; role: string }> = {
   "BP9TPSoo6LXpy2YvRTZnPg1kLA9ndnKxa6eHYxkdVMWE": {
@@ -105,7 +108,7 @@ export default function MintPage() {
       if (!prepRes.ok) { const err = await prepRes.json(); throw new Error(err.error || "Failed to prepare mint"); }
       const prepData = await prepRes.json();
       const { Transaction, Connection } = await import("@solana/web3.js");
-      const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY", "confirmed");
+      const connection = new Connection(SOLANA_RPC_URL, "confirmed");
       const txBuf = Buffer.from(prepData.transaction, "base64");
       const tx = Transaction.from(txBuf);
       const signed = await wallet.signTransaction(tx);
@@ -163,7 +166,7 @@ export default function MintPage() {
         if (mintSig) {
           try {
             const { Connection } = await import("@solana/web3.js");
-            const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY", "confirmed");
+            const connection = new Connection(SOLANA_RPC_URL, "confirmed");
             await connection.confirmTransaction(mintSig, "confirmed");
           } catch (confirmErr) {
             console.warn("TX confirm check failed (may already be confirmed):", confirmErr);
@@ -178,8 +181,8 @@ export default function MintPage() {
         // Paid mint (1 SOL) — user sends payment, then server mints via Metaplex
         if (!wallet.sendTransaction) return;
         const { Connection, Transaction, SystemProgram, PublicKey } = await import("@solana/web3.js");
-        const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY", "confirmed");
-        const treasury = new PublicKey("FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be");
+        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+        const treasury = new PublicKey(MINT_TREASURY);
         const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
         const tx = new Transaction({ blockhash, lastValidBlockHeight, feePayer: wallet.publicKey }).add(
           SystemProgram.transfer({ fromPubkey: wallet.publicKey, toPubkey: treasury, lamports: 1_000_000_000 })
@@ -218,7 +221,7 @@ export default function MintPage() {
     setError("");
     try {
       const { Connection } = await import("@solana/web3.js");
-      const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY", "confirmed");
+      const connection = new Connection(SOLANA_RPC_URL, "confirmed");
       let mintCompleted = false;
       for (let attempt = 0; attempt < 10 && !mintCompleted; attempt++) {
         if (attempt > 0) await new Promise(r => setTimeout(r, Math.min(4000 * attempt, 20000)));
