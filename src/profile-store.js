@@ -1101,23 +1101,22 @@ function registerRoutes(app) {
       const { PublicKey } = require('@solana/web3.js');
       const payerKey = new PublicKey(payer);
 
-      // Build TX with deployer as creator/authority, user as feePayer
+      // Build TX with user wallet as creator/authority. Platform only fee-pays.
       const fs = require('fs');
       const { Keypair } = require('@solana/web3.js');
       const deployerKey = JSON.parse(fs.readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'));
       const deployer = Keypair.fromSecretKey(Uint8Array.from(deployerKey));
 
       const { transaction, genesisPda } = await satpV3.client.buildCreateIdentity(
-        deployer.publicKey, agentId,
+        payerKey, agentId,
         { name, description: bio || 'AgentFolio registered agent', category, capabilities: skills, metadataUri: '' }
       );
 
-      // User pays the transaction fee + rent
-      transaction.feePayer = payerKey;
+      transaction.feePayer = deployer.publicKey;
       const { blockhash, lastValidBlockHeight } = await satpV3.client.connection.getLatestBlockhash();
       transaction.recentBlockhash = blockhash;
 
-      // Deployer signs as creator/authority
+      // Platform signs only as fee payer. User wallet signs as authority.
       transaction.partialSign(deployer);
 
       // Serialize and return (user's wallet will add their signature)
