@@ -580,20 +580,26 @@ function enrichProfile(row) {
           });
         }
       } catch (_) {}
-      const computed = computeScore(chainVerifs, { hasSatpIdentity: false, claimed: chainVerifs.length > 0 });
+      const levelLabels = ['Unverified', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
+      const levelBadges = ['⚪', '🟡', '🔵', '🟢', '🟠', '🟣'];
+      const onChainScore = v3
+        ? (v3.reputationScore > 10000 ? Math.round(v3.reputationScore / 10000) : (v3.reputationScore || 0))
+        : 0;
+      const onChainLevel = v3 && v3.verificationLevel != null ? v3.verificationLevel : 0;
+      const onChainLevelName = v3 && v3.verificationLabel ? v3.verificationLabel : (levelLabels[onChainLevel] || 'Unverified');
       return {
-        trust_score: { overall_score: computed.score, level: computed.levelName, score_breakdown: computed.breakdown, source: "compute-score-chain-cache" },
-        level: computed.level,
-        tier: computed.levelName,
-        score: computed.score,
-        trustScore: computed.score,
-        trustBreakdown: (() => { const b = computed.breakdown || {}; return { onChainReputation: b.satp || 0, verifications: (b.solana || 0) + (b.github || 0) + (b.x || 0) + (b.ethereum || 0) + (b.hyperliquid || 0) + (b.polymarket || 0) + (b.discord || 0) + (b.telegram || 0) + (b.moltbook || 0) + (b.agentmail || 0) + (b.website || 0) + (b.domain || 0) + (b.mcp || 0) + (b.a2a || 0), socialProof: 0, completeness: b.completeness || 0, marketplace: 0, tenure: 0 }; })(),
-        verificationLevel: computed.level,
-        verification_level: computed.level,
-        reputation_score: computed.score,
-        levelName: computed.levelName,
-        verificationBadge: computed.badge,
-        verificationLevelName: computed.levelName,
+        trust_score: { overall_score: onChainScore, level: onChainLevelName, score_breakdown: {}, source: v3 ? "v3-onchain" : "none" },
+        level: onChainLevel,
+        tier: onChainLevelName,
+        score: onChainScore,
+        trustScore: onChainScore,
+        trustBreakdown: { onChainReputation: 0, verifications: 0, socialProof: 0, completeness: 0, marketplace: 0, tenure: 0 },
+        verificationLevel: onChainLevel,
+        verification_level: onChainLevel,
+        reputation_score: onChainScore,
+        levelName: onChainLevelName,
+        verificationBadge: levelBadges[onChainLevel] || '⚪',
+        verificationLevelName: onChainLevelName,
       };
     })(),
     // Top-level unclaimed flag for frontend (from metadata)
@@ -1194,11 +1200,9 @@ function registerRoutes(app) {
     const levelLabels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
     for (const p of profiles) {
       const v = p.v3 || {};
-      const cl = p.chain_level || 0;
-      const cs = p.chain_score || 0;
-      p.level = v.verificationLevel || v.level || cl || 0;
-      p.score = v.reputationScore || v.score || cs || p.trust_score || 0;
-      p.levelName = v.verificationLabel || levelLabels[p.level] || 'Unknown';
+      p.level = v.verificationLevel || 0;
+      p.score = v.reputationScore || 0;
+      p.levelName = v.verificationLabel || levelLabels[p.level] || 'Unverified';
     }
     // Sort parameter: trust_desc (default), trust_asc, name_asc, name_desc, newest, oldest
     const sortParam = (req.query.sort || "trust_desc").toLowerCase();
