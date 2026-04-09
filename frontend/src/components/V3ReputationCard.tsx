@@ -2,6 +2,13 @@
 
 import { Shield, Zap, ExternalLink } from "lucide-react";
 
+const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
+
+function solanaExplorerUrl(path: string) {
+  const clusterQuery = SOLANA_CLUSTER && SOLANA_CLUSTER !== "mainnet-beta" ? `?cluster=${encodeURIComponent(SOLANA_CLUSTER)}` : "";
+  return `https://explorer.solana.com/${path}${clusterQuery}`;
+}
+
 function normalizeScore(value: number | null | undefined) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
   return value > 10000 ? Math.round(value / 10000) : value;
@@ -30,7 +37,7 @@ export function V3ReputationCard({ data }: { data: V3ReputationData }) {
   const levelLabel = LEVEL_LABELS[level] || "Unknown";
   const levelColor = LEVEL_COLORS[level] || "#64748B";
   const scorePct = Math.min(100, Math.round((score / MAX_SCORE) * 100));
-  const explorerUrl = `https://explorer.solana.com/address/${data.pda}`;
+  const explorerUrl = solanaExplorerUrl(`address/${data.pda}`);
 
   return (
     <div
