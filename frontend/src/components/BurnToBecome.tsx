@@ -4,7 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import { Flame, AlertTriangle, Check, Loader2, X, Image, Skull, Shield, ExternalLink } from "lucide-react";
 import BirthCertificate from "./BirthCertificate";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+const API = process.env.NEXT_PUBLIC_API_URL || SITE_URL;
+const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
+const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || (SOLANA_CLUSTER === "devnet" ? "https://api.devnet.solana.com" : SOLANA_CLUSTER === "testnet" ? "https://api.testnet.solana.com" : "https://api.mainnet-beta.solana.com");
 
 interface NFT {
   mint: string;
@@ -141,7 +144,7 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
           const { Connection, PublicKey, Transaction, SystemProgram } = await import("@solana/web3.js");
           const { createBurnInstruction, TOKEN_PROGRAM_ID, getAssociatedTokenAddress } = await import("@solana/spl-token");
 
-          const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
+          const connection = new Connection(SOLANA_RPC_URL, "confirmed");
           const wallet = (window as any).solana;
           const ownerPubkey = new PublicKey(walletAddress);
           const mintPubkey = new PublicKey(state.selectedNFT.mint);

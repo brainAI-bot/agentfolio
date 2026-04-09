@@ -19,7 +19,11 @@ import {
   getV3EscrowState,
 } from "@/lib/v3-escrow";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || SITE_URL;
+const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
+const SOLSCAN_CLUSTER_SUFFIX = SOLANA_CLUSTER === "mainnet-beta" ? "" : `?cluster=${SOLANA_CLUSTER}`;
+const solscanTxUrl = (tx: string) => `https://solscan.io/tx/${tx}${SOLSCAN_CLUSTER_SUFFIX}`;
 
 const statusConfig: Record<string, { label: string; color: string; icon: React.ElementType }> = {
   open: { label: "OPEN", color: "var(--success)", icon: CheckCircle },
@@ -523,7 +527,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                   <h3 className="text-base font-semibold mb-1">
                     <a href={`/marketplace/job/${job.id}`} className="hover:underline" style={{ color: "var(--text-primary)" }}>{job.title}</a>
                     <button
-                      onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(`https://agentfolio.bot/marketplace/job/${job.id}`); }}
+                      onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(`${SITE_URL}/marketplace/job/${job.id}`); }}
                       className="ml-2 text-[10px] opacity-40 hover:opacity-100 transition-opacity"
                       title="Copy link"
                     >
@@ -543,7 +547,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                     <span className="flex items-center gap-1" style={{ color: "var(--text-secondary)" }}>
                       <EscrowIcon size={12} />
                       {job.escrowTx ? (
-                        <a href={`https://solscan.io/tx/${job.escrowTx}`} target="_blank" rel="noopener noreferrer" style={{ color: "var(--solana)", textDecoration: "underline" }}>
+                        <a href={solscanTxUrl(job.escrowTx)} target="_blank" rel="noopener noreferrer" style={{ color: "var(--solana)", textDecoration: "underline" }}>
                           {ec.label} ↗
                         </a>
                       ) : ec.label}
