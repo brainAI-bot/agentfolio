@@ -666,7 +666,42 @@ function handleBurnToBecome(req, res, url) {
   if (url.pathname === '/api/burn-to-become/satp-score' && req.method === 'GET') {
     const wallet = (req?.query?.wallet || (() => { try { return url?.searchParams?.get ? url.searchParams.get('wallet') : new URL(req.originalUrl || req.url || '', 'http://localhost').searchParams.get('wallet'); } catch { return null; } })());
     if (!wallet) return sendJson(400, { error: 'wallet required' });
-    getSatpScore(wallet).then(score => sendJson(200, { score, free: score >= FREE_SCORE_THRESHOLD })).catch(e => sendJson(500, { error: e.message }));
+    (async () => {
+      try {
+        const Database = require('better-sqlite3');
+        const db = new Database(require('path').join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+        let matchedProfile = db.prepare("SELECT * FROM profiles WHERE wallet = ?").get(wallet);
+        if (!matchedProfile) {
+          matchedProfile = db.prepare("SELECT * FROM profiles WHERE id IN (SELECT profile_id FROM verifications WHERE identifier = ?)").get(wallet);
+        }
+        try { db.close(); } catch {}
+        if (matchedProfile?.id) {
+          const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
+          try {
+            const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(matchedProfile.id)}/trust-score`);
+            if (trustRes.ok) {
+              const trustJson = await trustRes.json();
+              const trust = trustJson?.data;
+              if (trust && typeof trust.reputationScore === 'number') {
+                const normalizedScore = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
+                return sendJson(200, {
+                  score: normalizedScore,
+                  free: normalizedScore >= FREE_SCORE_THRESHOLD,
+                  level: trust.verificationLevel || 0,
+                  levelName: trust.verificationLabel || 'Unverified',
+                  source: 'normalized-profile-trust',
+                  profileId: matchedProfile.id,
+                });
+              }
+            }
+          } catch {}
+        }
+        const score = await getSatpScore(wallet);
+        return sendJson(200, { score, free: score >= FREE_SCORE_THRESHOLD, source: 'raw-satp-score' });
+      } catch (e) {
+        return sendJson(500, { error: e.message });
+      }
+    })();
     return true;
   }
 
