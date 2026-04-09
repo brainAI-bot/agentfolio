@@ -2231,7 +2231,7 @@ app.get('/api/score', async (req, res) => {
       source: 'compute-score',
       verifications,
       onChain: { reputationScore: _computed.score, verificationLevel: _computed.level, isBorn: false },
-      payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.01' },
+      payment: { protocol: 'x402', enabled: X402_ENABLED, network: X402_ENABLED ? X402_NETWORK : null, price: X402_ENABLED ? '$0.01' : null, reason: X402_DISABLE_REASON },
     });
   }
 
@@ -2239,7 +2239,7 @@ app.get('/api/score', async (req, res) => {
   res.json({
     agentId: resolvedId, score: _computed.score, level: _computed.level, levelName: _computed.levelName, tier: _computed.levelName,
     source: 'legacy-computed',
-    payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.01' },
+    payment: { protocol: 'x402', enabled: X402_ENABLED, network: X402_ENABLED ? X402_NETWORK : null, price: X402_ENABLED ? '$0.01' : null, reason: X402_DISABLE_REASON },
   });
 });
 
@@ -2275,7 +2275,7 @@ app.get('/api/leaderboard/scores', async (req, res) => {
     total: leaderboard.length,
     limit,
     computedAt: new Date().toISOString(),
-    payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.05' },
+    payment: { protocol: 'x402', enabled: X402_ENABLED, network: X402_ENABLED ? X402_NETWORK : null, price: X402_ENABLED ? '$0.05' : null, reason: X402_DISABLE_REASON },
   });
 });
 
