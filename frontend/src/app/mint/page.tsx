@@ -10,7 +10,7 @@ const MINTING_PAUSED = false;
 
 const API = process.env.NEXT_PUBLIC_API_URL || "";
 const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
-const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || (SOLANA_CLUSTER === "devnet" ? "https://api.devnet.solana.com" : SOLANA_CLUSTER === "testnet" ? "https://api.testnet.solana.com" : "https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY");
+const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || (SOLANA_CLUSTER === "devnet" ? "https://api.devnet.solana.com" : SOLANA_CLUSTER === "testnet" ? "https://api.testnet.solana.com" : "https://api.mainnet-beta.solana.com");
 const MINT_TREASURY = process.env.NEXT_PUBLIC_MINT_TREASURY || "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be";
 const EXPLORER_CLUSTER_QUERY = SOLANA_CLUSTER === "mainnet-beta" ? "" : `?cluster=${encodeURIComponent(SOLANA_CLUSTER)}`;
 const solanaExplorerUrl = (path: string) => `https://explorer.solana.com/${path}${EXPLORER_CLUSTER_QUERY}`;
