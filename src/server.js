@@ -421,7 +421,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       did: 'did:agentfolio:' + profile.id,
       trustScore: displayScore,
       tier: displayLabel,
-      scoreVersion: v3Score ? 'v3' : 'none',
+      scoreVersion: (v3Score && v3Score.reputationScore > 0) ? 'v3' : 'attestations',
       verifications: dedupedVerifications.map(({ platform, verified, txSignature, solscanUrl, timestamp }) => ({
         platform,
         verified,
@@ -432,7 +432,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       wallets: profile.wallets || {},
       tags: profile.tags || [],
       skills: profile.skills || [],
-      onChainRegistered: !!(profile.wallet && chainCache.isVerified(profile.wallet)),
+      onChainRegistered: !!((profile.wallet && chainCache.isVerified(profile.wallet)) || (v3Score && v3Score.verificationLevel >= 1)),
       v3: {
         reputationScore: displayScore,
         verificationLevel: displayLevel,
