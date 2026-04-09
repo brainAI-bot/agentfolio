@@ -14,7 +14,7 @@ interface Props {
 
 const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
 const SOLANA_EXPLORER_SUFFIX = SOLANA_CLUSTER === "mainnet-beta" ? "" : `?cluster=${SOLANA_CLUSTER}`;
-const solanaExplorerUrl = (path: string) => `https://solscan.io/${path}${SOLANA_EXPLORER_SUFFIX}`;
+const solanaExplorerUrl = (path: string) => `https://explorer.solana.com/${path}${SOLANA_EXPLORER_SUFFIX}`;
 
 export function SATPOnChainSection({ walletAddress, agentId }: Props) {
   const [scores, setScores] = useState<any>(null);
