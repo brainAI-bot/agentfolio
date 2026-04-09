@@ -51,6 +51,10 @@ interface RawProfile {
   stats?: { jobsCompleted: number; rating: number };
   createdAt: string;
   updatedAt?: string;
+  score?: number;
+  trust_score?: number;
+  verificationLevel?: number;
+  level?: number;
   nftAvatar?: { chain: string; identifier: string; name: string | null; image: string | null; verifiedOnChain: boolean; verifiedAt: string } | null;
   activity?: any[];
   unclaimed?: boolean;
@@ -117,11 +121,9 @@ function mapProfile(p: RawProfile): Agent {
   // V3 on-chain scores override local scoring
   const v3 = (globalThis as any).__v3ScoresCache?.get(p.id);
   // Trust Score: SATP on-chain is source of truth (synced by backend score engine)
-  // V3 reputationPct is 0-100 scale, multiply by 8 to get 0-800 v2 trust score
-  const trustScore = v3 ? v3.reputationScore : 0; // P0: v3 on-chain only, no DB fallback
+  const trustScore = p.score || p.trust_score || (v3 ? v3.reputationScore : 0) || 0;
   const vd = p.verificationData || {};
-  // P0: Tier from v3 on-chain only. No local/DB fallback.
-  const tier: number = v3 ? v3.verificationLevel : 0;
+  const tier: number = p.verificationLevel || p.level || (v3 ? v3.verificationLevel : 0) || 0;
 
   return {
     id: p.id,
