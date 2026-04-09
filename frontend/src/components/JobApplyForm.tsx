@@ -5,7 +5,8 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { Briefcase, Send, Share2, Check } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || SITE_URL;
 
 export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: string }) {
   const { connected, publicKey } = useWallet();
@@ -72,7 +73,7 @@ export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: s
   };
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(`https://agentfolio.bot/marketplace/job/${jobId}`);
+    navigator.clipboard.writeText(`${SITE_URL}/marketplace/job/${jobId}`);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
