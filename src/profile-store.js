@@ -1055,23 +1055,30 @@ function registerRoutes(app) {
         }
       }
       // [CEO Apr 4] DB score override REMOVED -- on-chain is sole authority for display
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+      // P0 Apr 9: normalize profile-facing genesis output to trust-score data so
+      // polluted legacy attestations do not leak conflicting score/level values.
+      try {
+        const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333'
+        const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(profileId)}/trust-score`)
+        if (trustRes.ok) {
+          const trustPayload = await trustRes.json()
+          const normalized = trustPayload?.data || null
+          if (normalized) {
+            const normalizedScore = normalized.reputationScore ?? record.reputationScore ?? 0
+            record = {
+              ...record,
+              rawReputationScore: record.reputationScore,
+              rawVerificationLevel: record.verificationLevel,
+              rawVerificationLabel: record.verificationLabel || null,
+              reputationScore: normalizedScore,
+              verificationLevel: normalized.verificationLevel ?? record.verificationLevel,
+              verificationLabel: normalized.verificationLabel || record.verificationLabel,
+              reputationPct: (normalizedScore / 10).toFixed(2),
+              source: 'normalized-profile-trust',
+            }
+          }
+        }
+      } catch (_) {}
 
       res.json({ genesis: record });
     } catch (e) {

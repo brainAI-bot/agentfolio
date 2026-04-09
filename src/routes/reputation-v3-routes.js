@@ -63,6 +63,36 @@ function requireSDK(req, res, next) {
   next();
 }
 
+const INTERNAL_API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
+
+async function getNormalizedProfileTrust(agentId) {
+  try {
+    const res = await globalThis.fetch(`${INTERNAL_API_BASE}/api/profile/${encodeURIComponent(agentId)}/trust-score`);
+    if (!res.ok) return null;
+    const payload = await res.json();
+    return payload?.data || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function applyNormalizedTrust(raw, normalized) {
+  if (!raw || !normalized) return raw;
+  const normalizedScore = normalized.reputationScore ?? raw.reputationScore ?? 0;
+  return {
+    ...raw,
+    rawReputationScore: raw.reputationScore,
+    rawVerificationLevel: raw.verificationLevel,
+    rawVerificationLabel: raw.verificationLabel || raw.tierLabel || null,
+    reputationScore: normalizedScore,
+    verificationLevel: normalized.verificationLevel ?? raw.verificationLevel,
+    verificationLabel: normalized.verificationLabel || raw.verificationLabel || raw.tierLabel || null,
+    tierLabel: normalized.verificationLabel || raw.tierLabel || raw.verificationLabel || null,
+    reputationPct: (normalizedScore / 10).toFixed(2),
+    source: 'normalized-profile-trust',
+  };
+}
+
 function validatePublicKey(value) {
   try {
     new PublicKey(value);
@@ -225,17 +255,20 @@ router.get('/reputation/:agentId', requireSDK, async (req, res) => {
       return res.status(404).json({ error: 'Agent not found', agentId });
     }
 
-    res.json({
+    const payload = applyNormalizedTrust({
       agentId,
       pda: identity.pda,
       reputationScore: identity.reputationScore || 0,
       verificationLevel: identity.verificationLevel || 0,
       tier: identity.tier || null,
       tierLabel: identity.tierLabel || null,
+      verificationLabel: identity.tierLabel || null,
       authority: identity.authority,
       isBorn: identity.isBorn || false,
       network: NETWORK,
-    });
+    }, await getNormalizedProfileTrust(agentId))
+
+    res.json(payload);
   } catch (err) {
     console.error('[Reputation V3] get error:', err.message);
     res.status(500).json({ error: err.message });
