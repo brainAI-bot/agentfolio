@@ -3,7 +3,7 @@ import path from "path";
 import type { Agent, Job } from "./types";
 import { fetchV3Scores, v3ToComputedScores } from "./v3-scores";
 
-const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 
 const PROFILES_DIR = "/home/ubuntu/agentfolio/data/profiles";
 const JOBS_DIR = "/home/ubuntu/agentfolio/data/marketplace/jobs";
@@ -318,7 +318,7 @@ function loadAllJobs(): Job[] {
 }
 
 export async function getAllAgents(): Promise<Agent[]> {
-  const API = process.env.INTERNAL_API_URL || "http://localhost:3000";
+  const API = API_BASE;
   try {
     const res = await fetch(API + "/api/profiles?limit=200", { next: { revalidate: 30 } });
     if (res.ok) {
@@ -356,7 +356,7 @@ export function searchAgents(query: string): Agent[] {
 }
 
 export async function getStats() {
-  const API = process.env.INTERNAL_API_URL || "http://localhost:3000";
+  const API = API_BASE;
   try {
     const res = await fetch(API + "/api/stats", { next: { revalidate: 30 } });
     if (res.ok) {
