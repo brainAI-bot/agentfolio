@@ -338,7 +338,7 @@ async function verifyExistingAttestation(agentId, platform, attestationType, att
         { pubkey: attPDA, isSigner: false, isWritable: true },
         { pubkey: keypair.publicKey, isSigner: true, isWritable: true },
       ],
-      data: anchorDiscriminator('verify_attestation'),
+      data: discriminatorMap.verify_attestation,
     }));
   }
 
@@ -350,7 +350,7 @@ async function verifyExistingAttestation(agentId, platform, attestationType, att
         { pubkey: attPDA, isSigner: false, isWritable: false },
         { pubkey: keypair.publicKey, isSigner: true, isWritable: false },
       ],
-      data: anchorDiscriminator('recompute_score'),
+      data: discriminatorMap.recompute_score,
     }));
   }
 

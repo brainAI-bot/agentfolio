@@ -142,8 +142,8 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     }
   } catch {}
 
-  // V3 reputation (freshly deserialized) overrides genesis values for TrustBadge/sidebar
-  if (v3Reputation && genesis) {
+  // Use raw V3 as fallback metadata only, not as the displayed score when trust-score API is available.
+  if (v3Reputation && genesis && !trustScoreData) {
     const normalizedV3Score = v3Reputation.reputationScore > 10000
       ? Math.round(v3Reputation.reputationScore / 10000)
       : v3Reputation.reputationScore;
@@ -153,21 +153,21 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     genesis.isBorn = v3Reputation.isBorn ?? genesis.isBorn;
   }
 
-  // Profile header prefers V3/Genesis, but falls back to real attestation-derived trust score when Genesis is missing.
+  // Profile header should prefer the attestation-derived trust score, then Genesis/V3 fallback.
   const onChainBadgeScore = (() => {
+    const trustScoreFallback = trustScoreData ? normalizeScore(trustScoreData.reputationScore || 0) : 0;
     const genesisScore = genesis ? normalizeScore(genesis.reputationScore || 0) : 0;
     const v3Score = v3Reputation ? normalizeScore(v3Reputation.reputationScore || 0) : 0;
-    const trustScoreFallback = trustScoreData ? normalizeScore(trustScoreData.reputationScore || 0) : 0;
-    return genesisScore || v3Score || trustScoreFallback;
+    return trustScoreFallback || genesisScore || v3Score;
   })();
   if (genesis) {
     genesis.reputationScore = onChainBadgeScore;
   }
   const badgeScore = onChainBadgeScore;
   const badgeReputationScore = onChainBadgeScore;
-  const badgeTier = genesis?.verificationLabel || (badgeScore > 0 ? agent.tier : "Unverified");
-  const badgeVerificationLevel = genesis?.verificationLevel ?? (badgeScore > 0 ? agent.verificationLevel : 0);
-  const badgeVerificationLevelName = genesis?.verificationLabel || (badgeScore > 0 ? agent.verificationLevelName : "Unverified");
+  const badgeTier = trustScoreData?.verificationLabel || genesis?.verificationLabel || (badgeScore > 0 ? agent.tier : "Unverified");
+  const badgeVerificationLevel = trustScoreData?.verificationLevel ?? genesis?.verificationLevel ?? (badgeScore > 0 ? agent.verificationLevel : 0);
+  const badgeVerificationLevelName = trustScoreData?.verificationLabel || genesis?.verificationLabel || (badgeScore > 0 ? agent.verificationLevelName : "Unverified");
   let githubStats: any = null;
   if (v?.github?.verified && v.github.username) {
     try {
