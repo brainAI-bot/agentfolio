@@ -8,6 +8,10 @@ import { clusterApiUrl } from "@solana/web3.js";
 
 import "@solana/wallet-adapter-react-ui/styles.css";
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
+const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || clusterApiUrl(SOLANA_CLUSTER as "devnet" | "testnet" | "mainnet-beta");
+
 function isMobileBrowser(): boolean {
   if (typeof window === "undefined") return false;
   return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -27,9 +31,9 @@ function isSolflareInjected(): boolean {
 function MobileDeepLinkModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   if (!visible) return null;
 
-  const currentUrl = typeof window !== "undefined" ? window.location.href : "https://agentfolio.bot";
+  const currentUrl = typeof window !== "undefined" ? window.location.href : SITE_URL;
   // Phantom universal link — opens the current page inside Phantom's in-app browser
-  const phantomLink = `https://phantom.app/ul/browse/${encodeURIComponent(currentUrl)}?ref=${encodeURIComponent("https://agentfolio.bot")}`;
+  const phantomLink = `https://phantom.app/ul/browse/${encodeURIComponent(currentUrl)}?ref=${encodeURIComponent(SITE_URL)}`;
   const solflareLink = `https://solflare.com/ul/v1/browse/${encodeURIComponent(currentUrl)}`;
 
   return (
@@ -116,7 +120,7 @@ function SmartConnectProvider({ children }: { children: ReactNode }) {
 }
 
 export function WalletProvider({ children }: { children: ReactNode }) {
-  const endpoint = useMemo(() => clusterApiUrl("mainnet-beta"), []);
+  const endpoint = useMemo(() => SOLANA_RPC_URL, []);
   const wallets = useMemo(() => [
     new PhantomWalletAdapter(),
     new SolflareWalletAdapter(),

@@ -30,6 +30,9 @@ function normalizeScore(value: any) {
   return value > 10000 ? Math.round(value / 10000) : value;
 }
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || SITE_URL;
+
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   const agent = await fetchAgent(id);
@@ -37,16 +40,16 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
   const name = agent.name || id;
   const bio = agent.bio ? agent.bio.substring(0, 150) : `${name} on AgentFolio — verified AI agent portfolio`;
-  const avatar = agent.avatar || "https://agentfolio.bot/og-image.png?v=4";
+  const avatar = agent.avatar || `${SITE_URL}/og-image.png?v=4`;
 
   return {
     title: `${name} — AgentFolio`,
-    alternates: { canonical: `https://agentfolio.bot/profile/${id}` },
+    alternates: { canonical: `${SITE_URL}/profile/${id}` },
     description: bio,
     openGraph: {
       title: `${name} — AgentFolio`,
       description: bio,
-      url: `https://agentfolio.bot/profile/${id}`,
+      url: `${SITE_URL}/profile/${id}`,
       siteName: "AgentFolio",
       images: [{ url: avatar, width: 200, height: 200, alt: name }],
       type: "profile",
@@ -70,7 +73,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   // Fetch V3 on-chain Genesis Record for trust scores
   let genesis: any = null;
   try {
-    const genesisRes = await fetch(`https://agentfolio.bot/api/profile/${id}/genesis`, { next: { revalidate: 30 } });
+    const genesisRes = await fetch(`${API_BASE}/api/profile/${id}/genesis`, { next: { revalidate: 30 } });
     if (genesisRes.ok) {
       const gData = await genesisRes.json();
       genesis = gData.genesis;
@@ -80,7 +83,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   // Fetch trust-score (DB-enriched, normalized values)
   let trustScoreData: any = null;
   try {
-    const tsRes = await fetch(`https://agentfolio.bot/api/profile/${id}/trust-score`, { next: { revalidate: 30 } });
+    const tsRes = await fetch(`${API_BASE}/api/profile/${id}/trust-score`, { next: { revalidate: 30 } });
     if (tsRes.ok) {
       const tsData = await tsRes.json();
       trustScoreData = tsData.data;
@@ -99,10 +102,10 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   // Fetch chain-cache attestations (on-chain verified platforms)
   let chainAttestations: Array<{ platform: string; txSignature?: string; timestamp?: string; solscanUrl?: string }> = [];
   try {
-    const explorerRes = await fetch(`https://agentfolio.bot/api/explorer/${id}`, { next: { revalidate: 30 } });
+    const explorerRes = await fetch(`${API_BASE}/api/explorer/${id}`, { next: { revalidate: 30 } });
     if (explorerRes.ok) {
       const explorerData = await explorerRes.json();
-      chainAttestations = explorerData.attestationMemos || [];
+      chainAttestations = explorerData.verifications || explorerData.attestationMemos || [];
     }
   } catch {}
 
@@ -111,7 +114,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   const solWallet = (agent as any).wallets?.solana || (agent as any).wallet || agent.walletAddress;
   if (solWallet) {
     try {
-      const satpIdRes = await fetch(`http://localhost:3000/api/satp/identity/${solWallet}`, { next: { revalidate: 30 } });
+      const satpIdRes = await fetch(`${API_BASE}/api/satp/identity/${solWallet}`, { next: { revalidate: 30 } });
       if (satpIdRes.ok) satpIdentity = await satpIdRes.json();
     } catch {}
   }
@@ -120,7 +123,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   // Fetch V3 on-chain reputation (from SATP V3 SDK — deserialization fixed 2026-03-29)
   let v3Reputation: any = null;
   try {
-    const v3RepRes = await fetch(`https://agentfolio.bot/api/v3/reputation/${id}`, { next: { revalidate: 30 } });
+    const v3RepRes = await fetch(`${API_BASE}/api/v3/reputation/${id}`, { next: { revalidate: 30 } });
     if (v3RepRes.ok) {
       const v3Data = await v3RepRes.json();
       if (v3Data && v3Data.reputationScore !== undefined) {
@@ -158,7 +161,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   let githubStats: any = null;
   if (v?.github?.verified && v.github.username) {
     try {
-      const ghRes = await fetch(`http://localhost:3000/api/verify/github/stats?username=${encodeURIComponent(v.github.username)}`, { next: { revalidate: 30 } });
+      const ghRes = await fetch(`${API_BASE}/api/verify/github/stats?username=${encodeURIComponent(v.github.username)}`, { next: { revalidate: 30 } });
       if (ghRes.ok) githubStats = await ghRes.json();
     } catch {}
   }
@@ -168,7 +171,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   let avgRating = 0;
   try {
     // Primary: DB reviews (works with agent IDs)
-    const dbRes = await fetch(`https://agentfolio.bot/api/reviews/v2?agent=${id}`, { next: { revalidate: 60 } });
+    const dbRes = await fetch(`${API_BASE}/api/reviews/v2?agent=${id}`, { next: { revalidate: 60 } });
     if (dbRes.ok) {
       const dbData = await dbRes.json();
       reviews = (dbData.reviews || []).map((r: any) => ({
@@ -186,7 +189,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
       })).filter((r: any) => r.text);
     }
     // Also fetch peer reviews / endorsements
-    const prRes = await fetch(`https://agentfolio.bot/api/profile/${id}/endorsements`, { next: { revalidate: 60 } });
+    const prRes = await fetch(`${API_BASE}/api/profile/${id}/endorsements`, { next: { revalidate: 60 } });
     if (prRes.ok) {
       const prData = await prRes.json();
       const peerReviews = (prData.endorsements || []).map((r: any) => ({
@@ -206,7 +209,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     // Also fetch SATP on-chain reviews (trustless, from Solana)
     const wallet = (agent as any).wallets?.solana || (agent as any).wallet;
     if (wallet) {
-      const satpRes = await fetch(`https://agentfolio.bot/api/satp/reviews/${wallet}`, { next: { revalidate: 30 } });
+      const satpRes = await fetch(`${API_BASE}/api/satp/reviews/${wallet}`, { next: { revalidate: 30 } });
       if (satpRes.ok) {
         const satpData = await satpRes.json();
         const onChainReviews = (satpData.data?.reviews || []).map((r: any) => ({
@@ -238,8 +241,8 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     "@type": "SoftwareApplication",
     "name": agent.name,
     "description": agent.bio || `${agent.name} on AgentFolio — verified AI agent portfolio`,
-    "url": `https://agentfolio.bot/profile/${agent.id}`,
-    "image": agent.avatar || "https://agentfolio.bot/og-image.png",
+    "url": `${SITE_URL}/profile/${agent.id}`,
+    "image": agent.avatar || `${SITE_URL}/og-image.png`,
     "applicationCategory": "AI Agent",
     "operatingSystem": "Blockchain",
     "aggregateRating": {
@@ -252,7 +255,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     "author": {
       "@type": "Organization",
       "name": "AgentFolio",
-      "url": "https://agentfolio.bot",
+      "url": SITE_URL,
     },
   };
   return (
