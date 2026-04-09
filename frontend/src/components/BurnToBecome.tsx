@@ -8,6 +8,7 @@ const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 const API = process.env.NEXT_PUBLIC_API_URL || SITE_URL;
 const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
 const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || (SOLANA_CLUSTER === "devnet" ? "https://api.devnet.solana.com" : SOLANA_CLUSTER === "testnet" ? "https://api.testnet.solana.com" : "https://api.mainnet-beta.solana.com");
+const solanaExplorerUrl = (path: string) => SOLANA_CLUSTER === "mainnet-beta" ? `https://explorer.solana.com/${path}` : `https://explorer.solana.com/${path}?cluster=${SOLANA_CLUSTER}`;
 
 interface NFT {
   mint: string;
@@ -446,7 +447,7 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
 
         {avatar?.burnTxSignature && (
           <a
-            href={`https://solscan.io/tx/${avatar.burnTxSignature}`}
+            href={solanaExplorerUrl(`tx/${avatar.burnTxSignature}`)}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 text-sm hover:underline"
