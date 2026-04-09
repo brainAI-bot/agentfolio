@@ -12,6 +12,9 @@ const fs = require('fs');
 const rateLimit = require('express-rate-limit');
 
 const SITE_URL = process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || 'https://agentfolio.bot';
+const SITE_HOSTNAME = (() => {
+  try { return new URL(SITE_URL).hostname; } catch { return 'agentfolio.bot'; }
+})();
 
 // SATP Reviews integration
 const satpReviews = require('./satp-reviews');
@@ -299,7 +302,7 @@ app.get('/.well-known/did.json', (req, res) => {
     return res.status(500).json({ error: 'DID document unavailable — signing key error' });
   }
 
-  const did = 'did:web:agentfolio.bot';
+  const did = 'did:web:' + SITE_HOSTNAME;
   const didDocument = {
     '@context': [
       'https://www.w3.org/ns/did/v1',
@@ -320,17 +323,17 @@ app.get('/.well-known/did.json', (req, res) => {
       {
         id: `${did}#trust-credential`,
         type: 'AgentFolioTrustCredential',
-        serviceEndpoint: 'https://agentfolio.bot/api/trust-credential',
+        serviceEndpoint: SITE_URL + '/api/trust-credential',
       },
       {
         id: `${did}#satp`,
         type: 'SolanaAttestationProtocol',
-        serviceEndpoint: 'https://agentfolio.bot/api/satp',
+        serviceEndpoint: SITE_URL + '/api/satp',
       },
       {
         id: `${did}#api`,
         type: 'AgentFolioAPI',
-        serviceEndpoint: 'https://agentfolio.bot/api',
+        serviceEndpoint: SITE_URL + '/api',
       },
     ],
   };
