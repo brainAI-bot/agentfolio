@@ -55,6 +55,29 @@ function anchorDisc(name) {
   return crypto.createHash('sha256').update(`global:${name}`).digest().slice(0, 8);
 }
 
+function platformToAttestationType(platform) {
+  const map = {
+    github: 'github_verification',
+    x: 'x_verification',
+    solana: 'solana_wallet_verification',
+    agentmail: 'agentmail_verification',
+    telegram: 'telegram_verification',
+    discord: 'discord_verification',
+    eth: 'eth_wallet_verification',
+    domain: 'domain_verification',
+    website: 'website_verification',
+    ens: 'ens_verification',
+    farcaster: 'farcaster_verification',
+    moltbook: 'moltbook_verification',
+    polymarket: 'polymarket_verification',
+    hyperliquid: 'hyperliquid_verification',
+    mcp: 'mcp_verification',
+    a2a: 'a2a_verification',
+    kalshi: 'kalshi_verification',
+  };
+  return map[platform] || `${platform}_verification`;
+}
+
 function encodeString(s) {
   const buf = Buffer.from(s, 'utf8');
   const len = Buffer.alloc(4);
@@ -67,7 +90,13 @@ function hashAgentId(agentId) {
 }
 
 function getAttestationPDA(agentId, issuer, attestationType) {
-  return getV3AttestationPDA(agentId, new PublicKey(issuer), attestationType, 'mainnet');
+  const issuerPk = issuer instanceof PublicKey ? issuer : new PublicKey(issuer);
+  return PublicKey.findProgramAddressSync([
+    Buffer.from('attestation_v3'),
+    hashAgentId(agentId),
+    issuerPk.toBuffer(),
+    Buffer.from(attestationType, "utf8"),
+  ], ATTESTATIONS_PROGRAM);
 }
 
 function getGenesisPDA(agentId) {
@@ -104,22 +133,23 @@ async function postVerificationAttestation(agentId, platform, proofObj) {
 
   const conn = getConnection();
   const proofData = JSON.stringify(proofObj).slice(0, 512);
-  const attestationType = `verification_${platform}`;
+  const attestationType = platformToAttestationType(platform);
   const [attPDA] = getAttestationPDA(agentId, keypair.publicKey, attestationType);
   const [genesisPDA] = getGenesisPDA(agentId);
+  const genesisAcct = await conn.getAccountInfo(genesisPDA);
 
   // Check if attestation already exists
   try {
     const existing = await conn.getAccountInfo(attPDA);
-    if (existing && existing.data.length > 0) {
-      console.log(`[SATP Bridge] Attestation already exists for ${agentId}/${platform} — skipping create, triggering recompute`);
-      // Just trigger recompute (attestation may not be verified yet)
-      return await triggerRecomputeOnly(agentId, keypair, conn);
+    if (existing) {
+      console.log(`[SATP Bridge] Attestation already exists for ${agentId}/${platform} — verifying existing account and recomputing`);
+      return await verifyExistingAttestation(agentId, platform, attestationType, attPDA, genesisPDA, !!genesisAcct, keypair, conn);
     }
-  } catch (_) {}
+  } catch (e) {
+    console.warn('[SATP Bridge] Failed to check existing attestation:', e.message);
+  }
 
   // Check genesis exists (needed for recompute)
-  const genesisAcct = await conn.getAccountInfo(genesisPDA);
   if (!genesisAcct) {
     console.warn(`[SATP Bridge] No genesis record for ${agentId} — cannot recompute score`);
     // Still create the attestation (score will be computed later when genesis exists)
@@ -191,8 +221,9 @@ async function postVerificationAttestation(agentId, platform, proofObj) {
     const logs = Array.isArray(e?.logs) ? e.logs : [];
     logBridgeError(`TX failed for ${agentId}/${platform}`, e);
     const lower = ((e?.message || '') + ' ' + logs.join(' ')).toLowerCase();
-    if (lower.includes('already in use')) {
-      return await triggerRecomputeOnly(agentId, keypair, conn);
+    if (lower.includes('already in use') || lower.includes('0x1')) {
+      console.warn('[SATP Bridge] Attestation account already existed after race, verifying existing account and recomputing');
+      return await verifyExistingAttestation(agentId, platform, attestationType, attPDA, genesisPDA, !!genesisAcct, keypair, conn);
     }
     throw e;
   }
@@ -265,10 +296,88 @@ async function createAttestationOnly(agentId, attestationType, proofData, attPDA
     const logs = Array.isArray(e?.logs) ? e.logs : [];
     logBridgeError(`createAttestationOnly failed for ${agentId}/${attestationType}`, e);
     const lower = ((e?.message || '') + ' ' + logs.join(' ')).toLowerCase();
-    if (lower.includes('already in use')) {
-      console.warn(`[SATP Bridge] Attestation already exists for ${agentId}/${attestationType} while in create-only mode`);
-      return { txSignature: null, attestationPDA: attPDA.toBase58(), alreadyExisted: true };
+    if (lower.includes('already in use') || lower.includes('0x1')) {
+      console.warn(`[SATP Bridge] Attestation already exists for ${agentId}/${attestationType} while in create-only mode, verifying existing account`);
+      const [genesisPDA] = getGenesisPDA(agentId);
+      const genesisAcct = await conn.getAccountInfo(genesisPDA);
+      return await verifyExistingAttestation(agentId, attestationType, attestationType, attPDA, genesisPDA, !!genesisAcct, keypair, conn);
     }
+    return null;
+  }
+}
+
+/**
+ * Verify an existing attestation account, then recompute score if genesis exists.
+ */
+async function verifyExistingAttestation(agentId, platform, attestationType, attPDA, genesisPDA, hasGenesis, keypair, conn) {
+  let alreadyVerified = false;
+  try {
+    const existing = await conn.getAccountInfo(attPDA);
+    if (!existing) return null;
+    try {
+      const { deserializeAttestation } = require('@brainai/satp-v3');
+      const parsed = deserializeAttestation(existing.data);
+      alreadyVerified = !!parsed?.verified;
+      console.log(`[SATP Bridge] Existing attestation state for ${agentId}/${platform}: verified=${alreadyVerified}`);
+    } catch (e) {
+      console.warn('[SATP Bridge] Could not deserialize existing attestation:', e.message);
+    }
+  } catch (e) {
+    console.warn('[SATP Bridge] Failed to reload existing attestation:', e.message);
+    return null;
+  }
+
+  const tx = new Transaction();
+  tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 500000 }));
+  tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1000 }));
+
+  if (!alreadyVerified) {
+    tx.add(new TransactionInstruction({
+      programId: ATTESTATIONS_PROGRAM,
+      keys: [
+        { pubkey: attPDA, isSigner: false, isWritable: true },
+        { pubkey: keypair.publicKey, isSigner: true, isWritable: true },
+      ],
+      data: anchorDiscriminator('verify_attestation'),
+    }));
+  }
+
+  if (hasGenesis) {
+    tx.add(new TransactionInstruction({
+      programId: ATTESTATIONS_PROGRAM,
+      keys: [
+        { pubkey: genesisPDA, isSigner: false, isWritable: true },
+        { pubkey: attPDA, isSigner: false, isWritable: false },
+        { pubkey: keypair.publicKey, isSigner: true, isWritable: false },
+      ],
+      data: anchorDiscriminator('recompute_score'),
+    }));
+  }
+
+  if (tx.instructions.length <= 2) {
+    return {
+      txSignature: null,
+      attestationPDA: attPDA.toBase58(),
+      existed: true,
+      alreadyVerified,
+      recomputeSkipped: !hasGenesis,
+    };
+  }
+
+  try {
+    const sig = await conn.sendTransaction(tx, [keypair], { skipPreflight: false });
+    await conn.confirmTransaction(sig, 'confirmed');
+    console.log(`[SATP Bridge] Existing attestation fixed for ${agentId}/${platform}: ${sig}`);
+    return {
+      txSignature: sig,
+      attestationPDA: attPDA.toBase58(),
+      existed: true,
+      alreadyVerified,
+      verifiedNow: !alreadyVerified,
+      recomputed: !!hasGenesis,
+    };
+  } catch (e) {
+    logBridgeError('Existing attestation verify/recompute failed', e);
     return null;
   }
 }
