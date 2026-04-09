@@ -29,6 +29,7 @@ const { registerReviewsV2Routes } = require("./api/reviews-v2");
 
 // Profile Store (SQLite-backed persistent profiles, endorsements, reviews)
 const profileStore = require('./profile-store');
+const { handleOnChainAvatarRequest } = require('./lib/onchain-avatar');
 
 // Chain Cache — on-chain attestation data (source of truth for verifications)
 let chainCache;
@@ -171,6 +172,7 @@ try {
 // App configuration
 const app = express();
 app.set("trust proxy", 1);
+app.get('/api/avatar/onchain', (req, res) => handleOnChainAvatarRequest(req, res, new URL(req.originalUrl, `http://${req.get('host')}`)));
 const PORT = process.env.PORT || 3333;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
