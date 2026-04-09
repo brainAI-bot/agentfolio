@@ -406,9 +406,9 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     const v3Score = await getV3Score(profile.id).catch(() => null);
     const displayScore = v3Score
       ? (v3Score.reputationScore > 10000 ? Math.round(v3Score.reputationScore / 10000) : (v3Score.reputationScore || 0))
-      : computed.score;
-    const displayLevel = v3Score && v3Score.verificationLevel != null ? v3Score.verificationLevel : computed.level;
-    const displayLabel = (v3Score && v3Score.verificationLabel) || computed.levelName;
+      : 0;
+    const displayLevel = v3Score && v3Score.verificationLevel != null ? v3Score.verificationLevel : 0;
+    const displayLabel = (v3Score && v3Score.verificationLabel) || 'Unverified';
 
     res.json({
       agentId: profile.id,
@@ -416,7 +416,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       did: 'did:agentfolio:' + profile.id,
       trustScore: displayScore,
       tier: displayLabel,
-      scoreVersion: v3Score ? 'v3' : 'attestations',
+      scoreVersion: v3Score ? 'v3' : 'none',
       verifications: dedupedVerifications.map(({ platform, verified, txSignature, solscanUrl, timestamp }) => ({
         platform,
         verified,
@@ -434,7 +434,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
         verificationLabel: displayLabel,
         isBorn: !!(v3Score && v3Score.isBorn),
       },
-      breakdown: computed.breakdown,
+      breakdown: v3Score ? computed.breakdown : {},
       links: {
         profile: 'https://agentfolio.bot/profile/' + profile.id,
         trustCredential: 'https://agentfolio.bot/api/trust-credential/' + profile.id,
@@ -484,8 +484,8 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
     const v3Score = await getV3Score(profileId).catch(() => null);
     const reputationScore = v3Score
       ? (v3Score.reputationScore > 10000 ? Math.round(v3Score.reputationScore / 10000) : (v3Score.reputationScore || 0))
-      : computed.score;
-    const verificationLevel = v3Score && v3Score.verificationLevel != null ? v3Score.verificationLevel : computed.level;
+      : 0;
+    const verificationLevel = v3Score && v3Score.verificationLevel != null ? v3Score.verificationLevel : 0;
     const labels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
 
     res.json({
@@ -497,8 +497,8 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
         verificationLabel: (v3Score && v3Score.verificationLabel) || labels[verificationLevel] || 'Unknown',
         isBorn: !!(v3Score && v3Score.isBorn),
         faceImage: (v3Score && v3Score.faceImage) || null,
-        breakdown: computed.breakdown,
-        source: v3Score ? 'v3' : 'attestations',
+        breakdown: v3Score ? computed.breakdown : {},
+        source: v3Score ? 'v3' : 'none',
       }
     });
   } catch (e) {
