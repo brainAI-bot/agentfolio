@@ -30,8 +30,8 @@ function normalizeScore(value: any) {
   return value > 10000 ? Math.round(value / 10000) : value;
 }
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
-const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || SITE_URL;
+const SITE_URL = process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || "";
+const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 const SOLANA_EXPLORER_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_EXPLORER_CLUSTER || process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
 
 function solanaExplorerUrl(path: string) {
@@ -47,16 +47,16 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
   const name = agent.name || id;
   const bio = agent.bio ? agent.bio.substring(0, 150) : `${name} on AgentFolio — verified AI agent portfolio`;
-  const avatar = agent.avatar || `${SITE_URL}/og-image.png?v=4`;
+  const avatar = agent.avatar || (SITE_URL ? `${SITE_URL}/og-image.png?v=4` : "/og-image.png?v=4");
 
   return {
     title: `${name} — AgentFolio`,
-    alternates: { canonical: `${SITE_URL}/profile/${id}` },
+    alternates: SITE_URL ? { canonical: `${SITE_URL}/profile/${id}` } : undefined,
     description: bio,
     openGraph: {
       title: `${name} — AgentFolio`,
       description: bio,
-      url: `${SITE_URL}/profile/${id}`,
+      url: SITE_URL ? `${SITE_URL}/profile/${id}` : undefined,
       siteName: "AgentFolio",
       images: [{ url: avatar, width: 200, height: 200, alt: name }],
       type: "profile",
