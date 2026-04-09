@@ -62,13 +62,16 @@ try {
 // x402 Payment Layer
 const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
 const { HTTPFacilitatorClient } = require('@x402/core/server');
-const { ExactEvmScheme } = require('@x402/evm/exact/server');
 
-const X402_RECEIVE_ADDRESS = process.env.X402_RECEIVE_ADDRESS || '0xEE13776767542F3a8d67d9fAd723fc43213052Bd';
-const X402_FACILITATOR = process.env.X402_FACILITATOR || 'https://x402.org/facilitator';
-// Base Sepolia (testnet) for now — public facilitator only supports testnet
-// Switch to 'eip155:8453' (Base Mainnet) when self-hosting facilitator or using CDP mainnet
-const X402_NETWORK = process.env.X402_NETWORK || 'eip155:84532'; // Base Sepolia
+const X402_RECEIVE_ADDRESS = process.env.X402_RECEIVE_ADDRESS || '';
+const X402_FACILITATOR = process.env.X402_FACILITATOR || '';
+const X402_NETWORK = process.env.X402_NETWORK || '';
+const X402_ENABLED = process.env.X402_ENABLED === 'true'
+  && process.env.X402_SCHEME === 'svm'
+  && X402_NETWORK.toLowerCase().startsWith('solana')
+  && !!X402_RECEIVE_ADDRESS
+  && !!X402_FACILITATOR;
+const X402_DISABLE_REASON = X402_ENABLED ? null : 'x402 disabled until Solana SVM config is explicitly enabled';
 
 // Discord verification (HARDENED VERSION - FIXED!)
 let discordVerify;
@@ -2063,10 +2066,12 @@ process.on('SIGINT', () => {
 // x402 Paid API Endpoints (USDC on Base)
 // ============================================================
 
-// Initialize x402 facilitator and resource server
-const x402Facilitator = new HTTPFacilitatorClient({ url: X402_FACILITATOR });
-const x402Server = new x402ResourceServer(x402Facilitator);
-x402Server.register('eip155:*', new ExactEvmScheme());
+// Initialize x402 facilitator/resource server only when Solana SVM config is explicitly enabled.
+let x402Server = null;
+if (X402_ENABLED) {
+  const x402Facilitator = new HTTPFacilitatorClient({ url: X402_FACILITATOR });
+  x402Server = new x402ResourceServer(x402Facilitator);
+}
 
 // Free: SATP-integrated score (reads on-chain + off-chain)
 app.get('/api/satp/score/:id', async (req, res) => {
@@ -2111,33 +2116,35 @@ app.get('/api/satp/score/:id', async (req, res) => {
 
 // x402 payment middleware — protects paid routes
 // NOTE: x402 middleware doesn't support Express :param routes, so paid endpoints use query params
-app.use(
-  paymentMiddleware(
-    {
-      'GET /api/score': {
-        accepts: [{
-          scheme: 'exact',
-          price: '$0.01',
-          network: X402_NETWORK,
-          payTo: X402_RECEIVE_ADDRESS,
-        }],
-        description: 'Agent reputation score lookup (Level + breakdown). Pass ?id=<profileId>',
-        mimeType: 'application/json',
+if (X402_ENABLED) {
+  app.use(
+    paymentMiddleware(
+      {
+        'GET /api/score': {
+          accepts: [{
+            scheme: 'exact',
+            price: '$0.01',
+            network: X402_NETWORK,
+            payTo: X402_RECEIVE_ADDRESS,
+          }],
+          description: 'Agent reputation score lookup (Level + breakdown). Pass ?id=<profileId>',
+          mimeType: 'application/json',
+        },
+        'GET /api/leaderboard/scores': {
+          accepts: [{
+            scheme: 'exact',
+            price: '$0.05',
+            network: X402_NETWORK,
+            payTo: X402_RECEIVE_ADDRESS,
+          }],
+          description: 'Full agent reputation leaderboard with scores',
+          mimeType: 'application/json',
+        },
       },
-      'GET /api/leaderboard/scores': {
-        accepts: [{
-          scheme: 'exact',
-          price: '$0.05',
-          network: X402_NETWORK,
-          payTo: X402_RECEIVE_ADDRESS,
-        }],
-        description: 'Full agent reputation leaderboard with scores',
-        mimeType: 'application/json',
-      },
-    },
-    x402Server,
-  ),
-);
+      x402Server,
+    ),
+  );
+}
 
 // Paid: Individual agent score (x402-protected)
 // Usage: GET /api/score?id=<profileId>&wallet=<optional>
@@ -2276,9 +2283,11 @@ app.get('/api/leaderboard/scores', async (req, res) => {
 app.get('/api/x402/pricing', (req, res) => {
   res.json({
     protocol: 'x402',
-    network: X402_NETWORK,
+    enabled: X402_ENABLED,
+    network: X402_NETWORK || null,
     currency: 'USDC',
-    receivingAddress: X402_RECEIVE_ADDRESS,
+    receivingAddress: X402_RECEIVE_ADDRESS || null,
+    reason: X402_DISABLE_REASON,
     endpoints: {
       free: [
         { path: '/api/health', method: 'GET', price: 'free' },
@@ -2286,22 +2295,31 @@ app.get('/api/x402/pricing', (req, res) => {
         { path: '/api/profile/:id', method: 'GET', price: 'free' },
         { path: '/api/x402/pricing', method: 'GET', price: 'free' },
       ],
-      paid: [
+      paid: X402_ENABLED ? [
         { path: '/api/score?id=<profileId>', method: 'GET', price: '$0.01', description: 'Agent reputation score' },
         { path: '/api/leaderboard/scores', method: 'GET', price: '$0.05', description: 'Full scored leaderboard' },
-      ],
+      ] : [],
     },
-    facilitator: X402_FACILITATOR,
+    facilitator: X402_FACILITATOR || null,
     docs: 'https://x402.org',
   });
 });
 
-console.log(`[${new Date().toISOString()}] info: x402 payment layer initialized`, {
-  service: 'agentfolio',
-  network: X402_NETWORK,
-  receivingAddress: X402_RECEIVE_ADDRESS,
-  paidEndpoints: ['GET /api/score?id=<profileId> ($0.01)', 'GET /api/leaderboard/scores ($0.05)'],
-});
+if (X402_ENABLED) {
+  console.log(`[${new Date().toISOString()}] info: x402 payment layer initialized`, {
+    service: 'agentfolio',
+    network: X402_NETWORK,
+    receivingAddress: X402_RECEIVE_ADDRESS,
+    paidEndpoints: ['GET /api/score?id=<profileId> ($0.01)', 'GET /api/leaderboard/scores ($0.05)'],
+  });
+} else {
+  console.warn(`[${new Date().toISOString()}] warn: x402 payment layer disabled`, {
+    service: 'agentfolio',
+    reason: X402_DISABLE_REASON,
+    network: X402_NETWORK || null,
+    receivingAddress: X402_RECEIVE_ADDRESS || null,
+  });
+}
 
   // === P2: Admin Dashboard ===
   const db = profileStore.getDb();
