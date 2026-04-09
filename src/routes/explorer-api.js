@@ -19,6 +19,8 @@
 const express = require('express');
 const router = express.Router();
 
+const SITE_URL = process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || 'https://agentfolio.bot';
+
 // A1: Helper to compute score for any profile
 function getComputedScore(profileId) {
   try {
@@ -284,7 +286,7 @@ router.get('/leaderboard', async (req, res) => {
         nftImage: a.faceImage || null,
         soulbound: a.soulbound || false,
         isBorn: a.isBorn,
-        profileUrl: `https://agentfolio.bot/profile/${profileId}`,
+        profileUrl: `${SITE_URL}/profile/${profileId}`,
       };
     });
     
@@ -346,7 +348,7 @@ router.get('/search', async (req, res) => {
         platforms,
         nftImage: a.faceImage || null,
         isBorn: a.isBorn,
-        profileUrl: `https://agentfolio.bot/profile/${profileId}`,
+        profileUrl: `${SITE_URL}/profile/${profileId}`,
       };
     });
     
