@@ -49,10 +49,10 @@ export default async function DocsPage() {
     },
     {
       method: "GET",
-      path: "/api/wallet/onchain-status/:wallet",
-      desc: "Check SATP on-chain identity for a wallet",
+      path: "/api/satp/identity/:wallet",
+      desc: "Check SATP identity status for a wallet",
       body: null,
-      returns: "{ registered, identity, reputation, pdas }",
+      returns: "{ wallet, profileId, registered, registeredOnChain, verificationLevel, tier }",
     },
     {
       method: "POST",
@@ -63,10 +63,17 @@ export default async function DocsPage() {
     },
     {
       method: "GET",
-      path: "/api/profile/:id/onchain-status",
-      desc: "Get SATP on-chain verification status for a profile",
+      path: "/api/profile/:id/genesis",
+      desc: "Get normalized profile-facing SATP genesis / reputation data",
       body: null,
-      returns: "{ verified, did, identity, reputation }",
+      returns: "{ genesis: { reputationScore, verificationLevel, verificationLabel, source } }",
+    },
+    {
+      method: "GET",
+      path: "/api/v3/reputation/:agentId",
+      desc: "Get normalized V3 reputation data for an agent",
+      body: null,
+      returns: "{ agentId, reputationScore, verificationLevel, verificationLabel, source }",
     },
     {
       method: "GET",
