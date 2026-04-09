@@ -1284,17 +1284,8 @@ function registerRoutes(app) {
 
     const enriched = enrichProfile(safe);
 
-    // Clean start: single-profile score display is V3 genesis only, otherwise 0.
+    // Single-profile display should preserve attestation-derived score and use Genesis only as metadata/fallback.
     if (enriched) {
-      enriched.trust_score = { overall_score: 0, level: 'Unverified', score_breakdown: {}, source: 'onchain-only' };
-      enriched.score = 0;
-      enriched.trustScore = 0;
-      enriched.reputation_score = 0;
-      enriched.level = 0;
-      enriched.tier = 'Unverified';
-      enriched.levelName = 'Unverified';
-      enriched.verificationLevel = 0;
-      enriched.verificationLevelName = 'Unverified';
       try {
         const genesisUrl = "http://localhost:" + (process.env.PORT || 3000) + "/api/profile/" + encodeURIComponent(row.id) + "/genesis";
         const genesisResp = await fetch(genesisUrl);
@@ -1307,15 +1298,17 @@ function registerRoutes(app) {
           enriched.isBorn = v3Data.isBorn;
           if (v3Data.faceImage) enriched.faceImage = v3Data.faceImage;
           if (v3Data.authority && !enriched.walletAddress) enriched.walletAddress = v3Data.authority;
-          enriched.trust_score = { overall_score: v3Score, level: v3Data.verificationLabel || 'Unverified', score_breakdown: {}, source: 'v3-genesis' };
-          enriched.score = v3Score;
-          enriched.trustScore = v3Score;
-          enriched.reputation_score = v3Score;
-          enriched.level = v3Data.verificationLevel || 0;
-          enriched.tier = v3Data.verificationLabel || 'Unverified';
-          enriched.levelName = enriched.tier;
-          enriched.verificationLevel = enriched.level;
-          enriched.verificationLevelName = enriched.tier;
+          if (!enriched.score && v3Score > 0) {
+            enriched.trust_score = { overall_score: v3Score, level: v3Data.verificationLabel || 'Unverified', score_breakdown: {}, source: 'v3-genesis-fallback' };
+            enriched.score = v3Score;
+            enriched.trustScore = v3Score;
+            enriched.reputation_score = v3Score;
+            enriched.level = v3Data.verificationLevel || 0;
+            enriched.tier = v3Data.verificationLabel || 'Unverified';
+            enriched.levelName = enriched.tier;
+            enriched.verificationLevel = enriched.level;
+            enriched.verificationLevelName = enriched.tier;
+          }
         } else {
           enriched.onchain = null;
           enriched.isBorn = false;
