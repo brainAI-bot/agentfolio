@@ -1,49 +1,9 @@
 import fs from "fs";
 import path from "path";
-import { Connection, PublicKey } from "@solana/web3.js";
 import type { Agent, Job } from "./types";
-import { getAgentProfilePDA, AGENT_PROFILE_DISCRIMINATOR, SOLANA_RPC } from "./identity-registry";
 import { fetchV3Scores, v3ToComputedScores } from "./v3-scores";
 
 const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
-
-// Cache on-chain lookups to avoid rate limiting during builds
-const _onChainCache = new Map<string, boolean>();
-
-function checkOnChainIdentitySync(walletAddress: string): boolean {
-  // Check cache first
-  if (_onChainCache.has(walletAddress)) return _onChainCache.get(walletAddress)!;
-  // Default to false for sync - actual check happens via preload
-  return false;
-}
-
-// Preload on-chain identities for all profiles with wallets
-let _preloaded = false;
-async function preloadOnChainIdentities(profiles: RawProfile[]) {
-  if (_preloaded) return;
-  _preloaded = true;
-  try {
-    const connection = new Connection(SOLANA_RPC, "confirmed");
-    const walletsToCheck = profiles
-      .filter(p => p.wallets?.solana)
-      .map(p => ({ id: p.id, wallet: p.wallets.solana! }));
-    
-    // Batch check PDAs
-    for (const { id, wallet } of walletsToCheck) {
-      try {
-        const ownerPk = new PublicKey(wallet);
-        const [pda] = getAgentProfilePDA(ownerPk);
-        const info = await connection.getAccountInfo(pda);
-        const exists = !!(info && info.data && info.data.length > 8);
-        _onChainCache.set(wallet, exists);
-      } catch {
-        _onChainCache.set(wallet, false);
-      }
-    }
-  } catch {
-    // RPC failure - gracefully degrade
-  }
-}
 
 const PROFILES_DIR = "/home/ubuntu/agentfolio/data/profiles";
 const JOBS_DIR = "/home/ubuntu/agentfolio/data/marketplace/jobs";
@@ -180,25 +140,22 @@ function mapProfile(p: RawProfile): Agent {
         stars: vd.github.stars || 0,
         verified: !!vd.github.verified,
       } : undefined,
-      solana: (vd.solana?.verified || p.wallets?.solana) ? {
-        address: p.wallets?.solana || vd.solana?.address || "",
+      solana: vd.solana?.verified ? {
+        address: vd.solana?.address || p.wallets?.solana || "",
         txCount: vd.solana?.txCount || 0,
         balance: vd.solana?.balance || "0 SOL",
-        verified: !!vd.solana?.verified,
+        verified: true,
       } : undefined,
-      hyperliquid: (vd.hyperliquid?.verified || p.wallets?.hyperliquid) ? {
-        address: p.wallets?.hyperliquid || vd.hyperliquid?.address || "",
+      hyperliquid: vd.hyperliquid?.verified ? {
+        address: vd.hyperliquid?.address || p.wallets?.hyperliquid || "",
         volume: vd.hyperliquid?.volume || "$0",
-        verified: !!vd.hyperliquid?.verified,
+        verified: true,
       } : undefined,
-      x: (vd.x || vd.twitter) ? {
+      x: (vd.x?.verified || vd.twitter?.verified) ? {
         handle: vd.x?.handle || vd.twitter?.handle || vd.twitter?.address || p.handle || "",
-        verified: !!(vd.x?.verified || vd.twitter?.verified),
-      } : (p.links?.x ? {
-        handle: p.handle || "",
-        verified: false,
-      } : undefined),
-      satp: (vd.satp?.verified || (p.wallets?.solana && checkOnChainIdentitySync(p.wallets.solana))) ? {
+        verified: true,
+      } : undefined,
+      satp: vd.satp?.verified ? {
         did: vd.satp?.did || `did:satp:sol:${p.wallets?.solana || p.id}`,
         identifier: vd.satp?.identifier || vd.satp?.address || p.wallets?.solana || "",
         identityPDA: vd.satp?.proof?.identityPDA || "",
@@ -243,8 +200,6 @@ function loadAllProfiles(): Agent[] {
         rawProfiles.push(JSON.parse(fs.readFileSync(path.join(PROFILES_DIR, file), "utf-8")) as RawProfile);
       } catch { /* skip bad files */ }
     }
-    // Fire-and-forget on-chain preload (will populate cache for next request)
-    preloadOnChainIdentities(rawProfiles).catch(() => {});
     let agents: Agent[] = [];
     for (let i = 0; i < rawProfiles.length; i++) {
       try {
