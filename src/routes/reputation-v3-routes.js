@@ -311,8 +311,6 @@ router.get('/validation/:agentId', requireSDK, async (req, res) => {
       isBorn: normalized.isBorn || false,
       authority: identity.authority,
       network: NETWORK,
-      rawVerificationLevel: identity.verificationLevel || 0,
-      rawLevelLabel: LEVEL_LABELS[identity.verificationLevel] || 'Unknown',
       source: normalized.source || 'v3-onchain',
     });
   } catch (err) {
