@@ -399,12 +399,12 @@ export default function SATPExplorerPage() {
                   <Shield size={48} style={{ color: "var(--border)" }} />
                 </div>
               )}
-              {/* Tier badge */}
+              {/* Verification badge */}
               <div
                 className="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold"
                 style={{ fontFamily: "var(--font-mono)", background: TIER_COLORS[agent.tier] || "#4B5563", color: "#fff" }}
               >
-                {TIER_LABELS[agent.tier] || agent.tier}
+                {agent.verificationBadge || "⚪"} {agent.verificationLevelName || TIER_LABELS[agent.tier] || agent.tier}
               </div>
               {agent.soulbound && (
                 <div
