@@ -100,7 +100,7 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
         if (raw.avatar?.trim()) filled++;
         const skills = Array.isArray(raw.skills) ? raw.skills : [];
         if (skills.length > 0) filled++;
-        const vd2 = raw.verification_data || raw.verificationData || {};
+        const vd2 = raw.verifications || {};
         const links = raw.links || {};
         if (vd2.x?.verified || vd2.twitter?.verified || links.x) filled++;
         if (vd2.github?.verified || links.github) filled++;
