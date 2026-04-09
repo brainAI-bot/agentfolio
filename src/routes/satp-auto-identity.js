@@ -11,8 +11,9 @@
  *   Records the SATP identity creation in the DB
  */
 
-const { Connection, PublicKey, SystemProgram, Transaction, TransactionInstruction, ComputeBudgetProgram } = require('@solana/web3.js');
+const { Connection, PublicKey, SystemProgram, Transaction, TransactionInstruction, ComputeBudgetProgram, Keypair } = require('@solana/web3.js');
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 
 // SATP v2 Identity Registry — MAINNET (kept for backward compat)
@@ -30,6 +31,7 @@ try {
   console.warn('[SATP AutoID] V3 SDK not available:', e.message);
 }
 const NETWORK = process.env.SATP_NETWORK || 'mainnet';
+const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/agentfolio/config/platform-keypair.json';
 const RPC_URL = NETWORK === 'devnet' 
   ? 'https://api.devnet.solana.com' 
   : (process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb');
@@ -113,10 +115,12 @@ async function buildCreateIdentityTx(walletAddress, name, description, category,
       for (const ix of transaction.instructions) {
         tx.add(ix);
       }
-      tx.feePayer = wallet;
+      const platformKeypair = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(PLATFORM_KEYPAIR_PATH, 'utf8'))));
+      tx.feePayer = platformKeypair.publicKey;
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
       tx.recentBlockhash = blockhash;
       tx.lastValidBlockHeight = lastValidBlockHeight;
+      tx.partialSign(platformKeypair);
       
       return {
         transaction: tx.serialize({ requireAllSignatures: false }).toString('base64'),

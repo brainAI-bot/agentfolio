@@ -239,32 +239,7 @@ function registerSimpleRoutes(app, getDb) {
 
       // [CEO Apr 4] Create on-chain genesis record (fire-and-forget)
       if (satpV3SDK && platformKeypair) {
-        (async () => {
-          try {
-            const onchainProfileId = await resolveCanonicalOnchainProfileId(d, id, walletAddress);
-            const existing = await satpV3SDK.getGenesisRecord(onchainProfileId);
-            if (existing && !existing.error) {
-              console.log('[SimpleRegister] Genesis already exists for', onchainProfileId, '(requested profile', id + ')');
-              return;
-            }
-            const { transaction } = await satpV3SDK.buildCreateIdentity(
-              platformKeypair.publicKey, onchainProfileId,
-              { name: name.trim(), description: resolvedBio || '', category: 'agent', capabilities: resolvedSkills.map(s => s.name || s).slice(0, 5) }
-            );
-            transaction.sign(platformKeypair);
-            const sig = await satpV3SDK.connection.sendRawTransaction(transaction.serialize());
-            console.log('[SimpleRegister] Genesis created on-chain for', onchainProfileId, '(requested profile', id + '):', sig);
-            try {
-              const chainCache = require('../lib/chain-cache');
-              await chainCache.forceRefresh();
-              console.log('[SimpleRegister] Chain-cache force refreshed after genesis create for', onchainProfileId);
-            } catch (refreshErr) {
-              console.warn('[SimpleRegister] Chain-cache refresh failed after genesis create for', onchainProfileId, ':', refreshErr.message);
-            }
-          } catch (e) {
-            console.error('[SimpleRegister] Genesis creation failed for', id, ':', e.message);
-          }
-        })();
+        console.log('[SimpleRegister] Skipping server-side genesis creation for', id, 'because identity authority must be the user wallet');
       }
 
       // Chain-first: write on-chain first, cache only after success.
