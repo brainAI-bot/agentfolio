@@ -1070,9 +1070,6 @@ function registerRoutes(app) {
             const normalizedScore = normalized.reputationScore ?? record.reputationScore ?? 0
             record = {
               ...record,
-              rawReputationScore: record.reputationScore,
-              rawVerificationLevel: record.verificationLevel,
-              rawVerificationLabel: record.verificationLabel || null,
               reputationScore: normalizedScore,
               verificationLevel: normalized.verificationLevel ?? record.verificationLevel,
               verificationLabel: normalized.verificationLabel || record.verificationLabel,
@@ -1259,9 +1256,6 @@ function registerRoutes(app) {
       const displayLabel = useComputedLevel ? (computed.levelName || levelLabels[displayLevel] || 'Unverified') : (v.verificationLabel || computed.levelName || levelLabels[displayLevel] || 'Unverified');
       p.v3 = Object.keys(v).length ? {
         ...v,
-        rawReputationScore: v.reputationScore ?? null,
-        rawVerificationLevel: v.verificationLevel ?? null,
-        rawVerificationLabel: v.verificationLabel || null,
         reputationScore: displayScore,
         reputationPct: (displayScore / 10).toFixed(2),
         verificationLevel: displayLevel,

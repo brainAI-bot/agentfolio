@@ -82,9 +82,6 @@ function applyNormalizedTrust(raw, normalized) {
   const normalizedLabel = normalized.verificationLabel || raw.verificationLabel || raw.tierLabel || null;
   return {
     ...raw,
-    rawReputationScore: raw.reputationScore,
-    rawVerificationLevel: raw.verificationLevel,
-    rawVerificationLabel: raw.verificationLabel || raw.tierLabel || null,
     reputationScore: normalizedScore,
     verificationLevel: normalized.verificationLevel ?? raw.verificationLevel,
     verificationLabel: normalizedLabel,
