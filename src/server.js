@@ -403,17 +403,16 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     }
 
     const dedupedVerifications = Array.from(dedupedMap.values());
+    const v3Score = await getV3Score(profile.id).catch(() => null);
+    const hasSatpIdentity = !!(profile.wallet && chainCache.isVerified(profile.wallet)) || !!(v3Score && v3Score.verificationLevel >= 1);
     const computed = computeScore(
       dedupedVerifications.map(v => ({ platform: v.platform, identifier: v.identifier })),
-      { hasSatpIdentity: false, claimed: dedupedVerifications.length > 0 }
+      { hasSatpIdentity, claimed: true }
     );
 
-    const v3Score = await getV3Score(profile.id).catch(() => null);
-    const displayScore = (v3Score && v3Score.reputationScore > 0)
-      ? (v3Score.reputationScore > 10000 ? Math.round(v3Score.reputationScore / 10000) : v3Score.reputationScore)
-      : computed.score;
-    const displayLevel = (v3Score && v3Score.verificationLevel != null) ? v3Score.verificationLevel : computed.level;
-    const displayLabel = (v3Score && v3Score.verificationLabel) || computed.levelName;
+    const displayScore = computed.score;
+    const displayLevel = computed.level;
+    const displayLabel = computed.levelName;
 
     res.json({
       agentId: profile.id,
@@ -485,25 +484,22 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
       if (platform === 'x') seen.add('twitter');
     }
 
-    const computed = computeScore(chainVerifs, { hasSatpIdentity: false, claimed: chainVerifs.length > 0 });
     const v3Score = await getV3Score(profileId).catch(() => null);
-    const reputationScore = (v3Score && v3Score.reputationScore > 0)
-      ? (v3Score.reputationScore > 10000 ? Math.round(v3Score.reputationScore / 10000) : v3Score.reputationScore)
-      : computed.score;
-    const verificationLevel = (v3Score && v3Score.verificationLevel != null) ? v3Score.verificationLevel : computed.level;
+    const hasSatpIdentity = !!row.wallet && (!!chainCache.isVerified(row.wallet) || !!(v3Score && v3Score.verificationLevel >= 1));
+    const computed = computeScore(chainVerifs, { hasSatpIdentity, claimed: !!row.claimed });
     const labels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
 
     res.json({
       ok: true,
       data: {
         profileId,
-        reputationScore,
-        verificationLevel,
-        verificationLabel: (v3Score && v3Score.verificationLabel) || labels[verificationLevel] || 'Unknown',
+        reputationScore: computed.score,
+        verificationLevel: computed.level,
+        verificationLabel: computed.levelName || labels[computed.level] || 'Unknown',
         isBorn: !!(v3Score && v3Score.isBorn),
         faceImage: (v3Score && v3Score.faceImage) || null,
         breakdown: computed.breakdown,
-        source: (v3Score && v3Score.reputationScore > 0) ? 'v3' : 'attestations',
+        source: 'attestation-compute',
       }
     });
   } catch (e) {
