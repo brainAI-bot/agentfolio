@@ -1221,11 +1221,34 @@ function registerRoutes(app) {
     for (const p of profiles) {
       const v = v3ScoresById.get(p.id) || p.v3 || {};
       const v3Score = v.reputationScore > 10000 ? Math.round(v.reputationScore / 10000) : (v.reputationScore || 0);
+      let computedScore = 0;
+      try {
+        const chainCache = require('./lib/chain-cache');
+        const { computeScore } = require('./lib/compute-score');
+        const identityVerified = !!p.wallet && (chainCache.isVerified(p.wallet) || !!(v && v.verificationLevel >= 1));
+        const attRows = (chainCache.getVerifications(p.id, p.created_at) || []).filter(att => att.platform && att.platform !== 'review');
+        const chainVerifs = [];
+        if (identityVerified && p.wallet) {
+          chainVerifs.push({ platform: 'satp', identifier: p.wallet });
+          chainVerifs.push({ platform: 'solana', identifier: p.wallet });
+        }
+        for (const att of attRows) {
+          const platform = att.platform === 'twitter' ? 'x' : att.platform;
+          if (!platform) continue;
+          let proofData = {};
+          try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
+          const identifier = att.identifier || proofData.identifier || proofData.address || proofData.wallet || null;
+          if (!identifier) continue;
+          chainVerifs.push({ platform, identifier });
+        }
+        computedScore = computeScore(chainVerifs, { hasSatpIdentity: identityVerified, claimed: !!p.claimed }).score || 0;
+      } catch (_) {}
+      const displayScore = Math.max(v3Score, computedScore);
       p.v3 = Object.keys(v).length ? v : p.v3;
-      p.trust_score = v3Score;
-      p.trustScore = v3Score;
-      p.score = v3Score;
-      p.reputation_score = v3Score;
+      p.trust_score = displayScore;
+      p.trustScore = displayScore;
+      p.score = displayScore;
+      p.reputation_score = displayScore;
       p.level = v.verificationLevel || 0;
       p.verificationLevel = p.level;
       p.tier = v.verificationLabel || levelLabels[p.level] || 'Unverified';
