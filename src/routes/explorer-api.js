@@ -51,9 +51,28 @@ function getComputedScore(profileId) {
  *   ?limit=50           — Max results (default: all)
  */
 router.get('/agents', async (req, res) => {
+  let db = null;
   try {
     const v3Explorer = require('../v3-explorer');
     const chainCache = require('../lib/chain-cache');
+    const Database = require('better-sqlite3');
+    const path = require('path');
+    db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+    const normalizePlatform = (value) => {
+      const platform = String(value || '').toLowerCase();
+      if (!platform) return null;
+      if (platform === 'twitter') return 'x';
+      if (platform === 'satp_v3') return 'satp';
+      if (platform.startsWith('verification_')) return normalizePlatform(platform.slice('verification_'.length));
+      if (platform.endsWith('_verification')) return normalizePlatform(platform.slice(0, -'_verification'.length));
+      if (platform === 'solana_wallet') return 'solana';
+      return platform;
+    };
+    const parseJson = (val, fallback) => {
+      if (val === null || val === undefined || val === '') return fallback;
+      if (typeof val === 'object') return val;
+      try { return JSON.parse(val); } catch { return fallback; }
+    };
     
     let agents = await v3Explorer.fetchAllV3Agents();
     
@@ -87,22 +106,67 @@ router.get('/agents', async (req, res) => {
     // Enrich with chain-cache attestation data
     const enriched = agents.map(a => {
       const profileId = 'agent_' + a.agentName.toLowerCase();
-      const attestations = chainCache.getVerifications(profileId);
-      const platformSet = new Set(attestations.map(att => att.platform).filter(Boolean));
+      const profileRow = db.prepare('SELECT created_at, nft_avatar, verification_data FROM profiles WHERE id = ?').get(profileId) || {};
+      const verificationData = parseJson(profileRow.verification_data, {});
+      const attestations = chainCache.getVerifications(profileId, profileRow.created_at) || [];
+      const txHints = new Map();
+      const addTxHint = (platform, txSignature, timestamp = null) => {
+        const normalized = normalizePlatform(platform);
+        if (!normalized || !txSignature) return;
+        if (!txHints.has(normalized)) {
+          txHints.set(normalized, {
+            platform: normalized,
+            txSignature,
+            timestamp,
+            solscanUrl: `https://solana.fm/tx/${txSignature}`,
+          });
+        }
+      };
+
+      for (const row of db.prepare('SELECT platform, tx_signature, created_at FROM attestations WHERE profile_id = ? AND tx_signature IS NOT NULL ORDER BY created_at DESC').all(profileId)) {
+        addTxHint(row.platform, row.tx_signature, row.created_at || null);
+      }
+      for (const row of db.prepare('SELECT platform, proof, verified_at FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(profileId)) {
+        let proof = {};
+        try { proof = typeof row.proof === 'string' ? JSON.parse(row.proof) : (row.proof || {}); } catch {}
+        addTxHint(row.platform, proof.txSignature || proof.signature || proof.transactionSignature || null, row.verified_at || null);
+      }
+      for (const [platform, value] of Object.entries(verificationData || {})) {
+        const txSignature = value && typeof value === 'object' ? (value.txSignature || value.signature || value.transactionSignature || null) : null;
+        const timestamp = value && typeof value === 'object' ? (value.verifiedAt || value.timestamp || null) : null;
+        addTxHint(platform, txSignature, timestamp);
+      }
+
+      const platformSet = new Set([
+        ...attestations.map(att => normalizePlatform(att.platform)).filter(Boolean),
+        ...Array.from(txHints.keys()),
+      ]);
       
-      // Deduplicated attestation memos
+      // Deduplicated attestation memos with DB tx backfill
       const attMemos = [];
       const seen = new Set();
       for (const att of attestations) {
-        if (att.platform && !seen.has(att.platform)) {
-          seen.add(att.platform);
-          attMemos.push({
-            platform: att.platform,
-            txSignature: att.txSignature || null,
-            timestamp: att.timestamp || null,
-            solscanUrl: att.txSignature ? `https://solscan.io/tx/${att.txSignature}` : null,
-          });
-        }
+        const platform = normalizePlatform(att.platform);
+        if (!platform || seen.has(platform)) continue;
+        seen.add(platform);
+        const hinted = txHints.get(platform) || null;
+        const txSignature = att.txSignature || hinted?.txSignature || null;
+        attMemos.push({
+          platform,
+          txSignature,
+          timestamp: att.timestamp || hinted?.timestamp || null,
+          solscanUrl: txSignature ? `https://solana.fm/tx/${txSignature}` : (hinted?.solscanUrl || null),
+        });
+      }
+      for (const [platform, hinted] of txHints.entries()) {
+        if (seen.has(platform)) continue;
+        seen.add(platform);
+        attMemos.push({
+          platform,
+          txSignature: hinted.txSignature,
+          timestamp: hinted.timestamp || null,
+          solscanUrl: hinted.solscanUrl,
+        });
       }
       
       // Check DB for permanent face (overrides on-chain isBorn)
@@ -110,13 +174,8 @@ router.get('/agents', async (req, res) => {
       let dbFaceImage = a.faceImage || null;
       let dbSoulboundMint = a.faceMint || null;
       try {
-        const Database = require('better-sqlite3');
-        const path = require('path');
-        const db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
-        const row = db.prepare('SELECT nft_avatar FROM profiles WHERE id = ?').get(profileId);
-        db.close();
-        if (row && row.nft_avatar) {
-          const nftData = JSON.parse(row.nft_avatar);
+        if (profileRow && profileRow.nft_avatar) {
+          const nftData = JSON.parse(profileRow.nft_avatar);
           if (nftData.permanent) {
             dbBorn = true;
             dbFaceImage = nftData.image || dbFaceImage;
@@ -177,6 +236,10 @@ router.get('/agents', async (req, res) => {
   } catch (err) {
     console.error('[Explorer API] /agents error:', err.message);
     res.status(500).json({ error: 'Failed to fetch agents', details: err.message });
+  } finally {
+    if (db) {
+      try { db.close(); } catch (_) {}
+    }
   }
 });
 
