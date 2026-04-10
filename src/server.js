@@ -701,7 +701,7 @@ app.get('/api/analytics/views', (_req, res) => {
   try {
     const db = profileStore.getDb();
     const leaderboard = db.prepare(`
-      SELECT id, name, handle, avatar_url as avatar, view_count, total_earnings, verification_level
+      SELECT id, name, handle, avatar, view_count, total_earnings, verification_level
       FROM profiles
       ORDER BY view_count DESC, total_earnings DESC
       LIMIT 50
