@@ -156,8 +156,29 @@ async function getSatpAgents() {
       const profile = profiles.find((p) => p.id === agent.profileId);
       if (!profile) return agent;
 
-      const verifs = _db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profile.id);
-      const computed = computeScore(verifs, { hasSatpIdentity: true, claimed: !!profile.claimed });
+      const verifRows = _db.prepare('SELECT platform, identifier, proof FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(profile.id);
+      const verifs = [];
+      const seen = new Set();
+      const addVerif = (platform, identifier) => {
+        if (!platform || platform === 'review' || !identifier || seen.has(platform)) return;
+        verifs.push({ platform, identifier });
+        seen.add(platform);
+        if (platform === 'x') seen.add('twitter');
+        if (platform === 'twitter') seen.add('x');
+      };
+      for (const ver of verifRows) {
+        const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
+        if (platform === 'solana') {
+          let proof = {};
+          try { proof = typeof ver.proof === 'string' ? JSON.parse(ver.proof) : (ver.proof || {}); } catch {}
+          const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || null;
+          if (!txSignature) continue;
+        }
+        addVerif(platform, ver.identifier || null);
+      }
+      const hasSatpIdentity = !!profile.wallet && !!verifRows.find(v => v.platform === 'satp');
+      if (hasSatpIdentity && profile.wallet) addVerif('satp', profile.wallet);
+      const computed = computeScore(verifs, { hasSatpIdentity, claimed: !!profile.claimed });
 
       let explorerData = null;
       let byAgentData = null;

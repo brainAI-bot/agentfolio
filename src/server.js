@@ -455,6 +455,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       const hinted = txHints[platform] || null;
       const identifier = att.identifier || proofData.identifier || proofData.address || proofData.wallet || proofData.identityPDA || (platform === 'satp' ? (profile.wallet || profile.wallets?.solana || null) : null);
       const txSignature = att.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || hinted?.txSignature || null;
+      if (platform === 'solana' && !txSignature) continue;
       addVerification(platform, identifier, {
         txSignature,
         solscanUrl: hinted?.solscanUrl || att.solscanUrl || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null),
@@ -462,7 +463,6 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       });
     }
 
-    const dedupedVerifications = Array.from(dedupedMap.values());
     const v3Score = await getV3Score(profile.id).catch(() => null);
     const hasSatpIdentity = !!(profile.wallet && chainCache.isVerified(profile.wallet)) || !!(v3Score && v3Score.verificationLevel >= 1);
     if (hasSatpIdentity && profile.wallet && !dedupedMap.has('satp')) {
@@ -473,6 +473,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
         timestamp: null,
       });
     }
+    const dedupedVerifications = Array.from(dedupedMap.values());
     const computed = computeScore(
       dedupedVerifications.map(v => ({ platform: v.platform, identifier: v.identifier })),
       { hasSatpIdentity, claimed: true }
