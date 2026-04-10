@@ -322,17 +322,57 @@ function registerSATPRoutes(app) {
       if (!identity) {
         return res.status(404).json({ error: 'Agent not registered on-chain', wallet });
       }
+
+      let normalizedTrust = null;
+      let profileId = null;
+      try {
+        const Database = require('better-sqlite3');
+        const path = require('path');
+        const dbPath = path.join(__dirname, '..', '..', 'data', 'agentfolio.db');
+        const db = new Database(dbPath, { readonly: true });
+        try {
+          const profile = db.prepare("SELECT id FROM profiles WHERE wallet = ? OR json_extract(wallets, '$.solana') = ? LIMIT 1").get(wallet, wallet);
+          profileId = profile?.id || null;
+        } finally {
+          db.close();
+        }
+        if (profileId) {
+          const trustRes = await globalThis.fetch(`http://127.0.0.1:3333/api/profile/${encodeURIComponent(profileId)}/trust-score`);
+          if (trustRes.ok) {
+            const trustJson = await trustRes.json();
+            normalizedTrust = trustJson?.data || null;
+          }
+        }
+      } catch (_) {}
+
+      const reputationScore = normalizedTrust?.reputationScore ?? identity.reputationScore;
+      const verificationLevel = normalizedTrust?.verificationLevel ?? identity.verificationLevel;
+      const verificationLabel = normalizedTrust?.verificationLabel || satpIdentity.levelToLabel(verificationLevel);
       
       res.json({
         ok: true,
         data: {
-          identity,
+          identity: normalizedTrust ? {
+            ...identity,
+            rawReputationScore: identity.reputationScore,
+            rawVerificationLevel: identity.verificationLevel,
+            rawVerificationLabel: satpIdentity.levelToLabel(identity.verificationLevel),
+            reputationScore,
+            verificationLevel,
+            verificationLabel,
+            profileId,
+          } : identity,
           scores: {
-            reputationScore: identity.reputationScore,
-            reputationRank: satpIdentity.scoreToRank(identity.reputationScore),
-            verificationLevel: identity.verificationLevel,
-            verificationLabel: satpIdentity.levelToLabel(identity.verificationLevel),
+            reputationScore,
+            reputationRank: satpIdentity.scoreToRank(reputationScore),
+            verificationLevel,
+            verificationLabel,
             trustless: true,
+            source: normalizedTrust ? 'normalized-profile-trust' : 'solana-mainnet',
+            profileId,
+            rawReputationScore: identity.reputationScore,
+            rawVerificationLevel: identity.verificationLevel,
+            rawVerificationLabel: satpIdentity.levelToLabel(identity.verificationLevel),
           },
           attestations: {
             count: attestations.length,
@@ -341,7 +381,8 @@ function registerSATPRoutes(app) {
             items: attestations,
           },
           meta: {
-            source: 'solana-mainnet',
+            source: normalizedTrust ? 'normalized-profile-trust' : 'solana-mainnet',
+            profileId,
             programs: {
               identity: satpIdentity.PROGRAMS.IDENTITY.toBase58(),
               reputation: satpIdentity.PROGRAMS.REPUTATION.toBase58(),
