@@ -2310,7 +2310,13 @@ app.get('/api/satp/score/:id', async (req, res) => {
     // A1: compute-score
     const { computeScore: _cs } = require('./lib/compute-score');
     const _vRows = profileStore.getDb().prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profile.id);
-    const _comp = _cs(_vRows, { hasSatpIdentity: _vRows.some(v => v.platform === 'satp'), claimed: !!profile.claimed });
+    const _hasSatpIdentity = !!solWallet && (chainCache.isVerified(solWallet) || _vRows.some(v => v.platform === 'satp'));
+    const _scoreInputs = [..._vRows];
+    if (_hasSatpIdentity && solWallet) {
+      if (!_scoreInputs.some(v => v.platform === 'satp')) _scoreInputs.push({ platform: 'satp', identifier: solWallet });
+      if (!_scoreInputs.some(v => v.platform === 'solana')) _scoreInputs.push({ platform: 'solana', identifier: solWallet });
+    }
+    const _comp = _cs(_scoreInputs, { hasSatpIdentity: _hasSatpIdentity, claimed: !!row.claimed });
     res.json({ ok: true, data: { score: _comp.score, level: _comp.level, levelName: _comp.levelName, breakdown: _comp.breakdown } });
   } catch (err) {
     console.error('[SATP Score] error:', err.message);
