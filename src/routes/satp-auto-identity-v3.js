@@ -25,6 +25,7 @@
 
 const { Connection, PublicKey, SystemProgram, Transaction, TransactionInstruction, ComputeBudgetProgram } = require('@solana/web3.js');
 const crypto = require('crypto');
+const { clearV3Cache } = require('../v3-score-service');
 const path = require('path');
 
 // ─────────────────────────────────────────────
@@ -395,6 +396,8 @@ function registerSATPAutoIdentityV3Routes(app) {
       } catch (dbErr) {
         console.warn('[SATP AutoID V3] DB update failed (non-blocking):', dbErr.message);
       }
+
+      try { if (typeof clearV3Cache === 'function') clearV3Cache(); } catch (_) {}
 
       res.json({
         ok: true,
