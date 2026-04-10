@@ -687,6 +687,15 @@ app.get('/api/project-types', (_req, res) => {
   }
 });
 
+app.get('/api/marketplace/categories', (_req, res) => {
+  try {
+    res.json({ ok: true, categories: JOB_CATEGORIES, count: Array.isArray(JOB_CATEGORIES) ? JOB_CATEGORIES.length : Object.keys(JOB_CATEGORIES || {}).length });
+  } catch (e) {
+    console.error('[Marketplace] categories error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ─── DID Resolution for Solana Wallets ──────────────────
 app.get('/api/did/satp/sol/:address', async (req, res) => {
   const { address } = req.params;
