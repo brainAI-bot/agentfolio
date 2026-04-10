@@ -242,6 +242,7 @@ function registerTrustCredentialRoutes(app) {
       if (format === 'json') {
         return res.json({
           credential: vcPayload,
+          decoded: vcPayload,
           format: 'json',
           issuer: ISSUER_DID,
           note: 'Unsigned — use ?format=jwt for signed credential',
