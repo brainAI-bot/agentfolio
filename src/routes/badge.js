@@ -74,7 +74,7 @@ function generateFlatBadge(label, message, messageColor) {
 function registerBadgeRoute(app, deps) {
   const { profileStore, computeScoreWithOnChain, getV3Score } = deps;
 
-  app.get('/api/badge/:id.svg', async (req, res) => {
+  async function renderBadge(req, res) {
     try {
       const agentId = req.params.id;
       const label = req.query.label || 'AgentFolio';
@@ -138,7 +138,10 @@ function registerBadgeRoute(app, deps) {
       res.setHeader('Cache-Control', 'no-cache');
       res.send(svg);
     }
-  });
+  }
+
+  app.get('/api/badge/:id.svg', renderBadge);
+  app.get('/api/badge/:id', renderBadge);
 }
 
 module.exports = { registerBadgeRoute };
