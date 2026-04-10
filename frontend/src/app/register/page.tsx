@@ -40,14 +40,38 @@ export default function RegisterPage() {
   const [createdProfileId, setCreatedProfileId] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
 
-  // Simple registration — no wallet needed
+  // Registration with optional wallet-owned on-chain identity
   const handleSimpleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
+    setChainStatus("idle");
+    setTxSignature("");
 
     try {
       const skillList = skills.split(",").map(s => s.trim()).filter(Boolean);
+      const walletAddress = connected && publicKey ? publicKey.toBase58() : undefined;
+      let signedMessage = "";
+      let signatureB58 = "";
+
+      if (walletAddress) {
+        if (!isDemo && !signMessage) {
+          throw new Error("Connected wallet must support message signing for auto-verified registration");
+        }
+        setChainStatus("signing");
+        signedMessage = `AgentFolio Registration
+Agent: ${name.trim()}
+Wallet: ${walletAddress}
+Timestamp: ${Date.now()}`;
+        if (isDemo) {
+          signatureB58 = "demo_signature";
+        } else {
+          const msgBytes = new TextEncoder().encode(signedMessage);
+          const sigBytes = await signMessage!(msgBytes);
+          signatureB58 = Buffer.from(sigBytes).toString("base64");
+        }
+      }
+
       const payload: any = {
         customId: customId.trim() || undefined,
         name: name.trim(),
@@ -55,6 +79,9 @@ export default function RegisterPage() {
         skills: skillList.join(","),
         github: github.trim() || undefined,
         website: website.trim() || undefined,
+        walletAddress,
+        signature: signatureB58 || undefined,
+        signedMessage: signedMessage || undefined,
       };
 
       const res = await fetch("/api/register/simple", {
@@ -69,72 +96,48 @@ export default function RegisterPage() {
         return;
       }
 
+      const profileId = data.id;
       setApiKey(data.api_key || "");
+      setCreatedProfileId(profileId);
 
-      // If wallet is connected, try on-chain registration too
-      if (connected && publicKey) {
+      if (walletAddress) {
         try {
-          const profileId = data.id;
-          const walletAddress = publicKey.toBase58();
-
-          // Sign message to prove ownership
-          setChainStatus("signing");
-          const signedMessage = `AgentFolio Registration\nAgent: ${name.trim()}\nWallet: ${walletAddress}\nTimestamp: ${Date.now()}`;
-          let signatureB58 = "";
-          if (isDemo) {
-            signatureB58 = "demo_signature";
-          } else if (signMessage) {
-            const msgBytes = new TextEncoder().encode(signedMessage);
-            const sigBytes = await signMessage(msgBytes);
-            signatureB58 = Buffer.from(sigBytes).toString("base64");
-          }
-
-          if (signatureB58) {
-            // Update profile with wallet
-            await fetch("/api/register", {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ profileId, walletAddress, signature: signatureB58, signedMessage }),
-            });
-          }
-
-          // Try SATP identity
+          if (!sendTransaction) throw new Error("Connected wallet cannot sign transactions");
+          setChainStatus("genesis");
           const connection = new Connection(SOLANA_RPC, "confirmed");
-          const satpRes = await fetch("/api/satp-auto/identity/create", {
+          const genesisRes = await fetch("/api/satp/genesis/prepare", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ walletAddress, profileId }),
+            body: JSON.stringify({ agentId: profileId, payer: walletAddress }),
           });
-          const satpData = await satpRes.json();
+          const genesisData = await genesisRes.json();
 
-          if (satpData.data?.alreadyExists) {
+          if (genesisRes.status === 409 || genesisData?.error === "Genesis record already exists") {
             setChainStatus("done");
-          } else if (satpData.data?.transaction) {
+          } else if (genesisRes.ok && genesisData.transaction) {
             const { Transaction } = await import("@solana/web3.js");
-            const tx = Transaction.from(Buffer.from(satpData.data.transaction, "base64"));
-            const sig = await sendTransaction(tx, connection);
+            const tx = Transaction.from(Buffer.from(genesisData.transaction, "base64"));
             setChainStatus("confirming");
+            const sig = await sendTransaction(tx, connection);
             await connection.confirmTransaction(sig, "confirmed");
             setTxSignature(sig);
-            setChainStatus("done");
-
-            await fetch("/api/satp-auto/identity/confirm", {
+            await fetch("/api/satp-auto/v3/identity/confirm", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ walletAddress, profileId, txSignature: sig }),
-            }).catch(() => {});
+            });
+            setChainStatus("done");
           } else {
-            setChainStatus("skipped");
+            throw new Error(genesisData?.error || "Failed to create SATP identity");
           }
         } catch (chainErr) {
           console.warn("[Register] On-chain step failed (profile still saved):", chainErr);
           setChainStatus("skipped");
+          setError(chainErr instanceof Error ? `Profile created, but on-chain registration failed: ${chainErr.message}` : "Profile created, but on-chain registration failed");
         }
       }
 
       setSuccess(true);
-      const profileId = data.id;
-      setCreatedProfileId(profileId);
     } catch (err: any) {
       setError(err.message || "Network error");
     } finally {
@@ -161,7 +164,7 @@ export default function RegisterPage() {
         >
           <Wallet size={16} style={{ color: "var(--solana)" }} />
           <span className="text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--solana)" }}>
-            Wallet connected: {publicKey.toBase58().slice(0,4)}...{publicKey.toBase58().slice(-4)} — will auto-verify on registration
+            Wallet connected: {publicKey.toBase58().slice(0,4)}...{publicKey.toBase58().slice(-4)} — will auto-verify and register on-chain during signup
           </span>
         </div>
       ) : (
@@ -171,7 +174,7 @@ export default function RegisterPage() {
         >
           <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>
             <Zap size={12} className="inline mr-1" />
-            Optional: Connect a wallet to auto-verify on-chain during registration
+            Optional: Connect a wallet to auto-verify and mint your SATP identity during registration
           </span>
           <button
             onClick={() => smartConnect()}
