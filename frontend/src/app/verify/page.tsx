@@ -111,8 +111,12 @@ export default function VerifyPage() {
       .then(r => r.json())
       .then(data => {
         if (data.verifications) {
-          setExistingVerifications(data.verifications);
-          const vData = data.verifications || {};
+          const rawVerifications = data.verifications || {};
+          const vData = {
+            ...rawVerifications,
+            satp: rawVerifications.satp || rawVerifications.satp_v3 || data.verification_data?.satp || data.verification_data?.satp_v3 || undefined,
+          };
+          setExistingVerifications(vData);
           const linkedSolana = vData.solana?.address || data.walletAddress || data.wallet || data.wallets?.solana || "";
           if (linkedSolana) {
             setSolanaAddress(linkedSolana);
@@ -124,7 +128,7 @@ export default function VerifyPage() {
           if (vData.agentmail?.verified) {
             setAgentmailState({ loading: false, success: true, error: "", result: { verified: true } });
           }
-          if (vData.satp?.registered || vData.satp?.verified || (data?.onchain?.verificationLevel ?? 0) >= 1) {
+          if (vData.satp?.registered || vData.satp?.verified || vData.satp?.genesisPDA || vData.satp?.identityPDA || (data?.onchain?.verificationLevel ?? 0) >= 1) {
             setSatpState({ loading: false, success: true, error: "", result: { verified: true, registered: true } });
           }
           if (vData.solana?.verified) {
