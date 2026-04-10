@@ -7,6 +7,9 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const _bs58 = require('bs58');
+const bs58 = _bs58.default || _bs58;
+const nacl = require('tweetnacl');
 
 // [CEO Apr 4] On-chain genesis creation on registration
 let satpV3SDK, platformKeypair;
@@ -83,13 +86,34 @@ async function resolveCanonicalOnchainProfileId(db, profileId, walletAddress) {
 
 function registerSimpleRoutes(app, getDb) {
   app.post('/api/register/simple', simpleLimiter, async (req, res) => {
-    const { name, tagline, github, website, skills, walletAddress } = req.body;
+    const { name, tagline, github, website, skills, walletAddress, signature, signedMessage } = req.body;
 
     if (!name || typeof name !== 'string' || name.trim().length < 1) {
       return res.status(400).json({ error: 'name is required' });
     }
     if (name.trim().length > 32) {
       return res.status(400).json({ error: 'name must be 32 chars or less' });
+    }
+
+    if (walletAddress && signature && signedMessage) {
+      try {
+        const pubkeyBytes = bs58.decode(walletAddress);
+        if (pubkeyBytes.length != 32) throw new Error('invalid pubkey length');
+        let sigBytes;
+        try { sigBytes = bs58.decode(signature); } catch (_) {
+          sigBytes = Buffer.from(signature, 'base64');
+        }
+        if (sigBytes.length != 64) throw new Error('invalid signature length');
+        const msgBytes = new TextEncoder().encode(signedMessage);
+        const valid = nacl.sign.detached.verify(msgBytes, sigBytes, pubkeyBytes);
+        if (!valid) {
+          return res.status(401).json({ error: 'invalid wallet signature -- proof of ownership failed' });
+        }
+      } catch (sigErr) {
+        return res.status(400).json({ error: `signature verification error: ${sigErr.message}` });
+      }
+    } else if (walletAddress && (!signature || !signedMessage)) {
+      return res.status(400).json({ error: 'When walletAddress is provided, signature and signedMessage are required' });
     }
 
     const d = getDb();
@@ -245,17 +269,23 @@ function registerSimpleRoutes(app, getDb) {
       // Chain-first: write on-chain first, cache only after success.
       if (walletAddress) {
         try {
-          const proof = { source: 'simple-registration', wallet: walletAddress };
+          const proof = { source: 'simple-registration', wallet: walletAddress, signatureVerified: true };
           const { postVerificationHook } = require('../post-verification-hook');
           const onchainProfileId = await resolveCanonicalOnchainProfileId(d, id, walletAddress);
-          const onchainSucceeded = await postVerificationHook(onchainProfileId, 'solana', walletAddress, proof);
-          if (onchainSucceeded) {
+          const bridgeResult = await postVerificationHook(onchainProfileId, 'solana', walletAddress, proof);
+          if (bridgeResult) {
+            const enrichedProof = (bridgeResult && typeof bridgeResult === 'object') ? {
+              ...proof,
+              txSignature: bridgeResult.txSignature || null,
+              attestationPDA: bridgeResult.attestationPDA || null,
+              solscanUrl: bridgeResult.txSignature ? ('https://solana.fm/tx/' + bridgeResult.txSignature) : undefined,
+            } : proof;
             const vId = require('crypto').randomUUID();
             const insert = d.prepare("INSERT OR IGNORE INTO verifications (id, profile_id, platform, identifier, proof, verified_at) VALUES (?, ?, ?, ?, ?, datetime('now'))");
             const result = insert.run(
-              vId, id, 'solana', walletAddress, JSON.stringify(proof)
+              vId, id, 'solana', walletAddress, JSON.stringify(enrichedProof)
             );
-            console.log('[SimpleRegister] Cached Solana verification for', id, 'changes=', result.changes, 'wallet=', walletAddress);
+            console.log('[SimpleRegister] Cached Solana verification for', id, 'changes=', result.changes, 'wallet=', walletAddress, 'tx=', enrichedProof.txSignature || 'none');
           } else {
             console.warn('[SimpleRegister] Skipped Solana verification cache for', id, 'because on-chain write failed');
           }

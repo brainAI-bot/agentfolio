@@ -708,8 +708,8 @@ function enrichProfile(row) {
       try {
         const rows = getDb().prepare('SELECT platform, identifier, proof FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
         for (const ver of rows) {
-          const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
-          if (platform === 'solana') {
+          const platform = ver.platform === 'twitter' ? 'x' : (ver.platform === 'satp_v3' ? 'satp' : ver.platform);
+          if (platform === 'solana' || platform === 'satp') {
             let proof = {};
             try { proof = typeof ver.proof === 'string' ? JSON.parse(ver.proof) : (ver.proof || {}); } catch {}
             const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || null;
@@ -718,7 +718,7 @@ function enrichProfile(row) {
           addVerif(platform, ver.identifier || null);
         }
       } catch (_) {}
-      const hasSatpIdentity = !!row.wallet || !!(v3 && v3.verificationLevel >= 1);
+      const hasSatpIdentity = scoreInputs.some(v => v.platform === 'satp') || !!(v3 && v3.verificationLevel >= 1);
       if (hasSatpIdentity && row.wallet) {
         addVerif('satp', row.wallet);
       }
@@ -987,7 +987,7 @@ function registerRoutes(app) {
           const { Keypair } = require('@solana/web3.js');
           const signer = await loadPreferredSatpSignerKeypair();
           try {
-            const { transaction, genesisPda } = await satpV3.client.buildCreateIdentity(
+            const { transaction, genesisPDA: genesisPda } = await satpV3.client.buildCreateIdentity(
               signer.publicKey,
               id,
               {
@@ -1008,7 +1008,7 @@ function registerRoutes(app) {
             // Retry once after 3s (transient RPC failures are common)
             try {
               await new Promise(r => setTimeout(r, 3000));
-              const { transaction: tx2, genesisPda: pda2 } = await satpV3.client.buildCreateIdentity(
+              const { transaction: tx2, genesisPDA: pda2 } = await satpV3.client.buildCreateIdentity(
                 signer.publicKey, id,
                 {
                   name: name.trim().substring(0, 32),
@@ -1103,9 +1103,15 @@ function registerRoutes(app) {
           const proof = { source: "registration", wallet: solanaWallet, signatureVerified: !!signature };
           if (postVerificationHook) {
             Promise.resolve(postVerificationHook(id, "solana", solanaWallet, proof))
-              .then((onchainSucceeded) => {
-                if (onchainSucceeded) {
-                  addVerification(id, 'solana', solanaWallet, proof);
+              .then((bridgeResult) => {
+                if (bridgeResult) {
+                  const enrichedProof = (bridgeResult && typeof bridgeResult === 'object') ? {
+                    ...proof,
+                    txSignature: bridgeResult.txSignature || null,
+                    attestationPDA: bridgeResult.attestationPDA || null,
+                    solscanUrl: bridgeResult.txSignature ? ('https://solana.fm/tx/' + bridgeResult.txSignature) : undefined,
+                  } : proof;
+                  addVerification(id, 'solana', solanaWallet, enrichedProof);
                   console.log("[Register] Cached Solana verification after on-chain success for " + id);
                 } else {
                   console.warn("[Register] Skipped Solana verification cache for " + id + " because on-chain write failed");
@@ -1221,7 +1227,7 @@ function registerRoutes(app) {
       const deployerKey = JSON.parse(fs.readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'));
       const deployer = Keypair.fromSecretKey(Uint8Array.from(deployerKey));
 
-      const { transaction, genesisPda } = await satpV3.client.buildCreateIdentity(
+      const { transaction, genesisPDA: genesisPda } = await satpV3.client.buildCreateIdentity(
         payerKey, agentId,
         { name, description: bio || 'AgentFolio registered agent', category, capabilities: skills, metadataUri: '' }
       );

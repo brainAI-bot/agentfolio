@@ -189,6 +189,7 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
 
   // Step 1-3: On-chain work first via the V3 bridge. DB/cache update only after chain succeeds.
   let onchainWriteSucceeded = false;
+  let bridgeResult = null;
   const attestationType = platformToAttestationType(platform);
   const proofData = {
     platform,
@@ -205,6 +206,7 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
   try {
     const bridge = require('./lib/satp-verification-bridge');
     const result = await bridge.postVerificationAttestation(onchainProfileId, platform, proofData);
+    bridgeResult = result;
     console.log(`[PostVerify] ✅ Bridge result for ${profileId}: ${JSON.stringify(result)}`);
     onchainWriteSucceeded = !!result;
     if (!result) {
@@ -230,7 +232,7 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
   }
 
   console.log(`[PostVerify] ═══ Pipeline complete for ${profileId}/${platform} ═══`);
-  return onchainWriteSucceeded;
+  return bridgeResult || null;
 }
 
 module.exports = { postVerificationHook, recomputeDBScore, revalidateProfileCache };

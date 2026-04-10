@@ -59,7 +59,7 @@ function platformToAttestationType(platform) {
   const map = {
     github: 'github_verification',
     x: 'x_verification',
-    solana: 'solana_wallet_verification',
+    solana: 'solana_wallet',
     agentmail: 'agentmail_verification',
     telegram: 'telegram_verification',
     discord: 'discord_verification',
