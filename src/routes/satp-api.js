@@ -63,6 +63,56 @@ function registerSATPRoutes(app) {
     }
   }
 
+  function normalizeAttestationPlatform(value) {
+    const platform = String(value || '').toLowerCase();
+    if (!platform) return null;
+    if (platform === 'twitter') return 'x';
+    if (platform === 'satp_v3') return 'satp';
+    if (platform.startsWith('verification_')) return normalizeAttestationPlatform(platform.slice('verification_'.length));
+    if (platform.endsWith('_verification')) return normalizeAttestationPlatform(platform.slice(0, -'_verification'.length));
+    if (platform === 'solana_wallet') return 'solana';
+    return platform;
+  }
+
+  function loadAttestationTxHints(profileId) {
+    const hints = {};
+    if (!profileId) return hints;
+    const setHint = (platform, txSignature) => {
+      const normalized = normalizeAttestationPlatform(platform);
+      if (!normalized || !txSignature || hints[normalized]) return;
+      hints[normalized] = {
+        txSignature,
+        solscanUrl: 'https://solana.fm/tx/' + txSignature,
+      };
+    };
+
+    try {
+      const Database = require('better-sqlite3');
+      const path = require('path');
+      const db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+      const profile = db.prepare('SELECT verification_data FROM profiles WHERE id = ?').get(profileId);
+      const attRows = db.prepare('SELECT platform, tx_signature FROM attestations WHERE profile_id = ? AND tx_signature IS NOT NULL ORDER BY created_at DESC').all(profileId);
+      for (const row of attRows) setHint(row.platform, row.tx_signature);
+
+      const verifRows = db.prepare('SELECT platform, proof FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(profileId);
+      for (const row of verifRows) {
+        let proof = {};
+        try { proof = typeof row.proof === 'string' ? JSON.parse(row.proof) : (row.proof || {}); } catch {}
+        setHint(row.platform, proof.txSignature || proof.signature || proof.transactionSignature || null);
+      }
+
+      let verificationData = {};
+      try { verificationData = JSON.parse(profile?.verification_data || '{}'); } catch {}
+      for (const [platform, data] of Object.entries(verificationData || {})) {
+        const txSignature = data && typeof data === 'object' ? (data.txSignature || data.signature || data.transactionSignature || null) : null;
+        setHint(platform, txSignature);
+      }
+      db.close();
+    } catch (_) {}
+
+    return hints;
+  }
+
   async function buildOnchainStatus({ wallet = null, profileId = null }) {
     const profile = await loadProfileByWalletOrId({ wallet, profileId });
     const resolvedWallet = wallet || profile?.wallet || null;
@@ -572,6 +622,7 @@ function registerSATPRoutes(app) {
       const chainCache = require('../lib/chain-cache');
       const { agentId } = req.params;
       const attestations = chainCache.getVerifications(agentId);
+      const txHints = loadAttestationTxHints(agentId);
       const platforms = [...new Set(attestations.map(a => a.platform))];
       
       res.json({
@@ -580,15 +631,22 @@ function registerSATPRoutes(app) {
           agentId,
           count: attestations.length,
           platforms,
-          attestations: attestations.map(a => ({
-            platform: a.platform,
-            txSignature: a.txSignature,
-            memo: a.memo,
-            proofHash: a.proofHash,
-            signer: a.signer,
-            timestamp: a.timestamp,
-            solscanUrl: a.solscanUrl || (a.txSignature ? 'https://solscan.io/tx/' + a.txSignature : null),
-          })),
+          attestations: attestations.map(a => {
+            let proofData = {};
+            try { proofData = typeof a.proofData === 'string' ? JSON.parse(a.proofData) : (a.proofData || {}); } catch {}
+            const platform = normalizeAttestationPlatform(a.platform) || a.platform;
+            const hinted = txHints[platform] || null;
+            const txSignature = a.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || hinted?.txSignature || null;
+            return {
+              platform: a.platform,
+              txSignature,
+              memo: a.memo,
+              proofHash: a.proofHash,
+              signer: a.signer,
+              timestamp: a.timestamp,
+              solscanUrl: hinted?.solscanUrl || a.solscanUrl || (txSignature ? 'https://solana.fm/tx/' + txSignature : null),
+            };
+          }),
         },
       });
     } catch (err) {

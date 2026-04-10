@@ -387,22 +387,53 @@ app.get('/api/explorer/:agentId', async (req, res) => {
 
     const chainCache = require('./lib/chain-cache');
     const { computeScore } = require('./lib/compute-score');
+    const normalizeAttestationPlatform = (value) => {
+      const platform = String(value || '').toLowerCase();
+      if (!platform) return null;
+      if (platform === 'twitter') return 'x';
+      if (platform === 'satp_v3') return 'satp';
+      if (platform.startsWith('verification_')) return normalizeAttestationPlatform(platform.slice('verification_'.length));
+      if (platform.endsWith('_verification')) return normalizeAttestationPlatform(platform.slice(0, -'_verification'.length));
+      if (platform === 'solana_wallet') return 'solana';
+      return platform;
+    };
+    const txHints = {};
+    const setTxHint = (platform, txSignature) => {
+      const normalized = normalizeAttestationPlatform(platform);
+      if (!normalized || !txSignature || txHints[normalized]) return;
+      txHints[normalized] = { txSignature, solscanUrl: 'https://solana.fm/tx/' + txSignature };
+    };
+    for (const attRow of db.prepare('SELECT platform, tx_signature FROM attestations WHERE profile_id = ? AND tx_signature IS NOT NULL ORDER BY created_at DESC').all(profile.id)) {
+      setTxHint(attRow.platform, attRow.tx_signature);
+    }
+    for (const verifRow of db.prepare('SELECT platform, proof FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(profile.id)) {
+      let proof = {};
+      try { proof = typeof verifRow.proof === 'string' ? JSON.parse(verifRow.proof) : (verifRow.proof || {}); } catch {}
+      setTxHint(verifRow.platform, proof.txSignature || proof.signature || proof.transactionSignature || null);
+    }
+    const verificationData = parseJsonField(row.verification_data, {});
+    for (const [platform, data] of Object.entries(verificationData || {})) {
+      const txSignature = data && typeof data === 'object' ? (data.txSignature || data.signature || data.transactionSignature || null) : null;
+      setTxHint(platform, txSignature);
+    }
     const rawAttestations = chainCache.getVerifications(profile.id, profile.created_at) || [];
     const dedupedMap = new Map();
 
     for (const att of rawAttestations) {
-      const platform = att.platform === 'twitter' ? 'x' : att.platform;
+      const platform = normalizeAttestationPlatform(att.platform);
       if (!platform || platform === 'review' || dedupedMap.has(platform)) continue;
       let proofData = {};
       try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
-      const identifier = att.identifier || proofData.identifier || proofData.address || proofData.wallet || null;
+      const hinted = txHints[platform] || null;
+      const identifier = att.identifier || proofData.identifier || proofData.address || proofData.wallet || proofData.identityPDA || (platform === 'satp' ? (profile.wallet || profile.wallets?.solana || null) : null);
       if (!identifier) continue;
+      const txSignature = att.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || hinted?.txSignature || null;
       dedupedMap.set(platform, {
         platform,
         verified: true,
         identifier,
-        txSignature: att.txSignature || null,
-        solscanUrl: att.solscanUrl || (att.txSignature ? ('https://solscan.io/tx/' + att.txSignature) : null),
+        txSignature,
+        solscanUrl: hinted?.solscanUrl || att.solscanUrl || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null),
         timestamp: att.timestamp || att.verifiedAt || null,
       });
     }
