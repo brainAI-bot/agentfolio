@@ -191,7 +191,7 @@ async function getSatpAgents() {
         verificationLabel,
         verificationLevelName: verificationLabel || levelLabels[verificationLevel] || 'Unverified',
         verificationBadge: levelBadges[verificationLevel] || '⚪',
-        trustCredentialUrl: `/api/trust-credential/${encodeURIComponent(profile.id)}`,
+        trustCredentialUrl: `/trust/${encodeURIComponent(profile.id)}`,
         verifications: explorerVerifications,
         attestationMemos: explorerAttestations,
         platforms,
