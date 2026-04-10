@@ -701,9 +701,19 @@ app.get('/api/analytics/views', (_req, res) => {
   try {
     const db = profileStore.getDb();
     const leaderboard = db.prepare(`
-      SELECT id, name, handle, avatar, view_count, total_earnings, verification_level
-      FROM profiles
-      ORDER BY view_count DESC, total_earnings DESC
+      SELECT 
+        a.agent_id AS profileId,
+        p.name,
+        p.handle,
+        p.avatar,
+        a.profile_views AS viewCount,
+        a.badge_views AS badgeViews,
+        a.credential_requests AS credentialRequests,
+        a.export_requests AS exportRequests,
+        a.last_updated AS lastUpdated
+      FROM profile_analytics a
+      LEFT JOIN profiles p ON p.id = a.agent_id
+      ORDER BY a.profile_views DESC, a.badge_views DESC, a.credential_requests DESC
       LIMIT 50
     `).all();
     res.json({ ok: true, leaderboard, count: leaderboard.length });
