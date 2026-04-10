@@ -49,6 +49,7 @@ try {
 
 // Scoring module
 const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainData } = require('./scoring');
+const { computeUnifiedTrustScore } = require('./lib/unified-trust-score');
 
 // V3 on-chain score service (Genesis Records — authoritative)
 let getV3Score;
@@ -362,135 +363,21 @@ app.get('/api/explorer/:agentId', async (req, res) => {
   const { agentId } = req.params;
   try {
     const db = profileStore.getDb();
-    const parseJsonField = (val, fallback) => {
-      if (val === null || val === undefined || val === '') return fallback;
-      if (typeof val === 'object') return val;
-      try { return JSON.parse(val); } catch { return fallback; }
-    };
-
-    let row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId);
-    if (!row) {
-      row = db.prepare('SELECT * FROM profiles WHERE handle = ?').get(agentId);
-    }
-    if (!row) return res.status(404).json({ error: 'Profile not found' });
-
-    const profile = {
-      id: row.id,
-      name: row.name,
-      wallet: row.wallet,
-      wallets: parseJsonField(row.wallets, {}),
-      tags: parseJsonField(row.tags, []),
-      skills: parseJsonField(row.skills, []),
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-    };
-
-    const chainCache = require('./lib/chain-cache');
-    const { computeScore } = require('./lib/compute-score');
-    const normalizeAttestationPlatform = (value) => {
-      const platform = String(value || '').toLowerCase();
-      if (!platform) return null;
-      if (platform === 'twitter') return 'x';
-      if (platform === 'satp_v3') return 'satp';
-      if (platform.startsWith('verification_')) return normalizeAttestationPlatform(platform.slice('verification_'.length));
-      if (platform.endsWith('_verification')) return normalizeAttestationPlatform(platform.slice(0, -'_verification'.length));
-      if (platform === 'solana_wallet') return 'solana';
-      return platform;
-    };
-    const txHints = {};
-    const setTxHint = (platform, txSignature) => {
-      const normalized = normalizeAttestationPlatform(platform);
-      if (!normalized || !txSignature || txHints[normalized]) return;
-      txHints[normalized] = { txSignature, solscanUrl: 'https://solana.fm/tx/' + txSignature };
-    };
-    for (const attRow of db.prepare('SELECT platform, tx_signature FROM attestations WHERE profile_id = ? AND tx_signature IS NOT NULL ORDER BY created_at DESC').all(profile.id)) {
-      setTxHint(attRow.platform, attRow.tx_signature);
-    }
-    for (const verifRow of db.prepare('SELECT platform, proof FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(profile.id)) {
-      let proof = {};
-      try { proof = typeof verifRow.proof === 'string' ? JSON.parse(verifRow.proof) : (verifRow.proof || {}); } catch {}
-      setTxHint(verifRow.platform, proof.txSignature || proof.signature || proof.transactionSignature || null);
-    }
-    const verificationData = parseJsonField(row.verification_data, {});
-    for (const [platform, data] of Object.entries(verificationData || {})) {
-      const txSignature = data && typeof data === 'object' ? (data.txSignature || data.signature || data.transactionSignature || null) : null;
-      setTxHint(platform, txSignature);
-    }
-    const rawAttestations = chainCache.getVerifications(profile.id, profile.created_at) || [];
-    const dbVerifRows = db.prepare('SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(profile.id);
-    const dedupedMap = new Map();
-
-    const addVerification = (platform, identifier, extra = {}) => {
-      if (!platform || platform === 'review' || dedupedMap.has(platform) || !identifier) return;
-      dedupedMap.set(platform, {
-        platform,
-        verified: true,
-        identifier,
-        txSignature: extra.txSignature || null,
-        solscanUrl: extra.solscanUrl || (extra.txSignature ? ('https://solana.fm/tx/' + extra.txSignature) : null),
-        timestamp: extra.timestamp || null,
-      });
-    };
-
-    for (const verifRow of dbVerifRows) {
-      const platform = normalizeAttestationPlatform(verifRow.platform);
-      if (!platform || platform === 'review') continue;
-      let proof = {};
-      try { proof = typeof verifRow.proof === 'string' ? JSON.parse(verifRow.proof) : (verifRow.proof || {}); } catch {}
-      const hinted = txHints[platform] || null;
-      const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || hinted?.txSignature || null;
-      if (platform === 'solana' && !txSignature) continue;
-      addVerification(platform, verifRow.identifier || null, {
-        txSignature,
-        solscanUrl: hinted?.solscanUrl || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null),
-        timestamp: verifRow.verified_at || null,
-      });
-    }
-
-    for (const att of rawAttestations) {
-      const platform = normalizeAttestationPlatform(att.platform);
-      if (!platform || platform === 'review' || dedupedMap.has(platform)) continue;
-      let proofData = {};
-      try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
-      const hinted = txHints[platform] || null;
-      const identifier = att.identifier || proofData.identifier || proofData.address || proofData.wallet || proofData.identityPDA || (platform === 'satp' ? (profile.wallet || profile.wallets?.solana || null) : null);
-      const txSignature = att.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || hinted?.txSignature || null;
-      if (platform === 'solana' && !txSignature) continue;
-      addVerification(platform, identifier, {
-        txSignature,
-        solscanUrl: hinted?.solscanUrl || att.solscanUrl || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null),
-        timestamp: att.timestamp || att.verifiedAt || null,
-      });
-    }
+    let profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId);
+    if (!profile) profile = db.prepare('SELECT * FROM profiles WHERE handle = ?').get(agentId);
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
     const v3Score = await getV3Score(profile.id).catch(() => null);
-    const hasSatpIdentity = !!(profile.wallet && chainCache.isVerified(profile.wallet)) || !!(v3Score && v3Score.verificationLevel >= 1);
-    if (hasSatpIdentity && profile.wallet && !dedupedMap.has('satp')) {
-      const hinted = txHints['satp'] || null;
-      addVerification('satp', profile.wallet, {
-        txSignature: hinted?.txSignature || null,
-        solscanUrl: hinted?.solscanUrl || (hinted?.txSignature ? ('https://solana.fm/tx/' + hinted.txSignature) : null),
-        timestamp: null,
-      });
-    }
-    const dedupedVerifications = Array.from(dedupedMap.values());
-    const computed = computeScore(
-      dedupedVerifications.map(v => ({ platform: v.platform, identifier: v.identifier })),
-      { hasSatpIdentity, claimed: true }
-    );
-
-    const displayScore = computed.score;
-    const displayLevel = computed.level;
-    const displayLabel = computed.levelName;
+    const unified = computeUnifiedTrustScore(db, profile, { v3Score });
 
     res.json({
       agentId: profile.id,
       name: profile.name,
       did: 'did:agentfolio:' + profile.id,
-      trustScore: displayScore,
-      tier: displayLabel,
-      scoreVersion: (v3Score && v3Score.reputationScore > 0) ? 'v3' : 'attestations',
-      verifications: dedupedVerifications.map(({ platform, verified, txSignature, solscanUrl, timestamp }) => ({
+      trustScore: unified.score,
+      tier: unified.levelName,
+      scoreVersion: unified.source,
+      verifications: unified.verifications.map(({ platform, verified, txSignature, solscanUrl, timestamp }) => ({
         platform,
         verified,
         txSignature,
@@ -500,14 +387,14 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       wallets: profile.wallets || {},
       tags: profile.tags || [],
       skills: profile.skills || [],
-      onChainRegistered: !!((profile.wallet && chainCache.isVerified(profile.wallet)) || (v3Score && v3Score.verificationLevel >= 1)),
+      onChainRegistered: unified.hasSatpIdentity,
       v3: {
-        reputationScore: displayScore,
-        verificationLevel: displayLevel,
-        verificationLabel: displayLabel,
+        reputationScore: unified.score,
+        verificationLevel: unified.level,
+        verificationLabel: unified.levelName,
         isBorn: !!(v3Score && v3Score.isBorn),
       },
-      breakdown: v3Score ? computed.breakdown : {},
+      breakdown: unified.breakdown || {},
       links: {
         profile: SITE_URL + '/profile/' + profile.id,
         trustCredential: SITE_URL + '/trust/' + profile.id,
@@ -517,6 +404,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       updatedAt: profile.updated_at,
     });
   } catch (e) {
+    console.error('[Explorer] unified route error:', e.stack || e.message);
     res.status(500).json({ error: 'Internal error' });
   }
 });
@@ -534,58 +422,27 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
     }
     if (!row) return res.status(404).json({ error: 'Profile not found' });
 
-    const chainCache = require('./lib/chain-cache');
-    const { computeScore } = require('./lib/compute-score');
-    const dbVerifs = db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profileId) || [];
-    const chainVerifs = [];
-    const seen = new Set();
-    const addVerif = (platform, identifier) => {
-      if (!platform || !identifier || seen.has(platform)) return;
-      chainVerifs.push({ platform, identifier });
-      seen.add(platform);
-      if (platform === 'twitter') seen.add('x');
-      if (platform === 'x') seen.add('twitter');
-    };
-
-    for (const ver of db.prepare('SELECT platform, identifier, proof FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(profileId)) {
-      const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
-      if (!platform || platform === 'review') continue;
-      if (platform === 'solana') {
-        let proof = {};
-        try { proof = typeof ver.proof === 'string' ? JSON.parse(ver.proof) : (ver.proof || {}); } catch {}
-        const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || null;
-        if (!txSignature) continue;
-      }
-      addVerif(platform, ver.identifier || null);
-    }
-
     const v3Score = await getV3Score(profileId).catch(() => null);
-    const hasSatpIdentity = !!row.wallet && (!!chainCache.isVerified(row.wallet) || !!(v3Score && v3Score.verificationLevel >= 1));
-    if (hasSatpIdentity && row.wallet) {
-      addVerif('satp', row.wallet);
-    }
-    const computed = computeScore(chainVerifs, { hasSatpIdentity, claimed: !!row.claimed });
-    const labels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
+    const unified = computeUnifiedTrustScore(db, row, { v3Score });
 
     res.json({
       ok: true,
       data: {
         profileId,
-        reputationScore: computed.score,
-        verificationLevel: computed.level,
-        verificationLabel: computed.levelName || labels[computed.level] || 'Unknown',
+        reputationScore: unified.score,
+        verificationLevel: unified.level,
+        verificationLabel: unified.levelName,
         isBorn: !!(v3Score && v3Score.isBorn),
         faceImage: (v3Score && v3Score.faceImage) || null,
-        breakdown: computed.breakdown,
-        source: 'attestation-compute',
+        breakdown: unified.breakdown || {},
+        source: unified.source,
       }
     });
   } catch (e) {
+    console.error('[TrustScore] unified route error:', e.stack || e.message);
     res.status(500).json({ error: 'Internal error' });
   }
 });
-
-
 
 
 // ─── Genesis Record API (Bug 2 fix — Apr 6) ────────────────
@@ -630,26 +487,8 @@ app.get('/api/profile/:id/genesis', async (req, res) => {
       authority: v3Score.authority || '',
     };
 
-    try {
-      const profileId = req.params.id;
-      const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
-      const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(profileId)}/trust-score`);
-      if (trustRes.ok) {
-        const trustPayload = await trustRes.json();
-        const normalized = trustPayload?.data || null;
-        if (normalized) {
-          const normalizedScore = normalized.reputationScore ?? genesis.reputationScore ?? 0;
-          genesis = {
-            ...genesis,
-            reputationScore: normalizedScore,
-            verificationLevel: normalized.verificationLevel ?? genesis.verificationLevel,
-            verificationLabel: normalized.verificationLabel || genesis.verificationLabel,
-            reputationPct: (normalizedScore / 10).toFixed(2),
-            source: 'normalized-profile-trust',
-          };
-        }
-      }
-    } catch (_) {}
+    // [Apr 10] Preserve raw genesis here. Trust-score normalization belongs on
+    // profile display paths, not the dedicated on-chain genesis endpoint.
 
     res.json({ genesis });
   } catch (e) {
@@ -668,18 +507,14 @@ async function renderBadge(req, res) {
   try {
     const id = req.params.id;
     const db = profileStore.getDb();
-    const row = db.prepare('SELECT id, name FROM profiles WHERE id = ?').get(id);
+    const row = db.prepare('SELECT id, name, claimed, wallet, created_at FROM profiles WHERE id = ?').get(id);
     if (!row) return res.status(404).type('text/plain').send('Profile not found');
-    // A1: compute-score for badge consistency
-    const { computeScore } = require('./lib/compute-score');
-    const verifs = db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(id);
-    const hasSatp = verifs.some(v => v.platform === 'satp');
-    const computed = computeScore(verifs, { hasSatpIdentity: hasSatp, claimed: true });
-    const level = computed.level;
-    const score = computed.score;
-    const svg = generateBadgeSVG(row.name, level, score);
+    const v3Score = await getV3Score(id).catch(() => null);
+    const unified = computeUnifiedTrustScore(db, row, { v3Score });
+    const svg = generateBadgeSVG(row.name, unified.level, unified.score);
     res.set('Content-Type', 'image/svg+xml').set('Cache-Control', 'public, max-age=300').send(svg);
   } catch (e) {
+    console.error('[Badge] unified route error:', e.stack || e.message);
     res.status(500).type('text/plain').send('Error generating badge');
   }
 }
