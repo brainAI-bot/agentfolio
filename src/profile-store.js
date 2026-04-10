@@ -675,6 +675,17 @@ function enrichProfile(row) {
           const displayId = att.identifier || proofData.identifier || proofData.address || proofData.wallet || null;
           if (platform && displayId) platforms.add(platform);
         });
+        const verRows = getDb().prepare('SELECT platform, proof FROM verifications WHERE profile_id = ?').all(row.id);
+        verRows.forEach(ver => {
+          const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
+          if (!platform) return;
+          if (platform === 'solana') {
+            let proof = {};
+            try { proof = typeof ver.proof === 'string' ? JSON.parse(ver.proof) : (ver.proof || {}); } catch {}
+            if (!(proof.txSignature || proof.signature || proof.transactionSignature)) return;
+          }
+          platforms.add(platform);
+        });
         const attRows = getDb().prepare('SELECT platform, tx_signature FROM attestations WHERE profile_id = ?').all(row.id);
         attRows.forEach(att => {
           const platform = att.platform === 'twitter' ? 'x' : att.platform;
