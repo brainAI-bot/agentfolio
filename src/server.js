@@ -707,13 +707,13 @@ app.get('/api/analytics/views', (_req, res) => {
         p.handle,
         p.avatar,
         a.profile_views AS viewCount,
-        a.badge_views AS badgeViews,
+        a.badge_embeds AS badgeEmbeds,
         a.credential_requests AS credentialRequests,
         a.export_requests AS exportRequests,
         a.last_updated AS lastUpdated
       FROM profile_analytics a
       LEFT JOIN profiles p ON p.id = a.agent_id
-      ORDER BY a.profile_views DESC, a.badge_views DESC, a.credential_requests DESC
+      ORDER BY a.profile_views DESC, a.badge_embeds DESC, a.credential_requests DESC
       LIMIT 50
     `).all();
     res.json({ ok: true, leaderboard, count: leaderboard.length });
