@@ -623,30 +623,50 @@ function registerSATPRoutes(app) {
       const { agentId } = req.params;
       const attestations = chainCache.getVerifications(agentId);
       const txHints = loadAttestationTxHints(agentId);
-      const platforms = [...new Set(attestations.map(a => a.platform))];
+      const enriched = [];
+      const seenPlatforms = new Set();
+
+      for (const a of attestations) {
+        let proofData = {};
+        try { proofData = typeof a.proofData === 'string' ? JSON.parse(a.proofData) : (a.proofData || {}); } catch {}
+        const platform = normalizeAttestationPlatform(a.platform) || a.platform;
+        const hinted = txHints[platform] || null;
+        const txSignature = a.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || hinted?.txSignature || null;
+        enriched.push({
+          platform: a.platform,
+          txSignature,
+          memo: a.memo,
+          proofHash: a.proofHash,
+          signer: a.signer,
+          timestamp: a.timestamp,
+          solscanUrl: hinted?.solscanUrl || a.solscanUrl || (txSignature ? 'https://solana.fm/tx/' + txSignature : null),
+        });
+        if (platform) seenPlatforms.add(platform);
+      }
+
+      for (const [platform, hint] of Object.entries(txHints)) {
+        if (!platform || seenPlatforms.has(platform) || !hint?.txSignature) continue;
+        enriched.push({
+          platform,
+          txSignature: hint.txSignature,
+          memo: 'ATTESTATION|' + platform,
+          proofHash: null,
+          signer: null,
+          timestamp: null,
+          solscanUrl: hint.solscanUrl || ('https://solana.fm/tx/' + hint.txSignature),
+        });
+        seenPlatforms.add(platform);
+      }
+
+      const platforms = [...new Set(enriched.map(a => normalizeAttestationPlatform(a.platform) || a.platform).filter(Boolean))];
       
       res.json({
         ok: true,
         data: {
           agentId,
-          count: attestations.length,
+          count: enriched.length,
           platforms,
-          attestations: attestations.map(a => {
-            let proofData = {};
-            try { proofData = typeof a.proofData === 'string' ? JSON.parse(a.proofData) : (a.proofData || {}); } catch {}
-            const platform = normalizeAttestationPlatform(a.platform) || a.platform;
-            const hinted = txHints[platform] || null;
-            const txSignature = a.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || hinted?.txSignature || null;
-            return {
-              platform: a.platform,
-              txSignature,
-              memo: a.memo,
-              proofHash: a.proofHash,
-              signer: a.signer,
-              timestamp: a.timestamp,
-              solscanUrl: hinted?.solscanUrl || a.solscanUrl || (txSignature ? 'https://solana.fm/tx/' + txSignature : null),
-            };
-          }),
+          attestations: enriched,
         },
       });
     } catch (err) {
