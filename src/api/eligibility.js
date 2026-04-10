@@ -82,31 +82,29 @@ async function resolveAgentScore(agentId, profile) {
     }
   }
 
-  // Fallback to current chain-cache + compute-score path
+  // Fallback to active verifications + compute-score path
   if (computeScore && chainCache && profile) {
     try {
       const wallet = profile.wallet || parseJsonField(profile.wallets, {}).solana || null;
       const identityVerified = !!wallet && chainCache.isVerified(wallet);
-      const attRows = (chainCache.getVerifications(profile.id, profile.created_at) || []).filter(att => att.platform && att.platform !== 'review');
+      const verifRows = db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(profile.id);
       const seen = new Set();
       const chainVerifs = [];
-      if (identityVerified && wallet) {
-        chainVerifs.push({ platform: 'satp', identifier: wallet });
-        chainVerifs.push({ platform: 'solana', identifier: wallet });
-        seen.add('satp');
-        seen.add('solana');
-      }
-      for (const att of attRows) {
-        const platform = att.platform === 'twitter' ? 'x' : att.platform;
-        if (!platform || seen.has(platform)) continue;
-        let proofData = {};
-        try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
-        const identifier = att.identifier || proofData.identifier || proofData.address || proofData.wallet || null;
-        if (!identifier) continue;
+      const addVerif = (platform, identifier) => {
+        if (!platform || !identifier || seen.has(platform)) return;
         chainVerifs.push({ platform, identifier });
         seen.add(platform);
         if (platform === 'x') seen.add('twitter');
         if (platform === 'twitter') seen.add('x');
+      };
+      if (identityVerified && wallet) {
+        addVerif('satp', wallet);
+        addVerif('solana', wallet);
+      }
+      for (const ver of verifRows) {
+        const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
+        if (!platform || platform === 'review') continue;
+        addVerif(platform, ver.identifier || null);
       }
       const computed = computeScore(chainVerifs, {
         hasSatpIdentity: identityVerified,
@@ -115,7 +113,7 @@ async function resolveAgentScore(agentId, profile) {
       return {
         level: computed.level || 0,
         reputation: computed.score || 0,
-        source: 'compute_score_chain_cache',
+        source: 'compute_score_active_verifications',
         label: computed.levelName || 'Unknown',
       };
     } catch (e) {
