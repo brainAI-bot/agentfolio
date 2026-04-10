@@ -439,6 +439,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       try { proof = typeof verifRow.proof === 'string' ? JSON.parse(verifRow.proof) : (verifRow.proof || {}); } catch {}
       const hinted = txHints[platform] || null;
       const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || hinted?.txSignature || null;
+      if (platform === 'solana' && !txSignature) continue;
       addVerification(platform, verifRow.identifier || null, {
         txSignature,
         solscanUrl: hinted?.solscanUrl || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null),
@@ -545,9 +546,15 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
       if (platform === 'x') seen.add('twitter');
     };
 
-    for (const ver of dbVerifs) {
+    for (const ver of db.prepare('SELECT platform, identifier, proof FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(profileId)) {
       const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
       if (!platform || platform === 'review') continue;
+      if (platform === 'solana') {
+        let proof = {};
+        try { proof = typeof ver.proof === 'string' ? JSON.parse(ver.proof) : (ver.proof || {}); } catch {}
+        const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || null;
+        if (!txSignature) continue;
+      }
       addVerif(platform, ver.identifier || null);
     }
 
@@ -555,7 +562,6 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
     const hasSatpIdentity = !!row.wallet && (!!chainCache.isVerified(row.wallet) || !!(v3Score && v3Score.verificationLevel >= 1));
     if (hasSatpIdentity && row.wallet) {
       addVerif('satp', row.wallet);
-      addVerif('solana', row.wallet);
     }
     const computed = computeScore(chainVerifs, { hasSatpIdentity, claimed: !!row.claimed });
     const labels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
@@ -2400,6 +2406,7 @@ app.get('/api/score', async (req, res) => {
     try { proof = typeof ver.proof === 'string' ? JSON.parse(ver.proof) : (ver.proof || {}); } catch {}
     const hinted = ccHints.get(platform) || {};
     const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || hinted.txSignature || null;
+    if (platform === 'solana' && !txSignature) continue;
     verificationMap.set(platform, {
       type: platform,
       verified: true,
