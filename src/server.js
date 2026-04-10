@@ -587,7 +587,7 @@ app.get('/api/profile/:id/genesis', async (req, res) => {
 
 // ─── Badge SVG ──────────────────
 const { generateBadgeSVG } = require('./lib/badge-svg');
-app.get('/api/badge/:id.svg', async (req, res) => {
+async function renderBadge(req, res) {
   try {
     const id = req.params.id;
     const db = profileStore.getDb();
@@ -605,7 +605,9 @@ app.get('/api/badge/:id.svg', async (req, res) => {
   } catch (e) {
     res.status(500).type('text/plain').send('Error generating badge');
   }
-});
+}
+app.get('/api/badge/:id.svg', renderBadge);
+app.get('/api/badge/:id', renderBadge);
 
 // ─── DID Resolution for Solana Wallets ──────────────────
 app.get('/api/did/satp/sol/:address', async (req, res) => {
