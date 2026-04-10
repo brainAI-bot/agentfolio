@@ -472,16 +472,24 @@ export default function SATPExplorerPage() {
               {/* Platform badges */}
               {agent.platforms.length > 0 && (
                 <div className="flex flex-wrap gap-1 mb-3">
-                  {agent.platforms.slice(0, 8).map(p => (
+                  {agent.platforms.slice(0, 8).map(p => {
+                    const badgeColor = PLATFORM_BADGE_COLORS[p] || { bg: "rgba(148,163,184,0.14)", text: "#CBD5E1" };
+                    return (
                     <span
                       key={p}
-                      className="px-1.5 py-0.5 rounded text-[9px]"
-                      style={{ fontFamily: "var(--font-mono)", background: "var(--bg-tertiary)", color: "var(--text-secondary)" }}
+                      className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wider"
+                      style={{
+                        fontFamily: "var(--font-mono)",
+                        background: badgeColor.bg,
+                        color: badgeColor.text,
+                        border: `1px solid ${badgeColor.text}22`,
+                      }}
                       title={p}
                     >
                       {PLATFORM_ICONS[p] || "✓"} {p.slice(0, 3).toUpperCase()}
                     </span>
-                  ))}
+                    );
+                  })}
                   {agent.platforms.length > 8 && (
                     <span className="text-[9px]" style={{ color: "var(--text-tertiary)" }}>+{agent.platforms.length - 8}</span>
                   )}
