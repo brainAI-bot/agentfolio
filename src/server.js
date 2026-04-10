@@ -588,6 +588,7 @@ app.get('/api/profile/:id/genesis', async (req, res) => {
 // ─── Badge SVG ──────────────────
 const { generateBadgeSVG } = require('./lib/badge-svg');
 const { getTrendingAgents, getRisingAgents } = require('./lib/trending');
+const { getAllStandardSkills, getSkillCategories, getSkillsByCategory, autocompleteSkills } = require('./lib/skills-taxonomy');
 async function renderBadge(req, res) {
   try {
     const id = req.params.id;
@@ -640,6 +641,38 @@ app.get('/api/rising', async (req, res) => {
     res.json({ ok: true, agents, count: agents.length, source: 'trending-lib' });
   } catch (e) {
     console.error('[Rising] route error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/api/skills', (_req, res) => {
+  try {
+    const skills = getAllStandardSkills();
+    res.json({ ok: true, skills, count: skills.length });
+  } catch (e) {
+    console.error('[Skills] list error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/api/skills/categories', (_req, res) => {
+  try {
+    const categories = getSkillCategories();
+    res.json({ ok: true, categories, count: categories.length });
+  } catch (e) {
+    console.error('[Skills] categories error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/api/skills/autocomplete', (req, res) => {
+  try {
+    const q = String(req.query.q || req.query.query || '').trim();
+    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+    const skills = q ? autocompleteSkills(q, limit) : getAllStandardSkills().slice(0, limit);
+    res.json({ ok: true, skills, count: skills.length, query: q });
+  } catch (e) {
+    console.error('[Skills] autocomplete error:', e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
