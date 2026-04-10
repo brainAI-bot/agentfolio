@@ -666,15 +666,6 @@ function enrichProfile(row) {
     onchain_verification_count: (() => {
       try {
         const platforms = new Set();
-        const chainCache = require('./lib/chain-cache');
-        const atts = (chainCache.getVerifications(row.id, row.created_at) || []).filter(att => chainAttestationMatchesWallet(att, row));
-        atts.forEach(att => {
-          const platform = att.platform === 'twitter' ? 'x' : att.platform;
-          let proofData = {};
-          try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
-          const displayId = att.identifier || proofData.identifier || proofData.address || proofData.wallet || null;
-          if (platform && displayId) platforms.add(platform);
-        });
         const verRows = getDb().prepare('SELECT platform, proof FROM verifications WHERE profile_id = ?').all(row.id);
         verRows.forEach(ver => {
           const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
