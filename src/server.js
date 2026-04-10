@@ -446,7 +446,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       breakdown: v3Score ? computed.breakdown : {},
       links: {
         profile: SITE_URL + '/profile/' + profile.id,
-        trustCredential: SITE_URL + '/api/trust-credential/' + profile.id,
+        trustCredential: SITE_URL + '/trust/' + profile.id,
         api: SITE_URL + '/api/profile/' + profile.id,
       },
       createdAt: profile.created_at,
