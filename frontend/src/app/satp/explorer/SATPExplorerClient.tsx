@@ -96,7 +96,7 @@ function normalizeAttestation(att: any) {
     displayType: normalizePlatformLabel(rawPlatform),
     memo: att?.memo || proofData?.memo || proofData?.identifier || proofData?.wallet || proofData?.address || null,
     txSignature,
-    solscanUrl: txSignature ? `https://solscan.io/tx/${txSignature}` : (att?.solscanUrl || att?.url || att?.proof?.url || (att?.pda ? `https://solscan.io/account/${att.pda}` : null)),
+    solscanUrl: att?.solscanUrl || att?.url || att?.proof?.url || (txSignature ? `https://solana.fm/tx/${txSignature}` : (att?.pda ? `https://solscan.io/account/${att.pda}` : null)),
     timestamp: att?.timestamp || att?.verifiedAt || att?.verified_at || att?.createdAt || null,
   };
 }
