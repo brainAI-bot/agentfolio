@@ -2476,8 +2476,14 @@ app.get('/api/score', async (req, res) => {
   let _dbVerifs = [];
   try {
     const _sdb = new (require('better-sqlite3'))(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
-    _dbVerifs = _sdb.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(resolvedId);
+    const _rows = _sdb.prepare('SELECT platform, identifier, proof FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(resolvedId);
     _sdb.close();
+    _dbVerifs = _rows.filter(v => {
+      if (v.platform !== 'solana') return true;
+      let proof = {};
+      try { proof = typeof v.proof === 'string' ? JSON.parse(v.proof) : (v.proof || {}); } catch {}
+      return !!(proof.txSignature || proof.signature || proof.transactionSignature);
+    }).map(v => ({ platform: v.platform, identifier: v.identifier }));
   } catch (_) {}
   const _hasSatp = _dbVerifs.some(v => v.platform === 'satp');
   const _computed = _computeScore(_dbVerifs, { hasSatpIdentity: _hasSatp, claimed: !!row?.claimed });
@@ -2512,9 +2518,17 @@ app.get('/api/leaderboard/scores', async (req, res) => {
   const db = profileStore.getDb();
   const allProfiles = db.prepare('SELECT id, name, avatar, handle, claimed FROM profiles').all();
   const { computeScore: _lbScore } = require('./lib/compute-score');
-  const allVerifs = db.prepare('SELECT profile_id, platform, identifier FROM verifications').all();
+  const allVerifs = db.prepare('SELECT profile_id, platform, identifier, proof FROM verifications').all();
   const vMap = {};
-  for (const v of allVerifs) { if (!vMap[v.profile_id]) vMap[v.profile_id] = []; vMap[v.profile_id].push(v); }
+  for (const v of allVerifs) {
+    if (v.platform === 'solana') {
+      let proof = {};
+      try { proof = typeof v.proof === 'string' ? JSON.parse(v.proof) : (v.proof || {}); } catch {}
+      if (!(proof.txSignature || proof.signature || proof.transactionSignature)) continue;
+    }
+    if (!vMap[v.profile_id]) vMap[v.profile_id] = [];
+    vMap[v.profile_id].push({ profile_id: v.profile_id, platform: v.platform, identifier: v.identifier });
+  }
   const leaderboard = [];
   for (const p of allProfiles) {
     const verifs = vMap[p.id] || [];
