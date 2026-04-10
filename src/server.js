@@ -590,6 +590,7 @@ const { generateBadgeSVG } = require('./lib/badge-svg');
 const { getTrendingAgents, getRisingAgents } = require('./lib/trending');
 const { SKILL_CATEGORIES, getAllStandardSkills, getSkillsByCategory, autocompleteSkills } = require('./lib/skills-taxonomy');
 const { PROJECT_TYPES, MAX_PROJECTS } = require('./lib/projects');
+const { JOB_CATEGORIES } = require('./lib/marketplace');
 async function renderBadge(req, res) {
   try {
     const id = req.params.id;
