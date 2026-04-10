@@ -209,7 +209,7 @@ export default function SATPExplorerPage() {
               description: agent.description || profile?.tagline || "",
               programId: agent.programId,
               profileId,
-              trustCredentialUrl: agent.trustCredentialUrl || (profileId ? `/api/trust-credential/${profileId}` : null),
+              trustCredentialUrl: profileId ? `/trust/${profileId}` : (agent.trustCredentialUrl || null),
             };
           })
         );
@@ -603,7 +603,7 @@ export default function SATPExplorerPage() {
                     )}
                     {agent.profileId && (
                       <a
-                        href={agent.trustCredentialUrl || `/api/trust-credential/${agent.profileId}`}
+                        href={agent.trustCredentialUrl || `/trust/${agent.profileId}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex-1 block text-center py-2 rounded-lg text-[11px] font-semibold uppercase tracking-wider"
