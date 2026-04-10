@@ -525,12 +525,56 @@ function registerSATPRoutes(app) {
    */
   app.get('/api/satp/reputation/:wallet', async (req, res) => {
     try {
-      if (!isValidWallet(req.params.wallet)) return res.status(400).json({ error: 'Invalid wallet address' });
-      const rep = await satpReviewsOnchain.getReputation(req.params.wallet);
-      if (!rep) {
-        return res.status(404).json({ error: 'No reputation account found', wallet: req.params.wallet });
+      const wallet = req.params.wallet;
+      if (!isValidWallet(wallet)) return res.status(400).json({ error: 'Invalid wallet address' });
+      const rep = await satpReviewsOnchain.getReputation(wallet);
+
+      let profileId = null;
+      let normalizedTrust = null;
+      try {
+        const Database = require('better-sqlite3');
+        const path = require('path');
+        const db = new Database(path.join(__dirname, '..', '..', 'data', 'agentfolio.db'), { readonly: true });
+        try {
+          const profile = db.prepare("SELECT id FROM profiles WHERE wallet = ? OR json_extract(wallets, '$.solana') = ? LIMIT 1").get(wallet, wallet);
+          profileId = profile?.id || null;
+        } finally {
+          db.close();
+        }
+        if (profileId) {
+          const trustRes = await globalThis.fetch(`http://127.0.0.1:3333/api/profile/${encodeURIComponent(profileId)}/trust-score`);
+          if (trustRes.ok) {
+            const trustJson = await trustRes.json();
+            normalizedTrust = trustJson?.data || null;
+          }
+        }
+      } catch (_) {}
+
+      if (!rep && !normalizedTrust) {
+        return res.status(404).json({ error: 'No reputation account found', wallet });
       }
-      res.json({ ok: true, data: rep });
+
+      const rawScore = rep?.reputationScore ?? 0;
+      const rawLevel = rep?.verificationLevel ?? 1;
+      const rawLabel = rep?.verificationLabel || 'Registered';
+      const reputationScore = normalizedTrust?.reputationScore ?? rawScore;
+      const verificationLevel = normalizedTrust?.verificationLevel ?? rawLevel;
+      const verificationLabel = normalizedTrust?.verificationLabel ?? rawLabel;
+
+      res.json({
+        ok: true,
+        data: {
+          ...(rep || {}),
+          reputationScore,
+          verificationLevel,
+          verificationLabel,
+          source: normalizedTrust ? 'normalized-profile-trust' : 'solana-mainnet',
+          profileId,
+          rawReputationScore: rawScore,
+          rawVerificationLevel: rawLevel,
+          rawVerificationLabel: rawLabel,
+        }
+      });
     } catch (err) {
       console.error('[SATP API] reputation error:', err.message);
       res.status(500).json({ error: 'Failed to fetch reputation', detail: err.message });
@@ -600,16 +644,34 @@ function registerSATPRoutes(app) {
     try {
       const record = await satpV3Client.getGenesisRecord(req.params.agentId);
       if (!record) return res.status(404).json({ error: 'No Genesis Record', agentId: req.params.agentId });
+
+      let normalizedTrust = null;
+      try {
+        const trustRes = await globalThis.fetch(`http://127.0.0.1:3333/api/profile/${encodeURIComponent(req.params.agentId)}/trust-score`);
+        if (trustRes.ok) {
+          const trustJson = await trustRes.json();
+          normalizedTrust = trustJson?.data || null;
+        }
+      } catch (_) {}
+
+      const reputationScore = normalizedTrust?.reputationScore ?? record.reputationScore;
+      const verificationLevel = normalizedTrust?.verificationLevel ?? record.verificationLevel;
+      const verificationLabel = normalizedTrust?.verificationLabel ?? record.verificationLabel;
+
       res.json({
         ok: true,
-        source: 'satp_v3_onchain',
+        source: normalizedTrust ? 'normalized-profile-trust' : 'satp_v3_onchain',
         data: {
-          reputationScore: record.reputationScore,
-          reputationPct: record.reputationPct,
-          verificationLevel: record.verificationLevel,
-          verificationLabel: record.verificationLabel,
+          reputationScore,
+          reputationPct: normalizedTrust ? ((reputationScore || 0) / 10).toFixed(2) : record.reputationPct,
+          verificationLevel,
+          verificationLabel,
           isBorn: record.isBorn,
           pda: record.pda,
+          profileId: req.params.agentId,
+          rawReputationScore: record.reputationScore,
+          rawVerificationLevel: record.verificationLevel,
+          rawVerificationLabel: record.verificationLabel,
         }
       });
     } catch (e) {
