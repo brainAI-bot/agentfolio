@@ -1244,9 +1244,21 @@ function handleBurnToBecome(req, res, url) {
           
           let level = 0, rep = 0, isBorn = false;
           try {
+            const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
+            const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(profileId)}/trust-score`);
+            if (trustRes.ok) {
+              const trustJson = await trustRes.json();
+              const trust = trustJson?.data;
+              if (trust && typeof trust.reputationScore === 'number') {
+                level = trust.verificationLevel || 0;
+                rep = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
+              }
+            }
+          } catch {}
+          try {
             const { getV3Score } = require("../v3-score-service");
             const v3 = await getV3Score(profileId);
-            if (v3) { level = v3.verificationLevel || 0; rep = v3.reputationScore || 0; isBorn = !!v3.isBorn; }
+            if (v3) { isBorn = !!v3.isBorn; }
           } catch {}
           if (level < 3 || rep < 50) return sendJson(403, { error: "Free mint requires Level 3+ and Rep 50+", level, rep });
           if (isBorn) return sendJson(403, { error: "Already used free burn-to-become", isBorn: true });
@@ -1408,8 +1420,21 @@ function handleBurnToBecome(req, res, url) {
         }
         
         if (profileId) {
-          // Use best-of V3 on-chain + V2 computed scores (fixes stale Genesis Record bug)
+          // Use normalized profile trust first, with raw/V2 scoring only as fallback.
           let v3Level = 0, v3Rep = 0, v2Level = 0, v2Rep = 0;
+          let level = 0, rep = 0;
+          try {
+            const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
+            const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(profileId)}/trust-score`);
+            if (trustRes.ok) {
+              const trustJson = await trustRes.json();
+              const trust = trustJson?.data;
+              if (trust && typeof trust.reputationScore === 'number') {
+                level = trust.verificationLevel || 0;
+                rep = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
+              }
+            }
+          } catch (e) { console.error('[BURN] normalized trust fetch error:', e.message); }
           try {
             const { getV3Score } = require('../v3-score-service');
             const v3 = await getV3Score(profileId);
@@ -1418,26 +1443,28 @@ function handleBurnToBecome(req, res, url) {
               v3Rep = v3.reputationScore || 0;
             }
           } catch (e) { console.error('[BURN] V3 score lookup failed:', e.message); }
-          try {
-            let getCompleteScore; try { getCompleteScore = require('../lib/scoring-engine-v2').getCompleteScore; } catch(_) { getCompleteScore = () => ({ overall: 0, level: 'Unverified' }); }
-            const profile = checkDb.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
-            if (profile) {
-              const profileObj = {
-                id: profile.id, name: profile.name, handle: profile.handle, bio: profile.bio,
-                skills: JSON.parse(profile.skills || '[]'),
-                verification: JSON.parse(profile.verification || '{}'),
-                endorsements: JSON.parse(profile.endorsements || '[]'),
-                portfolio: JSON.parse(profile.portfolio || '[]'),
-                track_record: JSON.parse(profile.track_record || '{}'),
-              };
-              const scoreResult = getCompleteScore(profileObj);
-              v2Level = scoreResult.verificationLevel?.level || 0;
-              v2Rep = scoreResult.reputationScore?.score || 0;
-            }
-          } catch (e) { console.error('[BURN] V2 scoring error:', e.message); }
-          const level = Math.max(v3Level, v2Level);
-          const rep = Math.max(v3Rep, v2Rep);
-          console.log('[BURN] Score resolution for', profileId, 'V3:', v3Level+'/'+v3Rep, 'V2:', v2Level+'/'+v2Rep, 'Final:', level+'/'+rep);
+          if (!level && !rep) {
+            try {
+              let getCompleteScore; try { getCompleteScore = require('../lib/scoring-engine-v2').getCompleteScore; } catch(_) { getCompleteScore = () => ({ overall: 0, level: 'Unverified' }); }
+              const profile = checkDb.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
+              if (profile) {
+                const profileObj = {
+                  id: profile.id, name: profile.name, handle: profile.handle, bio: profile.bio,
+                  skills: JSON.parse(profile.skills || '[]'),
+                  verification: JSON.parse(profile.verification || '{}'),
+                  endorsements: JSON.parse(profile.endorsements || '[]'),
+                  portfolio: JSON.parse(profile.portfolio || '[]'),
+                  track_record: JSON.parse(profile.track_record || '{}'),
+                };
+                const scoreResult = getCompleteScore(profileObj);
+                v2Level = scoreResult.verificationLevel?.level || 0;
+                v2Rep = scoreResult.reputationScore?.score || 0;
+              }
+            } catch (e) { console.error('[BURN] V2 scoring error:', e.message); }
+            level = Math.max(v3Level, v2Level);
+            rep = Math.max(v3Rep, v2Rep);
+          }
+          console.log('[BURN] Score resolution for', profileId, 'normalized/fallback =>', level+'/'+rep, 'V3:', v3Level+'/'+v3Rep, 'V2:', v2Level+'/'+v2Rep);
           isEligibleFree = level >= 3 && rep >= 50;
           console.log("[BURN DEBUG]", { profileId, level, rep, isEligibleFree, effectiveMintCount: typeof effectiveMintCount !== "undefined" ? effectiveMintCount : "not set yet" });
         }
