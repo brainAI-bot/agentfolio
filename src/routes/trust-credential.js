@@ -168,30 +168,28 @@ function registerTrustCredentialRoutes(app) {
       try { const t = JSON.parse(profile.tags || '[]'); parsed.tags = Array.isArray(t) ? t : []; } catch (_) {}
       try { const s = JSON.parse(profile.skills || '[]'); parsed.skills = Array.isArray(s) ? s : []; } catch (_) {}
 
-      // 3. Clean-start scoring: on-chain only. No DB verification fallback.
+      // 3. Normalized scoring from active verifications, not raw memo history.
       const v3Score = await getV3Score(profile.id).catch(() => null);
-      const rawChainAttestations = chainCache.getVerifications(profile.id, profile.created_at) || [];
+      const dbVerifRows = db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(profile.id);
       const seenPlatforms = new Set();
-      const realAttestations = [];
-      for (const att of rawChainAttestations) {
-        const platform = att.platform === 'twitter' ? 'x' : att.platform;
-        if (!platform || platform === 'review' || seenPlatforms.has(platform)) continue;
-        let proofData = {};
-        try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch (_) {}
-        const identifier = att.identifier || proofData.identifier || proofData.address || proofData.wallet || null;
-        if (!identifier) continue;
-        realAttestations.push({ platform, identifier });
+      const activeVerifications = [];
+      const addVerification = (platform, identifier) => {
+        if (!platform || platform === 'review' || !identifier || seenPlatforms.has(platform)) return;
+        activeVerifications.push({ platform, identifier });
         seenPlatforms.add(platform);
         if (platform === 'x') seenPlatforms.add('twitter');
+        if (platform === 'twitter') seenPlatforms.add('x');
+      };
+      for (const verif of dbVerifRows) {
+        const platform = verif.platform === 'twitter' ? 'x' : verif.platform;
+        addVerification(platform, verif.identifier || null);
       }
       const identityVerified = !!(profile.wallet && (chainCache.isVerified(profile.wallet) || !!(v3Score && v3Score.verificationLevel >= 1)));
-      const chainScoreInputs = [];
       if (identityVerified && profile.wallet) {
-        chainScoreInputs.push({ platform: 'satp', identifier: profile.wallet });
-        chainScoreInputs.push({ platform: 'solana', identifier: profile.wallet });
+        addVerification('satp', profile.wallet);
+        addVerification('solana', profile.wallet);
       }
-      for (const att of realAttestations) chainScoreInputs.push(att);
-      const computed = computeScore(chainScoreInputs, {
+      const computed = computeScore(activeVerifications, {
         hasSatpIdentity: identityVerified,
         claimed: profile.claimed === 1 || profile.claimed === true,
       });
@@ -213,11 +211,11 @@ function registerTrustCredentialRoutes(app) {
         tier: normalizedTier,
         verificationLevel: normalizedVerificationLevel,
         scoreVersion: 'attestation-compute',
-        verificationCount: realAttestations.length,
+        verificationCount: computed.verificationCount || activeVerifications.length,
         onChainRegistered,
         breakdown: {
-          onChainReputation: computed.breakdown?.satp_identity || 0,
-          verifications: normalizedTrustScore - (computed.breakdown?.satp_identity || 0),
+          onChainReputation: computed.breakdown?.satp_identity || computed.breakdown?.satp || 0,
+          verifications: normalizedTrustScore - (computed.breakdown?.satp_identity || computed.breakdown?.satp || 0),
           socialProof: 0,
           completeness: 0,
           marketplace: 0,
