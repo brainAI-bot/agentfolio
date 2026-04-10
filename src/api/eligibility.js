@@ -99,13 +99,21 @@ async function resolveAgentScore(agentId, profile) {
       };
       if (identityVerified && wallet) {
         addVerif('satp', wallet);
-        addVerif('solana', wallet);
       }
       for (const ver of verifRows) {
         const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
-        if (!platform || platform === 'review') continue;
+        if (!platform || platform === 'review' || platform === 'solana') continue;
         addVerif(platform, ver.identifier || null);
       }
+      try {
+        const solRows = db.prepare('SELECT proof FROM verifications WHERE profile_id = ? AND platform = ? ORDER BY verified_at DESC').all(profile.id, 'solana');
+        for (const sol of solRows) {
+          let proof = {};
+          try { proof = typeof sol.proof === 'string' ? JSON.parse(sol.proof) : (sol.proof || {}); } catch {}
+          const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || null;
+          if (txSignature) { addVerif('solana', wallet); break; }
+        }
+      } catch (_) {}
       const computed = computeScore(chainVerifs, {
         hasSatpIdentity: identityVerified,
         claimed: !!profile.claimed,

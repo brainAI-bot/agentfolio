@@ -182,13 +182,22 @@ function registerTrustCredentialRoutes(app) {
       };
       for (const verif of dbVerifRows) {
         const platform = verif.platform === 'twitter' ? 'x' : verif.platform;
+        if (platform === 'solana') continue;
         addVerification(platform, verif.identifier || null);
       }
       const identityVerified = !!(profile.wallet && (chainCache.isVerified(profile.wallet) || !!(v3Score && v3Score.verificationLevel >= 1)));
       if (identityVerified && profile.wallet) {
         addVerification('satp', profile.wallet);
-        addVerification('solana', profile.wallet);
       }
+      try {
+        const solRows = db.prepare('SELECT proof FROM verifications WHERE profile_id = ? AND platform = ? ORDER BY verified_at DESC').all(profile.id, 'solana');
+        for (const sol of solRows) {
+          let proof = {};
+          try { proof = typeof sol.proof === 'string' ? JSON.parse(sol.proof) : (sol.proof || {}); } catch {}
+          const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || null;
+          if (txSignature) { addVerification('solana', profile.wallet); break; }
+        }
+      } catch (_) {}
       const computed = computeScore(activeVerifications, {
         hasSatpIdentity: identityVerified,
         claimed: profile.claimed === 1 || profile.claimed === true,

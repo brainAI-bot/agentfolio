@@ -545,12 +545,14 @@ function enrichProfile(row) {
           const displayId = ver.identifier || proof.identifier || proof.address || proof.wallet || row.wallet || null;
           if (!displayId) continue;
           const hint = hints.get(plat) || {};
+          const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || hint.txSignature || null;
+          if (plat === 'solana' && !txSignature) continue;
           vd[plat] = {
             verified: true,
             address: proof.address || displayId,
             identifier: displayId,
             linked: true,
-            txSignature: proof.txSignature || proof.signature || proof.transactionSignature || hint.txSignature || null,
+            txSignature,
             verifiedAt: ver.verified_at || hint.verifiedAt || null,
             source: 'active-verification'
           };
@@ -606,6 +608,7 @@ function enrichProfile(row) {
           if (!displayId) continue;
           const hint = hints.get(platform) || {};
           const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || hint.txSignature || null;
+          if (platform === 'solana' && !txSignature) continue;
           const proofUrl = hint.url || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null);
           vMap[platform] = {
             verified: true,
@@ -676,7 +679,6 @@ function enrichProfile(row) {
       const hasSatpIdentity = !!row.wallet || !!(v3 && v3.verificationLevel >= 1);
       if (hasSatpIdentity && row.wallet) {
         addVerif('satp', row.wallet);
-        addVerif('solana', row.wallet);
       }
       const computed = computeScore(scoreInputs, { hasSatpIdentity, claimed: !!row.claimed });
       return {
@@ -1313,12 +1315,23 @@ function registerRoutes(app) {
         };
         if (identityVerified && p.wallet) {
           addVerif('satp', p.wallet);
-          addVerif('solana', p.wallet);
         }
         for (const ver of dbVerifs) {
           const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
           const identifier = ver.identifier || null;
+          if (platform === 'solana') continue;
           addVerif(platform, identifier);
+        }
+        if (identityVerified && p.wallet) {
+          try {
+            const solRows = d.prepare('SELECT proof FROM verifications WHERE profile_id = ? AND platform = ? ORDER BY verified_at DESC').all(p.id, 'solana');
+            for (const sol of solRows) {
+              let proof = {};
+              try { proof = typeof sol.proof === 'string' ? JSON.parse(sol.proof) : (sol.proof || {}); } catch {}
+              const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || null;
+              if (txSignature) { addVerif('solana', p.wallet); break; }
+            }
+          } catch (_) {}
         }
         computed = computeScore(chainVerifs, { hasSatpIdentity: identityVerified, claimed: !!p.claimed }) || computed;
       } catch (_) {}
