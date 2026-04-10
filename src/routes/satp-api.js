@@ -80,6 +80,9 @@ function registerSATPRoutes(app) {
         var v3Agents = await v3Explorer.fetchAllV3Agents();
         var v3Match = v3Agents.find(function(a) { return a.authority === wallet; });
         if (v3Match) {
+          scores.rawReputationScore = v3Match.reputationScore;
+          scores.rawVerificationLevel = v3Match.verificationLevel;
+          scores.rawVerificationLabel = v3Match.tierLabel;
           scores.reputationScore = v3Match.reputationScore;
           scores.verificationLevel = v3Match.verificationLevel;
           scores.verificationLabel = v3Match.tierLabel;
@@ -91,6 +94,38 @@ function registerSATPRoutes(app) {
       } catch (v3e) {
         // V3 lookup failed, return V2 data as-is
       }
+
+      // Profile-facing SATP score responses should prefer normalized profile trust
+      // when this wallet is linked to a known AgentFolio profile.
+      try {
+        const Database = require('better-sqlite3');
+        const path = require('path');
+        const db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+        let matchedProfile = db.prepare("SELECT * FROM profiles WHERE wallet = ?").get(wallet);
+        if (!matchedProfile) {
+          matchedProfile = db.prepare("SELECT * FROM profiles WHERE id IN (SELECT profile_id FROM verifications WHERE identifier = ?)").get(wallet);
+        }
+        try { db.close(); } catch {}
+        if (matchedProfile?.id) {
+          const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
+          const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(matchedProfile.id)}/trust-score`);
+          if (trustRes.ok) {
+            const trustJson = await trustRes.json();
+            const trust = trustJson?.data;
+            if (trust && typeof trust.reputationScore === 'number') {
+              const normalizedScore = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
+              scores.reputationScore = normalizedScore;
+              scores.trustScore = normalizedScore;
+              scores.verificationLevel = trust.verificationLevel || 0;
+              scores.verificationLabel = trust.verificationLabel || trust.levelName || scores.verificationLabel;
+              scores.reputationRank = satpIdentity.scoreToRank(normalizedScore);
+              scores.tier = trust.verificationLabel || trust.levelName || scores.tier;
+              scores.source = 'normalized-profile-trust';
+              scores.profileId = matchedProfile.id;
+            }
+          }
+        }
+      } catch (_) {}
       res.json({ ok: true, data: scores });
     } catch (err) {
       console.error('[SATP API] scores error: ' + err.message);
