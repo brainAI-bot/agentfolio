@@ -20,6 +20,7 @@ const path = require('path');
 const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const { computeScore } = require("./lib/compute-score");
+const { computeUnifiedTrustScore } = require("./lib/unified-trust-score");
 
 // Rate limiter for registration: 5 per hour per IP
 const registerLimiter = rateLimit({
@@ -696,46 +697,32 @@ function enrichProfile(row) {
     },
     // A1: Single scoring function -- compute from chain-cache attestations, not DB verifications
     ...(() => {
-      const scoreInputs = [];
-      const seen = new Set();
-      const addVerif = (platform, identifier) => {
-        if (!platform || platform === 'review' || !identifier || seen.has(platform)) return;
-        scoreInputs.push({ platform, identifier });
-        seen.add(platform);
-        if (platform === 'x') seen.add('twitter');
-        if (platform === 'twitter') seen.add('x');
-      };
-      try {
-        const rows = getDb().prepare('SELECT platform, identifier, proof FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
-        for (const ver of rows) {
-          const platform = ver.platform === 'twitter' ? 'x' : (ver.platform === 'satp_v3' ? 'satp' : ver.platform);
-          if (platform === 'solana' || platform === 'satp') {
-            let proof = {};
-            try { proof = typeof ver.proof === 'string' ? JSON.parse(ver.proof) : (ver.proof || {}); } catch {}
-            const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || null;
-            if (!txSignature) continue;
-          }
-          addVerif(platform, ver.identifier || null);
-        }
-      } catch (_) {}
-      const hasSatpIdentity = scoreInputs.some(v => v.platform === 'satp') || !!(v3 && v3.verificationLevel >= 1);
-      if (hasSatpIdentity && row.wallet) {
-        addVerif('satp', row.wallet);
-      }
-      const computed = computeScore(scoreInputs, { hasSatpIdentity, claimed: !!row.claimed });
+      const unified = computeUnifiedTrustScore(getDb(), row, { v3Score: v3 });
+      const b = unified.breakdown || {};
+      const verificationPoints = Object.entries(b).reduce((sum, [key, value]) => {
+        if (!value || key === 'satp' || key === 'satp_identity' || key === 'completeness') return sum;
+        return sum + value;
+      }, 0);
       return {
-        trust_score: { overall_score: computed.score, level: computed.levelName, score_breakdown: computed.breakdown, source: "compute-score-active-verifications" },
-        level: computed.level,
-        tier: computed.levelName,
-        score: computed.score,
-        trustScore: computed.score,
-        trustBreakdown: (() => { const b = computed.breakdown || {}; return { onChainReputation: b.satp || b.satp_identity || 0, verifications: (b.solana || 0) + (b.github || 0) + (b.x || 0) + (b.ethereum || 0) + (b.hyperliquid || 0) + (b.polymarket || 0) + (b.discord || 0) + (b.telegram || 0) + (b.moltbook || 0) + (b.agentmail || 0) + (b.website || 0) + (b.domain || 0) + (b.mcp || 0) + (b.a2a || 0), socialProof: 0, completeness: b.completeness || 0, marketplace: 0, tenure: 0 }; })(),
-        verificationLevel: computed.level,
-        verification_level: computed.level,
-        reputation_score: computed.score,
-        levelName: computed.levelName,
-        verificationBadge: computed.badge,
-        verificationLevelName: computed.levelName,
+        trust_score: { overall_score: unified.score, level: unified.levelName, score_breakdown: b, source: unified.source },
+        level: unified.level,
+        tier: unified.levelName,
+        score: unified.score,
+        trustScore: unified.score,
+        trustBreakdown: {
+          onChainReputation: b.satp || b.satp_identity || 0,
+          verifications: verificationPoints,
+          socialProof: 0,
+          completeness: b.completeness || 0,
+          marketplace: 0,
+          tenure: 0,
+        },
+        verificationLevel: unified.level,
+        verification_level: unified.level,
+        reputation_score: unified.score,
+        levelName: unified.levelName,
+        verificationBadge: unified.badge,
+        verificationLevelName: unified.levelName,
       };
     })(),
     // Top-level unclaimed flag for frontend (from metadata)
@@ -1169,29 +1156,8 @@ function registerRoutes(app) {
           } catch {}
         }
       }
-      // [CEO Apr 4] DB score override REMOVED -- on-chain is sole authority for display
-      // P0 Apr 9: normalize profile-facing genesis output to trust-score data so
-      // polluted legacy attestations do not leak conflicting score/level values.
-      try {
-        const profileId = req.params.id;
-        const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333'
-        const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(profileId)}/trust-score`)
-        if (trustRes.ok) {
-          const trustPayload = await trustRes.json()
-          const normalized = trustPayload?.data || null
-          if (normalized) {
-            const normalizedScore = normalized.reputationScore ?? record.reputationScore ?? 0
-            record = {
-              ...record,
-              reputationScore: normalizedScore,
-              verificationLevel: normalized.verificationLevel ?? record.verificationLevel,
-              verificationLabel: normalized.verificationLabel || record.verificationLabel,
-              reputationPct: (normalizedScore / 10).toFixed(2),
-              source: 'normalized-profile-trust',
-            }
-          }
-        }
-      } catch (_) {}
+      // [Apr 10] Preserve raw genesis here. Profile/trust overlays are handled separately
+      // so /api/profile/:id/genesis remains a true on-chain source-of-truth view.
 
       res.json({ genesis: record });
     } catch (e) {
@@ -1339,72 +1305,31 @@ function registerRoutes(app) {
     } catch (_) {}
     for (const p of profiles) {
       const v = v3ScoresById.get(p.id) || p.v3 || {};
-      const v3Score = v.reputationScore > 10000 ? Math.round(v.reputationScore / 10000) : (v.reputationScore || 0);
-      let computed = { score: 0, level: 0, levelName: 'Unverified' };
-      try {
-        const chainCache = require('./lib/chain-cache');
-        const { computeScore } = require('./lib/compute-score');
-        const identityVerified = !!p.wallet && (chainCache.isVerified(p.wallet) || !!(v && v.verificationLevel >= 1));
-        const dbVerifs = (() => {
-          try {
-            return d.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(p.id) || [];
-          } catch (_) {
-            return [];
-          }
-        })();
-        const chainVerifs = [];
-        const seen = new Set();
-        const addVerif = (platform, identifier) => {
-          if (!platform || !identifier) return;
-          const key = platform + ':' + identifier;
-          if (seen.has(key)) return;
-          seen.add(key);
-          chainVerifs.push({ platform, identifier });
-        };
-        if (identityVerified && p.wallet) {
-          addVerif('satp', p.wallet);
-        }
-        for (const ver of dbVerifs) {
-          const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
-          const identifier = ver.identifier || null;
-          if (platform === 'solana') continue;
-          addVerif(platform, identifier);
-        }
-        if (identityVerified && p.wallet) {
-          try {
-            const solRows = d.prepare('SELECT proof FROM verifications WHERE profile_id = ? AND platform = ? ORDER BY verified_at DESC').all(p.id, 'solana');
-            for (const sol of solRows) {
-              let proof = {};
-              try { proof = typeof sol.proof === 'string' ? JSON.parse(sol.proof) : (sol.proof || {}); } catch {}
-              const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || null;
-              if (txSignature) { addVerif('solana', p.wallet); break; }
-            }
-          } catch (_) {}
-        }
-        computed = computeScore(chainVerifs, { hasSatpIdentity: identityVerified, claimed: !!p.claimed }) || computed;
-      } catch (_) {}
-      const computedScore = computed.score || 0;
-      const useComputedLevel = computedScore > v3Score;
-      const displayScore = Math.max(v3Score, computedScore);
-      const displayLevel = useComputedLevel ? (computed.level || 0) : (v.verificationLevel || computed.level || 0);
-      const displayLabel = useComputedLevel ? (computed.levelName || levelLabels[displayLevel] || 'Unverified') : (v.verificationLabel || computed.levelName || levelLabels[displayLevel] || 'Unverified');
-      p.v3 = Object.keys(v).length ? {
-        ...v,
+      const unified = computeUnifiedTrustScore(d, p, { v3Score: v });
+      const displayScore = unified.score;
+      const displayLevel = unified.level;
+      const displayLabel = unified.levelName;
+      p.trustScore = displayScore;
+      p.reputationScore = displayScore;
+      p.score = displayScore;
+      p.verificationLevel = displayLevel;
+      p.verificationLabel = displayLabel;
+      p.levelName = displayLabel;
+      p.verificationBadge = unified.badge;
+      p.trust_score = {
+        overall_score: displayScore,
+        level: displayLabel,
+        score_breakdown: unified.breakdown || {},
+        source: unified.source,
+      };
+      p.v3 = {
+        ...(p.v3 || {}),
         reputationScore: displayScore,
-        reputationPct: (displayScore / 10).toFixed(2),
         verificationLevel: displayLevel,
         verificationLabel: displayLabel,
-        source: 'normalized-profile-trust',
-      } : p.v3;
-      p.trust_score = displayScore;
-      p.trustScore = displayScore;
-      p.score = displayScore;
-      p.reputation_score = displayScore;
-      p.level = displayLevel;
-      p.verificationLevel = displayLevel;
-      p.tier = displayLabel;
-      p.levelName = displayLabel;
-      p.verificationLabel = displayLabel;
+        breakdown: unified.breakdown || {},
+        source: unified.source,
+      };
       p.verificationLevelName = displayLabel;
     }
     // Sort parameter: trust_desc (default), trust_asc, name_asc, name_desc, newest, oldest
@@ -1467,12 +1392,12 @@ function registerRoutes(app) {
         const v3Data = genesisJson && genesisJson.genesis ? genesisJson.genesis : genesisJson;
         const hasGenesis = v3Data && v3Data.agentName && !v3Data.error;
         if (hasGenesis) {
-          const v3Score = v3Data.reputationScore > 10000 ? Math.round(v3Data.reputationScore / 10000) : (v3Data.reputationScore || 0);
+          const v3Score = v3Data.reputationScore > 10000 ? Math.round(v3Data.reputationScore / 1000) : (v3Data.reputationScore || 0);
           enriched.onchain = v3Data;
           enriched.isBorn = v3Data.isBorn;
           if (v3Data.faceImage) enriched.faceImage = v3Data.faceImage;
           if (v3Data.authority && !enriched.walletAddress) enriched.walletAddress = v3Data.authority;
-          if (!enriched.score && v3Score > 0) {
+          if (v3Score > 0 && ((!enriched.score || v3Score > enriched.score) || ((v3Data.verificationLevel || 0) > (enriched.verificationLevel || 0)))) {
             enriched.trust_score = { overall_score: v3Score, level: v3Data.verificationLabel || 'Unverified', score_breakdown: {}, source: 'v3-genesis-fallback' };
             enriched.score = v3Score;
             enriched.trustScore = v3Score;
