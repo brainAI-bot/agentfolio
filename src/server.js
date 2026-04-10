@@ -2072,7 +2072,28 @@ try {
     app.get('/api/satp/explorer/agents', async (req, res) => {
       try {
         const result = await getSatpAgents();
-        res.json(result);
+        let agents = Array.isArray(result?.agents) ? [...result.agents] : [];
+        const rawSearch = String(req.query.search || '').trim();
+        if (rawSearch) {
+          const q = rawSearch.toLowerCase();
+          const rank = (agent) => {
+            const fields = [agent?.agentId, agent?.profileId, agent?.name, agent?.handle].filter(Boolean).map(v => String(v).toLowerCase());
+            if (fields.some(v => v == q)) return 0;
+            if (fields.some(v => v.startsWith(q))) return 1;
+            if (fields.some(v => v.includes(q))) return 2;
+            return 99;
+          };
+          agents = agents
+            .map(agent => ({ agent, _rank: rank(agent) }))
+            .filter(entry => entry._rank < 99)
+            .sort((a, b) => a._rank - b._rank || String(a.agent.name || a.agent.agentId || '').localeCompare(String(b.agent.name || b.agent.agentId || '')))
+            .map(entry => entry.agent);
+        }
+        const limit = Number.parseInt(String(req.query.limit || ''), 10);
+        if (Number.isFinite(limit) && limit > 0) {
+          agents = agents.slice(0, limit);
+        }
+        res.json({ ...result, agents, count: agents.length, search: rawSearch || undefined });
       } catch (e) {
         res.status(500).json({ error: e.message });
       }
