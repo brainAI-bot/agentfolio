@@ -589,6 +589,7 @@ app.get('/api/profile/:id/genesis', async (req, res) => {
 const { generateBadgeSVG } = require('./lib/badge-svg');
 const { getTrendingAgents, getRisingAgents } = require('./lib/trending');
 const { SKILL_CATEGORIES, getAllStandardSkills, getSkillsByCategory, autocompleteSkills } = require('./lib/skills-taxonomy');
+const { PROJECT_TYPES, MAX_PROJECTS } = require('./lib/projects');
 async function renderBadge(req, res) {
   try {
     const id = req.params.id;
@@ -673,6 +674,15 @@ app.get('/api/skills/autocomplete', (req, res) => {
     res.json({ ok: true, skills, count: skills.length, query: q });
   } catch (e) {
     console.error('[Skills] autocomplete error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/api/project-types', (_req, res) => {
+  try {
+    res.json({ ok: true, types: PROJECT_TYPES, maxProjects: MAX_PROJECTS });
+  } catch (e) {
+    console.error('[Projects] types error:', e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
