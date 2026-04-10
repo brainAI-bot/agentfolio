@@ -657,28 +657,30 @@ function enrichProfile(row) {
     },
     // A1: Single scoring function -- compute from chain-cache attestations, not DB verifications
     ...(() => {
-      const chainVerifs = [];
+      const scoreInputs = [];
+      const seen = new Set();
+      const addVerif = (platform, identifier) => {
+        if (!platform || platform === 'review' || !identifier || seen.has(platform)) return;
+        scoreInputs.push({ platform, identifier });
+        seen.add(platform);
+        if (platform === 'x') seen.add('twitter');
+        if (platform === 'twitter') seen.add('x');
+      };
       try {
-        const chainCache = require('./lib/chain-cache');
-        const atts = (chainCache.getVerifications(row.id, row.created_at) || []).filter(att => chainAttestationMatchesWallet(att, row));
-        for (const att of atts) {
-          const platform = att.platform === 'twitter' ? 'x' : att.platform;
-          if (!platform || platform === 'review') continue;
-          let proofData = {};
-          try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
-          const identifier = att.identifier || proofData.identifier || proofData.address || proofData.wallet || att.signer || platform;
-          chainVerifs.push({
-            platform,
-            identifier,
-            proof: JSON.stringify(proofData || {}),
-            verified_at: att.timestamp || att.verifiedAt || null,
-          });
+        const rows = getDb().prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
+        for (const ver of rows) {
+          const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
+          addVerif(platform, ver.identifier || null);
         }
       } catch (_) {}
       const hasSatpIdentity = !!row.wallet || !!(v3 && v3.verificationLevel >= 1);
-      const computed = computeScore(chainVerifs, { hasSatpIdentity, claimed: !!row.claimed });
+      if (hasSatpIdentity && row.wallet) {
+        addVerif('satp', row.wallet);
+        addVerif('solana', row.wallet);
+      }
+      const computed = computeScore(scoreInputs, { hasSatpIdentity, claimed: !!row.claimed });
       return {
-        trust_score: { overall_score: computed.score, level: computed.levelName, score_breakdown: computed.breakdown, source: "compute-score-chain-cache" },
+        trust_score: { overall_score: computed.score, level: computed.levelName, score_breakdown: computed.breakdown, source: "compute-score-active-verifications" },
         level: computed.level,
         tier: computed.levelName,
         score: computed.score,
