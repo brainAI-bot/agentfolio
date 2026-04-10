@@ -670,9 +670,15 @@ function enrichProfile(row) {
         if (platform === 'twitter') seen.add('x');
       };
       try {
-        const rows = getDb().prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
+        const rows = getDb().prepare('SELECT platform, identifier, proof FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
         for (const ver of rows) {
           const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
+          if (platform === 'solana') {
+            let proof = {};
+            try { proof = typeof ver.proof === 'string' ? JSON.parse(ver.proof) : (ver.proof || {}); } catch {}
+            const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || null;
+            if (!txSignature) continue;
+          }
           addVerif(platform, ver.identifier || null);
         }
       } catch (_) {}
