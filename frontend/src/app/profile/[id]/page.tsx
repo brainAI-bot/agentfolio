@@ -192,20 +192,20 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   if (genesis) {
     genesis.reputationScore = onChainBadgeScore;
   }
-  const displayReputationCard = v3Reputation
-    ? {
-        ...v3Reputation,
-        reputationScore: trustScoreData ? normalizeScore(trustScoreData.reputationScore ?? v3Reputation.reputationScore) : v3Reputation.reputationScore,
-        verificationLevel: trustScoreData?.verificationLevel ?? v3Reputation.verificationLevel,
-        tier: trustScoreData?.verificationLabel || v3Reputation.tier,
-        tierLabel: trustScoreData?.verificationLabel || v3Reputation.tierLabel,
-      }
-    : null;
   const badgeScore = onChainBadgeScore;
   const badgeReputationScore = onChainBadgeScore;
   const badgeTier = trustScoreData?.verificationLabel || genesis?.verificationLabel || (badgeScore > 0 ? agent.tier : "Unverified");
   const badgeVerificationLevel = trustScoreData?.verificationLevel ?? genesis?.verificationLevel ?? (badgeScore > 0 ? agent.verificationLevel : 0);
   const badgeVerificationLevelName = trustScoreData?.verificationLabel || genesis?.verificationLabel || (badgeScore > 0 ? agent.verificationLevelName : "Unverified");
+  const displayReputationCard = v3Reputation
+    ? {
+        ...v3Reputation,
+        reputationScore: onChainBadgeScore,
+        verificationLevel: badgeVerificationLevel,
+        tier: badgeTier,
+        tierLabel: badgeVerificationLevelName,
+      }
+    : null;
   let githubStats: any = null;
   if (v?.github?.verified && v.github.username) {
     try {
