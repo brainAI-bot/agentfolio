@@ -569,6 +569,21 @@ function enrichProfile(row) {
             source: 'active-verification'
           };
         }
+        const attRows = getDb().prepare('SELECT platform, tx_signature, memo, created_at FROM attestations WHERE profile_id = ? ORDER BY created_at DESC').all(row.id);
+        for (const att of attRows) {
+          const plat = att.platform === 'twitter' ? 'x' : att.platform;
+          if (!plat || plat === 'review' || vd[plat] || !att.tx_signature) continue;
+          const fallbackId = plat === 'github' ? (row.github || row.handle || 'github') : plat === 'x' ? (row.twitter || row.handle || 'x') : (row.wallet || row.handle || plat);
+          vd[plat] = {
+            verified: true,
+            address: fallbackId,
+            identifier: fallbackId,
+            linked: true,
+            txSignature: att.tx_signature,
+            verifiedAt: att.created_at || null,
+            source: 'on-chain-attestation'
+          };
+        }
       } catch (_) {}
       return vd;
     })(),
@@ -631,6 +646,20 @@ function enrichProfile(row) {
             source: 'active-verification',
           };
         }
+        const attRows = getDb().prepare('SELECT platform, tx_signature, memo, created_at FROM attestations WHERE profile_id = ? ORDER BY created_at DESC').all(row.id);
+        for (const att of attRows) {
+          const platform = att.platform === 'twitter' ? 'x' : att.platform;
+          if (!platform || platform === 'review' || vMap[platform] || !att.tx_signature) continue;
+          const fallbackId = platform === 'github' ? (row.github || row.handle || 'github') : platform === 'x' ? (row.twitter || row.handle || 'x') : (row.wallet || row.handle || platform);
+          vMap[platform] = {
+            verified: true,
+            address: fallbackId,
+            identifier: fallbackId,
+            proof: { txSignature: att.tx_signature, timestamp: att.created_at || null, url: 'https://solana.fm/tx/' + att.tx_signature },
+            verified_at: att.created_at || null,
+            source: 'on-chain-attestation',
+          };
+        }
       } catch (e) { /* chain-cache not available */ }
       return vMap;
     })(),
@@ -645,6 +674,11 @@ function enrichProfile(row) {
           try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
           const displayId = att.identifier || proofData.identifier || proofData.address || proofData.wallet || null;
           if (platform && displayId) platforms.add(platform);
+        });
+        const attRows = getDb().prepare('SELECT platform, tx_signature FROM attestations WHERE profile_id = ?').all(row.id);
+        attRows.forEach(att => {
+          const platform = att.platform === 'twitter' ? 'x' : att.platform;
+          if (platform && att.tx_signature) platforms.add(platform);
         });
         return platforms.size;
       } catch (_) {
