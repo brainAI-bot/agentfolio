@@ -503,25 +503,29 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
 
     const chainCache = require('./lib/chain-cache');
     const { computeScore } = require('./lib/compute-score');
-    const rawAttRows = chainCache.getVerifications(profileId, row.created_at) || [];
+    const dbVerifs = db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profileId) || [];
     const chainVerifs = [];
     const seen = new Set();
-
-    for (const att of rawAttRows) {
-      const platform = att.platform === 'twitter' ? 'x' : att.platform;
-      if (!platform || platform === 'review' || seen.has(platform)) continue;
-      let proofData = {};
-      try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
-      const identifier = att.identifier || proofData.identifier || proofData.address || proofData.wallet || null;
-      if (!identifier) continue;
+    const addVerif = (platform, identifier) => {
+      if (!platform || !identifier || seen.has(platform)) return;
       chainVerifs.push({ platform, identifier });
       seen.add(platform);
       if (platform === 'twitter') seen.add('x');
       if (platform === 'x') seen.add('twitter');
+    };
+
+    for (const ver of dbVerifs) {
+      const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
+      if (!platform || platform === 'review') continue;
+      addVerif(platform, ver.identifier || null);
     }
 
     const v3Score = await getV3Score(profileId).catch(() => null);
     const hasSatpIdentity = !!row.wallet && (!!chainCache.isVerified(row.wallet) || !!(v3Score && v3Score.verificationLevel >= 1));
+    if (hasSatpIdentity && row.wallet) {
+      addVerif('satp', row.wallet);
+      addVerif('solana', row.wallet);
+    }
     const computed = computeScore(chainVerifs, { hasSatpIdentity, claimed: !!row.claimed });
     const labels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
 
