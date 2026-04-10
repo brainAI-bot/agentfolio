@@ -6,6 +6,7 @@
 
 const satpIdentity = require('../satp-identity-client');
 const satpReviewsOnchain = require('../satp-reviews-onchain');
+const { checkOnChainIdentity } = require('../lib/wallet');
 
 // V3 SDK (using SATPV3SDK directly for all V3 operations)
 let satpV3Client;
@@ -32,6 +33,79 @@ function registerSATPRoutes(app) {
       .then(r => console.log(`[SATP API] Cache warmed: ${r.total} agents indexed`))
       .catch(e => console.error('[SATP API] Cache warm failed:', e.message));
   }, 5000);
+
+  async function loadProfileByWalletOrId({ wallet = null, profileId = null }) {
+    try {
+      const Database = require('better-sqlite3');
+      const path = require('path');
+      const db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+      let profile = null;
+      if (profileId) profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
+      if (!profile && wallet) profile = db.prepare('SELECT * FROM profiles WHERE wallet = ?').get(wallet);
+      if (!profile && wallet) profile = db.prepare('SELECT * FROM profiles WHERE id IN (SELECT profile_id FROM verifications WHERE identifier = ?)').get(wallet);
+      try { db.close(); } catch {}
+      return profile || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function loadNormalizedTrust(profileId) {
+    if (!profileId) return null;
+    try {
+      const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
+      const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(profileId)}/trust-score`);
+      if (!trustRes.ok) return null;
+      const trustJson = await trustRes.json();
+      return trustJson?.data || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function buildOnchainStatus({ wallet = null, profileId = null }) {
+    const profile = await loadProfileByWalletOrId({ wallet, profileId });
+    const resolvedWallet = wallet || profile?.wallet || null;
+    if (!resolvedWallet || !isValidWallet(resolvedWallet)) {
+      return { status: 404, body: { ok: false, error: 'wallet not found' } };
+    }
+
+    const onchain = await checkOnChainIdentity(resolvedWallet);
+    const trust = await loadNormalizedTrust(profile?.id || profileId || null);
+    const normalizedScore = trust && typeof trust.reputationScore === 'number'
+      ? (trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore)
+      : 0;
+
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        wallet: resolvedWallet,
+        profileId: profile?.id || profileId || null,
+        registered: !!onchain?.registered,
+        pda: onchain?.pda || onchain?.pdas?.identity || null,
+        identity: onchain?.identity || null,
+        reputation: onchain?.reputation || null,
+        rawAuthority: onchain?.identity?.authority || null,
+        rawVerificationLevel: onchain?.reputation?.verificationLevel ?? null,
+        rawReputationScore: onchain?.reputation?.reputationScore ?? null,
+        trustScore: normalizedScore,
+        verificationLevel: trust?.verificationLevel || 0,
+        verificationLabel: trust?.verificationLabel || trust?.levelName || 'Unverified',
+        source: trust ? 'normalized-profile-trust' : 'onchain-only',
+      }
+    };
+  }
+
+  app.get('/api/wallet/onchain-status/:wallet', async (req, res) => {
+    const result = await buildOnchainStatus({ wallet: req.params.wallet });
+    res.status(result.status).json(result.body);
+  });
+
+  app.get('/api/profile/:id/onchain-status', async (req, res) => {
+    const result = await buildOnchainStatus({ profileId: req.params.id });
+    res.status(result.status).json(result.body);
+  });
   
   // ─── Agent Identity ──────────────────────────────────
   
