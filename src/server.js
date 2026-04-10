@@ -697,6 +697,16 @@ app.get('/api/marketplace/categories', (_req, res) => {
   }
 });
 
+app.get('/api/analytics/views', (_req, res) => {
+  try {
+    const leaderboard = db.getViewsLeaderboard(50);
+    res.json({ ok: true, leaderboard, count: leaderboard.length });
+  } catch (e) {
+    console.error('[Analytics] views route error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ─── DID Resolution for Solana Wallets ──────────────────
 app.get('/api/did/satp/sol/:address', async (req, res) => {
   const { address } = req.params;
