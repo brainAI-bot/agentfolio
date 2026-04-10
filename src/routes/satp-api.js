@@ -632,16 +632,18 @@ function registerSATPRoutes(app) {
         const platform = normalizeAttestationPlatform(a.platform) || a.platform;
         const hinted = txHints[platform] || null;
         const txSignature = a.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || hinted?.txSignature || null;
-        enriched.push({
-          platform: a.platform,
-          txSignature,
-          memo: a.memo,
-          proofHash: a.proofHash,
-          signer: a.signer,
-          timestamp: a.timestamp,
-          solscanUrl: hinted?.solscanUrl || a.solscanUrl || (txSignature ? 'https://solana.fm/tx/' + txSignature : null),
-        });
-        if (platform) seenPlatforms.add(platform);
+        if (txSignature) {
+          enriched.push({
+            platform: a.platform,
+            txSignature,
+            memo: a.memo,
+            proofHash: a.proofHash,
+            signer: a.signer,
+            timestamp: a.timestamp,
+            solscanUrl: hinted?.solscanUrl || a.solscanUrl || ('https://solana.fm/tx/' + txSignature),
+          });
+          if (platform) seenPlatforms.add(platform);
+        }
       }
 
       for (const [platform, hint] of Object.entries(txHints)) {
