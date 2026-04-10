@@ -587,6 +587,7 @@ app.get('/api/profile/:id/genesis', async (req, res) => {
 
 // ─── Badge SVG ──────────────────
 const { generateBadgeSVG } = require('./lib/badge-svg');
+const { getTrendingAgents, getRisingAgents } = require('./lib/trending');
 async function renderBadge(req, res) {
   try {
     const id = req.params.id;
@@ -608,6 +609,40 @@ async function renderBadge(req, res) {
 }
 app.get('/api/badge/:id.svg', renderBadge);
 app.get('/api/badge/:id', renderBadge);
+
+async function loadProfilesForDiscoveryRoutes(limit = 1000) {
+  const apiBase = process.env.INTERNAL_API_URL || 'http://127.0.0.1:3333';
+  const res = await globalThis.fetch(`${apiBase}/api/profiles?limit=${limit}`);
+  if (!res.ok) throw new Error(`profiles fetch failed: ${res.status}`);
+  const json = await res.json();
+  return Array.isArray(json?.profiles) ? json.profiles : [];
+}
+
+app.get('/api/trending', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+    const hours = Math.min(parseInt(req.query.hours) || 24, 168);
+    const profiles = await loadProfilesForDiscoveryRoutes();
+    const agents = getTrendingAgents(profiles, limit, hours);
+    res.json({ ok: true, agents, count: agents.length, source: 'trending-lib' });
+  } catch (e) {
+    console.error('[Trending] route error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/api/rising', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+    const days = Math.min(parseInt(req.query.days) || 7, 30);
+    const profiles = await loadProfilesForDiscoveryRoutes();
+    const agents = getRisingAgents(profiles, limit, days);
+    res.json({ ok: true, agents, count: agents.length, source: 'trending-lib' });
+  } catch (e) {
+    console.error('[Rising] route error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
 
 // ─── DID Resolution for Solana Wallets ──────────────────
 app.get('/api/did/satp/sol/:address', async (req, res) => {
