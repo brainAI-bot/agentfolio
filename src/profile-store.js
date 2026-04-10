@@ -1232,20 +1232,30 @@ function registerRoutes(app) {
         const chainCache = require('./lib/chain-cache');
         const { computeScore } = require('./lib/compute-score');
         const identityVerified = !!p.wallet && (chainCache.isVerified(p.wallet) || !!(v && v.verificationLevel >= 1));
-        const attRows = (chainCache.getVerifications(p.id, p.created_at) || []).filter(att => att.platform && att.platform !== 'review');
+        const dbVerifs = (() => {
+          try {
+            return d.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(p.id) || [];
+          } catch (_) {
+            return [];
+          }
+        })();
         const chainVerifs = [];
-        if (identityVerified && p.wallet) {
-          chainVerifs.push({ platform: 'satp', identifier: p.wallet });
-          chainVerifs.push({ platform: 'solana', identifier: p.wallet });
-        }
-        for (const att of attRows) {
-          const platform = att.platform === 'twitter' ? 'x' : att.platform;
-          if (!platform) continue;
-          let proofData = {};
-          try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
-          const identifier = att.identifier || proofData.identifier || proofData.address || proofData.wallet || null;
-          if (!identifier) continue;
+        const seen = new Set();
+        const addVerif = (platform, identifier) => {
+          if (!platform || !identifier) return;
+          const key = platform + ':' + identifier;
+          if (seen.has(key)) return;
+          seen.add(key);
           chainVerifs.push({ platform, identifier });
+        };
+        if (identityVerified && p.wallet) {
+          addVerif('satp', p.wallet);
+          addVerif('solana', p.wallet);
+        }
+        for (const ver of dbVerifs) {
+          const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
+          const identifier = ver.identifier || null;
+          addVerif(platform, identifier);
         }
         computed = computeScore(chainVerifs, { hasSatpIdentity: identityVerified, claimed: !!p.claimed }) || computed;
       } catch (_) {}
