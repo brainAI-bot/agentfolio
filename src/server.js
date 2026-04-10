@@ -588,7 +588,7 @@ app.get('/api/profile/:id/genesis', async (req, res) => {
 // ─── Badge SVG ──────────────────
 const { generateBadgeSVG } = require('./lib/badge-svg');
 const { getTrendingAgents, getRisingAgents } = require('./lib/trending');
-const { getAllStandardSkills, getSkillCategories, getSkillsByCategory, autocompleteSkills } = require('./lib/skills-taxonomy');
+const { SKILL_CATEGORIES, getAllStandardSkills, getSkillsByCategory, autocompleteSkills } = require('./lib/skills-taxonomy');
 async function renderBadge(req, res) {
   try {
     const id = req.params.id;
@@ -657,7 +657,7 @@ app.get('/api/skills', (_req, res) => {
 
 app.get('/api/skills/categories', (_req, res) => {
   try {
-    const categories = getSkillCategories();
+    const categories = Object.keys(SKILL_CATEGORIES).map(key => ({ key, ...SKILL_CATEGORIES[key] }));
     res.json({ ok: true, categories, count: categories.length });
   } catch (e) {
     console.error('[Skills] categories error:', e.message);
