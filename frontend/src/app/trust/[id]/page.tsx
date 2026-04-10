@@ -15,12 +15,25 @@ type PageProps = {
 };
 
 async function fetchCredential(id: string) {
-  const res = await fetch(`${API_BASE}/api/trust-credential/${encodeURIComponent(id)}?format=json`, {
-    next: { revalidate: 30 },
-  });
+  const [jsonRes, jwtRes] = await Promise.all([
+    fetch(`${API_BASE}/api/trust-credential/${encodeURIComponent(id)}?format=json`, {
+      next: { revalidate: 30 },
+    }),
+    fetch(`${API_BASE}/api/trust-credential/${encodeURIComponent(id)}`, {
+      next: { revalidate: 30 },
+    }),
+  ]);
 
-  if (!res.ok) return null;
-  return res.json();
+  if (!jsonRes.ok) return null;
+  const jsonData = await jsonRes.json();
+  let jwtData = null;
+  try {
+    if (jwtRes.ok) jwtData = await jwtRes.json();
+  } catch {}
+  return {
+    ...jsonData,
+    jwt: typeof jwtData?.credential === "string" ? jwtData.credential : null,
+  };
 }
 
 function scoreColor(level: number) {
@@ -52,7 +65,9 @@ export default async function TrustCredentialPage({ params }: PageProps) {
   const proofColor = scoreColor(verificationLevel);
   const rawJson = JSON.stringify(decoded, null, 2);
   const rawEndpoint = `/api/trust-credential/${encodeURIComponent(id)}?format=json`;
-  const verifyEndpoint = `/api/trust-credential/verify?token=${encodeURIComponent(data.credential || "")}`;
+  const verifyEndpoint = data?.jwt
+    ? `/api/trust-credential/verify?token=${encodeURIComponent(data.jwt)}`
+    : `/api/trust-credential/${encodeURIComponent(id)}`;
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
