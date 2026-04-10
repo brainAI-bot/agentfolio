@@ -55,7 +55,21 @@ const PLATFORM_ICONS: Record<string, string> = {
   solana: "◎", github: "⌘", twitter: "𝕏", x: "𝕏", ethereum: "⟠",
   discord: "🎮", agentmail: "✉", moltbook: "📖", hyperliquid: "📊",
   polymarket: "📈", website: "🌐", domain: "🔗", satp: "🛡️",
-  telegram: "✈️", mcp: "🔌", a2a: "🤖",
+  telegram: "✈️", mcp: "🔌", a2a: "🤖", review: "✓",
+};
+
+const PLATFORM_BADGE_COLORS: Record<string, { bg: string; text: string }> = {
+  solana: { bg: "rgba(153,69,255,0.16)", text: "#9945FF" },
+  github: { bg: "rgba(255,255,255,0.08)", text: "#E5E7EB" },
+  twitter: { bg: "rgba(29,161,242,0.16)", text: "#1D9BF0" },
+  x: { bg: "rgba(29,161,242,0.16)", text: "#1D9BF0" },
+  website: { bg: "rgba(16,185,129,0.16)", text: "#10B981" },
+  domain: { bg: "rgba(16,185,129,0.16)", text: "#10B981" },
+  satp: { bg: "rgba(59,130,246,0.16)", text: "#3B82F6" },
+  review: { bg: "rgba(245,158,11,0.16)", text: "#F59E0B" },
+  polymarket: { bg: "rgba(168,85,247,0.16)", text: "#A855F7" },
+  agentmail: { bg: "rgba(236,72,153,0.16)", text: "#EC4899" },
+  telegram: { bg: "rgba(56,189,248,0.16)", text: "#38BDF8" },
 };
 
 type SortKey = "score" | "level" | "date" | "reviews";
@@ -90,10 +104,17 @@ function normalizeAttestation(att: any) {
   try { proofData = typeof att?.proofData === "string" ? JSON.parse(att.proofData) : (att?.proofData || {}); } catch {}
   const txSignature = att?.txSignature || proofData?.txSignature || proofData?.signature || proofData?.transactionSignature || null;
   const rawPlatform = att?.platform || att?.type || att?.attestationType || proofData?.platform || "attestation";
+  const platform = String(rawPlatform).toLowerCase();
+  const displayType = normalizePlatformLabel(rawPlatform);
+  const displayLabel = (displayType || platform || "Attestation")
+    .replace(/^X$/i, "Twitter")
+    .replace(/^Satp$/i, "SATP")
+    .toUpperCase();
   return {
     ...att,
-    platform: String(rawPlatform).toLowerCase(),
-    displayType: normalizePlatformLabel(rawPlatform),
+    platform,
+    displayType,
+    displayLabel,
     memo: att?.memo || proofData?.memo || proofData?.identifier || proofData?.wallet || proofData?.address || null,
     txSignature,
     solscanUrl: att?.solscanUrl || att?.url || att?.proof?.url || (txSignature ? `https://solana.fm/tx/${txSignature}` : (att?.pda ? `https://solscan.io/account/${att.pda}` : null)),
@@ -545,19 +566,27 @@ export default function SATPExplorerPage() {
                       <div className="text-[10px] animate-pulse" style={{ color: "var(--text-tertiary)" }}>Loading attestations...</div>
                     ) : attestations.length > 0 ? (
                       <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                        {attestations.map((att: any, i: number) => (
+                        {attestations.map((att: any, i: number) => {
+                          const badgeColor = PLATFORM_BADGE_COLORS[att.platform] || { bg: "rgba(148,163,184,0.14)", text: "#CBD5E1" };
+                          return (
                           <div key={i} className="py-1.5 px-2 rounded" style={{ background: "var(--bg-tertiary)" }}>
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[10px]">{PLATFORM_ICONS[att.platform] || "✓"}</span>
-                                <span className="text-[10px] font-semibold uppercase" style={{ color: "var(--text-primary)" }}>{att.platform}</span>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wider"
+                                  style={{ background: badgeColor.bg, color: badgeColor.text, fontFamily: "var(--font-mono)" }}
+                                  title={att.displayType || att.platform}
+                                >
+                                  <span>{PLATFORM_ICONS[att.platform] || "✓"}</span>
+                                  <span>{att.displayLabel || att.displayType || att.platform}</span>
+                                </span>
                               </div>
                               {att.txSignature ? (
                                 <a
                                   href={att.solscanUrl || `https://solscan.io/tx/${att.txSignature}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="hover:underline flex items-center gap-1 text-[9px]"
+                                  className="hover:underline flex items-center gap-1 text-[9px] shrink-0"
                                   style={{ color: "var(--accent)" }}
                                   onClick={e => e.stopPropagation()}
                                   title={att.txSignature}
@@ -565,16 +594,16 @@ export default function SATPExplorerPage() {
                                   {att.txSignature.slice(0, 8)}...{att.txSignature.slice(-4)} <ExternalLink size={8} />
                                 </a>
                               ) : (
-                                <span className="text-[9px]" style={{ color: "var(--text-tertiary)" }}>no tx</span>
+                                <span className="text-[9px] shrink-0" style={{ color: "var(--text-tertiary)" }}>no tx</span>
                               )}
                             </div>
                             {att.memo && (
-                              <div className="text-[9px] mt-0.5 truncate" style={{ color: "var(--text-tertiary)" }} title={att.memo}>
+                              <div className="text-[9px] mt-1 truncate" style={{ color: "var(--text-tertiary)" }} title={att.memo}>
                                 {att.memo}
                               </div>
                             )}
                           </div>
-                        ))}
+                        )})}
                       </div>
                     ) : (
                       <div className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>No attestation memos found</div>
