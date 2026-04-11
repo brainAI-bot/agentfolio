@@ -1,4 +1,5 @@
 const { computeScore } = require('./compute-score');
+const chainCache = require('./chain-cache');
 
 function normalizePlatform(platform) {
   if (!platform) return null;
@@ -33,65 +34,71 @@ function computeUnifiedTrustScore(db, profile, options = {}) {
   const wallet = profile?.wallet || profile?.walletAddress || profile?.wallets?.solana || null;
   const claimed = !!(profile?.claimed === 1 || profile?.claimed === true || profile?.claimed === '1');
   const v3Score = options.v3Score || null;
-  const verifications = new Map();
+  const verifications = [];
 
   const addVerification = (platform, identifier, extra = {}) => {
     const normalized = normalizePlatform(platform);
-    if (!normalized || normalized === 'review') return;
-    const finalIdentifier = identifier || (normalized === 'satp' || normalized === 'solana' ? wallet : profileId);
-    if (!finalIdentifier) return;
-    const existing = verifications.get(normalized);
-    if (existing && (!extra.txSignature || existing.txSignature)) return;
-    verifications.set(normalized, {
+    if (!normalized) return;
+    const finalIdentifier = identifier || extra.identifier || extra.address || (normalized === 'satp' || normalized === 'solana' ? wallet : profileId) || profileId;
+    verifications.push({
       platform: normalized,
       identifier: finalIdentifier,
       verified: true,
       txSignature: extra.txSignature || null,
       solscanUrl: extra.solscanUrl || (extra.txSignature ? `https://solana.fm/tx/${extra.txSignature}` : null),
       timestamp: extra.timestamp || null,
+      memo: extra.memo || null,
+      signer: extra.signer || null,
+      proofHash: extra.proofHash || null,
     });
   };
 
-  let verifRows = [];
-  let attRows = [];
+  let chainAttestations = [];
   try {
-    verifRows = db.prepare('SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(profileId) || [];
-  } catch (_) {}
-  try {
-    attRows = db.prepare('SELECT platform, tx_signature, created_at FROM attestations WHERE profile_id = ? AND tx_signature IS NOT NULL ORDER BY created_at DESC').all(profileId) || [];
+    chainAttestations = chainCache.getVerifications(profileId) || [];
   } catch (_) {}
 
-  for (const row of attRows) {
-    const platform = normalizePlatform(row.platform);
-    if (!platform || !isValidTxSignature(row.tx_signature)) continue;
-    addVerification(platform, null, {
-      txSignature: row.tx_signature,
-      timestamp: row.created_at || null,
-    });
+  if (chainAttestations.length > 0) {
+    for (const att of chainAttestations) {
+      addVerification(att.platform, att.identifier || att.address || null, {
+        txSignature: att.txSignature || null,
+        solscanUrl: att.solscanUrl || null,
+        timestamp: att.timestamp || null,
+        memo: att.memo || null,
+        signer: att.signer || null,
+        proofHash: att.proofHash || null,
+        address: att.address || null,
+      });
+    }
+  } else {
+    let verifRows = [];
+    let attRows = [];
+    try {
+      verifRows = db.prepare('SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(profileId) || [];
+    } catch (_) {}
+    try {
+      attRows = db.prepare('SELECT platform, tx_signature, created_at FROM attestations WHERE profile_id = ? ORDER BY created_at DESC').all(profileId) || [];
+    } catch (_) {}
+
+    for (const row of attRows) {
+      addVerification(row.platform, null, {
+        txSignature: row.tx_signature || null,
+        timestamp: row.created_at || null,
+      });
+    }
+
+    for (const row of verifRows) {
+      addVerification(row.platform, row.identifier || null, {
+        txSignature: extractTxSignature(row.proof),
+        timestamp: row.verified_at || null,
+      });
+    }
   }
 
-  for (const row of verifRows) {
-    const platform = normalizePlatform(row.platform);
-    const txSignature = extractTxSignature(row.proof);
-    if (!platform || !txSignature) continue;
-    addVerification(platform, row.identifier || null, {
-      txSignature,
-      timestamp: row.verified_at || null,
-    });
-  }
-
-  if (!verifications.has('satp') && wallet && v3Score && Number(v3Score.verificationLevel || 0) >= 1) {
-    addVerification('satp', wallet, {
-      txSignature: null,
-      timestamp: v3Score.createdAt || null,
-      solscanUrl: null,
-    });
-  }
-
-  const verificationList = Array.from(verifications.values());
+  const hasSatpIdentity = !!(wallet && v3Score && Number(v3Score.verificationLevel || 0) >= 1);
   const computed = computeScore(
-    verificationList.map(({ platform, identifier }) => ({ platform, identifier })),
-    { hasSatpIdentity: verificationList.some(v => v.platform === 'satp'), claimed }
+    verifications.map(({ platform, identifier }) => ({ platform, identifier })),
+    { hasSatpIdentity, claimed }
   ) || { score: 0, level: 0, levelName: 'Unverified', breakdown: {}, badge: '⚪' };
 
   return {
@@ -100,9 +107,9 @@ function computeUnifiedTrustScore(db, profile, options = {}) {
     levelName: computed.levelName || 'Unverified',
     breakdown: computed.breakdown || {},
     badge: computed.badge || '⚪',
-    verifications: verificationList,
-    hasSatpIdentity: verificationList.some(v => v.platform === 'satp'),
-    source: 'unified-proof-backed-trust',
+    verifications,
+    hasSatpIdentity,
+    source: 'unfiltered-onchain-attestations',
   };
 }
 

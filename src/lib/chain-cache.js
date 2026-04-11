@@ -461,13 +461,8 @@ function isVerified(wallet) {
  */
 function getVerifications(profileId, createdAfter) {
   const allAtts = cache.attestations.get(profileId) || [];
-  const atts = createdAfter ? allAtts.filter(a => new Date(a.timestamp).getTime() >= new Date(createdAfter).getTime()) : allAtts;
-  if (!createdAfter) return atts;
-  const cutoff = new Date(createdAfter).getTime();
-  return atts.filter(a => {
-    const ts = new Date(a.timestamp).getTime();
-    return !isNaN(ts) && ts >= cutoff;
-  });
+  // CEO Apr 11 rule: trust the chain, do not filter attestation reads by date.
+  return allAtts;
 }
 
 /**
@@ -476,9 +471,7 @@ function getVerifications(profileId, createdAfter) {
  * @returns {string[]} e.g. ['solana', 'github', 'x']
  */
 function getVerifiedPlatforms(profileId, createdAfter) {
-  const allAtts = cache.attestations.get(profileId) || [];
-  const atts = createdAfter ? allAtts.filter(a => new Date(a.timestamp).getTime() >= new Date(createdAfter).getTime()) : allAtts;
-  return [...new Set(atts.map(a => a.platform))];
+  return getVerifications(profileId, createdAfter).map(a => a.platform);
 }
 
 /**

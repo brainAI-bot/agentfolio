@@ -45,37 +45,36 @@ function computeScore(verifications = [], opts = {}) {
   
   const breakdown = {};
   let score = 0;
+  let verificationCount = 0;
+  let hasSatpAttestation = false;
   
-  // Deduplicate by platform (take first valid one)
-  const seen = new Set();
+  // CEO Apr 11 rule: do not filter or deduplicate on-chain attestations at read time.
+  // If an attestation exists, it counts.
   for (const v of verifications) {
     const platform = (v.platform || '').toLowerCase();
-    if (!platform || seen.has(platform)) continue;
-    // Skip if identifier is empty (not a real verification)
-    if (!v.identifier && !v.address && !v.did) continue;
-    
+    if (!platform) continue;
+    // Keep a minimal identifier fallback so raw on-chain attestation rows still count.
+    const identifier = v.identifier || v.address || v.did || `attestation:${verificationCount + 1}`;
+    if (!identifier) continue;
+
     const weight = VERIFICATION_WEIGHTS[platform] || 10;
     score += weight;
-    breakdown[platform] = weight;
-    seen.add(platform);
-    
-    // twitter and x are aliases — don't double count
-    if (platform === 'twitter') seen.add('x');
-    if (platform === 'x') seen.add('twitter');
+    breakdown[platform] = (breakdown[platform] || 0) + weight;
+    verificationCount += 1;
+    if (platform === 'satp') hasSatpAttestation = true;
   }
   
-  // SATP identity bonus (only if not already counted as a verification)
-  if (hasSatpIdentity && !seen.has('satp')) {
+  // SATP identity bonus only applies when there is identity but no explicit SATP attestation row.
+  if (hasSatpIdentity && !hasSatpAttestation) {
     score += VERIFICATION_WEIGHTS.satp;
-    breakdown.satp_identity = VERIFICATION_WEIGHTS.satp;
-    seen.add('satp');
+    breakdown.satp_identity = (breakdown.satp_identity || 0) + VERIFICATION_WEIGHTS.satp;
   }
   
   // Determine level
   let level = 0;
-  if (!claimed && !hasSatpIdentity && verifications.length === 0) {
+  if (!claimed && !hasSatpIdentity && verificationCount === 0) {
     level = 0; // Unclaimed
-  } else if (hasSatpIdentity || claimed) {
+  } else if (hasSatpIdentity || claimed || verificationCount > 0) {
     level = 1; // Registered
     // Upgrade based on score thresholds
     for (let i = LEVELS.length - 1; i >= 2; i--) {
@@ -96,7 +95,7 @@ function computeScore(verifications = [], opts = {}) {
     levelName: levelInfo.name,
     badge: levelInfo.badge,
     breakdown,
-    verificationCount: seen.size,
+    verificationCount,
   };
 }
 

@@ -727,7 +727,6 @@ function registerSATPRoutes(app) {
       const attestations = chainCache.getVerifications(agentId);
       const txHints = loadAttestationTxHints(agentId);
       const enriched = [];
-      const seenPlatforms = new Set();
 
       for (const a of attestations) {
         let proofData = {};
@@ -735,35 +734,34 @@ function registerSATPRoutes(app) {
         const platform = normalizeAttestationPlatform(a.platform) || a.platform;
         const hinted = txHints[platform] || null;
         const txSignature = a.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || hinted?.txSignature || null;
-        if (txSignature) {
+        enriched.push({
+          platform,
+          txSignature,
+          memo: a.memo || null,
+          proofHash: a.proofHash || null,
+          signer: a.signer || null,
+          timestamp: a.timestamp || null,
+          solscanUrl: hinted?.solscanUrl || a.solscanUrl || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null),
+        });
+      }
+
+      // Only synthesize DB proof hints when chain-cache returned nothing at all.
+      if (enriched.length === 0) {
+        for (const [platform, hint] of Object.entries(txHints)) {
+          if (!platform) continue;
           enriched.push({
             platform,
-            txSignature,
-            memo: (typeof a.memo === 'string' && a.memo.startsWith('ATTESTATION|')) ? null : a.memo,
-            proofHash: a.proofHash,
-            signer: a.signer,
-            timestamp: a.timestamp,
-            solscanUrl: hinted?.solscanUrl || a.solscanUrl || ('https://solana.fm/tx/' + txSignature),
+            txSignature: hint?.txSignature || null,
+            memo: null,
+            proofHash: null,
+            signer: null,
+            timestamp: null,
+            solscanUrl: hint?.solscanUrl || (hint?.txSignature ? ('https://solana.fm/tx/' + hint.txSignature) : null),
           });
-          if (platform) seenPlatforms.add(platform);
         }
       }
 
-      for (const [platform, hint] of Object.entries(txHints)) {
-        if (!platform || seenPlatforms.has(platform) || !hint?.txSignature) continue;
-        enriched.push({
-          platform,
-          txSignature: hint.txSignature,
-          memo: null,
-          proofHash: null,
-          signer: null,
-          timestamp: null,
-          solscanUrl: hint.solscanUrl || ('https://solana.fm/tx/' + hint.txSignature),
-        });
-        seenPlatforms.add(platform);
-      }
-
-      const platforms = [...new Set(enriched.map(a => normalizeAttestationPlatform(a.platform) || a.platform).filter(Boolean))];
+      const platforms = enriched.map(a => normalizeAttestationPlatform(a.platform) || a.platform).filter(Boolean);
       
       res.json({
         ok: true,
