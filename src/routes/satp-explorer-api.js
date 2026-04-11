@@ -20,6 +20,10 @@ const v3ScoreService = require("../../v3-score-service");
 let agentCache = null;
 const CACHE_TTL = 5 * 60 * 1000;
 
+function clearSatpExplorerCache() {
+  agentCache = null;
+}
+
 // NFT lookup (unchanged)
 async function lookupNFT(conn, wallet) {
   try {
@@ -230,4 +234,4 @@ async function getSatpAgents() {
   return result;
 }
 
-module.exports = { getSatpAgents };
+module.exports = { getSatpAgents, clearSatpExplorerCache };

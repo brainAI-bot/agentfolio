@@ -26,6 +26,7 @@
 const { Connection, PublicKey, SystemProgram, Transaction, TransactionInstruction, ComputeBudgetProgram } = require('@solana/web3.js');
 const crypto = require('crypto');
 const { clearV3Cache } = require('../v3-score-service');
+const { clearSatpExplorerCache } = require('./satp-explorer-api');
 const path = require('path');
 
 // ─────────────────────────────────────────────
@@ -587,6 +588,7 @@ function registerSATPAutoIdentityV3Routes(app) {
       }
 
       try { if (typeof clearV3Cache === 'function') clearV3Cache(); } catch (_) {}
+      try { if (typeof clearSatpExplorerCache === 'function') clearSatpExplorerCache(); } catch (_) {}
 
       res.json({
         ok: true,
