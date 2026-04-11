@@ -737,9 +737,9 @@ function registerSATPRoutes(app) {
         const txSignature = a.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || hinted?.txSignature || null;
         if (txSignature) {
           enriched.push({
-            platform: a.platform,
+            platform,
             txSignature,
-            memo: a.memo,
+            memo: (typeof a.memo === 'string' && a.memo.startsWith('ATTESTATION|')) ? null : a.memo,
             proofHash: a.proofHash,
             signer: a.signer,
             timestamp: a.timestamp,
