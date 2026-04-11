@@ -69,6 +69,11 @@ function registerSATPRoutes(app) {
     return platform;
   }
 
+  function isPublicAttestationPlatform(value) {
+    const platform = normalizeAttestationPlatform(value);
+    return !!platform && !platform.includes('satp');
+  }
+
   function loadAttestationTxHints(profileId) {
     const hints = {};
     if (!profileId) return hints;
@@ -738,6 +743,7 @@ function registerSATPRoutes(app) {
         let proofData = {};
         try { proofData = typeof a.proofData === 'string' ? JSON.parse(a.proofData) : (a.proofData || {}); } catch {}
         const platform = normalizeAttestationPlatform(a.platform) || a.platform;
+        if (!isPublicAttestationPlatform(platform)) continue;
         const hinted = txHints[platform] || txHints[String(platform || '').replace(/^verification_/, '').replace(/_verification$/, '')] || null;
         const txSignature = a.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || hinted?.txSignature || null;
         enriched.push({
@@ -754,7 +760,7 @@ function registerSATPRoutes(app) {
       // Only synthesize DB proof hints when chain-cache returned nothing at all.
       if (enriched.length === 0) {
         for (const [platform, hint] of Object.entries(txHints)) {
-          if (!platform) continue;
+          if (!isPublicAttestationPlatform(platform)) continue;
           enriched.push({
             platform,
             txSignature: hint?.txSignature || null,
@@ -767,7 +773,7 @@ function registerSATPRoutes(app) {
         }
       }
 
-      const platforms = enriched.map(a => normalizeAttestationPlatform(a.platform) || a.platform).filter(Boolean);
+      const platforms = enriched.map(a => normalizeAttestationPlatform(a.platform) || a.platform).filter(isPublicAttestationPlatform);
       
       res.json({
         ok: true,

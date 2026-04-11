@@ -282,6 +282,12 @@ function chainAttestationMatchesWallet(att, row) {
   }
 }
 
+function isPublicVerificationPlatform(platform) {
+  const normalized = String(platform || '').trim().toLowerCase();
+  if (!normalized) return false;
+  return !['satp', 'satp_v3', 'satp_verification'].includes(normalized);
+}
+
 // Score protection guard -- prevents corrupt scores from being written
 const MAX_VALID_SCORE = 10000;
 const MAX_LEVEL_JUMP = 2;
@@ -542,7 +548,7 @@ function enrichProfile(row) {
         const atts = chainCache.getVerifications(row.id, row.created_at) || [];
         const hints = new Map();
         for (const att of atts) {
-          if (!att.platform || att.platform === 'review') continue;
+          if (!att.platform || att.platform === 'review' || !isPublicVerificationPlatform(att.platform)) continue;
           if (!chainAttestationMatchesWallet(att, row)) continue;
           const plat = att.platform === 'twitter' ? 'x' : att.platform;
           if (hints.has(plat)) continue;
@@ -556,7 +562,7 @@ function enrichProfile(row) {
         const rows = getDb().prepare('SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
         for (const ver of rows) {
           const plat = ver.platform === 'twitter' ? 'x' : ver.platform;
-          if (!plat || plat === 'review' || vd[plat]) continue;
+          if (!plat || plat === 'review' || !isPublicVerificationPlatform(plat) || vd[plat]) continue;
           let proof = {};
           try { proof = typeof ver.proof === 'string' ? JSON.parse(ver.proof) : (ver.proof || {}); } catch {}
           const displayId = ver.identifier || proof.identifier || proof.address || proof.wallet || row.wallet || null;
@@ -574,22 +580,10 @@ function enrichProfile(row) {
             source: 'active-verification'
           };
         }
-        if (!vd.satp && row.wallet) {
-          const hint = hints.get('satp') || {};
-          vd.satp = {
-            verified: true,
-            address: row.wallet,
-            identifier: row.wallet,
-            linked: true,
-            txSignature: hint.txSignature || null,
-            verifiedAt: hint.verifiedAt || null,
-            source: 'active-verification'
-          };
-        }
         const attRows = getDb().prepare('SELECT platform, tx_signature, memo, created_at FROM attestations WHERE profile_id = ? ORDER BY created_at DESC').all(row.id);
         for (const att of attRows) {
           const plat = att.platform === 'twitter' ? 'x' : att.platform;
-          if (!plat || plat === 'review' || vd[plat] || !att.tx_signature) continue;
+          if (!plat || plat === 'review' || !isPublicVerificationPlatform(plat) || vd[plat] || !att.tx_signature) continue;
           const fallbackId = plat === 'github' ? (row.github || row.handle || 'github') : plat === 'x' ? (row.twitter || row.handle || 'x') : (row.wallet || row.handle || plat);
           vd[plat] = {
             verified: true,
@@ -617,7 +611,7 @@ function enrichProfile(row) {
         const atts = chainCache.getVerifications(row.id, row.created_at) || [];
         const hints = new Map();
         for (const att of atts) {
-          if (!att.platform || att.platform === 'review') continue;
+          if (!att.platform || att.platform === 'review' || !isPublicVerificationPlatform(att.platform)) continue;
           if (!chainAttestationMatchesWallet(att, row)) continue;
           const platform = att.platform === 'twitter' ? 'x' : att.platform;
           if (hints.has(platform)) continue;
@@ -633,7 +627,7 @@ function enrichProfile(row) {
         const rows = getDb().prepare('SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
         for (const ver of rows) {
           const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
-          if (!platform || platform === 'review' || vMap[platform]) continue;
+          if (!platform || platform === 'review' || !isPublicVerificationPlatform(platform) || vMap[platform]) continue;
           let proof = {};
           try { proof = typeof ver.proof === 'string' ? JSON.parse(ver.proof) : (ver.proof || {}); } catch {}
           const displayId = ver.identifier || proof.identifier || proof.address || proof.wallet || row.wallet || null;
@@ -651,22 +645,10 @@ function enrichProfile(row) {
             source: 'active-verification',
           };
         }
-        if (!vMap.satp && row.wallet) {
-          const hint = hints.get('satp') || {};
-          const txSignature = hint.txSignature || null;
-          vMap.satp = {
-            verified: true,
-            address: row.wallet,
-            identifier: row.wallet,
-            proof: { txSignature, timestamp: hint.verifiedAt || null, url: hint.url || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null) },
-            verified_at: hint.verifiedAt || null,
-            source: 'active-verification',
-          };
-        }
         const attRows = getDb().prepare('SELECT platform, tx_signature, memo, created_at FROM attestations WHERE profile_id = ? ORDER BY created_at DESC').all(row.id);
         for (const att of attRows) {
           const platform = att.platform === 'twitter' ? 'x' : att.platform;
-          if (!platform || platform === 'review' || vMap[platform] || !att.tx_signature) continue;
+          if (!platform || platform === 'review' || !isPublicVerificationPlatform(platform) || vMap[platform] || !att.tx_signature) continue;
           const fallbackId = platform === 'github' ? (row.github || row.handle || 'github') : platform === 'x' ? (row.twitter || row.handle || 'x') : (row.wallet || row.handle || platform);
           vMap[platform] = {
             verified: true,
@@ -1353,7 +1335,8 @@ function registerRoutes(app) {
       p.verificationLabel = displayLabel;
       p.levelName = displayLabel;
       p.verificationBadge = unified.badge;
-      p.trust_score = {
+      p.trust_score = displayScore;
+      p.trust_score_details = {
         overall_score: displayScore,
         level: displayLabel,
         score_breakdown: unified.breakdown || {},
