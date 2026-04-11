@@ -205,14 +205,43 @@ async function buildCreateIdentityV3Tx(walletAddress, agentId, name, description
  * @param {string} agentId
  * @returns {Promise<boolean>}
  */
-async function hasV3Identity(agentId) {
+async function getV3IdentityStatus(agentId) {
   try {
     const [pda] = getV3GenesisRecordPDA(agentId);
     const acct = await connection.getAccountInfo(pda);
-    return acct !== null && acct.data.length > 0;
+    const accountExists = acct !== null && acct.data.length > 0;
+    if (!accountExists) {
+      return { exists: false, accountExists: false, active: false, pda: pda.toBase58() };
+    }
+
+    let active = true;
+    let verificationLevel = null;
+    let reputationScore = null;
+    try {
+      const { SATPV3SDK } = require('../satp-client/src/v3-sdk');
+      const sdk = new SATPV3SDK({ rpcUrl: RPC_URL });
+      const record = await sdk.getGenesisRecord(agentId);
+      active = !!(record && !record.error && record.isActive !== false && record.active !== false);
+      verificationLevel = record && !record.error ? (record.verificationLevel ?? null) : null;
+      reputationScore = record && !record.error ? (record.reputationScore ?? null) : null;
+    } catch (_) {}
+
+    return {
+      exists: active,
+      accountExists: true,
+      active,
+      pda: pda.toBase58(),
+      verificationLevel,
+      reputationScore,
+    };
   } catch {
-    return false;
+    return { exists: false, accountExists: false, active: false, pda: null, verificationLevel: null, reputationScore: null };
   }
+}
+
+async function hasV3Identity(agentId) {
+  const status = await getV3IdentityStatus(agentId);
+  return !!status.exists;
 }
 
 /**
@@ -510,13 +539,17 @@ function registerSATPAutoIdentityV3Routes(app) {
     try {
       const agentId = req.params.agentId;
       const [v3Pda] = getV3GenesisRecordPDA(agentId);
-      const v3Exists = await hasV3Identity(agentId);
+      const v3Status = await getV3IdentityStatus(agentId);
 
       const result = {
         ok: true,
         agentId,
         v3: {
-          exists: v3Exists,
+          exists: v3Status.exists,
+          accountExists: v3Status.accountExists,
+          active: v3Status.active,
+          verificationLevel: v3Status.verificationLevel,
+          reputationScore: v3Status.reputationScore,
           genesisPDA: v3Pda.toBase58(),
           agentIdHash: computeAgentIdHash(agentId).toString('hex'),
           program: SATP_V3_IDENTITY_PROGRAM.toBase58(),
