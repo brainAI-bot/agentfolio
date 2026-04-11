@@ -130,6 +130,9 @@ Timestamp: ${Date.now()}`;
             if (!confirmRes.ok) {
               throw new Error(confirmData?.error || "Failed to finalize SATP identity");
             }
+            if (confirmData?.satpAttestation?.ok === false && !confirmData?.satpAttestation?.skipped) {
+              throw new Error(confirmData.satpAttestation.error || "SATP identity was created, but SATP attestation replay failed");
+            }
             if (confirmData?.solanaAttestation?.ok === false && !confirmData?.solanaAttestation?.skipped) {
               throw new Error(confirmData.solanaAttestation.error || "SATP identity was created, but Solana attestation replay failed");
             }
