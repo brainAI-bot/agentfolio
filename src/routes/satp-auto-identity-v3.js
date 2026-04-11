@@ -374,6 +374,7 @@ function registerSATPAutoIdentityV3Routes(app) {
 
       const [genesisPDA] = getV3GenesisRecordPDA(profileId);
       const agentIdHash = computeAgentIdHash(profileId).toString('hex');
+      let satpAttestation = { ok: true, skipped: true, reason: 'not-run' };
       let solanaAttestation = { ok: true, skipped: true, reason: 'not-run' };
 
       // Update profile with V3 SATP identity info
@@ -422,6 +423,79 @@ function registerSATPAutoIdentityV3Routes(app) {
 
           const solanaWallet = walletAddress || profile.wallet || vd?.solana?.address || null;
           if (solanaWallet) {
+            const { postVerificationHook } = require('../post-verification-hook');
+
+            const existingSatp = db.prepare(`
+              SELECT id, proof
+              FROM verifications
+              WHERE profile_id = ? AND platform = 'satp'
+              ORDER BY verified_at DESC
+              LIMIT 1
+            `).get(profileId);
+            let existingSatpProof = {};
+            try { existingSatpProof = JSON.parse(existingSatp?.proof || '{}'); } catch {}
+
+            if (existingSatpProof.txSignature) {
+              satpAttestation = {
+                ok: true,
+                skipped: true,
+                alreadyVerified: true,
+                txSignature: existingSatpProof.txSignature,
+              };
+            } else {
+              try {
+                const satpProof = {
+                  source: 'satp-auto-v3-confirm',
+                  auto: true,
+                  walletAddress: solanaWallet,
+                  genesisTxSignature: txSignature,
+                  genesisPDA: genesisPDA.toBase58(),
+                  verifiedAt,
+                };
+                const satpBridgeResult = await postVerificationHook(profileId, 'satp', solanaWallet, satpProof);
+                const finalSatpProof = {
+                  ...existingSatpProof,
+                  ...satpProof,
+                  txSignature: satpBridgeResult?.txSignature || null,
+                  bridgeResult: satpBridgeResult,
+                  verifiedAt,
+                };
+                const satpVerificationId = existingSatp?.id || (uuid ? uuid() : `satp_${Date.now()}`);
+                db.prepare(`
+                  INSERT OR REPLACE INTO verifications (id, profile_id, platform, identifier, proof, verified_at)
+                  VALUES (?, ?, 'satp', ?, ?, datetime('now'))
+                `).run(
+                  satpVerificationId,
+                  profileId,
+                  solanaWallet,
+                  JSON.stringify(finalSatpProof)
+                );
+                vd.satp = {
+                  ...(vd.satp || {}),
+                  verified: true,
+                  linked: true,
+                  address: solanaWallet,
+                  identifier: solanaWallet,
+                  txSignature: satpBridgeResult?.txSignature || null,
+                  genesisPDA: genesisPDA.toBase58(),
+                  verifiedAt,
+                  source: 'satp-auto-v3-confirm',
+                };
+                satpAttestation = {
+                  ok: true,
+                  skipped: false,
+                  txSignature: satpBridgeResult?.txSignature || null,
+                };
+              } catch (satpErr) {
+                satpAttestation = {
+                  ok: false,
+                  skipped: false,
+                  error: satpErr.message,
+                };
+                console.error(`[SATP AutoID V3] SATP attestation replay failed for ${profileId}:`, satpErr.message);
+              }
+            }
+
             const existingSolana = db.prepare(`
               SELECT id, proof
               FROM verifications
@@ -441,7 +515,6 @@ function registerSATPAutoIdentityV3Routes(app) {
               };
             } else {
               try {
-                const { postVerificationHook } = require('../post-verification-hook');
                 const bridgeProof = {
                   source: 'satp-auto-v3-confirm',
                   auto: true,
@@ -493,6 +566,7 @@ function registerSATPAutoIdentityV3Routes(app) {
               }
             }
           } else {
+            satpAttestation = { ok: false, skipped: true, reason: 'no-wallet' };
             solanaAttestation = { ok: false, skipped: true, reason: 'no-wallet' };
           }
 
@@ -502,6 +576,9 @@ function registerSATPAutoIdentityV3Routes(app) {
 
         db.close();
         console.log(`[SATP AutoID V3] Identity confirmed for ${profileId}: PDA=${genesisPDA.toBase58()}, TX=${txSignature}`);
+        if (satpAttestation && !satpAttestation.ok && !satpAttestation.skipped) {
+          console.warn(`[SATP AutoID V3] Identity confirmed but SATP attestation is still missing for ${profileId}`);
+        }
         if (solanaAttestation && !solanaAttestation.ok && !solanaAttestation.skipped) {
           console.warn(`[SATP AutoID V3] Identity confirmed but Solana attestation is still missing for ${profileId}`);
         }
@@ -522,6 +599,7 @@ function registerSATPAutoIdentityV3Routes(app) {
           walletAddress,
           profileId,
         },
+        satpAttestation,
         solanaAttestation,
       });
     } catch (err) {

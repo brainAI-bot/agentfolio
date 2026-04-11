@@ -276,33 +276,8 @@ function registerSimpleRoutes(app, getDb) {
         console.log('[SimpleRegister] Skipping server-side genesis creation for', id, 'because identity authority must be the user wallet');
       }
 
-      // Chain-first: write on-chain first, cache only after success.
-      if (walletAddress) {
-        try {
-          const proof = { source: 'simple-registration', wallet: walletAddress, signatureVerified: true };
-          const { postVerificationHook } = require('../post-verification-hook');
-          const onchainProfileId = await resolveCanonicalOnchainProfileId(d, id, walletAddress);
-          const bridgeResult = await postVerificationHook(onchainProfileId, 'solana', walletAddress, proof);
-          if (bridgeResult) {
-            const enrichedProof = (bridgeResult && typeof bridgeResult === 'object') ? {
-              ...proof,
-              txSignature: bridgeResult.txSignature || null,
-              attestationPDA: bridgeResult.attestationPDA || null,
-              solscanUrl: bridgeResult.txSignature ? ('https://solana.fm/tx/' + bridgeResult.txSignature) : undefined,
-            } : proof;
-            const vId = require('crypto').randomUUID();
-            const insert = d.prepare("INSERT OR IGNORE INTO verifications (id, profile_id, platform, identifier, proof, verified_at) VALUES (?, ?, ?, ?, ?, datetime('now'))");
-            const result = insert.run(
-              vId, id, 'solana', walletAddress, JSON.stringify(enrichedProof)
-            );
-            console.log('[SimpleRegister] Cached Solana verification for', id, 'changes=', result.changes, 'wallet=', walletAddress, 'tx=', enrichedProof.txSignature || 'none');
-          } else {
-            console.warn('[SimpleRegister] Skipped Solana verification cache for', id, 'because on-chain write failed');
-          }
-        } catch (vErr) {
-          console.error('[SimpleRegister] Solana auto-verify failed:', vErr.message);
-        }
-      }
+      // Do not attempt on-chain attestations before the user-owned genesis exists.
+      // Final SATP + Solana attestations are created in /api/satp-auto/v3/identity/confirm.
 
       res.status(201).json({
         id,
