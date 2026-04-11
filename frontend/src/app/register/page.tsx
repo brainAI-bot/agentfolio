@@ -121,11 +121,18 @@ Timestamp: ${Date.now()}`;
             const sig = await sendTransaction(tx, connection);
             await connection.confirmTransaction(sig, "confirmed");
             setTxSignature(sig);
-            await fetch("/api/satp-auto/v3/identity/confirm", {
+            const confirmRes = await fetch("/api/satp-auto/v3/identity/confirm", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ walletAddress, profileId, txSignature: sig }),
             });
+            const confirmData = await confirmRes.json().catch(() => null);
+            if (!confirmRes.ok) {
+              throw new Error(confirmData?.error || "Failed to finalize SATP identity");
+            }
+            if (confirmData?.solanaAttestation?.ok === false && !confirmData?.solanaAttestation?.skipped) {
+              throw new Error(confirmData.solanaAttestation.error || "SATP identity was created, but Solana attestation replay failed");
+            }
             setChainStatus("done");
           } else {
             throw new Error(genesisData?.error || "Failed to create SATP identity");
