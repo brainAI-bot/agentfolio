@@ -64,6 +64,7 @@ try {
 // x402 Payment Layer
 const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
 const { HTTPFacilitatorClient } = require('@x402/core/server');
+const { registerExactSvmScheme } = require('@x402/svm/exact/server');
 
 const X402_RECEIVE_ADDRESS = process.env.X402_RECEIVE_ADDRESS || '';
 const X402_FACILITATOR = process.env.X402_FACILITATOR || '';
@@ -360,33 +361,59 @@ try {
 
 // ─── API Explorer (agent profile deep-link) ─────────────
 app.get('/api/explorer/:agentId', async (req, res) => {
-  const { agentId } = req.params;
+  const rawAgentId = String(req.params.agentId || '').trim();
+  const parseJsonFieldSafe = (value, fallback) => {
+    if (value === null || value === undefined || value === '') return fallback;
+    if (typeof value === 'object') return value;
+    try { return JSON.parse(value); } catch (_) { return fallback; }
+  };
+  const isPublicPlatform = (platform) => {
+    const normalized = String(platform || '').trim().toLowerCase();
+    return !!normalized && !['satp', 'satp_v3', 'satp_verification'].includes(normalized);
+  };
+
   try {
     const db = profileStore.getDb();
-    let profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId);
-    if (!profile) profile = db.prepare('SELECT * FROM profiles WHERE handle = ?').get(agentId);
+    let profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(rawAgentId);
+    if (!profile) profile = db.prepare('SELECT * FROM profiles WHERE handle = ?').get(rawAgentId);
+    if (!profile && rawAgentId && !rawAgentId.startsWith('agent_')) {
+      const prefixedId = 'agent_' + rawAgentId.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(prefixedId);
+    }
+    if (!profile && rawAgentId) {
+      profile = db.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(rawAgentId);
+    }
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
     const v3Score = await getV3Score(profile.id).catch(() => null);
     const unified = computeUnifiedTrustScore(db, profile, { v3Score });
-
-    res.json({
-      agentId: profile.id,
-      name: profile.name,
-      did: 'did:agentfolio:' + profile.id,
-      trustScore: unified.score,
-      tier: unified.levelName,
-      scoreVersion: unified.source,
-      verifications: unified.verifications.map(({ platform, verified, txSignature, solscanUrl, timestamp }) => ({
+    const publicVerifications = (unified.verifications || [])
+      .filter(({ platform }) => isPublicPlatform(platform))
+      .map(({ platform, verified, txSignature, solscanUrl, timestamp }) => ({
         platform,
         verified,
         txSignature,
         solscanUrl,
         timestamp,
-      })),
-      wallets: profile.wallets || {},
-      tags: profile.tags || [],
-      skills: profile.skills || [],
+      }));
+
+    res.json({
+      agentId: profile.id,
+      profileId: profile.id,
+      name: profile.name,
+      did: 'did:agentfolio:' + profile.id,
+      trustScore: unified.score,
+      score: unified.score,
+      reputationScore: unified.score,
+      verificationLevel: unified.level,
+      verificationLevelName: unified.levelName,
+      verificationLabel: unified.levelName,
+      tier: unified.levelName,
+      scoreVersion: unified.source,
+      verifications: publicVerifications,
+      wallets: parseJsonFieldSafe(profile.wallets, {}),
+      tags: parseJsonFieldSafe(profile.tags, []),
+      skills: parseJsonFieldSafe(profile.skills, []),
       onChainRegistered: unified.hasSatpIdentity,
       v3: {
         reputationScore: unified.score,
@@ -413,33 +440,47 @@ app.get('/api/explorer/:agentId', async (req, res) => {
 // ─── Trust Score API (dedicated endpoint) ────────────────
 app.get('/api/profile/:id/trust-score', async (req, res) => {
   try {
-    let profileId = req.params.id;
+    const requestedId = String(req.params.id || '').trim();
+    let profileId = requestedId;
     const db = profileStore.getDb();
     let row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
     if (!row) {
       const byHandle = db.prepare('SELECT * FROM profiles WHERE handle = ?').get(profileId);
       if (byHandle) { row = byHandle; profileId = byHandle.id; }
     }
+    if (!row && profileId && !profileId.startsWith('agent_')) {
+      const prefixedId = 'agent_' + profileId.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      const byPrefixedId = db.prepare('SELECT * FROM profiles WHERE id = ?').get(prefixedId);
+      if (byPrefixedId) { row = byPrefixedId; profileId = byPrefixedId.id; }
+    }
+    if (!row && requestedId) {
+      const byName = db.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(requestedId);
+      if (byName) { row = byName; profileId = byName.id; }
+    }
     if (!row) return res.status(404).json({ error: 'Profile not found' });
 
     const v3Score = await getV3Score(profileId).catch(() => null);
     const unified = computeUnifiedTrustScore(db, row, { v3Score });
+    const payload = {
+      profileId,
+      trustScore: unified.score,
+      score: unified.score,
+      reputationScore: unified.score,
+      verificationLevel: unified.level,
+      verificationLevelName: unified.levelName,
+      verificationLabel: unified.levelName,
+      trustScoreBreakdown: unified.breakdown || {},
+      breakdown: unified.breakdown || {},
+      isBorn: !!(v3Score && v3Score.isBorn),
+      faceImage: (v3Score && v3Score.faceImage) || null,
+      source: unified.source,
+      x402PaidUrl: X402_ENABLED ? '/api/score?id=' + encodeURIComponent(profileId) : null,
+    };
 
     res.json({
       ok: true,
-      data: {
-        profileId,
-        trustScore: unified.score,
-        reputationScore: unified.score,
-        verificationLevel: unified.level,
-        verificationLevelName: unified.levelName,
-        verificationLabel: unified.levelName,
-        trustScoreBreakdown: unified.breakdown || {},
-        breakdown: unified.breakdown || {},
-        isBorn: !!(v3Score && v3Score.isBorn),
-        faceImage: (v3Score && v3Score.faceImage) || null,
-        source: unified.source,
-      }
+      ...payload,
+      data: payload,
     });
   } catch (e) {
     console.error('[TrustScore] unified route error:', e.stack || e.message);
@@ -451,12 +492,22 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
 // ─── Genesis Record API (Bug 2 fix — Apr 6) ────────────────
 app.get('/api/profile/:id/genesis', async (req, res) => {
   try {
-    let profileId = req.params.id;
+    const requestedId = String(req.params.id || '').trim();
+    let profileId = requestedId;
     const db = profileStore.getDb();
     let row = db.prepare('SELECT id FROM profiles WHERE id = ?').get(profileId);
     if (!row) {
       row = db.prepare('SELECT id FROM profiles WHERE handle = ?').get(profileId);
       if (row) profileId = row.id;
+    }
+    if (!row && profileId && !profileId.startsWith('agent_')) {
+      const prefixedId = 'agent_' + profileId.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      const byPrefixedId = db.prepare('SELECT id FROM profiles WHERE id = ?').get(prefixedId);
+      if (byPrefixedId) { row = byPrefixedId; profileId = byPrefixedId.id; }
+    }
+    if (!row && requestedId) {
+      const byName = db.prepare('SELECT id FROM profiles WHERE LOWER(name) = LOWER(?)').get(requestedId);
+      if (byName) { row = byName; profileId = byName.id; }
     }
     if (!row) return res.status(404).json({ error: 'Profile not found' });
 
@@ -2120,6 +2171,7 @@ let x402Server = null;
 if (X402_ENABLED) {
   const x402Facilitator = new HTTPFacilitatorClient({ url: X402_FACILITATOR });
   x402Server = new x402ResourceServer(x402Facilitator);
+  registerExactSvmScheme(x402Server, { networks: [X402_NETWORK] });
 }
 
 // Free: SATP-integrated score (reads on-chain + off-chain)
