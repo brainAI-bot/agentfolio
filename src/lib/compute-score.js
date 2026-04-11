@@ -10,8 +10,11 @@ const VERIFICATION_WEIGHTS = {
   x: 40,
   twitter: 40, // alias for x
   satp: 20,
+  satp_v3: 20,
   domain: 20,
   ethereum: 20,
+  eth: 20,
+  solana_wallet_verification: 30,
   agentmail: 15,
   moltbook: 15,
   hyperliquid: 15,

@@ -310,19 +310,15 @@ async function refreshAttestationsFromChain() {
 
 function normalizeAttestationPlatform(attestationType) {
   if (!attestationType) return null;
-  let platform = attestationType;
-  if (platform.startsWith('verification_')) platform = platform.slice('verification_'.length);
-  if (platform.endsWith('_verification')) platform = platform.slice(0, -'_verification'.length);
-  if (platform === 'solana_wallet') return 'solana';
-  if (platform === 'eth_wallet') return 'eth';
-  return platform;
+  return String(attestationType).trim().toLowerCase();
 }
 
 function upsertAttestation(map, profileId, entry) {
   if (!profileId || !entry?.platform) return;
   if (!map.has(profileId)) map.set(profileId, []);
   const list = map.get(profileId);
-  const idx = list.findIndex(item => item.platform === entry.platform);
+  const entryKey = entry.pda || entry.txSignature || entry.proofHash || `${entry.platform}:${entry.timestamp || ''}:${entry.memo || ''}`;
+  const idx = list.findIndex(item => (item.pda || item.txSignature || item.proofHash || `${item.platform}:${item.timestamp || ''}:${item.memo || ''}`) === entryKey);
   if (idx >= 0) list[idx] = { ...list[idx], ...entry };
   else list.push(entry);
 }
@@ -343,11 +339,9 @@ async function mergeProgramAttestationsIntoMap(newAttestations) {
     for (const { pubkey, account } of programAccounts) {
       try {
         const parsed = deserializeAttestation(account.data);
-        if (!parsed?.agentId || !parsed?.verified || parsed?.isRevoked) continue;
+        if (!parsed?.agentId) continue;
         let parsedProof = {};
         try { parsedProof = typeof parsed.proofData === 'string' ? JSON.parse(parsed.proofData) : (parsed.proofData || {}); } catch {}
-        const testSource = String(parsedProof.source || '');
-        if (testSource.startsWith('post-restart-proof')) continue;
         const platform = normalizeAttestationPlatform(parsed.attestationType);
         if (!platform) continue;
         upsertAttestation(newAttestations, parsed.agentId, {
@@ -366,7 +360,7 @@ async function mergeProgramAttestationsIntoMap(newAttestations) {
         discovered += 1;
       } catch (_) {}
     }
-    console.log(`[ChainCache] Loaded ${discovered} verified attestation-program accounts`);
+    console.log(`[ChainCache] Loaded ${discovered} attestation-program accounts`);
     return discovered;
   } catch (e) {
     console.warn('[ChainCache] Program attestation read failed:', e.message);
@@ -385,28 +379,12 @@ async function refreshAttestationsFromDB() {
     const dbPath = '/home/ubuntu/agentfolio/data/agentfolio.db';
     const db = new Database(dbPath, { readonly: true });
     
-    // Security: only trust attestations after hardened system date AND from platform signer
-    // HARDENED_DATE removed — signer check is the real security (date format mismatch caused regression: 17/49 memos)
-    // Trust both current and legacy platform signers
-    const trustedSigners = new Set([
-      PLATFORM_SIGNER,
-      'Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc', // deploy wallet
-      '4St74qSyzuGyV2TA9gxej9GvXG2TgVSTvp1HEpzJbwcP', // legacy signer
-      'JAbcYnKy4p2c5SYV3bHu14VtD6EDDpzj44uGYW8BMud4', // brainforge personal
-    ].filter(Boolean));
     const rows = db.prepare('SELECT * FROM attestations ORDER BY created_at DESC').all();
     
     const newAttestations = new Map();
     for (const row of rows) {
-      // Signer check: only trust attestations from known platform signers
-      if (row.signer && !trustedSigners.has(row.signer)) {
-        continue; // Skip attestations from untrusted signers
-      }
-      if (!newAttestations.has(row.profile_id)) {
-        newAttestations.set(row.profile_id, []);
-      }
-      newAttestations.get(row.profile_id).push({
-        platform: row.platform,
+      upsertAttestation(newAttestations, row.profile_id, {
+        platform: normalizeAttestationPlatform(row.platform) || row.platform,
         txSignature: row.tx_signature,
         memo: row.memo,
         proofHash: row.proof_hash,

@@ -64,13 +64,8 @@ function registerSATPRoutes(app) {
   }
 
   function normalizeAttestationPlatform(value) {
-    const platform = String(value || '').toLowerCase();
+    const platform = String(value || '').trim().toLowerCase();
     if (!platform) return null;
-    if (platform === 'twitter') return 'x';
-    if (platform === 'satp_v3') return 'satp';
-    if (platform.startsWith('verification_')) return normalizeAttestationPlatform(platform.slice('verification_'.length));
-    if (platform.endsWith('_verification')) return normalizeAttestationPlatform(platform.slice(0, -'_verification'.length));
-    if (platform === 'solana_wallet') return 'solana';
     return platform;
   }
 
