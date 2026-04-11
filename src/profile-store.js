@@ -198,6 +198,22 @@ function genId(prefix = 'agent') {
   return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
 }
 
+function isBlockedProdTestProfile(name, profileId) {
+  const normalizedName = String(name || '').trim().toLowerCase();
+  const normalizedId = String(profileId || '').trim().toLowerCase();
+  return /^rollbackproof\d*$/.test(normalizedId)
+    || /^rollback\s*proof(\s*\d+)?$/.test(normalizedName)
+    || /^rollbackproof\d*$/.test(normalizedName)
+    || /^p0autotest\d*$/.test(normalizedId)
+    || /^p0\s*autotest(\s*\d+)?$/.test(normalizedName)
+    || /^autotest\d*$/.test(normalizedId);
+}
+
+function isLocalRegistrationRequest(req) {
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || req.hostname || '').toLowerCase();
+  return host.includes('localhost') || host.includes('127.0.0.1') || host.includes('0.0.0.0');
+}
+
 function genApiKey() {
   return `af_${crypto.randomBytes(24).toString('hex')}`;
 }
@@ -838,6 +854,9 @@ function registerRoutes(app) {
         return res.status(400).json({ error: 'Custom ID must be 3-32 characters (letters, numbers, underscore, dash)' });
       }
       id = cleaned;
+      if (isBlockedProdTestProfile(name, id) && !isLocalRegistrationRequest(req)) {
+        return res.status(400).json({ error: 'Test profile IDs are blocked on production. Use the local registration harness instead.' });
+      }
       // Check uniqueness
       const existing = d.prepare('SELECT id FROM profiles WHERE id = ?').get(id);
       if (existing) {
@@ -845,6 +864,9 @@ function registerRoutes(app) {
       }
     } else {
       id = genId();
+      if (isBlockedProdTestProfile(name, id) && !isLocalRegistrationRequest(req)) {
+        return res.status(400).json({ error: 'Test profile IDs are blocked on production. Use the local registration harness instead.' });
+      }
     }
     const apiKey = genApiKey();
     // Detect if production schema has 'handle' column
