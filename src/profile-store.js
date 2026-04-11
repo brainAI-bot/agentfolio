@@ -1397,7 +1397,7 @@ function registerRoutes(app) {
           enriched.isBorn = v3Data.isBorn;
           if (v3Data.faceImage) enriched.faceImage = v3Data.faceImage;
           if (v3Data.authority && !enriched.walletAddress) enriched.walletAddress = v3Data.authority;
-          if (v3Score > 0 && ((!enriched.score || v3Score > enriched.score) || ((v3Data.verificationLevel || 0) > (enriched.verificationLevel || 0)))) {
+          if (v3Score > 0 && Number(enriched.trustScore || enriched.score || 0) <= 0 && Number(enriched.verificationLevel || 0) <= 0) {
             enriched.trust_score = { overall_score: v3Score, level: v3Data.verificationLabel || 'Unverified', score_breakdown: {}, source: 'v3-genesis-fallback' };
             enriched.score = v3Score;
             enriched.trustScore = v3Score;

@@ -1,5 +1,7 @@
 const { computeScore } = require('./compute-score');
 
+const CORE_TRUST_PLATFORMS = new Set(['satp', 'solana']);
+
 function normalizePlatform(platform) {
   if (!platform) return null;
   const map = {
@@ -89,8 +91,9 @@ function computeUnifiedTrustScore(db, profile, options = {}) {
   }
 
   const verificationList = Array.from(verifications.values());
+  const scoredVerificationList = verificationList.filter(v => CORE_TRUST_PLATFORMS.has(v.platform));
   const computed = computeScore(
-    verificationList.map(({ platform, identifier }) => ({ platform, identifier })),
+    scoredVerificationList.map(({ platform, identifier }) => ({ platform, identifier })),
     { hasSatpIdentity: verificationList.some(v => v.platform === 'satp'), claimed }
   ) || { score: 0, level: 0, levelName: 'Unverified', breakdown: {}, badge: '⚪' };
 
@@ -102,7 +105,7 @@ function computeUnifiedTrustScore(db, profile, options = {}) {
     badge: computed.badge || '⚪',
     verifications: verificationList,
     hasSatpIdentity: verificationList.some(v => v.platform === 'satp'),
-    source: 'unified-proof-backed-trust',
+    source: 'unified-core-identity-trust',
   };
 }
 

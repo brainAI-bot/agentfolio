@@ -2325,21 +2325,20 @@ app.get('/api/score', async (req, res) => {
   
   // A1: Single scoring function
   const resolvedId = row ? row.id : profileId;
-  const { computeScore: _computeScore } = require('./lib/compute-score');
-  let _dbVerifs = [];
+  let _computed = { score: 0, level: 0, levelName: 'Unverified', source: 'none', verifications: [] };
   try {
     const _sdb = new (require('better-sqlite3'))(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
-    const _rows = _sdb.prepare('SELECT platform, identifier, proof FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(resolvedId);
+    const _profileForTrust = {
+      ...(profile || {}),
+      id: resolvedId,
+      claimed: profile?.claimed ?? row?.claimed ?? 0,
+      wallet: solWallet || profile?.wallet || row?.wallet || null,
+    };
+    _computed = computeUnifiedTrustScore(_sdb, _profileForTrust, {
+      v3Score: satpData?.onChain || satpData || null,
+    });
     _sdb.close();
-    _dbVerifs = _rows.filter(v => {
-      if (v.platform !== 'solana') return true;
-      let proof = {};
-      try { proof = typeof v.proof === 'string' ? JSON.parse(v.proof) : (v.proof || {}); } catch {}
-      return !!(proof.txSignature || proof.signature || proof.transactionSignature);
-    }).map(v => ({ platform: v.platform, identifier: v.identifier }));
   } catch (_) {}
-  const _hasSatp = _dbVerifs.some(v => v.platform === 'satp');
-  const _computed = _computeScore(_dbVerifs, { hasSatpIdentity: _hasSatp, claimed: !!row?.claimed });
   
   {
     return res.json({
@@ -2348,8 +2347,8 @@ app.get('/api/score', async (req, res) => {
       level: _computed.level,
       levelName: _computed.levelName,
       tier: _computed.levelName,
-      source: 'compute-score',
-      verifications,
+      source: _computed.source || 'compute-score',
+      verifications: _computed.verifications || verifications,
       onChain: { reputationScore: _computed.score, verificationLevel: _computed.level, isBorn: false },
       payment: { protocol: 'x402', enabled: X402_ENABLED, network: X402_ENABLED ? X402_NETWORK : null, price: X402_ENABLED ? '$0.01' : null, reason: X402_DISABLE_REASON },
     });
@@ -2358,7 +2357,7 @@ app.get('/api/score', async (req, res) => {
   // Fallback — use compute-score
   res.json({
     agentId: resolvedId, score: _computed.score, level: _computed.level, levelName: _computed.levelName, tier: _computed.levelName,
-    source: 'legacy-computed',
+    source: _computed.source || 'legacy-computed',
     payment: { protocol: 'x402', enabled: X402_ENABLED, network: X402_ENABLED ? X402_NETWORK : null, price: X402_ENABLED ? '$0.01' : null, reason: X402_DISABLE_REASON },
   });
 });

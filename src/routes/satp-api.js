@@ -754,7 +754,7 @@ function registerSATPRoutes(app) {
         enriched.push({
           platform,
           txSignature: hint.txSignature,
-          memo: 'ATTESTATION|' + platform,
+          memo: null,
           proofHash: null,
           signer: null,
           timestamp: null,
