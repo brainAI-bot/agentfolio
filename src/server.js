@@ -365,22 +365,9 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     const db = profileStore.getDb();
     let profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId);
     if (!profile) profile = db.prepare('SELECT * FROM profiles WHERE handle = ?').get(agentId);
-    if (!profile) profile = db.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(agentId);
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
-    let canonicalIdentity = null;
-    if (profile.wallet && String(profile.wallet).trim()) {
-      try {
-        const satpIdentity = require('./satp-identity-client');
-        canonicalIdentity = await satpIdentity.getAgentIdentity(String(profile.wallet).trim(), 'mainnet');
-      } catch (walletErr) {
-        console.warn('[Explorer] wallet-canonical identity lookup failed:', walletErr.message);
-      }
-    }
-
-    const v3Score = (canonicalIdentity && canonicalIdentity.pda && !canonicalIdentity.error)
-      ? canonicalIdentity
-      : await getV3Score(profile.id).catch(() => null);
+    const v3Score = await getV3Score(profile.id).catch(() => null);
     const unified = computeUnifiedTrustScore(db, profile, { v3Score });
 
     res.json({
@@ -400,11 +387,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       wallets: profile.wallets || {},
       tags: profile.tags || [],
       skills: profile.skills || [],
-      onChainRegistered: !!(v3Score && v3Score.pda),
-      onchain: v3Score && v3Score.pda ? {
-        pda: v3Score.pda,
-        authority: v3Score.authority || '',
-      } : null,
+      onChainRegistered: unified.hasSatpIdentity,
       v3: {
         reputationScore: unified.score,
         verificationLevel: unified.level,
@@ -432,9 +415,9 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
   try {
     let profileId = req.params.id;
     const db = profileStore.getDb();
-    let row = db.prepare('SELECT id, claimed, wallet, created_at FROM profiles WHERE id = ?').get(profileId);
+    let row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
     if (!row) {
-      const byHandle = db.prepare('SELECT id, claimed, wallet, created_at FROM profiles WHERE handle = ?').get(profileId);
+      const byHandle = db.prepare('SELECT * FROM profiles WHERE handle = ?').get(profileId);
       if (byHandle) { row = byHandle; profileId = byHandle.id; }
     }
     if (!row) return res.status(404).json({ error: 'Profile not found' });
@@ -446,12 +429,15 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
       ok: true,
       data: {
         profileId,
+        trustScore: unified.score,
         reputationScore: unified.score,
         verificationLevel: unified.level,
+        verificationLevelName: unified.levelName,
         verificationLabel: unified.levelName,
+        trustScoreBreakdown: unified.breakdown || {},
+        breakdown: unified.breakdown || {},
         isBorn: !!(v3Score && v3Score.isBorn),
         faceImage: (v3Score && v3Score.faceImage) || null,
-        breakdown: unified.breakdown || {},
         source: unified.source,
       }
     });
@@ -466,53 +452,51 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
 app.get('/api/profile/:id/genesis', async (req, res) => {
   try {
     let profileId = req.params.id;
-    let record = null;
-    const { getV3Score } = require('./v3-score-service');
-
-    // Prefer canonical V3 agent-id lookup first. Wallet-derived identity reads can
-    // hit migrated/non-canonical records and should only be used as a fallback.
-    record = await getV3Score(profileId);
-
-    if ((!record || record.error) && !String(profileId).startsWith('agent_')) {
-      const normalizedId = `agent_${String(profileId).toLowerCase()}`;
-      const normalizedRecord = await getV3Score(normalizedId);
-      if (normalizedRecord && !normalizedRecord.error && normalizedRecord.pda) {
-        profileId = normalizedId;
-        record = normalizedRecord;
-      }
+    const db = profileStore.getDb();
+    let row = db.prepare('SELECT id FROM profiles WHERE id = ?').get(profileId);
+    if (!row) {
+      row = db.prepare('SELECT id FROM profiles WHERE handle = ?').get(profileId);
+      if (row) profileId = row.id;
     }
+    if (!row) return res.status(404).json({ error: 'Profile not found' });
 
-    if ((!record || record.error)) {
-      try {
-        const db = getDb();
-        const row = db.prepare('SELECT wallet FROM profiles WHERE id = ? OR handle = ? OR LOWER(name) = LOWER(?)').get(profileId, profileId, req.params.id);
-        const claimedWallet = row && row.wallet ? String(row.wallet).trim() : '';
-        if (claimedWallet) {
-          const satpIdentity = require('./satp-identity-client');
-          const walletIdentity = await satpIdentity.getAgentIdentity(claimedWallet, 'mainnet');
-          if (walletIdentity && !walletIdentity.error) {
-            record = walletIdentity;
-            profileId = walletIdentity.agentId || profileId;
-          }
-        }
-      } catch (walletErr) {
-        console.warn('[Genesis Route] wallet canonical lookup failed:', walletErr.message);
-      }
-    }
+    const v3Score = await getV3Score(profileId);
+    if (!v3Score) return res.json({ genesis: null, message: 'No on-chain genesis record' });
 
-    if (!record || record.error) return res.json({ genesis: null, error: 'No Genesis Record found' });
+    let pda = null;
+    try {
+      const crypto = require('crypto');
+      const { PublicKey } = require('@solana/web3.js');
+      const PROGRAM_ID = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
+      const hash = crypto.createHash('sha256').update(profileId).digest();
+      pda = PublicKey.findProgramAddressSync([Buffer.from('genesis'), hash], PROGRAM_ID)[0].toBase58();
+    } catch (e) { console.warn('[Genesis] PDA derivation failed:', e.message); }
 
-    if (!record.pda) {
-      try {
-        const { getGenesisPDA } = require('./satp-client/src/index');
-        const [pda] = getGenesisPDA(profileId, 'mainnet');
-        record = { ...record, pda: pda.toBase58() };
-      } catch (_) {}
-    }
+    let genesis = {
+      pda,
+      agentName: v3Score.agentName || '',
+      description: '',
+      category: 'agent',
+      verificationLevel: v3Score.verificationLevel || 0,
+      verificationLabel: v3Score.verificationLabel || 'Unknown',
+      reputationScore: v3Score.reputationScore || 0,
+      reputationPct: v3Score.reputationPct || '0.00',
+      isBorn: v3Score.isBorn || false,
+      bornAt: v3Score.genesisRecord || null,
+      faceImage: v3Score.faceImage || '',
+      faceMint: v3Score.faceMint || '',
+      faceBurnTx: '',
+      createdAt: v3Score.createdAt || null,
+      authority: v3Score.authority || '',
+    };
 
-    res.json({ genesis: record });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch genesis record', detail: err.message });
+    // [Apr 10] Preserve raw genesis here. Trust-score normalization belongs on
+    // profile display paths, not the dedicated on-chain genesis endpoint.
+
+    res.json({ genesis });
+  } catch (e) {
+    console.error('[Genesis API]', e.message);
+    res.status(500).json({ error: 'Internal error' });
   }
 });
 
@@ -2141,44 +2125,35 @@ if (X402_ENABLED) {
 // Free: SATP-integrated score (reads on-chain + off-chain)
 app.get('/api/satp/score/:id', async (req, res) => {
   try {
-    const profileId = req.params.id;
-    const Database = require('better-sqlite3');
-    const scoreDb = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
-    const row = scoreDb.prepare('SELECT * FROM profiles WHERE id = ? OR handle = ?').get(profileId, profileId);
-
+    let profileId = req.params.id;
+    const db = profileStore.getDb();
+    let row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
     if (!row) {
-      scoreDb.close();
-      return res.status(404).json({ error: 'Profile not found', id: profileId });
+      const byHandle = db.prepare('SELECT * FROM profiles WHERE handle = ?').get(profileId);
+      if (byHandle) { row = byHandle; profileId = byHandle.id; }
     }
 
-    const wallets = (() => {
-      try { return typeof row.wallets === 'string' ? JSON.parse(row.wallets || '{}') : (row.wallets || {}); } catch { return {}; }
-    })();
-    let v3Score = null;
-    try {
-      const { getV3Score } = require('./v3-score-service');
-      v3Score = await getV3Score(row.id);
-    } catch (_) {}
-    const computed = computeUnifiedTrustScore(scoreDb, {
-      id: row.id,
-      claimed: row.claimed,
-      wallet: row.wallet || wallets?.solana || null,
-      wallets,
-    }, { v3Score });
-    scoreDb.close();
+    if (!row) return res.status(404).json({ error: 'Profile not found', id: profileId });
+
+    const v3Score = await getV3Score(profileId).catch(() => null);
+    const unified = computeUnifiedTrustScore(db, row, { v3Score });
 
     res.json({
       ok: true,
       data: {
-        score: computed.score,
-        level: computed.level,
-        levelName: computed.levelName,
-        breakdown: computed.breakdown,
-        source: computed.source,
-      },
+        score: unified.score,
+        reputationScore: unified.score,
+        level: unified.level,
+        verificationLevel: unified.level,
+        levelName: unified.levelName,
+        verificationLevelName: unified.levelName,
+        verificationLabel: unified.levelName,
+        breakdown: unified.breakdown || {},
+        source: unified.source,
+      }
     });
   } catch (err) {
-    console.error('[SATP Score] error:', err.message);
+    console.error('[SATP Score] error:', err.stack || err.message);
     res.status(500).json({ error: 'Score computation failed', detail: err.message });
   }
 });
