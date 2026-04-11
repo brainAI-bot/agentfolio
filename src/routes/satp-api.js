@@ -72,13 +72,24 @@ function registerSATPRoutes(app) {
   function loadAttestationTxHints(profileId) {
     const hints = {};
     if (!profileId) return hints;
-    const setHint = (platform, txSignature) => {
+    const aliasPlatforms = (platform) => {
       const normalized = normalizeAttestationPlatform(platform);
-      if (!normalized || !txSignature || hints[normalized]) return;
-      hints[normalized] = {
-        txSignature,
-        solscanUrl: 'https://solana.fm/tx/' + txSignature,
-      };
+      if (!normalized) return [];
+      const aliases = new Set([normalized]);
+      if (normalized === 'solana') aliases.add('solana_wallet');
+      if (normalized === 'solana_wallet') aliases.add('solana');
+      if (normalized === 'solana_wallet_verification') aliases.add('solana_wallet');
+      if (normalized === 'solana_wallet') aliases.add('solana_wallet_verification');
+      return [...aliases];
+    };
+    const setHint = (platform, txSignature) => {
+      for (const normalized of aliasPlatforms(platform)) {
+        if (!normalized || !txSignature || hints[normalized]) continue;
+        hints[normalized] = {
+          txSignature,
+          solscanUrl: 'https://solana.fm/tx/' + txSignature,
+        };
+      }
     };
 
     try {

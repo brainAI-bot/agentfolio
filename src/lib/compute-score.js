@@ -15,6 +15,7 @@ const VERIFICATION_WEIGHTS = {
   ethereum: 20,
   eth: 20,
   solana_wallet_verification: 30,
+  solana_wallet: 30,
   agentmail: 15,
   moltbook: 15,
   hyperliquid: 15,
