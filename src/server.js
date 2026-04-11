@@ -2154,12 +2154,17 @@ app.get('/api/satp/score/:id', async (req, res) => {
     const wallets = (() => {
       try { return typeof row.wallets === 'string' ? JSON.parse(row.wallets || '{}') : (row.wallets || {}); } catch { return {}; }
     })();
+    let v3Score = null;
+    try {
+      const { getV3Score } = require('./v3-score-service');
+      v3Score = await getV3Score(row.id);
+    } catch (_) {}
     const computed = computeUnifiedTrustScore(scoreDb, {
       id: row.id,
       claimed: row.claimed,
       wallet: row.wallet || wallets?.solana || null,
       wallets,
-    }, {});
+    }, { v3Score });
     scoreDb.close();
 
     res.json({
