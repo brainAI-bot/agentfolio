@@ -180,10 +180,10 @@ async function getSatpAgents() {
       const rawExplorerAttestations = Array.isArray(byAgentData?.data?.attestations)
         ? byAgentData.data.attestations
         : (Array.isArray(explorerData?.attestationMemos) ? explorerData.attestationMemos : unified.verifications);
-      const explorerAttestations = rawExplorerAttestations.map((att) => {
-        const memo = typeof att?.memo === 'string' && att.memo.startsWith('ATTESTATION|') ? null : (att?.memo || null);
-        return { ...att, memo };
-      });
+      const explorerAttestations = rawExplorerAttestations.map((att) => ({
+        ...att,
+        memo: att?.memo || null,
+      }));
       const platforms = [...new Set([
         ...(Array.isArray(agent.platforms) ? agent.platforms : []),
         ...explorerVerifications.map(v => normalizePlatform(v.platform || v.type || v.label)),

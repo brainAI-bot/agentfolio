@@ -605,7 +605,7 @@ export default function SATPExplorerPage() {
                                 <span className="text-[9px] shrink-0" style={{ color: "var(--text-tertiary)" }}>no tx</span>
                               )}
                             </div>
-                            {att.memo && !att.memo.startsWith("ATTESTATION|") && (
+                            {att.memo && (
                               <div className="text-[9px] mt-1 truncate" style={{ color: "var(--text-tertiary)" }} title={att.memo}>
                                 {att.memo}
                               </div>
