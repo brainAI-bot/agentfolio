@@ -365,9 +365,22 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     const db = profileStore.getDb();
     let profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId);
     if (!profile) profile = db.prepare('SELECT * FROM profiles WHERE handle = ?').get(agentId);
+    if (!profile) profile = db.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(agentId);
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
-    const v3Score = await getV3Score(profile.id).catch(() => null);
+    let canonicalIdentity = null;
+    if (profile.wallet && String(profile.wallet).trim()) {
+      try {
+        const satpIdentity = require('./satp-identity-client');
+        canonicalIdentity = await satpIdentity.getAgentIdentity(String(profile.wallet).trim(), 'mainnet');
+      } catch (walletErr) {
+        console.warn('[Explorer] wallet-canonical identity lookup failed:', walletErr.message);
+      }
+    }
+
+    const v3Score = (canonicalIdentity && canonicalIdentity.pda && !canonicalIdentity.error)
+      ? canonicalIdentity
+      : await getV3Score(profile.id).catch(() => null);
     const unified = computeUnifiedTrustScore(db, profile, { v3Score });
 
     res.json({
@@ -387,7 +400,11 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       wallets: profile.wallets || {},
       tags: profile.tags || [],
       skills: profile.skills || [],
-      onChainRegistered: unified.hasSatpIdentity,
+      onChainRegistered: !!(v3Score && v3Score.pda),
+      onchain: v3Score && v3Score.pda ? {
+        pda: v3Score.pda,
+        authority: v3Score.authority || '',
+      } : null,
       v3: {
         reputationScore: unified.score,
         verificationLevel: unified.level,
@@ -449,51 +466,44 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
 app.get('/api/profile/:id/genesis', async (req, res) => {
   try {
     let profileId = req.params.id;
-    const db = profileStore.getDb();
-    let row = db.prepare('SELECT id FROM profiles WHERE id = ?').get(profileId);
-    if (!row) {
-      row = db.prepare('SELECT id FROM profiles WHERE handle = ?').get(profileId);
-      if (row) profileId = row.id;
+    let record = null;
+    const { getV3Score } = require('./v3-score-service');
+
+    // Prefer canonical V3 agent-id lookup first. Wallet-derived identity reads can
+    // hit migrated/non-canonical records and should only be used as a fallback.
+    record = await getV3Score(profileId);
+
+    if ((!record || record.error || !record.pda) && !String(profileId).startsWith('agent_')) {
+      const normalizedId = `agent_${String(profileId).toLowerCase()}`;
+      const normalizedRecord = await getV3Score(normalizedId);
+      if (normalizedRecord && !normalizedRecord.error && normalizedRecord.pda) {
+        profileId = normalizedId;
+        record = normalizedRecord;
+      }
     }
-    if (!row) return res.status(404).json({ error: 'Profile not found' });
 
-    const v3Score = await getV3Score(profileId);
-    if (!v3Score) return res.json({ genesis: null, message: 'No on-chain genesis record' });
+    if ((!record || record.error || !record.pda)) {
+      try {
+        const db = getDb();
+        const row = db.prepare('SELECT wallet FROM profiles WHERE id = ? OR handle = ? OR LOWER(name) = LOWER(?)').get(profileId, profileId, req.params.id);
+        const claimedWallet = row && row.wallet ? String(row.wallet).trim() : '';
+        if (claimedWallet) {
+          const satpIdentity = require('./satp-identity-client');
+          const walletIdentity = await satpIdentity.getAgentIdentity(claimedWallet, 'mainnet');
+          if (walletIdentity && !walletIdentity.error) {
+            record = walletIdentity;
+            profileId = walletIdentity.agentId || profileId;
+          }
+        }
+      } catch (walletErr) {
+        console.warn('[Genesis Route] wallet canonical lookup failed:', walletErr.message);
+      }
+    }
 
-    let pda = null;
-    try {
-      const crypto = require('crypto');
-      const { PublicKey } = require('@solana/web3.js');
-      const PROGRAM_ID = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
-      const hash = crypto.createHash('sha256').update(profileId).digest();
-      pda = PublicKey.findProgramAddressSync([Buffer.from('genesis'), hash], PROGRAM_ID)[0].toBase58();
-    } catch (e) { console.warn('[Genesis] PDA derivation failed:', e.message); }
-
-    let genesis = {
-      pda,
-      agentName: v3Score.agentName || '',
-      description: '',
-      category: 'agent',
-      verificationLevel: v3Score.verificationLevel || 0,
-      verificationLabel: v3Score.verificationLabel || 'Unknown',
-      reputationScore: v3Score.reputationScore || 0,
-      reputationPct: v3Score.reputationPct || '0.00',
-      isBorn: v3Score.isBorn || false,
-      bornAt: v3Score.genesisRecord || null,
-      faceImage: v3Score.faceImage || '',
-      faceMint: v3Score.faceMint || '',
-      faceBurnTx: '',
-      createdAt: v3Score.createdAt || null,
-      authority: v3Score.authority || '',
-    };
-
-    // [Apr 10] Preserve raw genesis here. Trust-score normalization belongs on
-    // profile display paths, not the dedicated on-chain genesis endpoint.
-
-    res.json({ genesis });
-  } catch (e) {
-    console.error('[Genesis API]', e.message);
-    res.status(500).json({ error: 'Internal error' });
+    if (!record || record.error || !record.pda) return res.json({ genesis: null, error: 'No Genesis Record found' });
+    res.json({ genesis: record });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch genesis record', detail: err.message });
   }
 });
 
@@ -2126,57 +2136,33 @@ app.get('/api/satp/score/:id', async (req, res) => {
     const Database = require('better-sqlite3');
     const scoreDb = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
     const row = scoreDb.prepare('SELECT * FROM profiles WHERE id = ? OR handle = ?').get(profileId, profileId);
+
+    if (!row) {
+      scoreDb.close();
+      return res.status(404).json({ error: 'Profile not found', id: profileId });
+    }
+
+    const wallets = (() => {
+      try { return typeof row.wallets === 'string' ? JSON.parse(row.wallets || '{}') : (row.wallets || {}); } catch { return {}; }
+    })();
+    const computed = computeUnifiedTrustScore(scoreDb, {
+      id: row.id,
+      claimed: row.claimed,
+      wallet: row.wallet || wallets?.solana || null,
+      wallets,
+    }, {});
     scoreDb.close();
 
-    if (!row) return res.status(404).json({ error: 'Profile not found', id: profileId });
-
-    // Build verifications from chain-cache attestations (on-chain source of truth)
-    const attestations = chainCache.getVerifications(row.id, row.created_at) || [];
-    const verifications = attestations
-      .filter(att => att.platform && att.platform !== 'review')
-      .map(att => ({ type: att.platform, verified: true, txSignature: att.txSignature, solscanUrl: att.solscanUrl || `https://solscan.io/tx/${att.txSignature}` }));
-    
-    const profile = {
-      id: row.id, name: row.name, description: row.bio, avatar: row.avatar,
-      wallets: row.wallets, skills: row.skills, verifications,
-      created_at: row.created_at, last_active_at: row.last_active_at, links: row.links,
-    };
-
-    // Get Solana wallet for on-chain lookup
-    let solWallet = null;
-    try {
-      const w = typeof profile.wallets === 'string' ? JSON.parse(profile.wallets) : profile.wallets;
-      solWallet = w?.solana || null;
-    } catch (e) { /* no wallet */ }
-
-    // A1: compute-score
-    const { computeScore: _cs } = require('./lib/compute-score');
-    const _rawRows = profileStore.getDb().prepare('SELECT platform, identifier, proof FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(profile.id);
-    const _scoreInputs = [];
-    const _seen = new Set();
-    const _addInput = (platform, identifier) => {
-      if (!platform || platform === 'review' || !identifier || _seen.has(platform)) return;
-      _scoreInputs.push({ platform, identifier });
-      _seen.add(platform);
-      if (platform === 'x') _seen.add('twitter');
-      if (platform === 'twitter') _seen.add('x');
-    };
-    for (const _row of _rawRows) {
-      const platform = _row.platform === 'twitter' ? 'x' : _row.platform;
-      if (platform === 'solana') {
-        let proof = {};
-        try { proof = typeof _row.proof === 'string' ? JSON.parse(_row.proof) : (_row.proof || {}); } catch {}
-        const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || null;
-        if (!txSignature) continue;
-      }
-      _addInput(platform, _row.identifier || null);
-    }
-    const _hasSatpIdentity = !!solWallet && (chainCache.isVerified(solWallet) || _scoreInputs.some(v => v.platform === 'satp'));
-    if (_hasSatpIdentity && solWallet) {
-      _addInput('satp', solWallet);
-    }
-    const _comp = _cs(_scoreInputs, { hasSatpIdentity: _hasSatpIdentity, claimed: !!row.claimed });
-    res.json({ ok: true, data: { score: _comp.score, level: _comp.level, levelName: _comp.levelName, breakdown: _comp.breakdown } });
+    res.json({
+      ok: true,
+      data: {
+        score: computed.score,
+        level: computed.level,
+        levelName: computed.levelName,
+        breakdown: computed.breakdown,
+        source: computed.source,
+      },
+    });
   } catch (err) {
     console.error('[SATP Score] error:', err.message);
     res.status(500).json({ error: 'Score computation failed', detail: err.message });
