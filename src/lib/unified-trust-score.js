@@ -3,12 +3,7 @@ const chainCache = require('./chain-cache');
 
 function normalizePlatform(platform) {
   if (!platform) return null;
-  const map = {
-    twitter: 'x',
-    satp_v3: 'satp',
-    eth: 'ethereum',
-  };
-  return map[platform] || platform;
+  return String(platform).trim().toLowerCase();
 }
 
 function parseProof(proof) {
