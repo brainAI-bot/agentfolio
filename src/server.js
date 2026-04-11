@@ -473,7 +473,7 @@ app.get('/api/profile/:id/genesis', async (req, res) => {
     // hit migrated/non-canonical records and should only be used as a fallback.
     record = await getV3Score(profileId);
 
-    if ((!record || record.error || !record.pda) && !String(profileId).startsWith('agent_')) {
+    if ((!record || record.error) && !String(profileId).startsWith('agent_')) {
       const normalizedId = `agent_${String(profileId).toLowerCase()}`;
       const normalizedRecord = await getV3Score(normalizedId);
       if (normalizedRecord && !normalizedRecord.error && normalizedRecord.pda) {
@@ -482,7 +482,7 @@ app.get('/api/profile/:id/genesis', async (req, res) => {
       }
     }
 
-    if ((!record || record.error || !record.pda)) {
+    if ((!record || record.error)) {
       try {
         const db = getDb();
         const row = db.prepare('SELECT wallet FROM profiles WHERE id = ? OR handle = ? OR LOWER(name) = LOWER(?)').get(profileId, profileId, req.params.id);
@@ -500,7 +500,16 @@ app.get('/api/profile/:id/genesis', async (req, res) => {
       }
     }
 
-    if (!record || record.error || !record.pda) return res.json({ genesis: null, error: 'No Genesis Record found' });
+    if (!record || record.error) return res.json({ genesis: null, error: 'No Genesis Record found' });
+
+    if (!record.pda) {
+      try {
+        const { getGenesisPDA } = require('./satp-client/src/index');
+        const [pda] = getGenesisPDA(profileId, 'mainnet');
+        record = { ...record, pda: pda.toBase58() };
+      } catch (_) {}
+    }
+
     res.json({ genesis: record });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch genesis record', detail: err.message });
