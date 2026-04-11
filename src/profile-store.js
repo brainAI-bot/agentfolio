@@ -1153,24 +1153,28 @@ function registerRoutes(app) {
     try {
       const rawId = req.params.id;
       let record = null;
-      // Try the raw ID directly (handles both "agent_brainkid" and display names)
+      const d = getDb();
+      const normalizedId = rawId.startsWith('agent_') ? rawId : 'agent_' + rawId.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const walletRow = d.prepare('SELECT wallet FROM profiles WHERE id = ? OR id = ? OR LOWER(name) = LOWER(?) LIMIT 1').get(rawId, normalizedId, rawId);
+      const claimedWallet = walletRow?.wallet && String(walletRow.wallet).trim();
+
+      // Prefer canonical V3 agent-id lookups first. Wallet-based identity reads can hit
+      // older or migrated records and should only be used as a fallback when the V3
+      // agent-id path truly cannot resolve a genesis record.
       record = await v3ScoreService.getV3Score(rawId);
       // If not found and it's an agent_ ID, try looking up profile name
-      if (!record && rawId.startsWith('agent_')) {
-        const d = getDb();
+      if ((!record || record.error || !record.pda) && rawId.startsWith('agent_')) {
         const row = d.prepare('SELECT name FROM profiles WHERE id = ?').get(rawId);
         if (row && row.name) {
           record = await v3ScoreService.getV3Score(row.name);
         }
       }
       // If not found and it looks like a display name, try agent_ + lowercase
-      if (!record && !rawId.startsWith('agent_')) {
-        const normalizedId = 'agent_' + rawId.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if ((!record || record.error || !record.pda) && !rawId.startsWith('agent_')) {
         record = await v3ScoreService.getV3Score(normalizedId);
         // Also try DB lookup by name (case-insensitive)
-        if (!record) {
+        if (!record || record.error || !record.pda) {
           try {
-            const d = getDb();
             const row = d.prepare('SELECT id FROM profiles WHERE LOWER(name) = LOWER(?)').get(rawId);
             if (row && row.id) {
               record = await v3ScoreService.getV3Score(row.id);
@@ -1178,6 +1182,22 @@ function registerRoutes(app) {
           } catch {}
         }
       }
+
+      if ((!record || record.error || !record.pda) && claimedWallet) {
+        try {
+          const satpIdentity = require('./satp-identity-client');
+          const walletIdentity = await satpIdentity.getAgentIdentity(claimedWallet, 'mainnet');
+          if (walletIdentity?.pda && !walletIdentity?.error) {
+            record = {
+              ...walletIdentity,
+              agentName: walletIdentity.agentName || walletIdentity.name || null
+            };
+          }
+        } catch (walletErr) {
+          console.warn('[Profile Store] wallet-canonical genesis lookup failed:', walletErr.message);
+        }
+      }
+
       // [Apr 10] Preserve raw genesis here. Profile/trust overlays are handled separately
       // so /api/profile/:id/genesis remains a true on-chain source-of-truth view.
 
