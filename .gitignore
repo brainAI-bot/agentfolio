@@ -14,3 +14,5 @@ logs/
 *.bak-*
 sync-genesis-scores.js
 snapshots/
+keys/
+*.keypair.json
