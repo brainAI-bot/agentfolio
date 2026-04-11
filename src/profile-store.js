@@ -434,7 +434,7 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
     const notifReq = http.request({
       hostname: 'localhost', port: 3456, path: '/api/comms/push',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-HQ-Key': 'REDACTED_HQ_KEY' },
+      headers: { 'Content-Type': 'application/json', 'X-HQ-Key': process.env.HQ_API_KEY || 'REDACTED_HQ_KEY' },
       timeout: 3000,
     });
     notifReq.on('error', () => {});
@@ -711,28 +711,23 @@ function enrichProfile(row) {
       positive: reviewStats.positive,
       negative: reviewStats.negative,
     },
-    // A1: Single scoring function -- compute from chain-cache attestations, not DB verifications
+    // Scoring v2 Phase A: verification level and trust score are independent.
     ...(() => {
       const unified = computeUnifiedTrustScore(getDb(), row, { v3Score: v3 });
-      const b = unified.breakdown || {};
-      const verificationPoints = Object.entries(b).reduce((sum, [key, value]) => {
-        if (!value || key === 'satp' || key === 'satp_identity' || key === 'completeness') return sum;
-        return sum + value;
-      }, 0);
+      const breakdown = unified.breakdown || {};
       return {
-        trust_score: { overall_score: unified.score, level: unified.levelName, score_breakdown: b, source: unified.source },
+        trust_score: {
+          overall_score: unified.score,
+          level: unified.levelName,
+          score_breakdown: breakdown,
+          source: unified.source,
+        },
         level: unified.level,
         tier: unified.levelName,
         score: unified.score,
         trustScore: unified.score,
-        trustBreakdown: {
-          onChainReputation: b.satp || b.satp_identity || 0,
-          verifications: verificationPoints,
-          socialProof: 0,
-          completeness: b.completeness || 0,
-          marketplace: 0,
-          tenure: 0,
-        },
+        trustScoreBreakdown: breakdown,
+        trustBreakdown: unified.trustBreakdown || {},
         verificationLevel: unified.level,
         verification_level: unified.level,
         reputation_score: unified.score,
@@ -1098,7 +1093,7 @@ function registerRoutes(app) {
         const notifReq = http.request({
           hostname: 'localhost', port: 3456, path: '/api/comms/push',
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-HQ-Key': 'REDACTED_HQ_KEY' },
+          headers: { 'Content-Type': 'application/json', 'X-HQ-Key': process.env.HQ_API_KEY || 'REDACTED_HQ_KEY' },
           timeout: 3000,
         });
         notifReq.on('error', () => {}); // fire-and-forget
@@ -1153,28 +1148,24 @@ function registerRoutes(app) {
     try {
       const rawId = req.params.id;
       let record = null;
-      const d = getDb();
-      const normalizedId = rawId.startsWith('agent_') ? rawId : 'agent_' + rawId.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const walletRow = d.prepare('SELECT wallet FROM profiles WHERE id = ? OR id = ? OR LOWER(name) = LOWER(?) LIMIT 1').get(rawId, normalizedId, rawId);
-      const claimedWallet = walletRow?.wallet && String(walletRow.wallet).trim();
-
-      // Prefer canonical V3 agent-id lookups first. Wallet-based identity reads can hit
-      // older or migrated records and should only be used as a fallback when the V3
-      // agent-id path truly cannot resolve a genesis record.
+      // Try the raw ID directly (handles both "agent_brainkid" and display names)
       record = await v3ScoreService.getV3Score(rawId);
       // If not found and it's an agent_ ID, try looking up profile name
-      if ((!record || record.error || !record.pda) && rawId.startsWith('agent_')) {
+      if (!record && rawId.startsWith('agent_')) {
+        const d = getDb();
         const row = d.prepare('SELECT name FROM profiles WHERE id = ?').get(rawId);
         if (row && row.name) {
           record = await v3ScoreService.getV3Score(row.name);
         }
       }
       // If not found and it looks like a display name, try agent_ + lowercase
-      if ((!record || record.error || !record.pda) && !rawId.startsWith('agent_')) {
+      if (!record && !rawId.startsWith('agent_')) {
+        const normalizedId = 'agent_' + rawId.toLowerCase().replace(/[^a-z0-9]/g, '');
         record = await v3ScoreService.getV3Score(normalizedId);
         // Also try DB lookup by name (case-insensitive)
-        if (!record || record.error || !record.pda) {
+        if (!record) {
           try {
+            const d = getDb();
             const row = d.prepare('SELECT id FROM profiles WHERE LOWER(name) = LOWER(?)').get(rawId);
             if (row && row.id) {
               record = await v3ScoreService.getV3Score(row.id);
@@ -1182,22 +1173,6 @@ function registerRoutes(app) {
           } catch {}
         }
       }
-
-      if ((!record || record.error || !record.pda) && claimedWallet) {
-        try {
-          const satpIdentity = require('./satp-identity-client');
-          const walletIdentity = await satpIdentity.getAgentIdentity(claimedWallet, 'mainnet');
-          if (walletIdentity?.pda && !walletIdentity?.error) {
-            record = {
-              ...walletIdentity,
-              agentName: walletIdentity.agentName || walletIdentity.name || null
-            };
-          }
-        } catch (walletErr) {
-          console.warn('[Profile Store] wallet-canonical genesis lookup failed:', walletErr.message);
-        }
-      }
-
       // [Apr 10] Preserve raw genesis here. Profile/trust overlays are handled separately
       // so /api/profile/:id/genesis remains a true on-chain source-of-truth view.
 
@@ -1353,7 +1328,7 @@ function registerRoutes(app) {
       }
     }
     // Clean start: default scores stay at 0 unless V3 genesis exists.
-    profiles.sort((a, b) => (b.trust_score || 0) - (a.trust_score || 0));
+    profiles.sort((a, b) => (b.trustScore || 0) - (a.trustScore || 0));
 
     // P0-13: Paginate after V3 overlay sort
     // [FIX 3] Second chain-cache overlay REMOVED -- V3 genesis only
@@ -1398,7 +1373,7 @@ function registerRoutes(app) {
     const sortParam = (req.query.sort || "trust_desc").toLowerCase();
     switch (sortParam) {
       case "trust_asc":
-        profiles.sort((a, b) => (a.trust_score || 0) - (b.trust_score || 0));
+        profiles.sort((a, b) => (a.trustScore || 0) - (b.trustScore || 0));
         break;
       case "name_asc":
         profiles.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
@@ -1414,12 +1389,12 @@ function registerRoutes(app) {
         break;
       case "trust_desc":
       default:
-        profiles.sort((a, b) => (b.trust_score || 0) - (a.trust_score || 0));
+        profiles.sort((a, b) => (b.trustScore || 0) - (a.trustScore || 0));
         break;
     }
 
     const paginatedProfiles = profiles.slice(offset, offset + limit);
-    res.json({ profiles: paginatedProfiles, total, page, limit, pages: Math.ceil(total / limit), sort: sortParam, search: search || null });
+    res.json({ profiles: paginatedProfiles, total, page, limit, pages: Math.ceil(total / limit), sort: sortParam });
   });
 
   // ── GET /api/profile/:id ───────────────────────────────────────
