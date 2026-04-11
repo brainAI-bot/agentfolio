@@ -10,6 +10,7 @@ const VERIFICATION_WEIGHTS = {
   x: 40,
   twitter: 40, // alias for x
   satp: 20,
+  satp_verification: 20,
   satp_v3: 20,
   domain: 20,
   ethereum: 20,
@@ -65,7 +66,7 @@ function computeScore(verifications = [], opts = {}) {
     score += weight;
     breakdown[platform] = (breakdown[platform] || 0) + weight;
     verificationCount += 1;
-    if (platform === 'satp') hasSatpAttestation = true;
+    if (platform === 'satp' || platform === 'satp_verification' || platform === 'satp_v3') hasSatpAttestation = true;
   }
   
   // SATP identity bonus only applies when there is identity but no explicit SATP attestation row.
