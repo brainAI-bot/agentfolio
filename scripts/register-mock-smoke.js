@@ -2,10 +2,14 @@
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
+const nacl = require('tweetnacl');
 const express = require('express');
 const Database = require('better-sqlite3');
+const { Keypair } = require('@solana/web3.js');
 
 (async () => {
+  const walletMode = process.argv.includes('--wallet');
   const repoRoot = path.resolve(__dirname, '..');
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-register-mock-'));
   const tempProfilesDir = path.join(tmpRoot, 'data', 'profiles');
@@ -43,6 +47,15 @@ const Database = require('better-sqlite3');
       created_at TEXT,
       updated_at TEXT
     );
+
+    CREATE TABLE verifications (
+      id TEXT PRIMARY KEY,
+      profile_id TEXT,
+      platform TEXT,
+      identifier TEXT,
+      proof TEXT,
+      verified_at TEXT
+    );
   `);
 
   const redirectIntoTemp = (targetPath) => {
@@ -66,6 +79,24 @@ const Database = require('better-sqlite3');
     return originalExistsSync.call(fs, redirectIntoTemp(targetPath));
   };
 
+  const hookModulePath = path.join(repoRoot, 'src', 'post-verification-hook.js');
+  const resolvedHookModulePath = require.resolve(hookModulePath);
+  const originalHookModule = require.cache[resolvedHookModulePath];
+
+  if (walletMode) {
+    require.cache[resolvedHookModulePath] = {
+      id: resolvedHookModulePath,
+      filename: resolvedHookModulePath,
+      loaded: true,
+      exports: {
+        postVerificationHook: async () => ({
+          txSignature: 'mock-solana-tx-' + crypto.randomBytes(8).toString('hex'),
+          attestationPDA: 'mock-attestation-pda',
+        }),
+      },
+    };
+  }
+
   const { registerSimpleRoutes } = require(path.join(repoRoot, 'src', 'routes', 'simple-register'));
 
   const app = express();
@@ -81,17 +112,32 @@ const Database = require('better-sqlite3');
     const baseUrl = `http://127.0.0.1:${address.port}`;
     const customId = 'mocksmoke_' + Date.now();
 
+    const requestBody = {
+      customId,
+      name: walletMode ? 'Mock Wallet Smoke Agent' : 'Mock Smoke Agent',
+      tagline: walletMode ? 'Local temp-db wallet registration harness' : 'Local temp-db registration harness',
+      skills: 'testing,mock',
+      github: 'mocksmoke',
+      website: 'https://example.com'
+    };
+
+    let walletAddress = null;
+    if (walletMode) {
+      const keypair = Keypair.generate();
+      walletAddress = keypair.publicKey.toBase58();
+      const timestamp = Date.now();
+      const signedMessage = `AgentFolio Registration\nAgent: ${requestBody.name}\nWallet: ${walletAddress}\nTimestamp: ${timestamp}`;
+      requestBody.walletAddress = walletAddress;
+      requestBody.signedMessage = signedMessage;
+      requestBody.signature = Buffer.from(
+        nacl.sign.detached(Buffer.from(signedMessage), keypair.secretKey)
+      ).toString('base64');
+    }
+
     const res = await fetch(baseUrl + '/api/register/simple', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        customId,
-        name: 'Mock Smoke Agent',
-        tagline: 'Local temp-db registration harness',
-        skills: 'testing,mock',
-        github: 'mocksmoke',
-        website: 'https://example.com'
-      })
+      body: JSON.stringify(requestBody)
     });
 
     const payload = await res.json();
@@ -99,7 +145,7 @@ const Database = require('better-sqlite3');
       throw new Error(`register/simple returned ${res.status}: ${JSON.stringify(payload)}`);
     }
 
-    const row = db.prepare('SELECT id, name, website, status, claimed FROM profiles WHERE id = ?').get(customId);
+    const row = db.prepare('SELECT id, name, website, status, claimed, claimed_by, wallet FROM profiles WHERE id = ?').get(customId);
     if (!row) {
       throw new Error('expected temp-db profile row to exist after registration');
     }
@@ -113,13 +159,30 @@ const Database = require('better-sqlite3');
       throw new Error('mock harness wrote into real repo data/profiles unexpectedly');
     }
 
+    let verificationRow = null;
+    if (walletMode) {
+      verificationRow = db.prepare('SELECT platform, identifier, proof FROM verifications WHERE profile_id = ?').get(customId);
+      if (!verificationRow) {
+        throw new Error('expected temp-db verification row to exist after wallet registration');
+      }
+      const parsedProof = JSON.parse(verificationRow.proof || '{}');
+      if (!parsedProof.txSignature) {
+        throw new Error('expected mocked wallet verification proof to include txSignature');
+      }
+      if (!row.claimed || row.claimed_by !== walletAddress || row.wallet !== walletAddress) {
+        throw new Error('expected wallet registration to claim the temp-db profile with the signed wallet');
+      }
+      verificationRow = { ...verificationRow, proof: parsedProof };
+    }
+
     console.log(JSON.stringify({
       ok: true,
       endpoint: '/api/register/simple',
-      mode: 'temp-db-mock',
+      mode: walletMode ? 'temp-db-mock-wallet' : 'temp-db-mock',
       profileId: customId,
       apiKeyPresent: Boolean(payload.api_key),
       dbRow: row,
+      verificationRow,
       tempDbPath,
       tempProfileJson: writtenProfileJson
     }, null, 2));
@@ -129,6 +192,10 @@ const Database = require('better-sqlite3');
     fs.mkdirSync = originalMkdirSync;
     fs.writeFileSync = originalWriteFileSync;
     fs.existsSync = originalExistsSync;
+    if (walletMode) {
+      if (originalHookModule) require.cache[resolvedHookModulePath] = originalHookModule;
+      else delete require.cache[resolvedHookModulePath];
+    }
   }
 })().catch((err) => {
   console.error('[register-mock-smoke] FAILED:', err && err.stack ? err.stack : err);

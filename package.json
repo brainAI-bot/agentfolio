@@ -10,7 +10,8 @@
     "test": "node --test 'tests/**/*.test.js'",
     "test:register:local": "node scripts/register-local-smoke.js",
     "test:register:local:wallet": "node scripts/register-local-smoke.js --wallet",
-    "test:register:mock": "node scripts/register-mock-smoke.js"
+    "test:register:mock": "node scripts/register-mock-smoke.js",
+    "test:register:mock:wallet": "node scripts/register-mock-smoke.js --wallet"
   },
   "keywords": [],
   "author": "",
