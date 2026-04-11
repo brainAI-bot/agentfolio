@@ -1,35 +1,29 @@
 /**
- * Simple registration — no wallet required.
- * Creates a profile with just name + tagline.
- * Wallet verification can happen later.
+ * Registration routes.
+ *
+ * Production registration is now atomic and wallet-first:
+ * 1. /api/register/atomic      -> build unsigned SATP V3 create_identity tx
+ * 2. user signs + submits tx
+ * 3. /api/register/atomic/confirm -> wait for chain confirmation, then create DB row
+ *
+ * Legacy /api/register/simple remains available only for localhost harness use.
  */
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const _bs58 = require('bs58');
-const bs58 = _bs58.default || _bs58;
-const nacl = require('tweetnacl');
+const { PublicKey, Connection } = require('@solana/web3.js');
+const { computeUnifiedTrustScore } = require('../lib/unified-trust-score');
+const {
+  buildCreateIdentityV3Tx,
+  getV3GenesisRecordPDA,
+  getV3IdentityStatus,
+  recordConfirmedV3Identity,
+  connection: satpConnection,
+} = require('./satp-auto-identity-v3');
 
-// [CEO Apr 4] On-chain genesis creation on registration
-let satpV3SDK, platformKeypair;
-try {
-  const { SATPV3SDK } = require('../satp-client/src/v3-sdk');
-  const { Keypair } = require('@solana/web3.js');
-  const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY';
-  satpV3SDK = new SATPV3SDK({ rpcUrl: RPC_URL });
-  const configuredKpPath = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/agentfolio/config/platform-keypair.json';
-  const kpPath = configuredKpPath === '/home/ubuntu/.config/solana/satp-mainnet-platform.json'
-    ? '/home/ubuntu/.config/solana/mainnet-deployer.json'
-    : configuredKpPath;
-  if (fs.existsSync(kpPath)) {
-    platformKeypair = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(kpPath, 'utf8'))));
-    console.log('[SimpleRegister] SATP V3 + platform keypair loaded for genesis creation');
-  }
-} catch (e) {
-  console.warn('[SimpleRegister] On-chain genesis not available:', e.message);
-}
-
+const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY';
+const registrationConnection = satpConnection || new Connection(RPC_URL, 'confirmed');
 
 const simpleLimiter = rateLimit({
   validate: false,
@@ -40,6 +34,10 @@ const simpleLimiter = rateLimit({
   message: { error: 'Too many registration attempts. Try again in 1 hour.' },
 });
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function genId() {
   return 'agent_' + crypto.randomBytes(6).toString('hex');
 }
@@ -48,248 +46,401 @@ function genApiKey() {
   return 'af_' + crypto.randomBytes(24).toString('hex');
 }
 
-function isBlockedTestProfile(name, profileId) {
-  const normalizedName = String(name || '').trim().toLowerCase();
-  const normalizedId = String(profileId || '').trim().toLowerCase();
-  return /^rollbackproof\d*$/.test(normalizedId)
-    || /^rollback\s*proof(\s*\d+)?$/.test(normalizedName)
-    || /^rollbackproof\d*$/.test(normalizedName)
-    || /^p0autotest\d*$/.test(normalizedId)
-    || /^p0\s*autotest(\s*\d+)?$/.test(normalizedName)
-    || /^autotest\d*$/.test(normalizedId);
-}
-
 function isLocalRegistrationRequest(req) {
   const host = String(req.headers['x-forwarded-host'] || req.headers.host || req.hostname || '').toLowerCase();
   return host.includes('localhost') || host.includes('127.0.0.1') || host.includes('0.0.0.0');
 }
 
-async function resolveCanonicalOnchainProfileId(db, profileId, walletAddress) {
-  if (!walletAddress || !satpV3SDK) return profileId;
-
-  try {
-    const current = await satpV3SDK.getGenesisRecord(profileId);
-    if (current && !current.error) return profileId;
-  } catch (_) {}
-
-  const candidates = db.prepare(`
-    SELECT id, wallet, wallets
-    FROM profiles
-    WHERE id != ? AND (
-      wallet = ? OR wallet LIKE ? OR wallets LIKE ? OR verification_data LIKE ?
-    )
-    ORDER BY CASE WHEN id LIKE 'agent_%' THEN 0 ELSE 1 END, created_at ASC
-  `).all(profileId, walletAddress, `%${walletAddress}%`, `%${walletAddress}%`, `%${walletAddress}%`);
-
-  for (const candidate of candidates) {
-    try {
-      const existing = await satpV3SDK.getGenesisRecord(candidate.id);
-      if (existing && !existing.error) {
-        console.log(`[SimpleRegister] Resolved canonical on-chain profile ${profileId} -> ${candidate.id} for wallet ${walletAddress}`);
-        return candidate.id;
-      }
-    } catch (_) {}
+function normalizeSkills(skills) {
+  if (typeof skills === 'string') {
+    return skills
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((s) => ({ name: s, category: 'general', verified: false }));
   }
 
-  return profileId;
+  if (Array.isArray(skills)) {
+    return skills
+      .map((skill) => {
+        if (typeof skill === 'string') {
+          const name = skill.trim();
+          return name ? { name, category: 'general', verified: false } : null;
+        }
+        if (!skill || typeof skill !== 'object') return null;
+        const name = String(skill.name || '').trim();
+        if (!name) return null;
+        return {
+          name,
+          category: skill.category || 'general',
+          verified: Boolean(skill.verified),
+        };
+      })
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function normalizeRegistrationInput(body = {}, options = {}) {
+  const requireWallet = options.requireWallet !== false;
+  const name = String(body.name || '').trim();
+  const tagline = String(body.tagline || '').trim();
+  const github = String(body.github || '').trim();
+  const website = String(body.website || '').trim();
+  const walletAddress = body.walletAddress ? String(body.walletAddress).trim() : '';
+
+  if (!name) throw new Error('name is required');
+  if (name.length > 32) throw new Error('name must be 32 chars or less');
+  if (!tagline) throw new Error('tagline is required');
+  if (tagline.length > 256) throw new Error('tagline must be 256 chars or less');
+
+  if (requireWallet) {
+    if (!walletAddress) throw new Error('walletAddress is required');
+    try {
+      new PublicKey(walletAddress);
+    } catch (_) {
+      throw new Error('walletAddress must be a valid Solana address');
+    }
+  }
+
+  let id = '';
+  const customId = body.customId ? String(body.customId).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') : '';
+  if (customId) {
+    if (customId.length < 3 || customId.length > 32) {
+      throw new Error('Custom ID must be 3-32 characters');
+    }
+    id = customId;
+  } else {
+    id = genId();
+  }
+
+  const resolvedSkills = normalizeSkills(body.skills);
+
+  return {
+    id,
+    name,
+    tagline,
+    github,
+    website,
+    walletAddress,
+    resolvedSkills,
+    capabilityNames: resolvedSkills.map((skill) => skill.name || '').filter(Boolean),
+  };
+}
+
+function ensureProfileIdAvailable(db, id) {
+  const existing = db.prepare('SELECT id FROM profiles WHERE id = ?').get(id);
+  if (existing) {
+    const err = new Error('This profile ID is already taken');
+    err.statusCode = 409;
+    throw err;
+  }
+}
+
+function writeProfileJson(profile) {
+  const profilesDir = path.join(__dirname, '..', '..', 'data', 'profiles');
+  fs.mkdirSync(profilesDir, { recursive: true });
+  fs.writeFileSync(path.join(profilesDir, `${profile.id}.json`), JSON.stringify(profile, null, 2));
+}
+
+function buildProfileJson({ id, name, tagline, github, website, walletAddress, resolvedSkills, apiKey, now }) {
+  return {
+    id,
+    name,
+    handle: null,
+    bio: tagline,
+    avatar: null,
+    links: { github: github || null, website: website || null },
+    wallets: walletAddress ? { solana: walletAddress } : {},
+    skills: resolvedSkills.map((skill) => ({
+      name: skill.name,
+      category: skill.category || 'general',
+      verified: Boolean(skill.verified),
+      proofs: [],
+    })),
+    portfolio: [],
+    trackRecord: null,
+    verification: { tier: 'registered', score: 10, lastVerified: now },
+    verificationData: {},
+    stats: { jobsCompleted: 0, rating: 0, reviewsReceived: 0 },
+    endorsements: [],
+    endorsementsGiven: [],
+    unclaimed: false,
+    apiKey,
+    activity: [{ type: 'registered', createdAt: now }],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function insertProfileRecord(db, registration) {
+  const apiKey = genApiKey();
+  const now = new Date().toISOString();
+  const cols = db.prepare('PRAGMA table_info(profiles)').all().map((column) => column.name);
+
+  const insertCols = ['id', 'name'];
+  const insertPlaceholders = ['?', '?'];
+  const insertVals = [registration.id, registration.name];
+
+  const optionalFields = [
+    ['handle', ''],
+    ['description', registration.tagline],
+    ['bio', registration.tagline],
+    ['avatar', ''],
+    ['website', registration.website],
+    ['framework', ''],
+    ['capabilities', JSON.stringify(registration.capabilityNames)],
+    ['tags', '[]'],
+    ['wallet', registration.walletAddress || ''],
+    ['wallets', registration.walletAddress ? JSON.stringify({ solana: registration.walletAddress }) : '{}'],
+    ['twitter', ''],
+    ['github', registration.github],
+    ['email', ''],
+    ['api_key', apiKey],
+    ['status', 'active'],
+    ['claimed', registration.walletAddress ? 1 : 0],
+    ['claimed_by', registration.walletAddress || ''],
+    ['skills', JSON.stringify(registration.resolvedSkills)],
+    ['links', JSON.stringify({ github: registration.github || null, website: registration.website || null })],
+    ['verification_data', '{}'],
+    ['created_at', now],
+    ['updated_at', now],
+  ];
+
+  for (const [column, value] of optionalFields) {
+    if (cols.includes(column)) {
+      insertCols.push(column);
+      insertPlaceholders.push('?');
+      insertVals.push(value);
+    }
+  }
+
+  db.prepare(`INSERT INTO profiles (${insertCols.join(', ')}) VALUES (${insertPlaceholders.join(', ')})`).run(...insertVals);
+
+  const profileJson = buildProfileJson({
+    id: registration.id,
+    name: registration.name,
+    tagline: registration.tagline,
+    github: registration.github,
+    website: registration.website,
+    walletAddress: registration.walletAddress,
+    resolvedSkills: registration.resolvedSkills,
+    apiKey,
+    now,
+  });
+  writeProfileJson(profileJson);
+
+  return { apiKey, now, profileJson };
+}
+
+function notifyRegistration(name, id, kind = 'atomic') {
+  try {
+    const http = require('http');
+    const notifData = JSON.stringify({
+      agent_id: 'agentfolio',
+      project_id: 'agentfolio',
+      text: `🆕 New agent registered (${kind}): ${name} (${id})`,
+      color: '#00BFFF',
+    });
+    const notifReq = http.request({
+      hostname: 'localhost',
+      port: 3456,
+      path: '/api/comms/push',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-HQ-Key': 'REDACTED_HQ_KEY' },
+      timeout: 3000,
+    });
+    notifReq.on('error', () => {});
+    notifReq.write(notifData);
+    notifReq.end();
+  } catch (_) {}
+}
+
+async function waitForConfirmedGenesisTransaction({ txSignature, walletAddress, profileId, timeoutMs = 90000 }) {
+  const [genesisPDA] = getV3GenesisRecordPDA(profileId);
+  const genesisAddress = genesisPDA.toBase58();
+  const deadline = Date.now() + timeoutMs;
+  let latestStatus = null;
+
+  while (Date.now() < deadline) {
+    const [parsedTx, signatureStatus, genesisAccount] = await Promise.all([
+      registrationConnection.getParsedTransaction(txSignature, {
+        commitment: 'confirmed',
+        maxSupportedTransactionVersion: 0,
+      }).catch(() => null),
+      registrationConnection.getSignatureStatus(txSignature, { searchTransactionHistory: true }).catch(() => null),
+      registrationConnection.getAccountInfo(genesisPDA, 'confirmed').catch(() => null),
+    ]);
+
+    latestStatus = signatureStatus?.value || latestStatus;
+
+    if (latestStatus?.err) {
+      throw new Error(`On-chain transaction failed: ${JSON.stringify(latestStatus.err)}`);
+    }
+
+    if (parsedTx?.meta?.err) {
+      throw new Error(`On-chain transaction failed: ${JSON.stringify(parsedTx.meta.err)}`);
+    }
+
+    if (parsedTx) {
+      const accountKeys = parsedTx.transaction.message.accountKeys.map((key) => {
+        const pubkey = key?.pubkey || key;
+        return typeof pubkey === 'string' ? pubkey : pubkey.toBase58();
+      });
+      const signerKeys = parsedTx.transaction.message.accountKeys
+        .filter((key) => key?.signer)
+        .map((key) => {
+          const pubkey = key?.pubkey || key;
+          return typeof pubkey === 'string' ? pubkey : pubkey.toBase58();
+        });
+
+      if (!signerKeys.includes(walletAddress)) {
+        throw new Error('Confirmed transaction was not signed by the expected wallet');
+      }
+      if (!accountKeys.includes(genesisAddress)) {
+        throw new Error('Confirmed transaction did not create the expected SATP genesis account');
+      }
+    }
+
+    if (parsedTx && genesisAccount && genesisAccount.data?.length > 0) {
+      return {
+        parsedTx,
+        genesisPDA: genesisAddress,
+      };
+    }
+
+    await sleep(1500);
+  }
+
+  if (latestStatus?.confirmationStatus) {
+    throw new Error(`Timed out waiting for SATP genesis account after transaction reached ${latestStatus.confirmationStatus}`);
+  }
+
+  throw new Error('Timed out waiting for confirmed SATP registration transaction');
 }
 
 function registerSimpleRoutes(app, getDb) {
   app.post('/api/register/simple', simpleLimiter, async (req, res) => {
-    const { name, tagline, github, website, skills, walletAddress, signature, signedMessage } = req.body;
-
-    if (!name || typeof name !== 'string' || name.trim().length < 1) {
-      return res.status(400).json({ error: 'name is required' });
+    if (!isLocalRegistrationRequest(req)) {
+      return res.status(410).json({
+        error: 'Legacy simple registration is disabled on production. Connect a wallet and use the atomic registration flow so SATP genesis and the DB row are created together.',
+      });
     }
-    if (name.trim().length > 32) {
-      return res.status(400).json({ error: 'name must be 32 chars or less' });
-    }
-
-    if (walletAddress && signature && signedMessage) {
-      try {
-        const pubkeyBytes = bs58.decode(walletAddress);
-        if (pubkeyBytes.length != 32) throw new Error('invalid pubkey length');
-        let sigBytes;
-        try { sigBytes = bs58.decode(signature); } catch (_) {
-          sigBytes = Buffer.from(signature, 'base64');
-        }
-        if (sigBytes.length != 64) throw new Error('invalid signature length');
-        const msgBytes = new TextEncoder().encode(signedMessage);
-        const valid = nacl.sign.detached.verify(msgBytes, sigBytes, pubkeyBytes);
-        if (!valid) {
-          return res.status(401).json({ error: 'invalid wallet signature -- proof of ownership failed' });
-        }
-      } catch (sigErr) {
-        return res.status(400).json({ error: `signature verification error: ${sigErr.message}` });
-      }
-    } else if (walletAddress && (!signature || !signedMessage)) {
-      return res.status(400).json({ error: 'When walletAddress is provided, signature and signedMessage are required' });
-    }
-
-    const d = getDb();
-
-    // Custom ID from name
-    let id;
-    const customId = req.body.customId;
-    if (customId && typeof customId === 'string') {
-      const cleaned = customId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-      if (cleaned.length < 3 || cleaned.length > 32) {
-        return res.status(400).json({ error: 'Custom ID must be 3-32 characters' });
-      }
-      id = cleaned;
-      if (isBlockedTestProfile(name, id) && !isLocalRegistrationRequest(req)) {
-        return res.status(400).json({ error: 'Test profile IDs are blocked on production. Use the local registration harness instead.' });
-      }
-      const existing = d.prepare('SELECT id FROM profiles WHERE id = ?').get(id);
-      if (existing) {
-        return res.status(409).json({ error: 'This profile ID is already taken' });
-      }
-    } else {
-      id = genId();
-      if (isBlockedTestProfile(name, id) && !isLocalRegistrationRequest(req)) {
-        return res.status(400).json({ error: 'Test profile IDs are blocked on production. Use the local registration harness instead.' });
-      }
-    }
-
-    const apiKey = genApiKey();
-    const now = new Date().toISOString();
-    const resolvedBio = (tagline || '').trim();
-    const handle = name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_').substring(0, 64);
-
-    // Parse skills
-    let resolvedSkills = [];
-    if (typeof skills === 'string') {
-      resolvedSkills = skills.split(',').map(s => s.trim()).filter(Boolean).map(s => ({ name: s, category: 'general', verified: false }));
-    } else if (Array.isArray(skills)) {
-      resolvedSkills = skills.map(s => typeof s === 'string' ? { name: s, category: 'general', verified: false } : s);
-    }
-
-    const resolvedGithub = (github || '').trim();
-    const resolvedWebsite = (website || '').trim();
-
-    const cols = d.prepare("PRAGMA table_info(profiles)").all().map(c => c.name);
 
     try {
-      const insertCols = ['id', 'name'];
-      const insertPlaceholders = ['?', '?'];
-      const insertVals = [id, name.trim()];
-
-      const optionalFields = [
-        ['handle', handle],
-        ['description', resolvedBio],
-        ['bio', resolvedBio],
-        ['avatar', ''],
-        ['website', resolvedWebsite],
-        ['framework', ''],
-        ['capabilities', JSON.stringify(resolvedSkills.map(s => s.name || s))],
-        ['tags', '[]'],
-        ['wallet', walletAddress || ''],
-        ['wallets', walletAddress ? JSON.stringify({solana: walletAddress}) : '{}'],
-        ['twitter', ''],
-        ['github', resolvedGithub],
-        ['email', ''],
-        ['api_key', apiKey],
-        ['status', 'active'],
-        ['claimed', walletAddress ? 1 : 0],
-        ['claimed_by', walletAddress || ''],
-        ['skills', JSON.stringify(resolvedSkills)],
-        ['links', JSON.stringify({ github: resolvedGithub || null, website: resolvedWebsite || null })],
-        ['verification_data', '{}'],
-        ['created_at', now],
-        ['updated_at', now],
-      ];
-
-      for (const [col, val] of optionalFields) {
-        if (cols.includes(col)) {
-          insertCols.push(col);
-          insertPlaceholders.push('?');
-          insertVals.push(val);
-        }
-      }
-
-      d.prepare(`INSERT INTO profiles (${insertCols.join(', ')}) VALUES (${insertPlaceholders.join(', ')})`).run(...insertVals);
-
-      // Write JSON profile file
-      const profilesDir = path.join(__dirname, '..', '..', 'data', 'profiles');
-      fs.mkdirSync(profilesDir, { recursive: true });
-      const profileJson = {
-        id,
-        name: name.trim(),
-        handle: `@${handle}`,
-        bio: resolvedBio,
-        avatar: null,
-        links: { github: resolvedGithub || null, website: resolvedWebsite || null },
-        wallets: {},
-        skills: resolvedSkills.map(s => ({ name: s.name || s, category: s.category || 'general', verified: false, proofs: [] })),
-        portfolio: [],
-        trackRecord: null,
-        verification: { tier: 'unverified', score: 0, lastVerified: null },
-        verificationData: {},
-        stats: { jobsCompleted: 0, rating: 0, reviewsReceived: 0 },
-        endorsements: [],
-        endorsementsGiven: [],
-        unclaimed: false,
-        activity: [{ type: 'registered', createdAt: now }],
-        createdAt: now,
-        updatedAt: now,
-      };
-      fs.writeFileSync(path.join(profilesDir, `${id}.json`), JSON.stringify(profileJson, null, 2));
-
-      // Auto-calculate trust score
-      try {
-        const { getProfileScoringData } = require('../lib/profile-scoring-integration');
-        const scoringData = getProfileScoringData(profileJson);
-        const overallScore = scoringData.overall?.score || scoringData.reputationScore?.score || 0;
-        const level = scoringData.verificationLevel?.name || 'NEW';
-        const breakdown = JSON.stringify(scoringData);
-        if (overallScore <= 10000 && overallScore >= 0) {
-          // P0: DB score writes removed — on-chain v3 is sole source
-        } else {
-          console.error('[SCORE GUARD] Blocked corrupt score in simple-register for ' + id + ': ' + overallScore);
-        }
-      } catch (scoreErr) {
-        console.error('[SimpleRegister] Trust scoring failed:', scoreErr.message);
-      }
-
-      // Notify CMD Center
-      try {
-        const http = require('http');
-        const notifData = JSON.stringify({
-          agent_id: 'agentfolio', project_id: 'agentfolio',
-          text: `🆕 New agent registered (simple): ${name.trim()} (${id}) — ${resolvedSkills.slice(0,3).map(s => s.name || s).join(', ') || 'no skills listed'}`,
-          color: '#00BFFF',
-        });
-        const notifReq = http.request({
-          hostname: 'localhost', port: 3456, path: '/api/comms/push',
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-HQ-Key': 'REDACTED_HQ_KEY' },
-          timeout: 3000,
-        });
-        notifReq.on('error', () => {});
-        notifReq.write(notifData);
-        notifReq.end();
-      } catch (_) {}
-
-
-      // [CEO Apr 4] Create on-chain genesis record (fire-and-forget)
-      if (satpV3SDK && platformKeypair) {
-        console.log('[SimpleRegister] Skipping server-side genesis creation for', id, 'because identity authority must be the user wallet');
-      }
-
-      // Do not attempt on-chain attestations before the user-owned genesis exists.
-      // Final SATP + Solana attestations are created in /api/satp-auto/v3/identity/confirm.
+      const d = getDb();
+      const registration = normalizeRegistrationInput(req.body, { requireWallet: false });
+      ensureProfileIdAvailable(d, registration.id);
+      const created = insertProfileRecord(d, registration);
 
       res.status(201).json({
-        id,
-        api_key: apiKey,
-        message: 'Profile created! Connect a wallet later to verify and register on-chain.',
+        id: registration.id,
+        api_key: created.apiKey,
+        message: 'Local-only legacy profile created without on-chain registration.',
       });
-    } catch (e) {
-      console.error('[SimpleRegister] error:', e.message);
-      if (e.message?.includes('UNIQUE')) {
-        return res.status(409).json({ error: 'Profile ID already exists' });
+    } catch (error) {
+      const statusCode = error.statusCode || (String(error.message || '').includes('already taken') ? 409 : 400);
+      res.status(statusCode).json({ error: error.message || 'Registration failed' });
+    }
+  });
+
+  app.post('/api/register/atomic', simpleLimiter, async (req, res) => {
+    try {
+      const d = getDb();
+      const registration = normalizeRegistrationInput(req.body, { requireWallet: true });
+      ensureProfileIdAvailable(d, registration.id);
+
+      const onchainStatus = await getV3IdentityStatus(registration.id);
+      if (onchainStatus?.accountExists || onchainStatus?.exists) {
+        return res.status(409).json({ error: 'SATP genesis record already exists for this profile ID' });
       }
-      res.status(500).json({ error: 'Registration failed', detail: e.message });
+
+      const txResult = await buildCreateIdentityV3Tx(
+        registration.walletAddress,
+        registration.id,
+        registration.name,
+        registration.tagline,
+        'ai-agent',
+        registration.capabilityNames,
+        `https://agentfolio.bot/api/profile/${registration.id}`
+      );
+
+      if (txResult.alreadyExists) {
+        return res.status(409).json({ error: 'SATP genesis record already exists for this profile ID' });
+      }
+
+      res.json({
+        ok: true,
+        data: {
+          profileId: registration.id,
+          ...txResult,
+        },
+      });
+    } catch (error) {
+      const statusCode = error.statusCode || (String(error.message || '').includes('already taken') ? 409 : 400);
+      res.status(statusCode).json({ error: error.message || 'Failed to prepare atomic registration' });
+    }
+  });
+
+  app.post('/api/register/atomic/confirm', simpleLimiter, async (req, res) => {
+    try {
+      const d = getDb();
+      const registration = normalizeRegistrationInput(req.body, { requireWallet: true });
+      const txSignature = String(req.body.txSignature || '').trim();
+      if (!txSignature) {
+        return res.status(400).json({ error: 'txSignature is required' });
+      }
+
+      await waitForConfirmedGenesisTransaction({
+        txSignature,
+        walletAddress: registration.walletAddress,
+        profileId: registration.id,
+      });
+
+      let existingProfile = d.prepare('SELECT * FROM profiles WHERE id = ?').get(registration.id);
+      let apiKey = existingProfile?.api_key || '';
+
+      if (!existingProfile) {
+        const created = insertProfileRecord(d, registration);
+        apiKey = created.apiKey;
+        existingProfile = d.prepare('SELECT * FROM profiles WHERE id = ?').get(registration.id);
+      }
+
+      let identityResult = null;
+      let identityWarning = null;
+      try {
+        identityResult = await recordConfirmedV3Identity({
+          walletAddress: registration.walletAddress,
+          profileId: registration.id,
+          txSignature,
+        });
+      } catch (identityError) {
+        identityWarning = identityError.message;
+        console.error('[AtomicRegister] Identity confirmation bookkeeping failed:', identityError.message);
+      }
+
+      const profile = d.prepare('SELECT * FROM profiles WHERE id = ?').get(registration.id) || existingProfile;
+      const scoring = computeUnifiedTrustScore(d, profile, { v3Score: { verificationLevel: 1 } });
+      notifyRegistration(registration.name, registration.id, 'atomic');
+
+      res.status(201).json({
+        ok: true,
+        id: registration.id,
+        api_key: apiKey,
+        walletAddress: registration.walletAddress,
+        txSignature,
+        genesisPDA: identityResult?.data?.genesisPDA || getV3GenesisRecordPDA(registration.id)[0].toBase58(),
+        level: scoring.levelName,
+        trustScore: scoring.trustScore,
+        profile,
+        warning: identityWarning,
+        satpAttestation: identityResult?.satpAttestation || null,
+        solanaAttestation: identityResult?.solanaAttestation || null,
+      });
+    } catch (error) {
+      console.error('[AtomicRegister] confirm error:', error.message);
+      res.status(500).json({ error: error.message || 'Failed to finalize atomic registration' });
     }
   });
 }
