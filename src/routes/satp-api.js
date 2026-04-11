@@ -738,7 +738,7 @@ function registerSATPRoutes(app) {
         let proofData = {};
         try { proofData = typeof a.proofData === 'string' ? JSON.parse(a.proofData) : (a.proofData || {}); } catch {}
         const platform = normalizeAttestationPlatform(a.platform) || a.platform;
-        const hinted = txHints[platform] || null;
+        const hinted = txHints[platform] || txHints[String(platform || '').replace(/^verification_/, '').replace(/_verification$/, '')] || null;
         const txSignature = a.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || hinted?.txSignature || null;
         enriched.push({
           platform,
