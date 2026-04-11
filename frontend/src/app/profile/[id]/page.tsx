@@ -570,17 +570,32 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
             <h2 className="text-sm font-semibold uppercase tracking-wider mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
               Trust Breakdown
             </h2>
-            {agent.trustBreakdown && agent.trustScore > 0 ? (() => {
-              const bd = agent.trustBreakdown;
-              const total = (bd.onChainReputation || 0) + (bd.verifications || 0) + (bd.socialProof || 0) + (bd.completeness || 0) + (bd.marketplace || 0) + (bd.tenure || 0);
-              const items = [
-                { label: "On-Chain", value: bd.onChainReputation || 0, color: "#3fb950" },
-                { label: "Verifications", value: bd.verifications || 0, color: "#58a6ff" },
-                { label: "Social Proof", value: bd.socialProof || 0, color: "#79c0ff" },
-                { label: "Completeness", value: bd.completeness || 0, color: "#a371f7" },
-                { label: "Marketplace", value: bd.marketplace || 0, color: "#56d364" },
-                { label: "Tenure", value: bd.tenure || 0, color: "#8b949e" },
-              ].filter(i => i.value > 0);
+            {((((agent as any).trust_score?.score_breakdown) || trustScoreData?.breakdown) && agent.trustScore > 0) ? (() => {
+              const authoritativeBreakdown = ((agent as any).trust_score?.score_breakdown) || trustScoreData?.breakdown || {};
+              const colorMap: Record<string, string> = {
+                satp: '#3fb950',
+                satp_identity: '#3fb950',
+                solana: '#58a6ff',
+                solana_wallet_verification: '#58a6ff',
+                github: '#a371f7',
+                x: '#79c0ff',
+              };
+              const labelMap: Record<string, string> = {
+                satp: 'SATP',
+                satp_identity: 'SATP Identity',
+                solana: 'Solana',
+                solana_wallet_verification: 'Solana Wallet',
+                github: 'GitHub',
+                x: 'X',
+              };
+              const items = Object.entries(authoritativeBreakdown)
+                .map(([key, value]) => ({
+                  label: labelMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+                  value: Number(value) || 0,
+                  color: colorMap[key] || '#8b949e',
+                }))
+                .filter(i => i.value > 0);
+              const total = agent.trustScore || items.reduce((sum, item) => sum + item.value, 0);
               return (
                 <div className="space-y-3">
                   {/* Stacked bar */}
