@@ -1273,8 +1273,8 @@ function registerRoutes(app) {
     const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit) || 50));
     const offset = (page - 1) * limit;
     const status = req.query.status || 'active';
+    const search = String(req.query.search || '').trim().toLowerCase();
 
-    const total = d.prepare('SELECT COUNT(*) as c FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL)').get(status).c;
     let rows;
     try {
       rows = d.prepare(`
@@ -1290,7 +1290,7 @@ function registerRoutes(app) {
     }
 
     // Strip api_key from list responses
-    const profiles = rows.map(r => {
+    let profiles = rows.map(r => {
       const { api_key, ...rest } = r;
       // Resolve avatar: nft_avatar.image takes priority over avatar
       let resolvedAvatar = rest.avatar;
@@ -1316,6 +1316,26 @@ function registerRoutes(app) {
       const unclaimed = (cleanRest.claimed === 0 || cleanRest.claimed === "0") || _md.unclaimed === true || _md.isPlaceholder === true || _md.placeholder === true;
       return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: {} /* [P0] chain-cache only, no DB reads */, portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: _md, nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, _dbLevel: dbLevel || null, claimed, unclaimed };
     });
+
+    if (search) {
+      const matchesSearch = (p) => {
+        const wallets = p.wallets || {};
+        const haystacks = [
+          p.id,
+          p.name,
+          p.handle,
+          p.wallet,
+          p.claimed_by,
+          p.description,
+          p.bio,
+          wallets.solana,
+        ].filter(Boolean).map(v => String(v).toLowerCase());
+        return haystacks.some(v => v.includes(search));
+      };
+      profiles = profiles.filter(matchesSearch);
+    }
+
+    const total = profiles.length;
 
     // A1: Compute scores for all profiles using chain-cache-derived verifications
     {
@@ -1399,7 +1419,7 @@ function registerRoutes(app) {
     }
 
     const paginatedProfiles = profiles.slice(offset, offset + limit);
-    res.json({ profiles: paginatedProfiles, total, page, limit, pages: Math.ceil(total / limit), sort: sortParam });
+    res.json({ profiles: paginatedProfiles, total, page, limit, pages: Math.ceil(total / limit), sort: sortParam, search: search || null });
   });
 
   // ── GET /api/profile/:id ───────────────────────────────────────
