@@ -260,6 +260,237 @@ async function hasV2Identity(walletAddress) {
   }
 }
 
+async function recordConfirmedV3Identity({ walletAddress, profileId, txSignature }) {
+  const [genesisPDA] = getV3GenesisRecordPDA(profileId);
+  const agentIdHash = computeAgentIdHash(profileId).toString('hex');
+  let satpAttestation = { ok: true, skipped: true, reason: 'not-run' };
+  let solanaAttestation = { ok: true, skipped: true, reason: 'not-run' };
+
+  try {
+    const Database = require('better-sqlite3');
+    const db = new Database(path.join(__dirname, '../../data/agentfolio.db'));
+
+    const { v4: uuid } = require('uuid');
+    const verificationId = uuid ? uuid() : `satp_v3_${Date.now()}`;
+    db.prepare(`
+      INSERT OR REPLACE INTO verifications (id, profile_id, platform, identifier, proof, verified_at)
+      VALUES (?, ?, 'satp_v3', ?, ?, datetime('now'))
+    `).run(
+      verificationId,
+      profileId,
+      walletAddress,
+      JSON.stringify({
+        genesisPDA: genesisPDA.toBase58(),
+        agentIdHash,
+        txSignature,
+        network: NETWORK,
+        program: SATP_V3_IDENTITY_PROGRAM.toBase58(),
+        programVersion: 'v3',
+        verifiedAt: new Date().toISOString(),
+      })
+    );
+
+    const profile = db.prepare('SELECT wallet, verification_data FROM profiles WHERE id = ?').get(profileId);
+    const verifiedAt = new Date().toISOString();
+    solanaAttestation = { ok: false, skipped: true, reason: 'profile-not-found' };
+
+    if (profile) {
+      let vd = {};
+      try { vd = JSON.parse(profile.verification_data || '{}'); } catch {}
+      vd.satp_v3 = {
+        verified: true,
+        genesisPDA: genesisPDA.toBase58(),
+        agentIdHash,
+        txSignature,
+        program: SATP_V3_IDENTITY_PROGRAM.toBase58(),
+        network: NETWORK,
+        verifiedAt,
+      };
+
+      const solanaWallet = walletAddress || profile.wallet || vd?.solana?.address || null;
+      if (solanaWallet) {
+        const { postVerificationHook } = require('../post-verification-hook');
+
+        const existingSatp = db.prepare(`
+          SELECT id, proof
+          FROM verifications
+          WHERE profile_id = ? AND platform = 'satp'
+          ORDER BY verified_at DESC
+          LIMIT 1
+        `).get(profileId);
+        let existingSatpProof = {};
+        try { existingSatpProof = JSON.parse(existingSatp?.proof || '{}'); } catch {}
+
+        if (existingSatpProof.txSignature) {
+          satpAttestation = {
+            ok: true,
+            skipped: true,
+            alreadyVerified: true,
+            txSignature: existingSatpProof.txSignature,
+          };
+        } else {
+          try {
+            const satpProof = {
+              source: 'satp-auto-v3-confirm',
+              auto: true,
+              walletAddress: solanaWallet,
+              genesisTxSignature: txSignature,
+              genesisPDA: genesisPDA.toBase58(),
+              verifiedAt,
+            };
+            const satpBridgeResult = await postVerificationHook(profileId, 'satp', solanaWallet, satpProof);
+            const finalSatpProof = {
+              ...existingSatpProof,
+              ...satpProof,
+              txSignature: satpBridgeResult?.txSignature || null,
+              bridgeResult: satpBridgeResult,
+              verifiedAt,
+            };
+            const satpVerificationId = existingSatp?.id || (uuid ? uuid() : `satp_${Date.now()}`);
+            db.prepare(`
+              INSERT OR REPLACE INTO verifications (id, profile_id, platform, identifier, proof, verified_at)
+              VALUES (?, ?, 'satp', ?, ?, datetime('now'))
+            `).run(
+              satpVerificationId,
+              profileId,
+              solanaWallet,
+              JSON.stringify(finalSatpProof)
+            );
+            vd.satp = {
+              ...(vd.satp || {}),
+              verified: true,
+              linked: true,
+              address: solanaWallet,
+              identifier: solanaWallet,
+              txSignature: satpBridgeResult?.txSignature || null,
+              genesisPDA: genesisPDA.toBase58(),
+              verifiedAt,
+              source: 'satp-auto-v3-confirm',
+            };
+            satpAttestation = {
+              ok: true,
+              skipped: false,
+              txSignature: satpBridgeResult?.txSignature || null,
+            };
+          } catch (satpErr) {
+            satpAttestation = {
+              ok: false,
+              skipped: false,
+              error: satpErr.message,
+            };
+            console.error(`[SATP AutoID V3] SATP attestation replay failed for ${profileId}:`, satpErr.message);
+          }
+        }
+
+        const existingSolana = db.prepare(`
+          SELECT id, proof
+          FROM verifications
+          WHERE profile_id = ? AND platform = 'solana'
+          ORDER BY verified_at DESC
+          LIMIT 1
+        `).get(profileId);
+        let existingSolanaProof = {};
+        try { existingSolanaProof = JSON.parse(existingSolana?.proof || '{}'); } catch {}
+
+        if (existingSolanaProof.txSignature) {
+          solanaAttestation = {
+            ok: true,
+            skipped: true,
+            alreadyVerified: true,
+            txSignature: existingSolanaProof.txSignature,
+          };
+        } else {
+          try {
+            const bridgeProof = {
+              source: 'satp-auto-v3-confirm',
+              auto: true,
+              walletAddress: solanaWallet,
+              genesisTxSignature: txSignature,
+              genesisPDA: genesisPDA.toBase58(),
+              verifiedAt,
+            };
+            const bridgeResult = await postVerificationHook(profileId, 'solana', solanaWallet, bridgeProof);
+            const finalSolanaProof = {
+              ...existingSolanaProof,
+              ...bridgeProof,
+              txSignature: bridgeResult?.txSignature || null,
+              bridgeResult,
+              verifiedAt,
+            };
+            const solanaVerificationId = existingSolana?.id || (uuid ? uuid() : `solana_${Date.now()}`);
+            db.prepare(`
+              INSERT OR REPLACE INTO verifications (id, profile_id, platform, identifier, proof, verified_at)
+              VALUES (?, ?, 'solana', ?, ?, datetime('now'))
+            `).run(
+              solanaVerificationId,
+              profileId,
+              solanaWallet,
+              JSON.stringify(finalSolanaProof)
+            );
+            vd.solana = {
+              ...(vd.solana || {}),
+              verified: true,
+              linked: true,
+              address: solanaWallet,
+              identifier: solanaWallet,
+              txSignature: bridgeResult?.txSignature || null,
+              verifiedAt,
+              source: 'satp-auto-v3-confirm',
+            };
+            solanaAttestation = {
+              ok: true,
+              skipped: false,
+              txSignature: bridgeResult?.txSignature || null,
+            };
+          } catch (solanaErr) {
+            solanaAttestation = {
+              ok: false,
+              skipped: false,
+              error: solanaErr.message,
+            };
+            console.error(`[SATP AutoID V3] Solana attestation replay failed for ${profileId}:`, solanaErr.message);
+          }
+        }
+      } else {
+        satpAttestation = { ok: false, skipped: true, reason: 'no-wallet' };
+        solanaAttestation = { ok: false, skipped: true, reason: 'no-wallet' };
+      }
+
+      db.prepare('UPDATE profiles SET verification_data = ? WHERE id = ?')
+        .run(JSON.stringify(vd), profileId);
+    }
+
+    db.close();
+    console.log(`[SATP AutoID V3] Identity confirmed for ${profileId}: PDA=${genesisPDA.toBase58()}, TX=${txSignature}`);
+    if (satpAttestation && !satpAttestation.ok && !satpAttestation.skipped) {
+      console.warn(`[SATP AutoID V3] Identity confirmed but SATP attestation is still missing for ${profileId}`);
+    }
+    if (solanaAttestation && !solanaAttestation.ok && !solanaAttestation.skipped) {
+      console.warn(`[SATP AutoID V3] Identity confirmed but Solana attestation is still missing for ${profileId}`);
+    }
+  } catch (dbErr) {
+    console.warn('[SATP AutoID V3] DB update failed (non-blocking):', dbErr.message);
+  }
+
+  try { if (typeof clearV3Cache === 'function') clearV3Cache(); } catch (_) {}
+  try { if (typeof clearSatpExplorerCache === 'function') clearSatpExplorerCache(); } catch (_) {}
+
+  return {
+    ok: true,
+    data: {
+      genesisPDA: genesisPDA.toBase58(),
+      agentIdHash,
+      txSignature,
+      network: NETWORK,
+      programVersion: 'v3',
+      walletAddress,
+      profileId,
+    },
+    satpAttestation,
+    solanaAttestation,
+  };
+}
+
 // ─────────────────────────────────────────────
 //  EXPRESS ROUTES
 // ─────────────────────────────────────────────
@@ -373,237 +604,8 @@ function registerSATPAutoIdentityV3Routes(app) {
         return res.status(400).json({ error: 'walletAddress and profileId required' });
       }
 
-      const [genesisPDA] = getV3GenesisRecordPDA(profileId);
-      const agentIdHash = computeAgentIdHash(profileId).toString('hex');
-      let satpAttestation = { ok: true, skipped: true, reason: 'not-run' };
-      let solanaAttestation = { ok: true, skipped: true, reason: 'not-run' };
-
-      // Update profile with V3 SATP identity info
-      try {
-        const Database = require('better-sqlite3');
-        const db = new Database(path.join(__dirname, '../../data/agentfolio.db'));
-
-        // Store V3 SATP verification
-        const { v4: uuid } = require('uuid');
-        const verificationId = uuid ? uuid() : `satp_v3_${Date.now()}`;
-        db.prepare(`
-          INSERT OR REPLACE INTO verifications (id, profile_id, platform, identifier, proof, verified_at)
-          VALUES (?, ?, 'satp_v3', ?, ?, datetime('now'))
-        `).run(
-          verificationId,
-          profileId,
-          walletAddress,
-          JSON.stringify({
-            genesisPDA: genesisPDA.toBase58(),
-            agentIdHash,
-            txSignature,
-            network: NETWORK,
-            program: SATP_V3_IDENTITY_PROGRAM.toBase58(),
-            programVersion: 'v3',
-            verifiedAt: new Date().toISOString(),
-          })
-        );
-
-        // Update profile verification data and replay the wallet-owned Solana attestation
-        const profile = db.prepare('SELECT wallet, verification_data FROM profiles WHERE id = ?').get(profileId);
-        const verifiedAt = new Date().toISOString();
-        solanaAttestation = { ok: false, skipped: true, reason: 'profile-not-found' };
-
-        if (profile) {
-          let vd = {};
-          try { vd = JSON.parse(profile.verification_data || '{}'); } catch {}
-          vd.satp_v3 = {
-            verified: true,
-            genesisPDA: genesisPDA.toBase58(),
-            agentIdHash,
-            txSignature,
-            program: SATP_V3_IDENTITY_PROGRAM.toBase58(),
-            network: NETWORK,
-            verifiedAt,
-          };
-
-          const solanaWallet = walletAddress || profile.wallet || vd?.solana?.address || null;
-          if (solanaWallet) {
-            const { postVerificationHook } = require('../post-verification-hook');
-
-            const existingSatp = db.prepare(`
-              SELECT id, proof
-              FROM verifications
-              WHERE profile_id = ? AND platform = 'satp'
-              ORDER BY verified_at DESC
-              LIMIT 1
-            `).get(profileId);
-            let existingSatpProof = {};
-            try { existingSatpProof = JSON.parse(existingSatp?.proof || '{}'); } catch {}
-
-            if (existingSatpProof.txSignature) {
-              satpAttestation = {
-                ok: true,
-                skipped: true,
-                alreadyVerified: true,
-                txSignature: existingSatpProof.txSignature,
-              };
-            } else {
-              try {
-                const satpProof = {
-                  source: 'satp-auto-v3-confirm',
-                  auto: true,
-                  walletAddress: solanaWallet,
-                  genesisTxSignature: txSignature,
-                  genesisPDA: genesisPDA.toBase58(),
-                  verifiedAt,
-                };
-                const satpBridgeResult = await postVerificationHook(profileId, 'satp', solanaWallet, satpProof);
-                const finalSatpProof = {
-                  ...existingSatpProof,
-                  ...satpProof,
-                  txSignature: satpBridgeResult?.txSignature || null,
-                  bridgeResult: satpBridgeResult,
-                  verifiedAt,
-                };
-                const satpVerificationId = existingSatp?.id || (uuid ? uuid() : `satp_${Date.now()}`);
-                db.prepare(`
-                  INSERT OR REPLACE INTO verifications (id, profile_id, platform, identifier, proof, verified_at)
-                  VALUES (?, ?, 'satp', ?, ?, datetime('now'))
-                `).run(
-                  satpVerificationId,
-                  profileId,
-                  solanaWallet,
-                  JSON.stringify(finalSatpProof)
-                );
-                vd.satp = {
-                  ...(vd.satp || {}),
-                  verified: true,
-                  linked: true,
-                  address: solanaWallet,
-                  identifier: solanaWallet,
-                  txSignature: satpBridgeResult?.txSignature || null,
-                  genesisPDA: genesisPDA.toBase58(),
-                  verifiedAt,
-                  source: 'satp-auto-v3-confirm',
-                };
-                satpAttestation = {
-                  ok: true,
-                  skipped: false,
-                  txSignature: satpBridgeResult?.txSignature || null,
-                };
-              } catch (satpErr) {
-                satpAttestation = {
-                  ok: false,
-                  skipped: false,
-                  error: satpErr.message,
-                };
-                console.error(`[SATP AutoID V3] SATP attestation replay failed for ${profileId}:`, satpErr.message);
-              }
-            }
-
-            const existingSolana = db.prepare(`
-              SELECT id, proof
-              FROM verifications
-              WHERE profile_id = ? AND platform = 'solana'
-              ORDER BY verified_at DESC
-              LIMIT 1
-            `).get(profileId);
-            let existingSolanaProof = {};
-            try { existingSolanaProof = JSON.parse(existingSolana?.proof || '{}'); } catch {}
-
-            if (existingSolanaProof.txSignature) {
-              solanaAttestation = {
-                ok: true,
-                skipped: true,
-                alreadyVerified: true,
-                txSignature: existingSolanaProof.txSignature,
-              };
-            } else {
-              try {
-                const bridgeProof = {
-                  source: 'satp-auto-v3-confirm',
-                  auto: true,
-                  walletAddress: solanaWallet,
-                  genesisTxSignature: txSignature,
-                  genesisPDA: genesisPDA.toBase58(),
-                  verifiedAt,
-                };
-                const bridgeResult = await postVerificationHook(profileId, 'solana', solanaWallet, bridgeProof);
-                const finalSolanaProof = {
-                  ...existingSolanaProof,
-                  ...bridgeProof,
-                  txSignature: bridgeResult?.txSignature || null,
-                  bridgeResult,
-                  verifiedAt,
-                };
-                const solanaVerificationId = existingSolana?.id || (uuid ? uuid() : `solana_${Date.now()}`);
-                db.prepare(`
-                  INSERT OR REPLACE INTO verifications (id, profile_id, platform, identifier, proof, verified_at)
-                  VALUES (?, ?, 'solana', ?, ?, datetime('now'))
-                `).run(
-                  solanaVerificationId,
-                  profileId,
-                  solanaWallet,
-                  JSON.stringify(finalSolanaProof)
-                );
-                vd.solana = {
-                  ...(vd.solana || {}),
-                  verified: true,
-                  linked: true,
-                  address: solanaWallet,
-                  identifier: solanaWallet,
-                  txSignature: bridgeResult?.txSignature || null,
-                  verifiedAt,
-                  source: 'satp-auto-v3-confirm',
-                };
-                solanaAttestation = {
-                  ok: true,
-                  skipped: false,
-                  txSignature: bridgeResult?.txSignature || null,
-                };
-              } catch (solanaErr) {
-                solanaAttestation = {
-                  ok: false,
-                  skipped: false,
-                  error: solanaErr.message,
-                };
-                console.error(`[SATP AutoID V3] Solana attestation replay failed for ${profileId}:`, solanaErr.message);
-              }
-            }
-          } else {
-            satpAttestation = { ok: false, skipped: true, reason: 'no-wallet' };
-            solanaAttestation = { ok: false, skipped: true, reason: 'no-wallet' };
-          }
-
-          db.prepare('UPDATE profiles SET verification_data = ? WHERE id = ?')
-            .run(JSON.stringify(vd), profileId);
-        }
-
-        db.close();
-        console.log(`[SATP AutoID V3] Identity confirmed for ${profileId}: PDA=${genesisPDA.toBase58()}, TX=${txSignature}`);
-        if (satpAttestation && !satpAttestation.ok && !satpAttestation.skipped) {
-          console.warn(`[SATP AutoID V3] Identity confirmed but SATP attestation is still missing for ${profileId}`);
-        }
-        if (solanaAttestation && !solanaAttestation.ok && !solanaAttestation.skipped) {
-          console.warn(`[SATP AutoID V3] Identity confirmed but Solana attestation is still missing for ${profileId}`);
-        }
-      } catch (dbErr) {
-        console.warn('[SATP AutoID V3] DB update failed (non-blocking):', dbErr.message);
-      }
-
-      try { if (typeof clearV3Cache === 'function') clearV3Cache(); } catch (_) {}
-      try { if (typeof clearSatpExplorerCache === 'function') clearSatpExplorerCache(); } catch (_) {}
-
-      res.json({
-        ok: true,
-        data: {
-          genesisPDA: genesisPDA.toBase58(),
-          agentIdHash,
-          txSignature,
-          network: NETWORK,
-          programVersion: 'v3',
-          walletAddress,
-          profileId,
-        },
-        satpAttestation,
-        solanaAttestation,
-      });
+      const result = await recordConfirmedV3Identity({ walletAddress, profileId, txSignature });
+      res.json(result);
     } catch (err) {
       console.error('[SATP AutoID V3] confirm error:', err.message);
       res.status(500).json({ error: 'Failed to confirm V3 identity', detail: err.message });
@@ -701,9 +703,14 @@ module.exports = {
   getV3GenesisRecordPDA,
   getV2IdentityPDA,
   computeAgentIdHash,
+  getV3IdentityStatus,
   hasV3Identity,
   hasV2Identity,
   buildCreateIdentityV3Tx,
+  recordConfirmedV3Identity,
   SATP_V3_IDENTITY_PROGRAM,
   SATP_V2_IDENTITY_PROGRAM,
+  NETWORK,
+  RPC_URL,
+  connection,
 };
