@@ -660,35 +660,66 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
         }
       }
     },
-    '/api/marketplace/jobs/create-onchain': {
+    '/api/marketplace/jobs/{id}/escrow/onchain': {
       post: {
         tags: ['Marketplace', 'Escrow'],
-        summary: 'Create job with on-chain escrow (headless)',
-        description: 'Creates a marketplace job AND returns an unsigned Solana transaction for the on-chain escrow program. Sign the tx, submit via /api/escrow/confirm-tx, then confirm deposit.',
+        summary: 'Build unsigned on-chain escrow funding transaction',
+        description: 'After creating a job and accepting an applicant, build the unsigned Solana transaction that funds the escrow PDA for that job. Submit the signed transaction to /api/marketplace/jobs/{id}/escrow/confirm.',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
+        ],
         requestBody: {
           required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['clientId', 'title', 'description', 'clientWallet', 'budgetAmount'],
+                required: ['clientWallet', 'amount'],
                 properties: {
-                  clientId: { type: 'string' },
-                  title: { type: 'string' },
-                  description: { type: 'string' },
-                  clientWallet: { type: 'string', description: 'Solana wallet address' },
-                  budgetAmount: { type: 'number', description: 'USDC amount' },
-                  deadlineUnix: { type: 'integer', description: 'Unix timestamp (default: 30 days)' },
-                  category: { type: 'string' },
-                  skills: { type: 'array', items: { type: 'string' } }
+                  clientWallet: { type: 'string', description: 'Solana wallet address funding escrow' },
+                  amount: { type: 'number', description: 'USDC amount' },
+                  deadlineUnix: { type: 'integer', description: 'Unix timestamp for escrow expiry (default: 30 days)' }
                 }
               }
             }
           }
         },
         responses: {
-          201: { description: 'Job created with unsigned escrow transaction' },
-          400: { description: 'Validation error' }
+          200: { description: 'Unsigned escrow funding transaction built' },
+          400: { description: 'Validation error or job not ready for funding' },
+          404: { description: 'Job not found' }
+        }
+      }
+    },
+    '/api/marketplace/jobs/{id}/escrow/confirm': {
+      post: {
+        tags: ['Marketplace', 'Escrow'],
+        summary: 'Confirm signed on-chain escrow funding transaction',
+        description: 'Confirms the signed Solana transaction on-chain, links the escrow PDA to the marketplace job, and stores the funded escrow record locally.',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['txSignature', 'escrowPDA'],
+                properties: {
+                  txSignature: { type: 'string', description: 'Signed Solana transaction signature' },
+                  escrowPDA: { type: 'string', description: 'Escrow PDA returned by the build endpoint' },
+                  clientWallet: { type: 'string', description: 'Client Solana wallet address' },
+                  amount: { type: 'number', description: 'Optional fallback USDC amount if on-chain read is delayed' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          201: { description: 'On-chain escrow confirmed and linked to job' },
+          400: { description: 'Validation error or transaction not confirmed' },
+          404: { description: 'Job not found' }
         }
       }
     },
@@ -1011,7 +1042,7 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
                   walletAddress: '0x...',
                   amount: 25,
                   currency: 'USDC',
-                  network: 'base',
+                  network: 'solana',
                   memo: 'job_abc123'
                 }
               }
