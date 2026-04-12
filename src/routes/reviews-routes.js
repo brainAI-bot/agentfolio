@@ -36,9 +36,13 @@ const sdk = new SATPSDK({ network, rpcUrl: process.env.SOLANA_RPC_URL });
  *   commentUri: string (URI to off-chain comment, max 200 chars)
  *   commentHash: string (hex-encoded SHA256 hash of comment, or raw text to hash)
  */
-router.post('/submit', async (req, res) => {
+router.post('/submit', async (req, res, next) => {
   try {
-    const { reviewer, reviewerIdentity, jobPDA, rating, quality, reliability, communication, commentUri, commentHash } = req.body;
+    const { reviewer, reviewerIdentity, jobPDA, rating, quality, reliability, communication, commentUri, commentHash, challengeId, walletAddress } = req.body || {};
+
+    if ((!reviewer || !reviewerIdentity || !jobPDA || !rating || !commentUri) && (challengeId || walletAddress)) {
+      return next();
+    }
 
     if (!reviewer || !reviewerIdentity || !jobPDA || !rating || !commentUri) {
       return res.status(400).json({
@@ -135,31 +139,6 @@ router.post('/respond', async (req, res) => {
 });
 
 /**
- * GET /api/reviews/:pda
- * Fetch review state from on-chain.
- */
-router.get('/:pda', async (req, res) => {
-  try {
-    const { pda } = req.params;
-
-    // Validate pubkey format
-    try { new PublicKey(pda); } catch {
-      return res.status(400).json({ error: 'Invalid PDA format' });
-    }
-
-    const review = await sdk.getReview(pda);
-    if (!review) {
-      return res.status(404).json({ error: 'Review not found' });
-    }
-
-    res.json(review);
-  } catch (e) {
-    console.error('GET /api/reviews/:pda error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-/**
  * GET /api/reviews/pda/derive
  * Derive review PDA from job + reviewer.
  * 
@@ -192,6 +171,31 @@ router.get('/pda/derive', async (req, res) => {
     });
   } catch (e) {
     console.error('GET /api/reviews/pda/derive error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/reviews/:pda
+ * Fetch review state from on-chain.
+ */
+router.get('/:pda', async (req, res) => {
+  try {
+    const { pda } = req.params;
+
+    // Validate pubkey format
+    try { new PublicKey(pda); } catch {
+      return res.status(400).json({ error: 'Invalid PDA format' });
+    }
+
+    const review = await sdk.getReview(pda);
+    if (!review) {
+      return res.status(404).json({ error: 'Review not found' });
+    }
+
+    res.json(review);
+  } catch (e) {
+    console.error('GET /api/reviews/:pda error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
