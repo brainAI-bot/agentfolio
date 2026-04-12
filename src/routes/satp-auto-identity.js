@@ -309,10 +309,6 @@ function registerSATPAutoIdentityRoutes(app) {
       }
 
       const [identityPDA] = getIdentityPDA(new PublicKey(walletAddress));
-      const existsOnChain = await hasIdentity(walletAddress);
-      if (!existsOnChain) {
-        return res.status(400).json({ error: 'SATP identity not found on-chain for wallet. Complete the real create_identity transaction first.' });
-      }
 
       // Update profile with SATP identity info
       try {
@@ -336,6 +332,20 @@ function registerSATPAutoIdentityRoutes(app) {
           return res.status(403).json({ error: 'walletAddress must match the profile\'s verified Solana wallet' });
         }
 
+        const hasV2Identity = await hasIdentity(walletAddress);
+        let hasV3Genesis = false;
+        const v3GenesisPda = vd?.satp_v3?.genesisPDA;
+        if (v3GenesisPda) {
+          try {
+            const v3Acct = await connection.getAccountInfo(new PublicKey(v3GenesisPda));
+            hasV3Genesis = !!(v3Acct && v3Acct.data && v3Acct.data.length > 0);
+          } catch {}
+        }
+        if (!hasV2Identity && !hasV3Genesis) {
+          db.close();
+          return res.status(400).json({ error: 'SATP identity not found on-chain for wallet/profile. Complete the real on-chain SATP flow first.' });
+        }
+
         const existingSatp = vd?.satp || {};
         const satpRecord = {
           ...existingSatp,
@@ -343,13 +353,18 @@ function registerSATPAutoIdentityRoutes(app) {
           linked: true,
           address: verifiedSolana,
           identifier: verifiedSolana,
-          identityPDA: identityPDA.toBase58(),
-          program: SATP_IDENTITY_PROGRAM.toBase58(),
           network: NETWORK,
           verifiedAt: existingSatp.verifiedAt || new Date().toISOString(),
-          source: existingSatp.source || 'satp-auto-identity-confirm',
+          source: existingSatp.source || (hasV3Genesis ? 'satp-auto-v3-confirm' : 'satp-auto-identity-confirm'),
         };
-        if (txSignature && !existingSatp.txSignature) satpRecord.txSignature = txSignature;
+        if (hasV2Identity) {
+          satpRecord.identityPDA = identityPDA.toBase58();
+          satpRecord.program = SATP_IDENTITY_PROGRAM.toBase58();
+        }
+        if (v3GenesisPda && !satpRecord.genesisPDA) satpRecord.genesisPDA = v3GenesisPda;
+
+        // Preserve existing proof fields, do not let public callers overwrite them.
+        if (txSignature && !existingSatp.txSignature && hasV2Identity) satpRecord.txSignature = txSignature;
 
         // Store SATP verification in verifications table
         const { v4: uuid } = require('uuid');
@@ -381,7 +396,7 @@ function registerSATPAutoIdentityRoutes(app) {
           console.warn('[SATP AutoID] JSON sync failed (non-blocking):', syncErr.message);
         }
 
-        console.log(`[SATP AutoID] Identity confirmed for ${profileId}: PDA=${identityPDA.toBase58()}, wallet=${walletAddress}`);
+        console.log(`[SATP AutoID] Identity confirmed for ${profileId}: wallet=${walletAddress}, v2=${hasV2Identity}, v3=${hasV3Genesis}`);
       } catch (dbErr) {
         console.warn('[SATP AutoID] DB update failed:', dbErr.message);
         return res.status(500).json({ error: 'Failed to persist SATP identity', detail: dbErr.message });
