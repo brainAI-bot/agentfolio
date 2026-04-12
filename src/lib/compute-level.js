@@ -42,7 +42,10 @@ function computeVerificationLevel(input = {}) {
   const profile = input.profile || {};
   const activity = input.activity || {};
   const hasSatpIdentity = Boolean(input.hasSatpIdentity || input.hasSatpGenesis || activity.hasSatpGenesis);
-  const normalizedVerifications = normalizeVerifications(input.verifications || [], { includeSatp: true, dedupe: true });
+  // SATP genesis is the L1 registration prerequisite, not one of the extra verifications
+  // needed to reach L2+. Keep it out of verificationCount while still using hasSatpIdentity
+  // as the separate registration gate.
+  const normalizedVerifications = normalizeVerifications(input.verifications || [], { includeSatp: false, dedupe: true });
   const categories = [...new Set(normalizedVerifications.map((v) => getVerificationCategory(v.platform)).filter(Boolean))];
   const verificationCount = normalizedVerifications.length;
   const effectiveVerificationCount = countEffectiveVerifications(normalizedVerifications);
