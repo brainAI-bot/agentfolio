@@ -1,22 +1,20 @@
 /**
  * MCP Endpoint Verification Module
- * Verifies Model Context Protocol servers via .well-known or JSON-RPC
+ * Verifies Model Context Protocol servers via .well-known, JSON-RPC, or SSE transport
  */
 
 const TIMEOUT_MS = 10000;
 
 /**
- * Verify MCP endpoint by checking .well-known/agentfolio.json or tools/list JSON-RPC
+ * Verify MCP endpoint by checking .well-known/agentfolio.json, tools/list JSON-RPC, or SSE transport
  */
 async function verifyMcpEndpoint(mcpUrl, expectedProfileId) {
   try {
     // Normalize URL
     const url = new URL(mcpUrl);
     const baseUrl = `${url.protocol}//${url.host}`;
-    
+
     const errors = [];
-    let method = null;
-    let toolCount = 0;
 
     // Method 1: Check .well-known/agentfolio.json
     try {
@@ -25,7 +23,7 @@ async function verifyMcpEndpoint(mcpUrl, expectedProfileId) {
         headers: { 'Accept': 'application/json', 'User-Agent': 'AgentFolio-MCP-Verify/1.0' },
         signal: AbortSignal.timeout(TIMEOUT_MS)
       });
-      
+
       if (res.ok) {
         const data = await res.json();
         if (data.profileId === expectedProfileId) {
@@ -52,7 +50,7 @@ async function verifyMcpEndpoint(mcpUrl, expectedProfileId) {
       const rpcUrl = mcpUrl.endsWith('/') ? mcpUrl : mcpUrl + '/';
       const res = await fetch(`${rpcUrl}tools/list`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'User-Agent': 'AgentFolio-MCP-Verify/1.0'
@@ -69,8 +67,6 @@ async function verifyMcpEndpoint(mcpUrl, expectedProfileId) {
       if (res.ok) {
         const data = await res.json();
         if (data.result && Array.isArray(data.result.tools)) {
-          // For JSON-RPC, we verify the endpoint works but can't verify profileId
-          // This is autonomous verification - assume valid if MCP server responds
           return {
             verified: true,
             url: mcpUrl,
@@ -89,12 +85,39 @@ async function verifyMcpEndpoint(mcpUrl, expectedProfileId) {
       errors.push(`JSON-RPC check failed: ${e.message}`);
     }
 
+    // Method 3: Check SSE transport endpoint
+    try {
+      const res = await fetch(mcpUrl, {
+        headers: {
+          'Accept': 'text/event-stream',
+          'User-Agent': 'AgentFolio-MCP-Verify/1.0'
+        },
+        signal: AbortSignal.timeout(TIMEOUT_MS)
+      });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('text/event-stream')) {
+        return {
+          verified: true,
+          url: mcpUrl,
+          method: 'sse',
+          profileId: expectedProfileId,
+          toolCount: 0,
+          message: 'MCP endpoint verified via SSE transport handshake'
+        };
+      }
+
+      errors.push(`SSE check failed: HTTP ${res.status}, content-type ${contentType || 'unknown'}`);
+    } catch (e) {
+      errors.push(`SSE check failed: ${e.message}`);
+    }
+
     return {
       verified: false,
       url: mcpUrl,
       profileId: expectedProfileId,
       errors,
-      message: 'MCP endpoint verification failed - neither .well-known nor JSON-RPC methods worked'
+      message: 'MCP endpoint verification failed - well-known, JSON-RPC, and SSE methods all failed'
     };
 
   } catch (error) {

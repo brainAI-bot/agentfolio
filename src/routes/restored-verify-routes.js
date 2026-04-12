@@ -27,6 +27,38 @@ function registerRestoredRoutes(app) {
   const DATA_DIR = path.join(__dirname, '..', '..', 'data', 'profiles');
   const PROFILES_DIR = DATA_DIR;
 
+  function upsertActiveVerification(profileId, platform, identifier, proof = {}) {
+    try {
+      const Database = require('better-sqlite3');
+      const db = new Database(path.join(__dirname, '..', '..', 'data', 'agentfolio.db'));
+      db.prepare(`
+        INSERT INTO verifications (id, profile_id, platform, identifier, proof, verified_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(profile_id, platform) DO UPDATE SET
+          identifier = excluded.identifier,
+          proof = excluded.proof,
+          verified_at = datetime('now')
+      `).run(
+        `${profileId}-${platform}`,
+        profileId,
+        platform,
+        identifier,
+        JSON.stringify(proof || {})
+      );
+
+      const row = db.prepare('SELECT verification_data FROM profiles WHERE id = ?').get(profileId);
+      if (row) {
+        let vd = {};
+        try { vd = JSON.parse(row.verification_data || '{}'); } catch {}
+        vd[platform] = { ...(vd[platform] || {}), verified: true, ...(proof || {}) };
+        db.prepare('UPDATE profiles SET verification_data = ? WHERE id = ?').run(JSON.stringify(vd), profileId);
+      }
+      db.close();
+    } catch (e) {
+      console.warn(`[RestoredRoutes] Failed to upsert active verification for ${profileId}/${platform}: ${e.message}`);
+    }
+  }
+
   // Activity
   const { ACTIVITY_TYPES, addActivity } = require('../lib/activity');
   let broadcastActivity;
@@ -639,6 +671,13 @@ function registerRestoredRoutes(app) {
           };
           profile.updatedAt = new Date().toISOString();
           dbSaveProfileFn(profile);
+          upsertActiveVerification(profileId, 'mcp', mcpUrl, {
+            url: mcpUrl,
+            method: result.method,
+            toolCount: result.toolCount || 0,
+            identifier: mcpUrl,
+            verifiedAt: profile.verificationData.mcp.verifiedAt
+          });
           addActivityAndBroadcast(profileId, 'verification_mcp', { url: mcpUrl, method: result.method, tools: result.toolCount || 0 }, DATA_DIR);
         }
       }

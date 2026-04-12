@@ -1,6 +1,6 @@
 {
   "profileId": "agent_brainkid",
-  "mcpEndpoint": "https://agentfolio.bot:3400/sse",
+  "mcpEndpoint": "https://agentfolio.bot/mcp/sse",
   "name": "brainKID",
   "version": "1.0.0"
 }
