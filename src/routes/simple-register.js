@@ -148,7 +148,7 @@ function buildProfileJson({ id, name, tagline, github, website, walletAddress, r
   return {
     id,
     name,
-    handle: null,
+    handle: "",
     bio: tagline,
     avatar: null,
     links: { github: github || null, website: website || null },
