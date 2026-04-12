@@ -21,6 +21,34 @@ const router = express.Router();
 
 const SITE_URL = process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || 'https://agentfolio.bot';
 
+const NON_PUBLIC_EXPLORER_NAMES = new Set([
+  'Smoke 423064591',
+  'Smoke 423302531',
+  'Smoke 423302532',
+  'brainTEST',
+  'test',
+  'ratecheck',
+  'ratecheck2',
+  'ratetest1',
+  'ratetest2',
+  'ratetest3',
+  'ratelimit-probe',
+  '__rate_test__',
+  'CEO Selftest 55648944',
+]);
+
+function isNonPublicExplorerAgent(agent) {
+  const name = String(agent?.agentName || '').trim();
+  if (!name) return true;
+  if (NON_PUBLIC_EXPLORER_NAMES.has(name)) return true;
+  const lower = name.toLowerCase();
+  if (lower.startsWith('ratecheck') || lower.startsWith('ratetest')) return true;
+  if (lower === 'ratelimit-probe' || lower === '__rate_test__') return true;
+  if (lower === 'test' || lower.startsWith('braintest')) return true;
+  if (lower.startsWith('ceo selftest ')) return true;
+  return false;
+}
+
 // A1: Helper to compute score for any profile
 function getComputedScore(profileId) {
   try {
@@ -89,6 +117,7 @@ router.get('/agents', async (req, res) => {
     };
     
     agents = agents.filter(a => !isTest(a.agentName));
+    agents = agents.filter(a => !isNonPublicExplorerAgent(a));
     
     // Apply query filters
     const { category, minLevel, born, limit } = req.query;
@@ -324,6 +353,7 @@ router.get('/leaderboard', async (req, res) => {
       const ln = (a.agentName || '').toLowerCase();
       return !ln.startsWith('smoketest') && !ln.startsWith('e2etest') && ln !== 'mainnet-deploy-test';
     });
+    agents = agents.filter(a => !isNonPublicExplorerAgent(a));
     
     // Optional born filter
     if (req.query.born === 'true') {
@@ -386,7 +416,8 @@ router.get('/search', async (req, res) => {
     const v3Explorer = require('../v3-explorer');
     const chainCache = require('../lib/chain-cache');
     
-    const agents = await v3Explorer.fetchAllV3Agents();
+    let agents = await v3Explorer.fetchAllV3Agents();
+    agents = agents.filter(a => !isNonPublicExplorerAgent(a));
     const query = q.toLowerCase().trim();
     
     const matches = agents.filter(a => {

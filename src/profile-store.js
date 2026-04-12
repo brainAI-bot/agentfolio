@@ -84,6 +84,24 @@ const SATP_NETWORK = process.env.SATP_NETWORK || 'mainnet';
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'agentfolio.db');
 
+const NON_PUBLIC_DIRECTORY_PROFILE_IDS = new Set([
+  'agent_sm423064591',
+  'agent_sm423302531',
+  'agent_sm423302532',
+  'agent_braintest',
+  'agent_braintest2',
+  'agent_forgetest',
+  'agent_forgetest2',
+]);
+
+function isPublicDirectoryProfile(profile) {
+  const id = String(profile?.id || '').toLowerCase();
+  if (!id) return false;
+  if (NON_PUBLIC_DIRECTORY_PROFILE_IDS.has(id)) return false;
+  if (id.startsWith('local_') || id.startsWith('lauc_') || id.startsWith('laur_')) return false;
+  return true;
+}
+
 let db;
 
 function getDb() {
@@ -1275,6 +1293,8 @@ function registerRoutes(app) {
       const unclaimed = (cleanRest.claimed === 0 || cleanRest.claimed === "0") || _md.unclaimed === true || _md.isPlaceholder === true || _md.placeholder === true;
       return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: {} /* [P0] chain-cache only, no DB reads */, portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: _md, nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, _dbLevel: dbLevel || null, claimed, unclaimed };
     });
+
+    profiles = profiles.filter(isPublicDirectoryProfile);
 
     if (search) {
       const matchesSearch = (p) => {
