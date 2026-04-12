@@ -594,22 +594,14 @@ function registerSATPAutoIdentityV3Routes(app) {
 
   /**
    * POST /api/satp-auto/v3/identity/confirm
-   * Called after the user signs and submits the V3 create_identity TX.
-   * Records the SATP V3 genesis record in the DB.
+   * SECURITY: disabled. This legacy public route previously accepted untrusted
+   * wallet/profile/tx data and wrote forged SATP V3 verification rows to the DB.
+   * Atomic registration must use /api/register/atomic/confirm instead.
    */
-  app.post('/api/satp-auto/v3/identity/confirm', async (req, res) => {
-    try {
-      const { walletAddress, profileId, txSignature } = req.body;
-      if (!walletAddress || !profileId) {
-        return res.status(400).json({ error: 'walletAddress and profileId required' });
-      }
-
-      const result = await recordConfirmedV3Identity({ walletAddress, profileId, txSignature });
-      res.json(result);
-    } catch (err) {
-      console.error('[SATP AutoID V3] confirm error:', err.message);
-      res.status(500).json({ error: 'Failed to confirm V3 identity', detail: err.message });
-    }
+  app.post('/api/satp-auto/v3/identity/confirm', (req, res) => {
+    return res.status(410).json({
+      error: 'This legacy V3 confirm route is disabled. Use /api/register/atomic/confirm for real registration finalization.'
+    });
   });
 
   /**
