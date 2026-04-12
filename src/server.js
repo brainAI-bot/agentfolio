@@ -1802,32 +1802,69 @@ app.post('/api/verify/solana/confirm', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// AgentMail: challenge → sends code to email → confirm
+// AgentMail: challenge -> send code (or manual fallback) -> confirm
 app.post('/api/verify/agentmail/challenge', async (req, res) => {
   try {
     const { profileId, email } = req.body;
     if (!profileId || !email) return res.status(400).json({ error: 'profileId and email required' });
-    if (!email.endsWith('@agentmail.to')) return res.status(400).json({ error: 'Only @agentmail.to addresses supported' });
-    const challenge = verificationChallenges.generateChallenge(profileId, 'agentmail', email);
-    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-    challenge.challengeData.code = code;
-    challenge.challengeData.instructions = `Check your ${email} inbox for verification code: ${code}`;
-    await verificationChallenges.storeChallenge(challenge);
-    // In production: send email with code via AgentMail API
-    res.json({ challengeId: challenge.id, instructions: `Enter the verification code sent to ${email}`, expiresAt: challenge.challengeData.expiresAt });
+
+    const normalizedEmail = String(email).toLowerCase().trim();
+    if (!normalizedEmail.endsWith('@agentmail.to')) {
+      return res.status(400).json({ error: 'Only @agentmail.to addresses supported' });
+    }
+
+    const { startVerification } = require('./lib/agentmail-verify');
+    const result = await startVerification(profileId, normalizedEmail);
+    if (!result.success) {
+      return res.status(400).json({ error: result.message || 'Failed to start AgentMail verification' });
+    }
+
+    const challengeId = `${profileId}:${normalizedEmail}`;
+    res.json({
+      success: true,
+      challengeId,
+      email: normalizedEmail,
+      instructions: result.message,
+      manualOnly: !!result.manualOnly,
+      emailSent: !!result.emailSent,
+      code: result.code,
+      expiresInMinutes: 30
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/verify/agentmail/confirm', async (req, res) => {
   try {
-    const { challengeId, code } = req.body;
-    if (!challengeId || !code) return res.status(400).json({ error: 'challengeId and code required' });
-    const challenge = await verificationChallenges.getChallenge(challengeId);
-    if (!challenge) return res.status(404).json({ error: 'Challenge not found or expired' });
-    if (code.toUpperCase() !== challenge.challengeData.code) return res.status(400).json({ error: 'Invalid verification code' });
-    await verificationChallenges.completeChallenge(challengeId, { email: challenge.challengeData.identifier, verifiedAt: new Date().toISOString() });
-    profileStore.addVerification(challenge.profileId, 'agentmail', challenge.challengeData.identifier, { challengeId, verifiedAt: new Date().toISOString() });
-    res.json({ verified: true, platform: 'agentmail', identifier: challenge.challengeData.identifier, proof: { challengeId } });
+    let { challengeId, profileId, email, code } = req.body;
+    if ((!profileId || !email) && challengeId && String(challengeId).includes(':')) {
+      const idx = String(challengeId).indexOf(':');
+      profileId = String(challengeId).slice(0, idx);
+      email = String(challengeId).slice(idx + 1);
+    }
+    if (!profileId || !email || !code) {
+      return res.status(400).json({ error: 'profileId/email/code or challengeId/code required' });
+    }
+
+    const normalizedEmail = String(email).toLowerCase().trim();
+    const { confirmVerification } = require('./lib/agentmail-verify');
+    const result = confirmVerification(profileId, normalizedEmail, code);
+    if (!result.success) {
+      return res.status(400).json({ error: result.message || 'Invalid verification code' });
+    }
+
+    const proofChallengeId = challengeId || `${profileId}:${normalizedEmail}`;
+    profileStore.addVerification(profileId, 'agentmail', normalizedEmail, {
+      challengeId: proofChallengeId,
+      verifiedAt: result.verifiedAt || new Date().toISOString()
+    });
+
+    res.json({
+      verified: true,
+      platform: 'agentmail',
+      identifier: normalizedEmail,
+      proof: { challengeId: proofChallengeId },
+      verifiedAt: result.verifiedAt || new Date().toISOString()
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
