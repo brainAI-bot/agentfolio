@@ -118,6 +118,31 @@ async function checkOnChainMints(wallet) {
   }
 }
 
+
+function getRecordedBoaMintCount({ wallet, agentId } = {}) {
+  try {
+    const recordsDir = path.join(PIPELINE_DIR, 'mint-records');
+    const files = fs.existsSync(recordsDir) ? fs.readdirSync(recordsDir).filter((name) => name.endsWith('.json')) : [];
+    let count = 0;
+    for (const file of files) {
+      try {
+        const record = JSON.parse(fs.readFileSync(path.join(recordsDir, file), 'utf8'));
+        if (wallet && record?.recipient === wallet) {
+          count += 1;
+          continue;
+        }
+        if (agentId && record?.agentId === agentId) {
+          count += 1;
+        }
+      } catch {}
+    }
+    return count;
+  } catch (e) {
+    console.warn('[RecordedMintCount] Failed to read mint records:', e.message);
+    return 0;
+  }
+}
+
 // Genesis 1/1 registry
 const GENESIS_REGISTRY = {
   'BP9TPSoo6LXpy2YvRTZnPg1kLA9ndnKxa6eHYxkdVMWE': {
@@ -888,6 +913,7 @@ function handleBurnToBecome(req, res, url) {
         // Check isBorn from Genesis Record — free first mint only if not already born
         let isBorn = false;
         let boaMintCount = 0;
+        let recordedBoaMintCount = 0;
         try {
           const { getV3Score } = require('../v3-score-service');
           const v3Data = await getV3Score(matchedProfile.id);
@@ -897,7 +923,8 @@ function handleBurnToBecome(req, res, url) {
           const onChainMints = await checkOnChainMints(wallet);
           boaMintCount = onChainMints.count || 0;
         } catch {}
-        sendJson(200, { found: true, agent: matchedProfile.id, name: matchedProfile.name, level, levelName: LEVEL_NAMES[level] || 'Unknown', badge: LEVEL_BADGES[level] || '⚪', reputation, eligible, freeFirstMint: eligible && !isBorn && boaMintCount === 0, isBorn, boaMintCount });
+        recordedBoaMintCount = getRecordedBoaMintCount({ wallet, agentId: matchedProfile.id });
+        sendJson(200, { found: true, agent: matchedProfile.id, name: matchedProfile.name, level, levelName: LEVEL_NAMES[level] || 'Unknown', badge: LEVEL_BADGES[level] || '⚪', reputation, eligible, freeFirstMint: eligible && !isBorn && recordedBoaMintCount === 0 && boaMintCount === 0, isBorn, boaMintCount, recordedBoaMintCount });
       } catch (e) { console.error('[BurnPublic] eligibility error:', e); sendJson(500, { error: e.message }); }
     })();
     return true;
@@ -1325,12 +1352,14 @@ function handleBurnToBecome(req, res, url) {
             if (v3) { isBorn = !!v3.isBorn; }
           } catch {}
           let boaMintCount = 0;
+          let recordedBoaMintCount = 0;
           try {
             const onChainMints = await checkOnChainMints(wallet);
             boaMintCount = onChainMints.count || 0;
           } catch {}
+          recordedBoaMintCount = getRecordedBoaMintCount({ wallet, agentId: profileId });
           if (level < 3 || rep < 50) return sendJson(403, { error: "Free mint requires Level 3+ and Rep 50+", level, rep });
-          if (isBorn || boaMintCount > 0) return sendJson(403, { error: "Free mint already used", isBorn: !!isBorn, boaMintCount });
+          if (isBorn || boaMintCount > 0 || recordedBoaMintCount > 0) return sendJson(403, { error: "Free mint already used", isBorn: !!isBorn, boaMintCount, recordedBoaMintCount });
         }
 
         // === ANTI-GAMING: PDA check DISABLED (2026-03-31) — using isBorn via V3 Genesis Record instead ===
