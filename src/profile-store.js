@@ -1600,6 +1600,11 @@ function registerRoutes(app) {
     const computedName = enrichedEndorser.name || endorser.name || endorser_name || endorser_id;
     const endorserLevel = Number(enrichedEndorser.verificationLevel || enrichedEndorser.level || 0);
 
+    const existingPair = d.prepare('SELECT id, skill FROM endorsements WHERE profile_id = ? AND endorser_id = ? ORDER BY created_at ASC LIMIT 1').get(req.params.id, endorser_id);
+    if (existingPair) {
+      return res.status(409).json({ error: 'Duplicate endorsement (same endorser pair)', existingEndorsementId: existingPair.id, existingSkill: existingPair.skill });
+    }
+
     const id = genId('end');
     try {
       d.prepare(`
