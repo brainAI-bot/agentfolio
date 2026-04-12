@@ -887,12 +887,17 @@ function handleBurnToBecome(req, res, url) {
         db.close();
         // Check isBorn from Genesis Record — free first mint only if not already born
         let isBorn = false;
+        let boaMintCount = 0;
         try {
           const { getV3Score } = require('../v3-score-service');
           const v3Data = await getV3Score(matchedProfile.id);
           if (v3Data && v3Data.isBorn) isBorn = true;
         } catch {}
-        sendJson(200, { found: true, agent: matchedProfile.id, name: matchedProfile.name, level, levelName: LEVEL_NAMES[level] || 'Unknown', badge: LEVEL_BADGES[level] || '⚪', reputation, eligible, freeFirstMint: eligible && !isBorn, isBorn });
+        try {
+          const onChainMints = await checkOnChainMints(wallet);
+          boaMintCount = onChainMints.count || 0;
+        } catch {}
+        sendJson(200, { found: true, agent: matchedProfile.id, name: matchedProfile.name, level, levelName: LEVEL_NAMES[level] || 'Unknown', badge: LEVEL_BADGES[level] || '⚪', reputation, eligible, freeFirstMint: eligible && !isBorn && boaMintCount === 0, isBorn, boaMintCount });
       } catch (e) { console.error('[BurnPublic] eligibility error:', e); sendJson(500, { error: e.message }); }
     })();
     return true;
@@ -1319,8 +1324,13 @@ function handleBurnToBecome(req, res, url) {
             const v3 = await getV3Score(profileId);
             if (v3) { isBorn = !!v3.isBorn; }
           } catch {}
+          let boaMintCount = 0;
+          try {
+            const onChainMints = await checkOnChainMints(wallet);
+            boaMintCount = onChainMints.count || 0;
+          } catch {}
           if (level < 3 || rep < 50) return sendJson(403, { error: "Free mint requires Level 3+ and Rep 50+", level, rep });
-          if (isBorn) return sendJson(403, { error: "Already used free burn-to-become", isBorn: true });
+          if (isBorn || boaMintCount > 0) return sendJson(403, { error: "Free mint already used", isBorn: !!isBorn, boaMintCount });
         }
 
         // === ANTI-GAMING: PDA check DISABLED (2026-03-31) — using isBorn via V3 Genesis Record instead ===
