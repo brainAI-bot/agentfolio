@@ -1792,19 +1792,10 @@ function registerRoutes(app) {
     if (!wallet) return res.status(400).json({ found: false, error: 'wallet address required' });
     try {
       const db = getDb();
-      // Check wallet column directly
-      let match = db.prepare('SELECT id, name FROM profiles WHERE wallet = ?').get(wallet);
-      if (!match) match = db.prepare('SELECT id, name FROM profiles WHERE claimed_by = ?').get(wallet);
-      if (!match) {
-        // Check wallets JSON column
-        const all = db.prepare('SELECT id, name, wallets FROM profiles').all();
-        for (const p of all) {
-          try {
-            const w = JSON.parse(p.wallets || '{}');
-            if (w.solana === wallet) { match = { id: p.id, name: p.name }; break; }
-          } catch (_) {}
-        }
-      }
+      const like = `%${String(wallet || '').replace(/'/g, '')}%`;
+      const match = db.prepare(
+        'SELECT id, name FROM profiles WHERE wallet = ? OR claimed_by = ? OR wallets LIKE ? ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1'
+      ).get(wallet, wallet, like);
       if (match) {
         return res.json({ found: true, profileId: match.id, name: match.name, profile: { id: match.id, name: match.name } });
       }
@@ -1820,21 +1811,11 @@ function registerRoutes(app) {
     if (!wallet) return res.status(400).json({ error: 'wallet required' });
     try {
       const db = getDb();
-      // Direct wallet column lookup (fast path)
-      const directMatch = db.prepare('SELECT id, name FROM profiles WHERE wallet = ?').get(wallet);
-      if (directMatch) return res.json({ id: directMatch.id, name: directMatch.name });
-      const claimedMatch = db.prepare('SELECT id, name FROM profiles WHERE claimed_by = ?').get(wallet);
-      if (claimedMatch) return res.json({ id: claimedMatch.id, name: claimedMatch.name });
-      const profiles = db.prepare('SELECT id, name, wallets FROM profiles').all();
-      for (const p of profiles) {
-        try {
-          // [P0 FIX] Check wallets column only -- no DB verification_data
-          const w = JSON.parse(p.wallets || '{}');
-          if (w.solana === wallet) {
-            return res.json({ id: p.id, name: p.name });
-          }
-        } catch (e2) {}
-      }
+      const like = `%${String(wallet || '').replace(/'/g, '')}%`;
+      const match = db.prepare(
+        'SELECT id, name FROM profiles WHERE wallet = ? OR claimed_by = ? OR wallets LIKE ? ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1'
+      ).get(wallet, wallet, like);
+      if (match) return res.json({ id: match.id, name: match.name });
       return res.status(404).json({ error: 'No profile found for this wallet' });
     } catch (e) {
       return res.status(500).json({ error: e.message });
