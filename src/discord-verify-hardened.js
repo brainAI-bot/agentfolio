@@ -98,22 +98,20 @@ Alternative: DM the message to @AgentFolio_Bot`;
   }
 }
 
-// Verify Discord message posting (would integrate with Discord bot API)
+// Verify Discord message posting (must be validated by a real Discord bot/API integration)
 async function verifyDiscordChallenge(challengeId, messageProof) {
   try {
     const challenge = await getChallenge(challengeId);
     if (!challenge) {
-      return { 
-        verified: false, 
-        error: 'Challenge not found or expired' 
+      return {
+        verified: false,
+        error: 'Challenge not found or expired'
       };
     }
 
     const expectedCode = challenge.verificationCode;
     const expectedUsername = challenge.challengeData.identifier;
 
-    // In production, would validate via Discord bot API
-    // For now, accept proof structure validation
     if (!messageProof || !messageProof.messageId || !messageProof.channelId) {
       return {
         verified: false,
@@ -121,7 +119,6 @@ async function verifyDiscordChallenge(challengeId, messageProof) {
       };
     }
 
-    // Validate message contains verification code
     if (!messageProof.content || !messageProof.content.includes(expectedCode)) {
       return {
         verified: false,
@@ -129,7 +126,6 @@ async function verifyDiscordChallenge(challengeId, messageProof) {
       };
     }
 
-    // Validate username matches
     if (messageProof.authorUsername !== expectedUsername) {
       return {
         verified: false,
@@ -137,22 +133,9 @@ async function verifyDiscordChallenge(challengeId, messageProof) {
       };
     }
 
-    // Mark challenge as completed
-    await completeChallenge(challengeId, {
-      platform: 'discord',
-      identifier: expectedUsername,
-      messageId: messageProof.messageId,
-      channelId: messageProof.channelId,
-      verifiedAt: new Date().toISOString()
-    });
-
     return {
-      verified: true,
-      discordUsername: expectedUsername,
-      verificationMethod: 'message_posting',
-      messageId: messageProof.messageId,
-      channelId: messageProof.channelId,
-      verifiedAt: new Date().toISOString()
+      verified: false,
+      error: 'Discord bot verification is not yet implemented. Manual JSON proof is rejected until a real Discord-side check exists.'
     };
 
   } catch (error) {
