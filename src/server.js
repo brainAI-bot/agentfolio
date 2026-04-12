@@ -1260,7 +1260,9 @@ app.post('/api/verification/telegram/verify', async (req, res) => {
     const result = await completeTelegramVerification(challengeId);
     res.status(result.verified ? 200 : 400).json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    const message = error?.message || 'Telegram verification failed';
+    const status = /challenge not found|challenge expired/i.test(message) ? 400 : 500;
+    res.status(status).json({ error: message });
   }
 });
 
