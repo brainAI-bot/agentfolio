@@ -520,6 +520,74 @@ app.get('/api/explorer/:agentId', async (req, res) => {
 
 
 // ─── Trust Score API (dedicated endpoint) ────────────────
+function isLoopbackTrustRequest(req) {
+  const host = String(req.get('host') || '').toLowerCase();
+  const forwardedFor = String(req.headers['x-forwarded-for'] || '').toLowerCase();
+  const remoteAddress = String(req.ip || req.socket?.remoteAddress || '').toLowerCase();
+  const hostIsLoopback = host.startsWith('127.0.0.1:') || host.startsWith('localhost:');
+  const forwardedIsLoopback = forwardedFor.includes('127.0.0.1') || forwardedFor.includes('::1');
+  const remoteIsLoopback = remoteAddress.includes('127.0.0.1') || remoteAddress.includes('::1');
+  return hostIsLoopback || forwardedIsLoopback || (!forwardedFor && remoteIsLoopback);
+}
+
+function isBrowserTrustRequest(req) {
+  const accept = String(req.headers['accept'] || '').toLowerCase();
+  const secFetchDest = String(req.headers['sec-fetch-dest'] || '').toLowerCase();
+  const secFetchMode = String(req.headers['sec-fetch-mode'] || '').toLowerCase();
+  const referer = String(req.headers['referer'] || '').toLowerCase();
+  return accept.includes('text/html')
+    || secFetchDest === 'document'
+    || secFetchMode === 'navigate'
+    || referer.startsWith('https://agentfolio.bot/')
+    || referer.startsWith('http://agentfolio.bot/');
+}
+
+async function maybeGateProgrammaticTrustScore(req, res, profileId) {
+  if (!X402_ENABLED) return false;
+  if (req.headers['x-api-key']) return false;
+  if (isLoopbackTrustRequest(req)) return false;
+  if (isBrowserTrustRequest(req)) return false;
+
+  const gateUrl = new URL(`http://127.0.0.1:${process.env.PORT || 3333}/api/score`);
+  gateUrl.searchParams.set('id', profileId);
+  if (req.query.wallet) gateUrl.searchParams.set('wallet', String(req.query.wallet));
+
+  const forwardedHeaders = {};
+  for (const headerName of ['accept', 'payment-signature', 'x-payment', 'payment', 'x-402-payment']) {
+    if (req.headers[headerName]) forwardedHeaders[headerName] = req.headers[headerName];
+  }
+
+  const gateRes = await globalThis.fetch(gateUrl.toString(), { headers: forwardedHeaders });
+  if (!gateRes.ok) {
+    for (const [headerName, value] of gateRes.headers.entries()) {
+      if (headerName === 'payment-required') continue;
+      res.setHeader(headerName, value);
+    }
+
+    const paymentRequiredHeader = gateRes.headers.get('payment-required');
+    if (paymentRequiredHeader) {
+      try {
+        const paymentRequired = JSON.parse(Buffer.from(paymentRequiredHeader, 'base64').toString('utf8'));
+        const forwardedProto = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim() || 'https';
+        const publicUrl = `${forwardedProto}://${req.get('host')}${req.originalUrl}`;
+        if (paymentRequired && paymentRequired.resource && paymentRequired.resource.url) {
+          paymentRequired.resource.url = publicUrl;
+        }
+        res.setHeader('payment-required', Buffer.from(JSON.stringify(paymentRequired)).toString('base64'));
+      } catch {
+        res.setHeader('payment-required', paymentRequiredHeader);
+      }
+    }
+
+    const gateBody = await gateRes.text();
+    res.status(gateRes.status).send(gateBody);
+    return true;
+  }
+
+  req._x402Paid = true;
+  return false;
+}
+
 app.get('/api/profile/:id/trust-score', async (req, res) => {
   try {
     const requestedId = String(req.params.id || '').trim();
@@ -540,6 +608,8 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
       if (byName) { row = byName; profileId = byName.id; }
     }
     if (!row) return res.status(404).json({ error: 'Profile not found' });
+
+    if (await maybeGateProgrammaticTrustScore(req, res, profileId)) return;
 
     const v3Score = await getV3Score(profileId).catch(() => null);
     const unified = computeUnifiedTrustScore(db, row, { v3Score });
