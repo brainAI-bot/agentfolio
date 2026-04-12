@@ -295,16 +295,18 @@ const ESCROW_STATES = {
  * Read and deserialize the on-chain escrow PDA account.
  * Returns the current on-chain state (source of truth).
  *
- * Account layout (after 8-byte Anchor discriminator):
- *   client:      Pubkey (32)
- *   agent:       Pubkey (32)  — all zeros if unset
- *   job_id:      String (4-byte len + utf8)
- *   amount:      u64 (8)
- *   deadline:    i64 (8)
- *   status:      u8 (1)
- *   submitted_at: i64 (8) — 0 if not submitted
- *   created_at:  i64 (8)
- *   bump:        u8 (1)
+ * Live mainnet layout observed from funded/released accounts:
+ *   client:       Pubkey (32)
+ *   agent:        Pubkey (32) — all zeros if unset
+ *   job_id:       String (4-byte len + utf8)
+ *   amount:       u64 (8)
+ *   deadline:     i64 (8)
+ *   created_at:   i64 (8)
+ *   submitted_at: i64 (8) — 0 until work is submitted
+ *   status:       u8 (1)
+ *   escrow_bump:  u8 (1)
+ *   vault_bump:   u8 (1)
+ *   ...reserved / future fields
  */
 async function readEscrowAccount(jobId) {
   const connection = await getConnection();
@@ -326,42 +328,33 @@ async function readEscrowAccount(jobId) {
   const agentIsZero = agentBytes.every(b => b === 0);
   offset += 32;
 
-  // job_id string (4-byte LE length prefix)
   const jobIdLen = data.readUInt32LE(offset);
   offset += 4;
   const onchainJobId = data.slice(offset, offset + jobIdLen).toString('utf8');
   offset += jobIdLen;
 
-  const amount = Number(data.readBigUInt64LE(offset)) / 1e6; // raw → USDC
+  const amount = Number(data.readBigUInt64LE(offset)) / 1e6;
   offset += 8;
 
   const deadline = Number(data.readBigInt64LE(offset));
   offset += 8;
 
-  // Status byte comes right after deadline per Anchor struct layout
-  const statusCode = data.readUInt8(offset);
+  const createdAt = (offset + 8 <= data.length) ? Number(data.readBigInt64LE(offset)) : 0;
+  offset += 8;
+
+  const submittedAt = (offset + 8 <= data.length) ? Number(data.readBigInt64LE(offset)) : 0;
+  offset += 8;
+
+  const statusCode = (offset < data.length) ? data.readUInt8(offset) : 0;
   offset += 1;
 
-  // submitted_at: i64 (0 if not submitted)
-  let submittedAt = 0;
-  if (offset + 8 <= data.length) {
-    submittedAt = Number(data.readBigInt64LE(offset));
-    offset += 8;
-  }
+  const escrowBump = (offset < data.length) ? data.readUInt8(offset) : 0;
+  offset += 1;
 
-  // created_at: i64
-  let createdAt = 0;
-  if (offset + 8 <= data.length) {
-    createdAt = Number(data.readBigInt64LE(offset));
-    offset += 8;
-  }
+  const vaultBump = (offset < data.length) ? data.readUInt8(offset) : 0;
+  offset += 1;
 
-  // bump: u8
-  let bump = 0;
-  if (offset < data.length) {
-    bump = data.readUInt8(offset);
-    offset += 1;
-  }
+  const validUnix = (n) => n > 0 && n < 4102444800;
 
   return {
     exists: true,
@@ -371,14 +364,16 @@ async function readEscrowAccount(jobId) {
     jobId: onchainJobId,
     amountUSDC: amount,
     deadline,
-    deadlineDate: new Date(deadline * 1000).toISOString(),
+    deadlineDate: validUnix(deadline) ? new Date(deadline * 1000).toISOString() : null,
     status: ESCROW_STATES[statusCode] || `unknown_${statusCode}`,
     statusCode,
-    submittedAt: (submittedAt > 0 && submittedAt < 4102444800) ? submittedAt : null,
-    submittedAtDate: (submittedAt > 0 && submittedAt < 4102444800) ? new Date(submittedAt * 1000).toISOString() : null,
-    createdAt,
-    createdAtDate: (createdAt > 0 && createdAt < 4102444800) ? new Date(createdAt * 1000).toISOString() : null,
-    bump,
+    submittedAt: validUnix(submittedAt) ? submittedAt : null,
+    submittedAtDate: validUnix(submittedAt) ? new Date(submittedAt * 1000).toISOString() : null,
+    createdAt: validUnix(createdAt) ? createdAt : null,
+    createdAtDate: validUnix(createdAt) ? new Date(createdAt * 1000).toISOString() : null,
+    bump: escrowBump,
+    escrowBump,
+    vaultBump,
     explorerUrl: `https://explorer.solana.com/address/${escrowPDA.toBase58()}`,
   };
 }
