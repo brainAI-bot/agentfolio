@@ -1302,9 +1302,31 @@ function registerRoutes(app) {
         } catch (_) {}
       }
       const { _trust_score: ts, _trust_level: dbLevel, ...cleanRest } = rest;
-      const _md = parseJsonField(cleanRest.metadata);
+      const enriched = enrichProfile(cleanRest) || {};
+      const _md = { ...parseJsonField(cleanRest.metadata), ...parseJsonField(enriched.metadata) };
       const unclaimed = (cleanRest.claimed === 0 || cleanRest.claimed === "0") || _md.unclaimed === true || _md.isPlaceholder === true || _md.placeholder === true;
-      return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: {} /* [P0] chain-cache only, no DB reads */, portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: _md, nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, _dbLevel: dbLevel || null, claimed, unclaimed };
+      return {
+        ...cleanRest,
+        avatar: resolvedAvatar,
+        capabilities: parseJsonField(cleanRest.capabilities),
+        tags: parseJsonField(cleanRest.tags),
+        links: parseJsonField(cleanRest.links),
+        wallets: parseJsonField(cleanRest.wallets),
+        skills: parseJsonField(cleanRest.skills),
+        verification_data: enriched.verification_data || {},
+        verifications: enriched.verifications || {},
+        onchain_verification_count: enriched.onchain_verification_count || 0,
+        genesisPDA: enriched.genesisPDA || null,
+        portfolio: parseJsonField(cleanRest.portfolio),
+        endorsements_given: parseJsonField(cleanRest.endorsements_given),
+        custom_badges: parseJsonField(cleanRest.custom_badges),
+        metadata: _md,
+        nft_avatar: parseJsonField(cleanRest.nft_avatar),
+        trust_score: ts || 0,
+        _dbLevel: dbLevel || null,
+        claimed,
+        unclaimed,
+      };
     });
 
     profiles = profiles.filter(isPublicDirectoryProfile);
