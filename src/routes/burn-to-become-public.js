@@ -119,7 +119,7 @@ async function checkOnChainMints(wallet) {
 }
 
 
-function getRecordedBoaMintCount({ wallet, agentId } = {}) {
+function getRecordedBoaMintCount({ wallet, agentId, matchWallet = true } = {}) {
   try {
     const recordsDir = path.join(PIPELINE_DIR, 'mint-records');
     const files = fs.existsSync(recordsDir) ? fs.readdirSync(recordsDir).filter((name) => name.endsWith('.json')) : [];
@@ -127,7 +127,7 @@ function getRecordedBoaMintCount({ wallet, agentId } = {}) {
     for (const file of files) {
       try {
         const record = JSON.parse(fs.readFileSync(path.join(recordsDir, file), 'utf8'));
-        if (wallet && record?.recipient === wallet) {
+        if (matchWallet && wallet && record?.recipient === wallet) {
           count += 1;
           continue;
         }
@@ -938,7 +938,7 @@ function handleBurnToBecome(req, res, url) {
           const onChainMints = await checkOnChainMints(wallet);
           boaMintCount = onChainMints.count || 0;
         } catch {}
-        recordedBoaMintCount = getRecordedBoaMintCount({ wallet, agentId: matchedProfile.id });
+        recordedBoaMintCount = getRecordedBoaMintCount({ wallet, agentId: matchedProfile.id, matchWallet: !profileId });
         sendJson(200, { found: true, agent: matchedProfile.id, name: matchedProfile.name, level, levelName: LEVEL_NAMES[level] || 'Unknown', badge: LEVEL_BADGES[level] || '⚪', reputation, eligible, freeFirstMint: eligible && !isBorn && recordedBoaMintCount === 0 && boaMintCount === 0, isBorn, boaMintCount, recordedBoaMintCount });
       } catch (e) { console.error('[BurnPublic] eligibility error:', e); sendJson(500, { error: e.message }); }
     })();
@@ -1377,7 +1377,7 @@ function handleBurnToBecome(req, res, url) {
             const onChainMints = await checkOnChainMints(wallet);
             boaMintCount = onChainMints.count || 0;
           } catch {}
-          recordedBoaMintCount = getRecordedBoaMintCount({ wallet, agentId: profileId });
+          recordedBoaMintCount = getRecordedBoaMintCount({ wallet, agentId: profileId, matchWallet: !requestedProfileId });
           if (level < 3 || rep < 50) return sendJson(403, { error: "Free mint requires Level 3+ and Rep 50+", level, rep });
           if (isBorn || boaMintCount > 0 || recordedBoaMintCount > 0) return sendJson(403, { error: "Free mint already used", isBorn: !!isBorn, boaMintCount, recordedBoaMintCount });
         }
@@ -1437,6 +1437,7 @@ function handleBurnToBecome(req, res, url) {
   if (url.pathname === "/api/burn-to-become/mint-boa" && req.method === "POST") {
     const wallet = req.body && req.body.wallet;
     const paymentTx = req.body && req.body.paymentTx; // SOL payment TX for paid mints
+    const requestedProfileId = req.body && req.body.profileId;
     if (!wallet) return sendJson(400, { error: "wallet required" });
 
     (async () => {
@@ -1467,7 +1468,6 @@ function handleBurnToBecome(req, res, url) {
         // This is wallet-rotation proof — Genesis Record PDA is permanent identity.
         let v3IsBorn = false;
         let agentIdForCount = null;
-        const requestedProfileId = req.body && req.body.profileId;
         const countDb = new Database(dbPath, { readonly: true });
         const resolvedProfile = await resolveBestProfileForWallet(countDb, wallet, { preferredProfileId: requestedProfileId });
         agentIdForCount = resolvedProfile?.profile?.id || null;
@@ -1498,7 +1498,7 @@ function handleBurnToBecome(req, res, url) {
         } catch (e) { console.warn("[MintBOA] On-chain mint check failed:", e.message); }
         let recordedBoaMintCount = 0;
         try {
-          recordedBoaMintCount = getRecordedBoaMintCount({ wallet, agentId: agentIdForCount });
+          recordedBoaMintCount = getRecordedBoaMintCount({ wallet, agentId: agentIdForCount, matchWallet: !requestedProfileId });
         } catch (e) { console.warn("[MintBOA] Recorded mint count failed:", e.message); }
         // On-chain isBorn overrides: if born on-chain, count is at least 1
         const effectiveMintCount = Math.max(onChainCount, recordedBoaMintCount, v3IsBorn ? 1 : 0);
