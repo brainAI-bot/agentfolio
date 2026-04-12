@@ -109,6 +109,7 @@ export default function VerifyPage() {
   const [websiteToken, setWebsiteToken] = useState("");
   const [polymarketAddress, setPolymarketAddress] = useState("");
   const [polymarketState, setPolymarketState] = useState(initialState);
+  const [polymarketChallenge, setPolymarketChallenge] = useState<any>(null);
   
   // Authority transfer state
   const [authorityStatus, setAuthorityStatus] = useState<string>("");
@@ -138,6 +139,14 @@ export default function VerifyPage() {
           const existingEthVerification = getVerificationRecord(vData, "ethereum");
           if (existingEthVerification?.address || existingEthVerification?.identifier) {
             setEthAddress(existingEthVerification.address || existingEthVerification.identifier);
+          }
+          const existingHlVerification = getVerificationRecord(vData, "hyperliquid");
+          if (existingHlVerification?.address || existingHlVerification?.identifier) {
+            setHlAddress(existingHlVerification.address || existingHlVerification.identifier);
+          }
+          const existingPolymarketVerification = getVerificationRecord(vData, "polymarket");
+          if (existingPolymarketVerification?.address || existingPolymarketVerification?.identifier) {
+            setPolymarketAddress(existingPolymarketVerification.address || existingPolymarketVerification.identifier);
           }
           if (vData.agentmail?.verified) {
             setAgentmailState({ loading: false, success: true, error: "", result: { verified: true } });
@@ -790,13 +799,37 @@ export default function VerifyPage() {
     if (!profileId || !polymarketAddress) return;
     setPolymarketState({ loading: true, success: false, error: "", result: null });
     try {
-      const res = await fetch(`/api/verify/polymarket/stats?address=${encodeURIComponent(polymarketAddress)}`);
-      const data = await res.json();
-      if (!res.ok || data.error) {
-        setPolymarketState({ loading: false, success: false, error: data.error || "Failed to fetch Polymarket stats", result: null });
+      const initRes = await fetch(`/api/profile/${encodeURIComponent(profileId)}/verify/polymarket/initiate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: polymarketAddress }),
+      });
+      const initData = await initRes.json();
+      if (!initRes.ok) throw new Error(initData.error || "Failed to initiate Polymarket verification");
+      setPolymarketChallenge(initData);
+
+      if (typeof window !== "undefined" && (window as any).ethereum) {
+        try {
+          const accounts = await (window as any).ethereum.request({ method: "eth_requestAccounts" });
+          const signature = await (window as any).ethereum.request({
+            method: "personal_sign",
+            params: [initData.message || initData.challengeString || "AgentFolio Polymarket Verify", accounts[0]],
+          });
+          const verifyRes = await fetch(`/api/profile/${encodeURIComponent(profileId)}/verify/polymarket/complete`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ challengeId: initData.challengeId, signature }),
+          });
+          const verifyData = await verifyRes.json();
+          if (!verifyRes.ok) throw new Error(verifyData.error || "Polymarket verification failed");
+          setPolymarketState({ loading: false, success: true, error: "", result: verifyData });
+          setExistingVerifications(prev => ({ ...prev, polymarket: { verified: true, address: polymarketAddress } }));
+          sendOnChainAttestation();
+        } catch (signErr: any) {
+          setPolymarketState({ loading: false, success: false, error: "Wallet signing failed: " + (signErr.message || signErr), result: null });
+        }
       } else {
-        // Stats fetched — now need signature verification for full verify
-        setPolymarketState({ loading: false, success: true, error: "", result: data });
+        setPolymarketState({ loading: false, success: false, error: "", result: { challenge: initData, step: "sign" } });
       }
     } catch (err: any) {
       setPolymarketState({ loading: false, success: false, error: err.message, result: null });
