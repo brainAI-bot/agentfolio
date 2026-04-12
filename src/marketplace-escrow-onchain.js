@@ -94,7 +94,7 @@ function registerMarketplaceEscrowOnchain(app) {
       if (!confirmed) return res.status(400).json({ error: 'Transaction not confirmed on-chain' });
 
       let onchainState;
-      try { onchainState = await escrowOnchain.readEscrowAccount(escrowPDA); } catch { onchainState = null; }
+      try { onchainState = await escrowOnchain.readEscrowAccount(job.id); } catch { onchainState = null; }
 
       const amt = onchainState ? onchainState.amountUSDC : parseFloat(req.body.amount || 0);
       const escrow = {
@@ -277,7 +277,7 @@ function registerMarketplaceEscrowOnchain(app) {
       if (!escrow) return res.status(404).json({ error: 'Escrow not found' });
       if (!escrow.escrowPDA) return res.status(400).json({ error: 'No on-chain PDA linked' });
 
-      const onchainState = await escrowOnchain.readEscrowAccount(escrow.escrowPDA);
+      const onchainState = await escrowOnchain.readEscrowAccount(escrow.jobId);
       const localNeedsSync = (onchainState.status === 'released' && escrow.status === 'funded') ||
                               (onchainState.status === 'refunded' && escrow.status === 'funded');
 
