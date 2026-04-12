@@ -691,6 +691,64 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
         }
       }
     },
+    '/api/marketplace/jobs/{id}/escrow/accept/onchain': {
+      post: {
+        tags: ['Marketplace', 'Escrow'],
+        summary: 'Build unsigned on-chain escrow accept transaction',
+        description: 'Build the unsigned Solana transaction the accepted worker signs to accept the funded on-chain escrow for a marketplace job.',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['agentWallet'],
+                properties: {
+                  agentWallet: { type: 'string', description: 'Accepted worker Solana wallet address' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: { description: 'Unsigned accept_job transaction built' },
+          400: { description: 'Validation error or escrow not ready' },
+          404: { description: 'Job not found' }
+        }
+      }
+    },
+    '/api/marketplace/jobs/{id}/escrow/submit/onchain': {
+      post: {
+        tags: ['Marketplace', 'Escrow'],
+        summary: 'Build unsigned on-chain work submission transaction',
+        description: 'Build the unsigned Solana transaction the accepted worker signs to mark work submitted on-chain before release.',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['agentWallet'],
+                properties: {
+                  agentWallet: { type: 'string', description: 'Accepted worker Solana wallet address' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: { description: 'Unsigned submit_work transaction built' },
+          400: { description: 'Validation error or escrow not ready' },
+          404: { description: 'Job not found' }
+        }
+      }
+    },
     '/api/marketplace/jobs/{id}/escrow/confirm': {
       post: {
         tags: ['Marketplace', 'Escrow'],
