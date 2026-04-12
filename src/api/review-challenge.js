@@ -5,9 +5,46 @@
  */
 
 const Database = require('better-sqlite3');
+const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const nacl = require('tweetnacl');
+
+const MARKETPLACE_DIR = path.join(__dirname, '..', '..', 'data', 'marketplace');
+
+function readJson(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}
+
+function findReleasedEscrowReviewRight(reviewerId, revieweeId) {
+  const jobsDir = path.join(MARKETPLACE_DIR, 'jobs');
+  const escrowDir = path.join(MARKETPLACE_DIR, 'escrow');
+  let files = [];
+  try { files = fs.readdirSync(jobsDir).filter(name => name.endsWith('.json')); } catch { return null; }
+
+  for (const name of files) {
+    const job = readJson(path.join(jobsDir, name));
+    if (!job) continue;
+
+    const clientId = job.clientId || job.postedBy;
+    const workerId = job.acceptedApplicant || job.selectedAgentId;
+    const pairMatches = (reviewerId === clientId && revieweeId === workerId) || (reviewerId === workerId && revieweeId === clientId);
+    if (!pairMatches) continue;
+
+    if (job.escrowId) {
+      const escrow = readJson(path.join(escrowDir, `${job.escrowId}.json`));
+      if (escrow && escrow.status === 'released') {
+        return { jobId: job.id, source: 'json_escrow', escrowId: job.escrowId };
+      }
+    }
+
+    if (job.v3EscrowPDA && (job.v3ReleaseTx || job.v3ReleasedAt)) {
+      return { jobId: job.id, source: 'v3_escrow', escrowPDA: job.v3EscrowPDA, releaseTx: job.v3ReleaseTx || null };
+    }
+  }
+
+  return null;
+}
 
 function getDb(readonly = true) {
   return new Database('/home/ubuntu/agentfolio/data/agentfolio.db', { readonly });
@@ -20,7 +57,7 @@ function registerReviewChallengeRoutes(app) {
   // POST /api/reviews/challenge
   app.post('/api/reviews/challenge', (req, res) => {
     try {
-      const { reviewerId, revieweeId, rating, chain } = req.body;
+      const { reviewerId, revieweeId, rating, chain, jobId } = req.body;
       if (!reviewerId || !revieweeId || !rating) {
         return res.status(400).json({ success: false, error: 'reviewerId, revieweeId, and rating required' });
       }
@@ -37,6 +74,7 @@ function registerReviewChallengeRoutes(app) {
         revieweeId,
         rating: Math.min(5, Math.max(1, parseInt(rating))),
         chain: chain || 'solana',
+        jobId: jobId || null,
         message,
         nonce,
         createdAt: Date.now(),
@@ -96,10 +134,13 @@ function registerReviewChallengeRoutes(app) {
         // For now, accept it (frontend did the signing)
       }
 
-      // Escrow gate: Check if reviewer has completed escrow with reviewee
-      // (Relaxed for now — will enforce after escrow system matures)
-      // TODO: const hasCompletedEscrow = checkEscrow(challenge.reviewerId, challenge.revieweeId);
-      // if (!hasCompletedEscrow) return res.status(403).json({ verified: false, error: 'No completed escrow between these agents' });
+      const reviewRight = findReleasedEscrowReviewRight(challenge.reviewerId, challenge.revieweeId);
+      if (!reviewRight) {
+        return res.status(403).json({
+          verified: false,
+          error: 'No released escrow job found between these agents. Reviews require completed funded escrow.',
+        });
+      }
 
       // Save review
       const db = getDb(false);
@@ -112,7 +153,7 @@ function registerReviewChallengeRoutes(app) {
       if (useRevieweeId) {
         db.prepare(`INSERT INTO reviews (id, job_id, reviewer_id, reviewee_id, rating, comment, type, created_at)
           VALUES (?,?,?,?,?,?,?,?)`)
-          .run(id, 'wallet-signed', challenge.reviewerId, challenge.revieweeId, challenge.rating, comment || '', 'review', new Date().toISOString());
+          .run(id, reviewRight.jobId || challenge.jobId || 'wallet-signed', challenge.reviewerId, challenge.revieweeId, challenge.rating, comment || '', 'review', new Date().toISOString());
       } else {
         db.prepare(`INSERT INTO reviews (id, profile_id, reviewer_id, reviewer_name, rating, comment, created_at)
           VALUES (?,?,?,?,?,?,?)`)
@@ -133,6 +174,8 @@ function registerReviewChallengeRoutes(app) {
           comment: comment || '',
           walletAddress,
           chain: challenge.chain,
+          jobId: reviewRight.jobId || challenge.jobId || null,
+          escrowSource: reviewRight.source,
         },
       });
     } catch (e) {
