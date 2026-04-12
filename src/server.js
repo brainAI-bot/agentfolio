@@ -1854,9 +1854,10 @@ const verificationChallenges = require('./verification-challenges');
 // GitHub: challenge → user creates gist → confirm
 app.post('/api/verify/github/challenge', async (req, res) => {
   try {
-    const { profileId, githubUsername } = req.body;
-    if (!profileId || !githubUsername) return res.status(400).json({ error: 'profileId and githubUsername required' });
-    const challenge = verificationChallenges.generateChallenge(profileId, 'github', githubUsername);
+    const { profileId, githubUsername, username } = req.body;
+    const normalizedUsername = githubUsername || username;
+    if (!profileId || !normalizedUsername) return res.status(400).json({ error: 'profileId and githubUsername required' });
+    const challenge = verificationChallenges.generateChallenge(profileId, 'github', normalizedUsername);
     challenge.challengeData.instructions = `Create a public gist containing: agentfolio-verify:${challenge.id}`;
     challenge.challengeData.expectedContent = `agentfolio-verify:${challenge.id}`;
     await verificationChallenges.storeChallenge(challenge);
