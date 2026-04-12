@@ -74,9 +74,15 @@ function registerSATPRoutes(app) {
     return platform;
   }
 
-  function isPublicAttestationPlatform(value) {
+  function isVisibleAttestationPlatform(value, includeSatp = false) {
     const platform = normalizeAttestationPlatform(value);
-    return !!platform && platform !== 'review' && !platform.includes('satp');
+    if (!platform || platform === 'review') return false;
+    if (includeSatp) return true;
+    return !platform.includes('satp');
+  }
+
+  function isPublicAttestationPlatform(value) {
+    return isVisibleAttestationPlatform(value, false);
   }
 
   function dedupePublicAttestations(items) {
@@ -91,14 +97,15 @@ function registerSATPRoutes(app) {
     return out;
   }
 
-  function buildPublicAttestationEntries(attestations, txHints = {}) {
+  function buildPublicAttestationEntries(attestations, txHints = {}, options = {}) {
+    const includeSatp = options.includeSatp === true;
     const enriched = [];
 
     for (const a of attestations || []) {
       let proofData = {};
       try { proofData = typeof a.proofData === 'string' ? JSON.parse(a.proofData) : (a.proofData || {}); } catch {}
       const platform = normalizeAttestationPlatform(a.platform || a.attestationType) || a.platform || a.attestationType;
-      if (!isPublicAttestationPlatform(platform)) continue;
+      if (!isVisibleAttestationPlatform(platform, includeSatp)) continue;
       const hinted = txHints[platform] || txHints[String(platform || '').replace(/^verification_/, '').replace(/_verification$/, '')] || null;
       const txSignature = a.txSignature || a.tx_signature || proofData.txSignature || proofData.signature || proofData.transactionSignature || hinted?.txSignature || null;
       enriched.push({
@@ -114,7 +121,7 @@ function registerSATPRoutes(app) {
 
     if (enriched.length === 0) {
       for (const [platform, hint] of Object.entries(txHints || {})) {
-        if (!isPublicAttestationPlatform(platform)) continue;
+        if (!isVisibleAttestationPlatform(platform, includeSatp)) continue;
         enriched.push({
           platform,
           txSignature: hint?.txSignature || null,
@@ -130,7 +137,7 @@ function registerSATPRoutes(app) {
     return dedupePublicAttestations(enriched);
   }
 
-  async function loadPublicAttestations({ wallet = null, profileId = null }) {
+  async function loadPublicAttestations({ wallet = null, profileId = null, includeSatp = false }) {
     const chainCache = require('../lib/chain-cache');
     const profile = await loadProfileByWalletOrId({ wallet, profileId });
     const resolvedProfileId = profile?.id || profileId || null;
@@ -139,7 +146,7 @@ function registerSATPRoutes(app) {
 
     if (resolvedProfileId) {
       const chainAttestations = chainCache.getVerifications(resolvedProfileId) || [];
-      const enriched = buildPublicAttestationEntries(chainAttestations, txHints);
+      const enriched = buildPublicAttestationEntries(chainAttestations, txHints, { includeSatp });
       if (enriched.length > 0 || Object.keys(txHints).length > 0) {
         return {
           wallet: resolvedWallet,
@@ -154,7 +161,7 @@ function registerSATPRoutes(app) {
 
     if (resolvedWallet && isValidWallet(resolvedWallet)) {
       const legacyAttestations = await satpIdentity.getAgentAttestations(resolvedWallet);
-      const enriched = buildPublicAttestationEntries(legacyAttestations, txHints);
+      const enriched = buildPublicAttestationEntries(legacyAttestations, txHints, { includeSatp });
       return {
         wallet: resolvedWallet,
         profileId: resolvedProfileId,
@@ -378,7 +385,8 @@ function registerSATPRoutes(app) {
   app.get('/api/satp/attestations/:wallet', async (req, res) => {
     try {
       if (!isValidWallet(req.params.wallet)) return res.status(400).json({ error: 'Invalid wallet address' });
-      const result = await loadPublicAttestations({ wallet: req.params.wallet });
+      const includeSatp = req.query.includeSatp === '1' || req.query.include_satp === '1';
+      const result = await loadPublicAttestations({ wallet: req.params.wallet, includeSatp });
       res.json({
         ok: true,
         data: {
@@ -426,9 +434,10 @@ function registerSATPRoutes(app) {
     try {
       const wallet = req.params.wallet;
       const network = req.query.network || 'mainnet';
+      const includeSatp = req.query.includeSatp === '1' || req.query.include_satp === '1';
       const results = await Promise.allSettled([
         satpIdentity.getAgentIdentity(wallet, network),
-        loadPublicAttestations({ wallet }),
+        loadPublicAttestations({ wallet, includeSatp }),
       ]);
       const identity = results[0].status === 'fulfilled' ? results[0].value : null;
       const attestationResult = results[1].status === 'fulfilled' ? results[1].value : { attestations: [], types: [], verified: 0, source: 'error', profileId: null };
@@ -860,7 +869,8 @@ function registerSATPRoutes(app) {
         }
       }
 
-      const result = await loadPublicAttestations({ profileId: agentId });
+      const includeSatp = req.query.includeSatp === '1' || req.query.include_satp === '1';
+      const result = await loadPublicAttestations({ profileId: agentId, includeSatp });
       const enriched = result.attestations || [];
       const platforms = result.types || enriched.map(a => normalizeAttestationPlatform(a.platform) || a.platform).filter(isPublicAttestationPlatform);
       
