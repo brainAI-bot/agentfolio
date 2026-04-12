@@ -43,8 +43,17 @@ function computeSocialProof(input = {}) {
     ? input.endorsementsReceived
     : (Array.isArray(input.receivedEndorsements) ? input.receivedEndorsements : []);
 
-  const givenPoints = Math.min(5, endorsementsGiven.length) * 5;
-  const seenPairs = new Set();
+  const seenGivenPairs = new Set();
+  for (const endorsement of endorsementsGiven) {
+    const endorserId = endorsement.endorserId || endorsement.from || endorsement.endorser_id || profile.id || subjectWallet || null;
+    const subjectId = endorsement.subjectId || endorsement.to || endorsement.profile_id || endorsement.profileId || null;
+    const pairKey = `${String(endorserId || '')}->${String(subjectId || '')}`;
+    if (pairKey === '->') continue;
+    seenGivenPairs.add(pairKey);
+  }
+
+  const givenPoints = Math.min(5, seenGivenPairs.size) * 5;
+  const seenReceivedPairs = new Set();
   let receivedPoints = 0;
 
   for (const endorsement of endorsementsReceived) {
@@ -53,9 +62,9 @@ function computeSocialProof(input = {}) {
     const subjectId = endorsement.subjectId || endorsement.to || endorsement.profile_id || profile.id || subjectWallet || 'subject';
     if (subjectWallet && endorserWallet && subjectWallet === endorserWallet) continue;
 
-    const pairKey = [String(endorserId || ''), String(subjectId || '')].sort().join('::');
-    if (pairKey !== '::' && seenPairs.has(pairKey)) continue;
-    if (pairKey !== '::') seenPairs.add(pairKey);
+    const pairKey = `${String(endorserId || '')}->${String(subjectId || '')}`;
+    if (pairKey !== '->' && seenReceivedPairs.has(pairKey)) continue;
+    if (pairKey !== '->') seenReceivedPairs.add(pairKey);
 
     receivedPoints += pointsForEndorserLevel(
       endorsement.endorserLevel || endorsement.level || endorsement.endorser_level || endorsement.reviewerLevel
