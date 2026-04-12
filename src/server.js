@@ -106,8 +106,45 @@ try {
 // Domain verification provider
 let domainVerify;
 try {
-  domainVerify = require('./domain-verify');
-  console.log('✓ Domain verification loaded successfully');
+  const hardenedDomainVerify = require('./lib/domain-verify-hardened');
+  const { getChallenge } = require('./lib/verification-challenges');
+  domainVerify = {
+    initiateDomainVerification: hardenedDomainVerify.initiateDomainVerification,
+    verifyDomainChallenge: async (challengeId) => {
+      const challenge = await getChallenge(challengeId);
+      const result = await hardenedDomainVerify.verifyDomainOwnership(challengeId);
+
+      if (result?.verified && challenge) {
+        const domain = challenge.challengeData?.identifier;
+        profileStore.addVerification(challenge.challengeData?.profileId, 'domain', domain, {
+          challengeId,
+          domain,
+          method: result.method || result.proof?.method || 'well_known',
+          verifiedAt: result.verifiedAt || new Date().toISOString(),
+        });
+
+        return {
+          ...result,
+          platform: 'domain',
+          identifier: domain,
+          profileId: challenge.challengeData?.profileId,
+        };
+      }
+
+      return result;
+    },
+    getDomainVerificationStatus: async (challengeId) => {
+      const challenge = await getChallenge(challengeId);
+      if (!challenge) return { found: false };
+      return {
+        found: true,
+        verified: challenge.status === 'completed',
+        domain: challenge.challengeData?.identifier,
+        expiresAt: challenge.challengeData?.expiresAt,
+      };
+    }
+  };
+  console.log('✓ Domain hardened verification loaded successfully');
 } catch (error) {
   console.log('⚠️  Domain verification not found, using fallback');
   domainVerify = {
@@ -211,6 +248,21 @@ app.get('/.well-known/agentfolio-verification.txt', (req, res) => {
 
   res.set('Access-Control-Allow-Origin', '*');
   res.type('text/plain').send(fs.readFileSync(filePath, 'utf8'));
+});
+
+app.get('/.well-known/agentfolio.json', (req, res) => {
+  const candidatePaths = [
+    path.join(__dirname, '..', 'frontend', 'public', '.well-known', 'agentfolio.json'),
+    path.join(__dirname, '..', 'public', '.well-known', 'agentfolio.json')
+  ];
+
+  const filePath = candidatePaths.find((candidate) => fs.existsSync(candidate));
+  if (!filePath) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  res.set('Access-Control-Allow-Origin', '*');
+  res.type('application/json').send(fs.readFileSync(filePath, 'utf8'));
 });
 
 app.get('/directory', (req, res) => {
