@@ -76,7 +76,7 @@ function registerSATPRoutes(app) {
 
   function isPublicAttestationPlatform(value) {
     const platform = normalizeAttestationPlatform(value);
-    return !!platform && platform !== 'review';
+    return !!platform && platform !== 'review' && !platform.includes('satp');
   }
 
   function dedupePublicAttestations(items) {
