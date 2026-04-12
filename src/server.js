@@ -1217,23 +1217,25 @@ app.post('/api/verification/telegram/initiate', async (req, res) => {
   }
 
   try {
-    const result = await telegramVerify.initiateTelegramVerification(profileId, telegramUsername);
+    const { initiateTelegramVerification } = require('./lib/telegram-verify-hardened');
+    const result = await initiateTelegramVerification(profileId, telegramUsername);
     res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(400).json({ error: error.message });
   }
 });
 
 app.post('/api/verification/telegram/verify', async (req, res) => {
-  const { challengeId, messageUrl } = req.body;
+  const { challengeId } = req.body;
   
-  if (!challengeId || !messageUrl) {
-    return res.status(400).json({ error: 'Missing challengeId or messageUrl' });
+  if (!challengeId) {
+    return res.status(400).json({ error: 'Missing challengeId' });
   }
 
   try {
-    const result = await telegramVerify.verifyTelegramChallenge(challengeId, messageUrl);
-    res.json(result);
+    const { completeTelegramVerification } = require('./lib/telegram-verify-hardened');
+    const result = await completeTelegramVerification(challengeId);
+    res.status(result.verified ? 200 : 400).json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
