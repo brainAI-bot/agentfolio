@@ -108,16 +108,21 @@ async function completePMVerification(challengeId, signature) {
   // Step 2: Check Polymarket trading activity
   const stats = await getPolymarketStats(ch.walletAddress);
   if (stats.error) {
-    // Wallet verified, but stats fetch failed — still count as verified (wallet ownership proven)
     challenges.delete(challengeId);
     return {
-      verified: true,
+      verified: false,
       signatureVerified: true,
-      platform: 'polymarket',
-      identifier: ch.walletAddress,
-      profileId: ch.profileId,
-      stats: null,
-      note: 'Wallet ownership verified. Polymarket stats could not be fetched: ' + stats.error,
+      error: `Wallet ownership verified, but Polymarket stats could not be fetched: ${stats.error}`,
+    };
+  }
+
+  if ((stats.totalTrades || 0) < 5) {
+    challenges.delete(challengeId);
+    return {
+      verified: false,
+      signatureVerified: true,
+      error: `Wallet ownership verified, but minimum 5 Polymarket trades are required. Found ${stats.totalTrades || 0}.`,
+      stats,
     };
   }
 
