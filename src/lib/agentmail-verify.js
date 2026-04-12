@@ -110,12 +110,11 @@ async function startVerification(profileId, email) {
   // Try to send email
   const client = getClient();
   if (!client) {
-    // Return code for manual verification if email sending fails
+    delete pending[verificationKey];
+    savePending(pending);
     return {
-      success: true,
-      message: 'Verification code generated. Email sending not available - use manual code entry.',
-      code, // Return code for testing/debugging
-      manualOnly: true
+      success: false,
+      message: 'AgentMail verification is temporarily unavailable because email delivery is not configured.'
     };
   }
 
@@ -165,11 +164,11 @@ Built by @0xbrainKID`,
     };
   } catch (err) {
     console.error('Failed to send verification email:', err.message);
+    delete pending[verificationKey];
+    savePending(pending);
     return {
-      success: true,
-      message: `Could not send email (${err.message}). Use code: ${code}`,
-      code, // Return code as fallback
-      manualOnly: true
+      success: false,
+      message: `Could not send verification email: ${err.message}`
     };
   }
 }
