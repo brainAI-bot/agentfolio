@@ -120,13 +120,21 @@ async function getSatpAgents() {
 
     const levelLabels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
     const levelBadges = ['⚪','🟡','🔵','🟢','🟠','🟣'];
-    const normalizePlatform = (value) => String(value || '')
-      .replace(/^verification_/, '')
-      .replace(/_wallet_verification$/, '')
-      .replace(/_verification$/, '')
-      .replace(/_/g, ' ')
-      .trim()
-      .toLowerCase();
+    const normalizePlatform = (value) => {
+      const raw = String(value || '').trim().toLowerCase();
+      if (!raw) return '';
+      if (raw === 'twitter') return 'x';
+      if (raw === 'solana_wallet') return 'solana';
+      const normalized = raw
+        .replace(/^verification_/, '')
+        .replace(/_wallet_verification$/, '')
+        .replace(/_verification$/, '')
+        .replace(/_/g, ' ')
+        .trim()
+        .toLowerCase();
+      if (!normalized || normalized === 'review' || normalized.includes('satp')) return '';
+      return normalized;
+    };
 
     const filteredAgents = [];
     const seenProfileIds = new Set();
@@ -184,10 +192,13 @@ async function getSatpAgents() {
       const rawExplorerAttestations = Array.isArray(byAgentData?.data?.attestations)
         ? byAgentData.data.attestations
         : (Array.isArray(explorerData?.attestationMemos) ? explorerData.attestationMemos : unified.verifications);
-      const explorerAttestations = rawExplorerAttestations.map((att) => ({
-        ...att,
-        memo: att?.memo || null,
-      }));
+      const explorerAttestations = rawExplorerAttestations
+        .filter((att) => !!normalizePlatform(att?.platform || att?.type || att?.attestationType))
+        .map((att) => ({
+          ...att,
+          platform: normalizePlatform(att?.platform || att?.type || att?.attestationType),
+          memo: att?.memo || null,
+        }));
       const platforms = [...new Set([
         ...(Array.isArray(agent.platforms) ? agent.platforms : []),
         ...explorerVerifications.map(v => normalizePlatform(v.platform || v.type || v.label)),

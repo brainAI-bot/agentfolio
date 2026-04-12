@@ -62,10 +62,11 @@ router.get('/agents', async (req, res) => {
       const platform = String(value || '').toLowerCase();
       if (!platform) return null;
       if (platform === 'twitter') return 'x';
-      if (platform === 'satp_v3') return 'satp';
+      if (platform === 'satp_v3') return null;
       if (platform.startsWith('verification_')) return normalizePlatform(platform.slice('verification_'.length));
       if (platform.endsWith('_verification')) return normalizePlatform(platform.slice(0, -'_verification'.length));
       if (platform === 'solana_wallet') return 'solana';
+      if (platform === 'review' || platform.includes('satp')) return null;
       return platform;
     };
     const parseJson = (val, fallback) => {
