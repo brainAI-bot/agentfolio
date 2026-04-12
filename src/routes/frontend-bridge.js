@@ -179,13 +179,13 @@ function registerFrontendBridge(app, profileStore) {
     app.handle(req, res);
   });
 
-  // Website: /api/verify/website/initiate → /api/verification/website/initiate
+  // Website: keep public alias paths, but route them to restored challenge/confirm handlers
   app.post('/api/verify/website/initiate', express.json(), (req, res) => {
-    req.url = '/api/verification/website/initiate';
+    req.url = '/api/verify/website/challenge';
     app.handle(req, res);
   });
   app.post('/api/verify/website/verify', express.json(), (req, res) => {
-    req.url = '/api/verification/website/verify';
+    req.url = '/api/verify/website/confirm';
     app.handle(req, res);
   });
 
