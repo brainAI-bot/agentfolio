@@ -1818,44 +1818,80 @@ try {
           } catch (dasErr) { console.warn('[ConfirmMint] DAS artwork resolution failed:', dasErr.message); }
         }
         if (!metadataUri) metadataUri = artworkUri;
-        // Card 1/3: Regular tradable NFT — no soulbound suffix
-        
-        // STEP 2: Card 1/3 = regular tradable NFT. Soulbound is ONLY for Card 2 (burn flow).
-        let soulboundMintAddress = null; // Not used for Card 1/3
-        // DISABLED for Card 1/3:         if (artworkUri && wallet) {
-        // DISABLED for Card 1/3:           try {
-        // DISABLED for Card 1/3:             const agentName = agentId ? agentId.replace('agent_', '') : 'Unknown';
-        // DISABLED for Card 1/3:             console.log('[ConfirmMint] Minting soulbound Token-2022 for', agentName, 'artwork:', artworkUri?.slice(0, 50));
-        // DISABLED for Card 1/3:             const sbResult = await mintSoulbound(wallet, artworkUri, metadataUri, nftName, asset || '', signature || '');
-        // DISABLED for Card 1/3:             soulboundMintAddress = sbResult.soulboundMint;
-        // DISABLED for Card 1/3:             record.soulboundMint = soulboundMintAddress;
-        // DISABLED for Card 1/3:             record.soulboundTx = sbResult.signature;
-        // DISABLED for Card 1/3:             console.log('[ConfirmMint] Soulbound minted:', soulboundMintAddress, 'tx:', sbResult.signature?.slice(0, 20));
-        // DISABLED for Card 1/3:           } catch (e) {
-        // DISABLED for Card 1/3:             console.error('[ConfirmMint] Soulbound minting failed:', e.message);
-        // DISABLED for Card 1/3:             record.soulboundError = e.message;
-        // DISABLED for Card 1/3:           }
-        // DISABLED for Card 1/3:         } else {
-        // DISABLED for Card 1/3:           console.warn('[ConfirmMint] No artwork URI — skipping soulbound. imageUri:', imageUri, 'record.imageUri:', record.imageUri);
-        // DISABLED for Card 1/3:         }
-        
-        // STEP 3: SKIPPED for Card 1/3 — burnToBecome only applies when soulbound token exists (Card 2)
-        if (agentId && soulboundMintAddress) {
+        // Card 1/3: Regular tradable NFT — use the minted asset as the profile face reference.
+        let soulboundMintAddress = null;
+        const faceMintAddress = asset || soulboundMintAddress || null;
+        let burnToBecomeResult = null;
+
+        // Keep profile/avatar state in sync for client-signed mints, same as server-side mint-boa.
+        if (agentId && artworkUri) {
           try {
-            console.log('[ConfirmMint] Calling burnToBecome:', agentId, 'face:', artworkUri?.slice(0, 40), 'soulbound:', soulboundMintAddress?.slice(0, 16));
-            const burnResult = await safeBurnToBecome(agentId, artworkUri || '', soulboundMintAddress, signature || '');
-            if (burnResult.success) {
-              console.log('[ConfirmMint] V3 burnToBecome recorded:', agentId, 'tx:', burnResult.txSignature);
-              record.burnToBecomeTx = burnResult.txSignature;
-            } else if (burnResult.needsClientSign) {
-              console.log('[ConfirmMint] burnToBecome needs client sign:', agentId, 'authority:', burnResult.authority);
+            const { loadProfile, saveProfile: _rawSave } = require('../lib/profile');
+            const fs = require('fs');
+            const path = require('path');
+            function saveProfile(profile) {
+              _rawSave(profile);
+              try { fs.writeFileSync(path.join(__dirname, '../../data/profiles', profile.id + '.json'), JSON.stringify(profile, null, 2)); } catch (e) {}
+            }
+            const profile = loadProfile(agentId);
+            const nftAvatarPayload = {
+              chain: 'solana',
+              wallet,
+              identifier: faceMintAddress || asset || null,
+              name: nftName || boaName || 'Burned-Out Agent',
+              image: artworkUri,
+              arweaveUrl: artworkUri,
+              verifiedAt: new Date().toISOString(),
+              verifiedOnChain: true,
+              permanent: true,
+              burnTxSignature: signature || '',
+              soulboundMint: faceMintAddress || null,
+              boaId: effectiveBoaId,
+              mintedAt: new Date().toISOString(),
+            };
+            if (profile) {
+              profile.nftAvatar = nftAvatarPayload;
+              profile.avatar = artworkUri;
+              profile.boaMint = faceMintAddress || profile.boaMint || null;
+              profile.boaId = effectiveBoaId;
+              saveProfile(profile);
+            }
+            try {
+              const Database = require('better-sqlite3');
+              const directDb = new Database(require('path').join(__dirname, '../../data/agentfolio.db'));
+              directDb.prepare('UPDATE profiles SET nft_avatar = ?, avatar = ?, updated_at = ? WHERE id = ?').run(
+                JSON.stringify(nftAvatarPayload),
+                artworkUri,
+                new Date().toISOString(),
+                agentId
+              );
+              directDb.close();
+            } catch (dbErr) {
+              console.error('[ConfirmMint] Profile DB update failed:', dbErr.message);
+            }
+            console.log('[ConfirmMint] Profile avatar updated for', agentId, 'mint:', (faceMintAddress || '').slice(0, 16));
+          } catch (profileErr) {
+            console.warn('[ConfirmMint] Profile avatar sync failed:', profileErr.message);
+          }
+        }
+
+        // Try to finalize burnToBecome using the minted BOA asset, matching the server-side mint path.
+        if (agentId && faceMintAddress) {
+          try {
+            console.log('[ConfirmMint] Calling burnToBecome:', agentId, 'face:', artworkUri?.slice(0, 40), 'mint:', faceMintAddress?.slice(0, 16));
+            burnToBecomeResult = await safeBurnToBecome(agentId, artworkUri || '', faceMintAddress, signature || '');
+            if (burnToBecomeResult.success) {
+              console.log('[ConfirmMint] V3 burnToBecome recorded:', agentId, 'tx:', burnToBecomeResult.txSignature);
+              record.burnToBecomeTx = burnToBecomeResult.txSignature;
+            } else if (burnToBecomeResult.needsClientSign) {
+              console.log('[ConfirmMint] burnToBecome needs client sign:', agentId, 'authority:', burnToBecomeResult.authority);
             } else {
-              console.log('[ConfirmMint] burnToBecome skipped:', agentId, burnResult.reason);
+              console.log('[ConfirmMint] burnToBecome skipped:', agentId, burnToBecomeResult.reason);
             }
           } catch (e) { console.warn('[ConfirmMint] burnToBecome failed:', e.message); }
         }
-        
-        sendJson(200, { success: true, recorded: true, agentId, boaId: effectiveBoaId, soulboundMint: soulboundMintAddress, ...record });
+
+        sendJson(200, { success: true, recorded: true, agentId, boaId: effectiveBoaId, soulboundMint: soulboundMintAddress, burnToBecome: burnToBecomeResult, ...record });
       } catch (e) {
         console.error('[ConfirmMint] Error:', e.message);
         sendJson(500, { error: e.message });
