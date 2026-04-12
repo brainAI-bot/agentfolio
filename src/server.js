@@ -1266,7 +1266,7 @@ app.post('/api/verification/domain/initiate', async (req, res) => {
 
   try {
     const result = await domainVerify.initiateDomainVerification(profileId, domain);
-    res.json(result);
+    res.status(result?.success ? 200 : 400).json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1281,7 +1281,7 @@ app.post('/api/verification/domain/verify', async (req, res) => {
 
   try {
     const result = await domainVerify.verifyDomainChallenge(challengeId, method || 'auto');
-    res.json(result);
+    res.status(result?.verified ? 200 : 400).json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
