@@ -28,7 +28,7 @@ try {
   console.warn('[Marketplace Escrow] ⚠️ escrow-onchain not available:', e.message);
 }
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+const DATA_DIR = path.join(__dirname, '..', 'data', 'marketplace');
 
 function readJSON(p) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
