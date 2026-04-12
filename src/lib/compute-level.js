@@ -42,7 +42,7 @@ function computeVerificationLevel(input = {}) {
   const profile = input.profile || {};
   const activity = input.activity || {};
   const hasSatpIdentity = Boolean(input.hasSatpIdentity || input.hasSatpGenesis || activity.hasSatpGenesis);
-  const normalizedVerifications = normalizeVerifications(input.verifications || [], { includeSatp: false, dedupe: true });
+  const normalizedVerifications = normalizeVerifications(input.verifications || [], { includeSatp: true, dedupe: true });
   const categories = [...new Set(normalizedVerifications.map((v) => getVerificationCategory(v.platform)).filter(Boolean))];
   const verificationCount = normalizedVerifications.length;
   const effectiveVerificationCount = countEffectiveVerifications(normalizedVerifications);
