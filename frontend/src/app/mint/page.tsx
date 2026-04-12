@@ -327,7 +327,7 @@ export default function MintPage() {
   const stepMap: Record<string, number> = { connect: 0, loading: 1, choose: 1, minting: 1, select: 1, preview: 2, burning: 2, error: 2, complete: 3 };
   const currentIdx = stepMap[step] ?? 0;
 
-  const isFree = eligibility?.eligible ?? false;
+  const hasFreeFirstMint = eligibility?.freeFirstMint === true;
 
   return (
     <div style={{ background: "var(--bg-primary)", minHeight: "calc(100vh - 56px)" }}>
@@ -464,10 +464,17 @@ export default function MintPage() {
                       </div>
                     </div>
                   </div>
-                  {eligibility.eligible ? (
+                  {hasFreeFirstMint ? (
                     <div className="flex items-center gap-2 mt-3 px-3 py-2 rounded-lg" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)" }}>
                       <CheckCircle size={14} style={{ color: "var(--success)" }} />
-                      <span className="text-xs font-semibold" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>Eligible for free first mint (Level ≥ 3, Rep ≥ 50)</span>
+                      <span className="text-xs font-semibold" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>Eligible for free first mint (Level ≥ 3, Rep ≥ 50, free mint unused)</span>
+                    </div>
+                  ) : eligibility.eligible ? (
+                    <div className="flex items-center gap-2 mt-3 px-3 py-2 rounded-lg" style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)" }}>
+                      <AlertTriangle size={14} style={{ color: "var(--warning)" }} />
+                      <span className="text-xs font-semibold" style={{ color: "var(--warning)", fontFamily: "var(--font-mono)" }}>
+                        Free first mint already used. Paid BOA mints are still available.
+                      </span>
                     </div>
                   ) : (
                     <div className="flex items-center gap-2 mt-3 px-3 py-2 rounded-lg" style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)" }}>
@@ -491,7 +498,7 @@ export default function MintPage() {
                 {/* Card 1: Free Mint (regular tradable NFT) — PRIMARY CTA */}
                 <div
                   className="rounded-xl border p-6 text-left transition-all"
-                  style={{ background: "var(--bg-tertiary)", borderColor: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "var(--success)" : "var(--accent)", borderWidth: "2px", boxShadow: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "0 0 30px rgba(16,185,129,0.15)" : "0 0 20px rgba(153,69,255,0.1)" }}
+                  style={{ background: "var(--bg-tertiary)", borderColor: (hasFreeFirstMint && !(eligibility && eligibility.isBorn)) ? "var(--success)" : "var(--accent)", borderWidth: "2px", boxShadow: (hasFreeFirstMint && !(eligibility && eligibility.isBorn)) ? "0 0 30px rgba(16,185,129,0.15)" : "0 0 20px rgba(153,69,255,0.1)" }}
                 >
                   <div className="flex items-center gap-2 mb-4">
                     <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.2)" }}>
@@ -502,10 +509,10 @@ export default function MintPage() {
                     </span>
                   </div>
                   <h3 className="text-base font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-                    Mint + Become (One Step)
+                    Free First BOA Mint
                   </h3>
                   <p className="text-xs mb-4 leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                    Mint a Burned-Out Agent NFT. This is a regular tradable NFT — you can sell it, trade it, or burn it via Card 2 to create a permanent soulbound identity.
+                    Mint one tradable Burned-Out Agent NFT for free when your agent is Level 3+ with Rep 50+ and has not used its free first mint. You can later burn it via Card 2 to create a permanent soulbound identity.
                   </p>
                   <div className="rounded-lg p-3 mb-4" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
                     <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>Requirements</p>
@@ -519,25 +526,25 @@ export default function MintPage() {
                         <span style={{ color: eligibility && eligibility.reputation >= 50 ? "var(--success)" : "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>Rep ≥ 50 {eligibility ? "(" + eligibility.reputation + ")" : ""}</span>
                       </div>
                       <div className="flex items-center gap-2 text-xs">
-                        {(eligibility && eligibility.isBorn) ? <AlertTriangle size={12} style={{ color: "var(--warning)" }} /> : <CheckCircle size={12} style={{ color: "var(--text-tertiary)" }} />}
-                        <span style={{ color: eligibility?.isBorn ? "var(--warning)" : "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>{(eligibility && eligibility.isBorn) ? "Already committed (isBorn)" : "Not yet committed"}</span>
+                        {hasFreeFirstMint ? <CheckCircle size={12} style={{ color: "var(--success)" }} /> : <AlertTriangle size={12} style={{ color: "var(--warning)" }} />}
+                        <span style={{ color: hasFreeFirstMint ? "var(--success)" : "var(--warning)", fontFamily: "var(--font-mono)" }}>{hasFreeFirstMint ? "Free first mint available" : "Free first mint already used"}</span>
                       </div>
                     </div>
                   </div>
                   <button
                     onClick={() => handleClientMint("free")}
-                    disabled={!(eligibility && eligibility.eligible) || (eligibility && eligibility.isBorn)}
+                    disabled={!hasFreeFirstMint || (eligibility && eligibility.isBorn)}
                     className="w-full group inline-flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all hover:scale-[1.02]"
                     style={{
                       fontFamily: "var(--font-mono)",
-                      background: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "linear-gradient(135deg, #10b981, #059669)" : "var(--bg-tertiary)",
-                      color: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "#fff" : "var(--text-tertiary)",
-                      border: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "none" : "1px solid var(--border)",
-                      cursor: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "pointer" : "not-allowed",
+                      background: (hasFreeFirstMint && !(eligibility && eligibility.isBorn)) ? "linear-gradient(135deg, #10b981, #059669)" : "var(--bg-tertiary)",
+                      color: (hasFreeFirstMint && !(eligibility && eligibility.isBorn)) ? "#fff" : "var(--text-tertiary)",
+                      border: (hasFreeFirstMint && !(eligibility && eligibility.isBorn)) ? "none" : "1px solid var(--border)",
+                      cursor: (hasFreeFirstMint && !(eligibility && eligibility.isBorn)) ? "pointer" : "not-allowed",
                     }}
                   >
                     <Zap size={16} />
-                    {(eligibility && eligibility.isBorn) ? "Already Committed" : (eligibility && eligibility.eligible) ? "Mint & Become (Free)" : "Not Eligible Yet"}
+                    {(eligibility && eligibility.isBorn) ? "Already Committed" : hasFreeFirstMint ? "Mint BOA (Free)" : (eligibility && eligibility.eligible) ? "Free Mint Used" : "Not Eligible Yet"}
                   </button>
                 </div>
 
