@@ -135,6 +135,26 @@ export default function MintPage() {
         if (confirmData.soulboundMint) {
           setSoulboundMint(confirmData.soulboundMint);
         }
+        // If server returns a burnToBecome TX (genesis record update), have user sign it
+        if (confirmData.burnToBecomeTx && wallet.signTransaction) {
+          try {
+            const btbTx = Transaction.from(Buffer.from(confirmData.burnToBecomeTx, "base64"));
+            const signedBtb = await wallet.signTransaction(btbTx);
+            const btbRes = await fetch(`${API}/api/burn-to-become/submit-genesis`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                signedTransaction: Buffer.from(signedBtb.serialize()).toString("base64"),
+              }),
+            });
+            if (btbRes.ok) {
+              const btbResult = await btbRes.json();
+              console.log("Genesis record updated after mint:", btbResult);
+            }
+          } catch (btbErr) {
+            console.warn("burnToBecome signing after mint failed (non-critical):", btbErr);
+          }
+        }
       } catch (e) { console.warn("confirm-mint failed (non-critical):", e); }
       setBurnTx(sig);
       await loadWalletData(walletAddr);

@@ -940,6 +940,7 @@ function handleBurnToBecome(req, res, url) {
         const txBuffer = Buffer.from(signedTransaction, 'base64');
         const sig = await connection.sendRawTransaction(txBuffer);
         await connection.confirmTransaction(sig, 'confirmed');
+        try { require('../v3-score-service').clearV3Cache(); } catch {}
         console.log('[SubmitGenesis] burnToBecome TX confirmed:', sig);
         sendJson(200, { success: true, signature: sig });
       } catch (e) {
@@ -1139,6 +1140,9 @@ function handleBurnToBecome(req, res, url) {
                   faceMint: faceMintPk,
                   faceBurnTx: burnTx || '',
                 });
+                const latestBtb = await connection.getLatestBlockhash('confirmed');
+                clientBurnTx.feePayer = userAuthority;
+                clientBurnTx.recentBlockhash = latestBtb.blockhash;
                 // Serialize for client signing (no server signature needed)
                 const serializedBurnToBecome = clientBurnTx.serialize({ requireAllSignatures: false }).toString('base64');
                 // Store for response
@@ -1896,6 +1900,27 @@ try {
               record.burnToBecomeTx = burnToBecomeResult.txSignature;
             } else if (burnToBecomeResult.needsClientSign) {
               console.log('[ConfirmMint] burnToBecome needs client sign:', agentId, 'authority:', burnToBecomeResult.authority);
+              try {
+                const v3sdk = require('@brainai/satp-v3');
+                const builders = new v3sdk.SatpV3Builders(process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY');
+                const userAuthority = new PublicKey(burnToBecomeResult.authority);
+                const faceMintPk = faceMintAddress ? new PublicKey(faceMintAddress) : PublicKey.default;
+                const clientBurnTx = await builders.burnToBecome({
+                  agentId,
+                  authority: userAuthority,
+                  faceImage: artworkUri || '',
+                  faceMint: faceMintPk,
+                  faceBurnTx: signature || '',
+                });
+                const latestBtb = await connection.getLatestBlockhash('confirmed');
+                clientBurnTx.feePayer = userAuthority;
+                clientBurnTx.recentBlockhash = latestBtb.blockhash;
+                record.burnToBecomeTx = clientBurnTx.serialize({ requireAllSignatures: false }).toString('base64');
+                record.burnToBecomeAuthority = burnToBecomeResult.authority;
+                console.log('[ConfirmMint] Built client burnToBecome TX for', agentId);
+              } catch (btbErr) {
+                console.warn('[ConfirmMint] Failed to build client burnToBecome TX:', btbErr.message);
+              }
             } else {
               console.log('[ConfirmMint] burnToBecome skipped:', agentId, burnToBecomeResult.reason);
             }
