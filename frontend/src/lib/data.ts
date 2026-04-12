@@ -105,6 +105,24 @@ let _jobsCache: Job[] | null = null;
 let _jobsCacheTime = 0;
 const CACHE_TTL_MS = 5_000; // Reduced from 60s for faster profile availability // 60 seconds
 
+const NON_PUBLIC_FRONTEND_PROFILE_IDS = new Set([
+  'agent_sm423064591',
+  'agent_sm423302531',
+  'agent_sm423302532',
+  'agent_braintest',
+  'agent_braintest2',
+  'agent_forgetest',
+  'agent_forgetest2',
+]);
+
+function isPublicFrontendProfileId(id: string | undefined | null): boolean {
+  const normalized = String(id || '').toLowerCase();
+  if (!normalized) return false;
+  if (NON_PUBLIC_FRONTEND_PROFILE_IDS.has(normalized)) return false;
+  if (normalized.startsWith('local_') || normalized.startsWith('lauc_') || normalized.startsWith('laur_')) return false;
+  return true;
+}
+
 function calcTrustScore(p: RawProfile): number {
   // CEO directive: V3 Genesis Records only. No Genesis = 0.
   return 0;
@@ -213,6 +231,7 @@ function loadAllProfiles(): Agent[] {
     }
     // Sort by trust score desc
     agents.sort((a, b) => b.trustScore - a.trustScore); // CEO directive: sort by score only, not level-first
+    agents = agents.filter(a => isPublicFrontendProfileId(a.id));
     // Filter out test profiles from public views
     const TEST_IDS = ["test_satp", "test-no-sig", "test-check-id", "ghosttest", "ghosttest3806"];
     const TEST_EXACT_NAMES = ["SmokeTest", "TestCLI", "CEOTestAgent", "test", "E2E-Test-Agent", "BrainForgeQA", "ghosttest", "ghost_test_3806"];
