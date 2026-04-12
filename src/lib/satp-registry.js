@@ -74,16 +74,73 @@ function syncAttestationsFromProfile(profile) {
   }
 
   // X verification
-  if (vd.twitter?.verified) {
+  if (vd.twitter?.verified || vd.x?.verified) {
+    const xData = vd.twitter?.verified ? vd.twitter : vd.x;
     attestations.push({
       id: makeAttestationId(profile.id, 'verification', 'twitter'),
       agent_id: profile.id,
       attestation_type: 'verification',
       score: 60,
-      evidence: JSON.stringify({ platform: 'twitter', handle: vd.twitter.handle || '' }),
-      issued_at: vd.twitter.verifiedAt || now,
+      evidence: JSON.stringify({ platform: 'twitter', handle: xData?.handle || xData?.identifier || '' }),
+      issued_at: xData?.verifiedAt || now,
       expires_at: null,
       issuer: 'twitter'
+    });
+  }
+
+  // Ethereum verification
+  if (vd.eth?.verified) {
+    attestations.push({
+      id: makeAttestationId(profile.id, 'verification', 'eth'),
+      agent_id: profile.id,
+      attestation_type: 'verification',
+      score: 75,
+      evidence: JSON.stringify({ platform: 'eth', wallet: vd.eth.address || vd.eth.identifier || '' }),
+      issued_at: vd.eth.verifiedAt || now,
+      expires_at: null,
+      issuer: 'eth'
+    });
+  }
+
+  // AgentMail verification
+  if (vd.agentmail?.verified) {
+    attestations.push({
+      id: makeAttestationId(profile.id, 'verification', 'agentmail'),
+      agent_id: profile.id,
+      attestation_type: 'verification',
+      score: 55,
+      evidence: JSON.stringify({ platform: 'agentmail', identifier: vd.agentmail.identifier || vd.agentmail.address || '' }),
+      issued_at: vd.agentmail.verifiedAt || now,
+      expires_at: null,
+      issuer: 'agentmail'
+    });
+  }
+
+  // Domain verification
+  if (vd.domain?.verified) {
+    attestations.push({
+      id: makeAttestationId(profile.id, 'verification', 'domain'),
+      agent_id: profile.id,
+      attestation_type: 'verification',
+      score: 65,
+      evidence: JSON.stringify({ platform: 'domain', domain: vd.domain.identifier || vd.domain.address || '' }),
+      issued_at: vd.domain.verifiedAt || now,
+      expires_at: null,
+      issuer: 'domain'
+    });
+  }
+
+  // Website verification
+  if (vd.website?.verified) {
+    attestations.push({
+      id: makeAttestationId(profile.id, 'verification', 'website'),
+      agent_id: profile.id,
+      attestation_type: 'verification',
+      score: 60,
+      evidence: JSON.stringify({ platform: 'website', url: vd.website.identifier || vd.website.address || '' }),
+      issued_at: vd.website.verifiedAt || now,
+      expires_at: null,
+      issuer: 'website'
     });
   }
 
@@ -317,5 +374,6 @@ module.exports = {
   listAttestations,
   getTrustScore,
   getRegistryStats,
-  syncAllTrustScores
+  syncAllTrustScores,
+  syncAttestationsFromProfile
 };

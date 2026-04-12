@@ -44,34 +44,21 @@ function verifySignature(challengeId, signature) {
   }
   
   try {
-    // Use ethers.js if available, otherwise basic recovery
+    let ethersModule;
+    try {
+      ethersModule = require('ethers');
+    } catch (e) {
+      return { verified: false, error: 'ethers.js not available on server' };
+    }
+
+    const ethersApi = ethersModule.ethers || ethersModule;
     let recoveredAddress;
     try {
-      const { ethers } = require('ethers');
-      recoveredAddress = ethers.verifyMessage(challenge.message, signature).toLowerCase();
+      recoveredAddress = ethersApi.verifyMessage(challenge.message, signature).toLowerCase();
     } catch (e) {
-      // Fallback: accept signature format but mark as pending manual verification
-      // In production, ethers.js should always be available
-      if (/^0x[0-9a-fA-F]{130}$/.test(signature)) {
-        challenge.verified = true;
-        challenges.delete(challengeId);
-        return {
-          verified: true,
-          profileId: challenge.profileId,
-          walletAddress: challenge.walletAddress,
-          proof: {
-            type: 'eth_personal_sign',
-            signature,
-            message: challenge.message,
-            nonce: challenge.nonce,
-            timestamp: challenge.timestamp,
-            note: 'Signature format valid; install ethers for cryptographic verification'
-          }
-        };
-      }
-      return { verified: false, error: 'Invalid signature format. Expected 0x-prefixed 65-byte hex.' };
+      return { verified: false, error: `Invalid signature: ${e.message}` };
     }
-    
+
     if (recoveredAddress !== challenge.walletAddress) {
       return { verified: false, error: `Recovered address ${recoveredAddress} does not match ${challenge.walletAddress}` };
     }

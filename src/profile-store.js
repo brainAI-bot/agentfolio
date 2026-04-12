@@ -416,6 +416,16 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
     console.error('Failed to sync verification to JSON file:', syncErr.message);
   }
 
+  try {
+    const satpRegistry = require('./lib/satp-registry');
+    const { loadProfile: loadProfileFromDb } = require('./lib/database');
+    if (satpRegistry.syncAttestationsFromProfile) {
+      const refreshedProfile = loadProfileFromDb(profileId);
+      if (refreshedProfile) satpRegistry.syncAttestationsFromProfile(refreshedProfile);
+    }
+  } catch (attErr) {
+    console.error('Failed to sync SATP attestations:', attErr.message);
+  }
 
   // Post-verification pipeline: DB cache must roll back if on-chain write fails.
   if (postVerificationHook) {
