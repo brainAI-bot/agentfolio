@@ -1429,12 +1429,12 @@ function handleBurnToBecome(req, res, url) {
         const dbPath = require("path").join(__dirname, "../../data/agentfolio.db");
         
         // === 1. Per-agent mint count (max 3) — tracks by agent_id to prevent wallet-swap gaming ===
-        // ON-CHAIN SATP SECURITY — identity PDA + boa_soulbound attestation check
+        // ON-CHAIN SATP SECURITY — legacy wallet PDA + V3 genesis fallback
         const satpCheck = await checkSatpOnChain(wallet);
-        if (!satpCheck.hasIdentity) {
-          return sendJson(403, { error: "SATP identity required. Verify your wallet at agentfolio.bot/verify first.", identityPDA: satpCheck.identityPda });
+        let hasSatpIdentity = satpCheck.hasIdentity;
+        if (satpCheck.hasIdentity) {
+          console.log("[MintBOA] SATP identity verified via legacy PDA:", satpCheck.identityPda);
         }
-        console.log("[MintBOA] SATP identity verified:", satpCheck.identityPda);
         
         // If already has boa_soulbound attestation (already burned), no free mint
         if (satpCheck.hasBoaSoulbound) {
@@ -1457,20 +1457,31 @@ function handleBurnToBecome(req, res, url) {
           try {
             const { getV3Score } = require("../v3-score-service");
             const v3 = await getV3Score(agentIdForCount);
-            if (v3 && v3.isBorn) v3IsBorn = true;
+            if (v3) {
+              hasSatpIdentity = true;
+              if (v3.isBorn) v3IsBorn = true;
+              console.log("[MintBOA] SATP identity verified via V3 genesis for", agentIdForCount);
+            }
             console.log("[MintBOA] V3 Genesis Record for", agentIdForCount, "isBorn:", v3IsBorn);
           } catch (e) { console.warn("[MintBOA] V3 check failed:", e.message); }
         }
+        if (!hasSatpIdentity) {
+          return sendJson(403, { error: "SATP identity required. Verify your wallet at agentfolio.bot/verify first.", identityPDA: satpCheck.identityPda, agentId: agentIdForCount || null });
+        }
         
-        // Mint count: on-chain Core NFT check (replaces disk records)
+        // Mint count: combine on-chain collection scan, V3 born state, and recorded BOA mints.
         let onChainCount = 0;
         try {
           const onChainResult = await checkOnChainMints(wallet);
           onChainCount = onChainResult.count || 0;
         } catch (e) { console.warn("[MintBOA] On-chain mint check failed:", e.message); }
+        let recordedBoaMintCount = 0;
+        try {
+          recordedBoaMintCount = getRecordedBoaMintCount({ wallet, agentId: agentIdForCount });
+        } catch (e) { console.warn("[MintBOA] Recorded mint count failed:", e.message); }
         // On-chain isBorn overrides: if born on-chain, count is at least 1
-        const effectiveMintCount = Math.max(onChainCount, v3IsBorn ? 1 : 0);
-        console.log("[MintBOA] Effective mint count:", effectiveMintCount, "(onChain:", onChainCount, "v3IsBorn:", v3IsBorn, ")");
+        const effectiveMintCount = Math.max(onChainCount, recordedBoaMintCount, v3IsBorn ? 1 : 0);
+        console.log("[MintBOA] Effective mint count:", effectiveMintCount, "(onChain:", onChainCount, "recorded:", recordedBoaMintCount, "v3IsBorn:", v3IsBorn, ")");
 
         // === HARD CAP: Max 3 mints per agent ===
         if (effectiveMintCount >= 3) {
