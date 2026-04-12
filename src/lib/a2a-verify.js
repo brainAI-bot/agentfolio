@@ -58,7 +58,7 @@ async function verifyA2aAgentCard(agentUrl, expectedProfileId) {
       return {
         verified: false,
         error: `Ownership proof missing: agent.json must include agentfolio="${expectedProfileId}" or reference "agentfolio:${expectedProfileId}"`,
-        url: agentUrl,
+        url: baseUrl,
         agentCard
       };
     }
