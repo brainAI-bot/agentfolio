@@ -1718,11 +1718,8 @@ try {
         let agentId = null;
         try {
           const db = new Database(dbPath, { readonly: true });
-          const profiles = db.prepare('SELECT * FROM profiles').all();
-          for (const p of profiles) {
-            try { const vd = JSON.parse(p.verification_data || '{}'); if (vd.solana && vd.solana.address === wallet) { agentId = p.id; break; } } catch {}
-            try { const w = JSON.parse(p.wallets || '{}'); if (w.solana === wallet) { agentId = p.id; break; } } catch {}
-          }
+          const resolvedProfile = await resolveBestProfileForWallet(db, wallet);
+          agentId = resolvedProfile?.profile?.id || null;
           db.close();
         } catch {}
         
