@@ -584,6 +584,11 @@ async function maybeGateProgrammaticTrustScore(req, res, profileId) {
     return true;
   }
 
+  for (const headerName of ['payment-response', 'x-payment-response']) {
+    const headerValue = gateRes.headers.get(headerName);
+    if (headerValue) res.setHeader(headerName, headerValue);
+  }
+
   req._x402Paid = true;
   return false;
 }
