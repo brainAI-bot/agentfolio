@@ -76,7 +76,103 @@ function registerSATPRoutes(app) {
 
   function isPublicAttestationPlatform(value) {
     const platform = normalizeAttestationPlatform(value);
-    return !!platform && !platform.includes('satp');
+    return !!platform && platform !== 'review' && !platform.includes('satp');
+  }
+
+  function dedupePublicAttestations(items) {
+    const seen = new Set();
+    const out = [];
+    for (const item of items || []) {
+      const key = [item.platform || '', item.txSignature || '', item.memo || '', item.solscanUrl || ''].join('|');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(item);
+    }
+    return out;
+  }
+
+  function buildPublicAttestationEntries(attestations, txHints = {}) {
+    const enriched = [];
+
+    for (const a of attestations || []) {
+      let proofData = {};
+      try { proofData = typeof a.proofData === 'string' ? JSON.parse(a.proofData) : (a.proofData || {}); } catch {}
+      const platform = normalizeAttestationPlatform(a.platform || a.attestationType) || a.platform || a.attestationType;
+      if (!isPublicAttestationPlatform(platform)) continue;
+      const hinted = txHints[platform] || txHints[String(platform || '').replace(/^verification_/, '').replace(/_verification$/, '')] || null;
+      const txSignature = a.txSignature || a.tx_signature || proofData.txSignature || proofData.signature || proofData.transactionSignature || hinted?.txSignature || null;
+      enriched.push({
+        platform,
+        txSignature,
+        memo: a.memo || (a.attestationType ? ('ATTESTATION|' + a.attestationType) : null),
+        proofHash: a.proofHash || null,
+        signer: a.signer || a.issuer || null,
+        timestamp: a.timestamp || a.verifiedAt || a.createdAt || null,
+        solscanUrl: hinted?.solscanUrl || a.solscanUrl || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null),
+      });
+    }
+
+    if (enriched.length === 0) {
+      for (const [platform, hint] of Object.entries(txHints || {})) {
+        if (!isPublicAttestationPlatform(platform)) continue;
+        enriched.push({
+          platform,
+          txSignature: hint?.txSignature || null,
+          memo: null,
+          proofHash: null,
+          signer: null,
+          timestamp: null,
+          solscanUrl: hint?.solscanUrl || (hint?.txSignature ? ('https://solana.fm/tx/' + hint.txSignature) : null),
+        });
+      }
+    }
+
+    return dedupePublicAttestations(enriched);
+  }
+
+  async function loadPublicAttestations({ wallet = null, profileId = null }) {
+    const chainCache = require('../lib/chain-cache');
+    const profile = await loadProfileByWalletOrId({ wallet, profileId });
+    const resolvedProfileId = profile?.id || profileId || null;
+    const resolvedWallet = wallet || profile?.wallet || null;
+    const txHints = resolvedProfileId ? loadAttestationTxHints(resolvedProfileId) : {};
+
+    if (resolvedProfileId) {
+      const chainAttestations = chainCache.getVerifications(resolvedProfileId) || [];
+      const enriched = buildPublicAttestationEntries(chainAttestations, txHints);
+      if (enriched.length > 0 || Object.keys(txHints).length > 0) {
+        return {
+          wallet: resolvedWallet,
+          profileId: resolvedProfileId,
+          attestations: enriched,
+          types: [...new Set(enriched.map(a => a.platform).filter(Boolean))],
+          verified: enriched.filter(a => !!a.txSignature || !!a.solscanUrl).length,
+          source: 'v3-chain-cache',
+        };
+      }
+    }
+
+    if (resolvedWallet && isValidWallet(resolvedWallet)) {
+      const legacyAttestations = await satpIdentity.getAgentAttestations(resolvedWallet);
+      const enriched = buildPublicAttestationEntries(legacyAttestations, txHints);
+      return {
+        wallet: resolvedWallet,
+        profileId: resolvedProfileId,
+        attestations: enriched,
+        types: [...new Set(enriched.map(a => a.platform).filter(Boolean))],
+        verified: enriched.filter(a => !!a.txSignature || !!a.solscanUrl).length,
+        source: 'legacy-wallet-reader',
+      };
+    }
+
+    return {
+      wallet: resolvedWallet,
+      profileId: resolvedProfileId,
+      attestations: [],
+      types: [],
+      verified: 0,
+      source: 'no-match',
+    };
   }
 
   function loadAttestationTxHints(profileId) {
@@ -282,15 +378,17 @@ function registerSATPRoutes(app) {
   app.get('/api/satp/attestations/:wallet', async (req, res) => {
     try {
       if (!isValidWallet(req.params.wallet)) return res.status(400).json({ error: 'Invalid wallet address' });
-      const attestations = await satpIdentity.getAgentAttestations(req.params.wallet);
+      const result = await loadPublicAttestations({ wallet: req.params.wallet });
       res.json({
         ok: true,
         data: {
           wallet: req.params.wallet,
-          count: attestations.length,
-          attestations,
-          types: [...new Set(attestations.map(a => a.attestationType))],
-          verified: attestations.filter(a => a.verified && !a.expired).length,
+          profileId: result.profileId,
+          count: result.attestations.length,
+          attestations: result.attestations,
+          types: result.types,
+          verified: result.verified,
+          source: result.source,
         },
       });
     } catch (err) {
@@ -330,10 +428,11 @@ function registerSATPRoutes(app) {
       const network = req.query.network || 'mainnet';
       const results = await Promise.allSettled([
         satpIdentity.getAgentIdentity(wallet, network),
-        satpIdentity.getAgentAttestations(wallet),
+        loadPublicAttestations({ wallet }),
       ]);
       const identity = results[0].status === 'fulfilled' ? results[0].value : null;
-      const attestations = results[1].status === 'fulfilled' ? results[1].value : [];
+      const attestationResult = results[1].status === 'fulfilled' ? results[1].value : { attestations: [], types: [], verified: 0, source: 'error', profileId: null };
+      const attestations = attestationResult.attestations || [];
       
       if (!identity) {
         return res.status(404).json({ error: 'Agent not registered on-chain', wallet });
@@ -392,13 +491,14 @@ function registerSATPRoutes(app) {
           },
           attestations: {
             count: attestations.length,
-            verified: attestations.filter(a => a.verified && !a.expired).length,
-            types: [...new Set(attestations.map(a => a.attestationType))],
+            verified: attestationResult.verified || 0,
+            types: attestationResult.types || [...new Set(attestations.map(a => a.platform || a.attestationType).filter(Boolean))],
             items: attestations,
+            source: attestationResult.source || 'unknown',
           },
           meta: {
             source: normalizedTrust ? 'normalized-profile-trust' : 'solana-mainnet',
-            profileId,
+            profileId: profileId || attestationResult.profileId || null,
             programs: {
               identity: satpIdentity.PROGRAMS.IDENTITY.toBase58(),
               reputation: satpIdentity.PROGRAMS.REPUTATION.toBase58(),
@@ -760,45 +860,9 @@ function registerSATPRoutes(app) {
         }
       }
 
-      const attestations = chainCache.getVerifications(agentId);
-      const txHints = loadAttestationTxHints(agentId);
-      const enriched = [];
-
-      for (const a of attestations) {
-        let proofData = {};
-        try { proofData = typeof a.proofData === 'string' ? JSON.parse(a.proofData) : (a.proofData || {}); } catch {}
-        const platform = normalizeAttestationPlatform(a.platform) || a.platform;
-        if (!isPublicAttestationPlatform(platform)) continue;
-        const hinted = txHints[platform] || txHints[String(platform || '').replace(/^verification_/, '').replace(/_verification$/, '')] || null;
-        const txSignature = a.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || hinted?.txSignature || null;
-        enriched.push({
-          platform,
-          txSignature,
-          memo: a.memo || null,
-          proofHash: a.proofHash || null,
-          signer: a.signer || null,
-          timestamp: a.timestamp || null,
-          solscanUrl: hinted?.solscanUrl || a.solscanUrl || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null),
-        });
-      }
-
-      // Only synthesize DB proof hints when chain-cache returned nothing at all.
-      if (enriched.length === 0) {
-        for (const [platform, hint] of Object.entries(txHints)) {
-          if (!isPublicAttestationPlatform(platform)) continue;
-          enriched.push({
-            platform,
-            txSignature: hint?.txSignature || null,
-            memo: null,
-            proofHash: null,
-            signer: null,
-            timestamp: null,
-            solscanUrl: hint?.solscanUrl || (hint?.txSignature ? ('https://solana.fm/tx/' + hint.txSignature) : null),
-          });
-        }
-      }
-
-      const platforms = enriched.map(a => normalizeAttestationPlatform(a.platform) || a.platform).filter(isPublicAttestationPlatform);
+      const result = await loadPublicAttestations({ profileId: agentId });
+      const enriched = result.attestations || [];
+      const platforms = result.types || enriched.map(a => normalizeAttestationPlatform(a.platform) || a.platform).filter(isPublicAttestationPlatform);
       
       res.json({
         ok: true,
