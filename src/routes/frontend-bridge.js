@@ -338,7 +338,10 @@ function registerFrontendBridge(app, profileStore) {
   app.get('/api/wallet/lookup/:addr', (req, res) => {
     try {
       const { addr } = req.params;
-      const profile = db.prepare("SELECT id, name, avatar, handle, claimed, wallet, wallets FROM profiles WHERE wallet = ? OR wallets LIKE '%" + addr.replace(/'/g, '') + "%'").get(addr);
+      const like = `%${String(addr || '').replace(/'/g, '')}%`;
+      const profile = db.prepare(
+        'SELECT id, name, avatar, handle, claimed, wallet, wallets, created_at, updated_at FROM profiles WHERE wallet = ? OR claimed_by = ? OR wallets LIKE ? ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1'
+      ).get(addr, addr, like);
       if (!profile) return res.status(404).json({ found: false, address: addr });
       res.json({ found: true, profileId: profile.id, name: profile.name, avatar: profile.avatar, handle: profile.handle, claimed: !!profile.claimed, profile: { id: profile.id, name: profile.name } });
     } catch (e) {
@@ -352,7 +355,10 @@ function registerFrontendBridge(app, profileStore) {
     try {
       const { wallet } = req.query;
       if (!wallet) return res.status(400).json({ error: 'wallet parameter required' });
-      const profile = db.prepare("SELECT * FROM profiles WHERE wallet = ? OR wallets LIKE '%" + wallet.replace(/'/g, '') + "%'").get(wallet);
+      const like = `%${String(wallet || '').replace(/'/g, '')}%`;
+      const profile = db.prepare(
+        'SELECT * FROM profiles WHERE wallet = ? OR claimed_by = ? OR wallets LIKE ? ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1'
+      ).get(wallet, wallet, like);
       if (!profile) return res.status(404).json({ found: false });
       res.json({ found: true, profileId: profile.id, name: profile.name, avatar: profile.avatar, apiKey: profile.api_key, claimed: !!profile.claimed });
     } catch (e) {
