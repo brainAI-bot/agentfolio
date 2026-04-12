@@ -50,6 +50,27 @@ function getDb(readonly = true) {
   return new Database('/home/ubuntu/agentfolio/data/agentfolio.db', { readonly });
 }
 
+function getProfileWallet(profileId) {
+  try {
+    const db = getDb(true);
+    const row = db.prepare('SELECT wallet, wallets, verification_data FROM profiles WHERE id = ?').get(profileId);
+    db.close();
+    if (!row) return null;
+    if (row.wallet && row.wallet.length > 30) return row.wallet;
+    try {
+      const wallets = JSON.parse(row.wallets || '{}');
+      if (wallets.solana) return wallets.solana;
+    } catch (_) {}
+    try {
+      const vd = JSON.parse(row.verification_data || '{}');
+      if (vd.solana?.address) return vd.solana.address;
+    } catch (_) {}
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
 // In-memory challenge store (TTL 30 min)
 const challenges = new Map();
 
@@ -129,9 +150,16 @@ function registerReviewChallengeRoutes(app) {
         if (!valid) {
           return res.status(400).json({ verified: false, error: 'Signature verification failed' });
         }
+
+        const reviewerWallet = getProfileWallet(challenge.reviewerId);
+        if (!reviewerWallet) {
+          return res.status(403).json({ verified: false, error: 'Reviewer profile has no linked Solana wallet.' });
+        }
+        if (reviewerWallet !== walletAddress) {
+          return res.status(403).json({ verified: false, error: 'Wallet does not match reviewer profile.' });
+        }
       } else {
-        // ETH verification — simplified (ecrecover would go here)
-        // For now, accept it (frontend did the signing)
+        return res.status(400).json({ verified: false, error: 'Only Solana signed reviews are enabled on production.' });
       }
 
       const reviewRight = findReleasedEscrowReviewRight(challenge.reviewerId, challenge.revieweeId);
