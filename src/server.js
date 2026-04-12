@@ -632,6 +632,7 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
       faceImage: (v3Score && v3Score.faceImage) || null,
       source: unified.source,
       x402PaidUrl: X402_ENABLED ? '/api/score?id=' + encodeURIComponent(profileId) : null,
+      x402PaidAliasUrl: X402_ENABLED ? '/api/profile/' + encodeURIComponent(profileId) + '/trust-score' : null,
     };
 
     res.json({
@@ -1080,6 +1081,12 @@ app.get('/docs', (req, res) => {
         <span class="path">/api/score</span>
         <span class="tag tag-paid">x402</span>
         <p class="desc">Compute trust score. Query: <code>?id=&lt;profileId&gt;&amp;wallet=&lt;optional&gt;</code>. Requires x402 payment.</p>
+      </div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="path">/api/profile/:id/trust-score</span>
+        <span class="tag tag-paid">x402</span>
+        <p class="desc">Paid trust score alias for direct profile lookups. Same x402 gate as <code>/api/score?id=&lt;profileId&gt;</code>.</p>
       </div>
       <div class="endpoint">
         <span class="method get">GET</span>
@@ -2739,6 +2746,7 @@ app.get('/api/x402/pricing', (req, res) => {
       ],
       paid: X402_ENABLED ? [
         { path: '/api/score?id=<profileId>', method: 'GET', price: '$0.01', description: 'Agent reputation score' },
+        { path: '/api/profile/:id/trust-score', method: 'GET', price: '$0.01', description: 'Direct profile trust score alias' },
         { path: '/api/leaderboard/scores', method: 'GET', price: '$0.05', description: 'Full scored leaderboard' },
       ] : [],
     },
@@ -2752,7 +2760,7 @@ if (X402_ENABLED) {
     service: 'agentfolio',
     network: X402_NETWORK,
     receivingAddress: X402_RECEIVE_ADDRESS,
-    paidEndpoints: ['GET /api/score?id=<profileId> ($0.01)', 'GET /api/leaderboard/scores ($0.05)'],
+    paidEndpoints: ['GET /api/score?id=<profileId> ($0.01)', 'GET /api/profile/:id/trust-score ($0.01)', 'GET /api/leaderboard/scores ($0.05)'],
   });
 } else {
   console.warn(`[${new Date().toISOString()}] warn: x402 payment layer disabled`, {
