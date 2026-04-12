@@ -1476,7 +1476,7 @@ function registerRoutes(app) {
     }
     if (!authed) return res.status(403).json({ error: 'Invalid api_key or wallet signature' });
 
-    const allowed = ['name', 'bio', 'description', 'handle', 'avatar', 'website', 'framework', 'capabilities', 'tags', 'wallet', 'twitter', 'github', 'email', 'skills', 'wallets', 'links'];
+    const allowed = ['name', 'bio', 'description', 'handle', 'avatar', 'website', 'framework', 'capabilities', 'tags', 'wallet', 'twitter', 'github', 'email', 'skills', 'wallets', 'links', 'portfolio'];
     const sets = [];
     const vals = [];
     for (const k of allowed) {
@@ -1508,6 +1508,7 @@ function registerRoutes(app) {
         if (req.body.avatar !== undefined) existing.avatar = req.body.avatar;
         if (req.body.name !== undefined) existing.name = req.body.name;
         if (req.body.skills !== undefined) existing.skills = req.body.skills;
+        if (req.body.portfolio !== undefined) existing.portfolio = req.body.portfolio;
         existing.updatedAt = new Date().toISOString();
         require('fs').writeFileSync(existingPath, JSON.stringify(existing, null, 2));
       }
