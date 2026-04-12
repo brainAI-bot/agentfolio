@@ -54,6 +54,17 @@ function registerRestoredRoutes(app) {
         db.prepare('UPDATE profiles SET verification_data = ? WHERE id = ?').run(JSON.stringify(vd), profileId);
       }
       db.close();
+
+      try {
+        const satpRegistry = require('../lib/satp-registry');
+        const { loadProfile: loadProfileFromDb } = require('../lib/database');
+        if (satpRegistry.syncAttestationsFromProfile) {
+          const refreshedProfile = loadProfileFromDb(profileId);
+          if (refreshedProfile) satpRegistry.syncAttestationsFromProfile(refreshedProfile);
+        }
+      } catch (e) {
+        console.warn(`[RestoredRoutes] Failed to sync SATP attestations for ${profileId}/${platform}: ${e.message}`);
+      }
     } catch (e) {
       console.warn(`[RestoredRoutes] Failed to upsert active verification for ${profileId}/${platform}: ${e.message}`);
     }

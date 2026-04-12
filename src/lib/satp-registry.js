@@ -144,6 +144,34 @@ function syncAttestationsFromProfile(profile) {
     });
   }
 
+  // MCP verification
+  if (vd.mcp?.verified) {
+    attestations.push({
+      id: makeAttestationId(profile.id, 'verification', 'mcp'),
+      agent_id: profile.id,
+      attestation_type: 'verification',
+      score: 60,
+      evidence: JSON.stringify({ platform: 'mcp', url: vd.mcp.identifier || vd.mcp.address || vd.mcp.url || '' }),
+      issued_at: vd.mcp.verifiedAt || now,
+      expires_at: null,
+      issuer: 'mcp'
+    });
+  }
+
+  // A2A verification
+  if (vd.a2a?.verified) {
+    attestations.push({
+      id: makeAttestationId(profile.id, 'verification', 'a2a'),
+      agent_id: profile.id,
+      attestation_type: 'verification',
+      score: 60,
+      evidence: JSON.stringify({ platform: 'a2a', url: vd.a2a.identifier || vd.a2a.address || vd.a2a.url || '' }),
+      issued_at: vd.a2a.verifiedAt || now,
+      expires_at: null,
+      issuer: 'a2a'
+    });
+  }
+
   // Polymarket verification
   if (vd.polymarket?.verified) {
     attestations.push({
