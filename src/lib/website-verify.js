@@ -10,10 +10,26 @@ const TIMEOUT_MS = 10000;
 // In-memory storage for challenges (would use Redis in production)
 const challenges = new Map();
 
+function normalizeWebsiteUrl(websiteUrl) {
+  let parsed;
+  try {
+    parsed = new URL(websiteUrl);
+  } catch (_) {
+    throw new Error('Invalid website URL');
+  }
+
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('Website URL must start with http:// or https://');
+  }
+
+  return parsed.origin;
+}
+
 /**
  * Generate a verification challenge for website ownership
  */
 function generateWebsiteChallenge(profileId, websiteUrl) {
+  const normalizedWebsiteUrl = normalizeWebsiteUrl(websiteUrl);
   const challengeId = crypto.randomUUID();
   const token = `agentfolio-verify-${crypto.randomBytes(16).toString('hex')}`;
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
@@ -21,7 +37,7 @@ function generateWebsiteChallenge(profileId, websiteUrl) {
   const challenge = {
     challengeId,
     profileId,
-    websiteUrl,
+    websiteUrl: normalizedWebsiteUrl,
     token,
     expiresAt,
     createdAt: new Date()
@@ -38,8 +54,8 @@ function generateWebsiteChallenge(profileId, websiteUrl) {
     challengeId,
     token,
     profileId,
-    websiteUrl,
-    instructions: `Place a file at ${websiteUrl}/.well-known/agentfolio-verification.txt containing exactly: ${token}`,
+    websiteUrl: normalizedWebsiteUrl,
+    instructions: `Place a file at ${normalizedWebsiteUrl}/.well-known/agentfolio-verification.txt containing exactly: ${token}`,
     expiresAt: expiresAt.toISOString()
   };
 }
