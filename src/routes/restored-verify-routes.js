@@ -387,6 +387,11 @@ function registerRestoredRoutes(app) {
 
   // POST /api/verify/telegram/confirm
   app.post('/api/verify/telegram/confirm', express.json(), async (req, res) => {
+    const authKey = req.headers['x-api-key'] || (req.headers['authorization'] || '').replace('Bearer ', '');
+    const ADMIN_KEY = process.env.ADMIN_API_KEY || 'agentfolio-admin-2026';
+    if (authKey !== ADMIN_KEY) {
+      return res.status(403).json({ error: 'Admin access required. Telegram confirmation must come from the verification bot.' });
+    }
     try {
       const { code, telegramUserId, telegramUsername } = req.body;
       if (!code) return res.status(400).json({ error: 'code is required' });
