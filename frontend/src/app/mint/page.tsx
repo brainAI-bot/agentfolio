@@ -37,6 +37,7 @@ interface NFTItem {
 export default function MintPage() {
   const wallet = useWallet();
   const { smartConnect } = useSmartConnect();
+  const [profileId, setProfileId] = useState("");
   const [step, setStep] = useState<Step>("connect");
   const [nfts, setNfts] = useState<NFTItem[]>([]);
   const [selectedNft, setSelectedNft] = useState<NFTItem | null>(null);
@@ -58,6 +59,12 @@ export default function MintPage() {
   const [eligibility, setEligibility] = useState<{found:boolean;level:number;levelName:string;badge:string;reputation:number;eligible:boolean;isBorn?:boolean;freeFirstMint?:boolean;agent?:string;name?:string;message?:string} | null>(null);
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      setProfileId(new URLSearchParams(window.location.search).get("profileId") || "");
+    }
+  }, []);
+
+  useEffect(() => {
     if (wallet.connected && wallet.publicKey && !MINTING_PAUSED) {
       const addr = wallet.publicKey.toBase58();
       setGenesisInfo(GENESIS_REGISTRY[addr] || null);
@@ -70,13 +77,13 @@ export default function MintPage() {
       setGenesisInfo(null);
       setSatpScore(null);
     }
-  }, [wallet.connected, wallet.publicKey]);
+  }, [wallet.connected, wallet.publicKey, profileId]);
 
   const loadWalletData = async (walletAddr: string) => {
     try {
       const [nftRes, scoreRes] = await Promise.allSettled([
         fetch(`${API}/api/burn-to-become/wallet-nfts?wallet=${walletAddr}`).then(r => r.json()),
-        fetch(`${API}/api/burn-to-become/eligibility?wallet=${walletAddr}`).then(r => r.json()),
+        fetch(`${API}/api/burn-to-become/eligibility?wallet=${walletAddr}${profileId ? `&profileId=${encodeURIComponent(profileId)}` : ""}`).then(r => r.json()),
       ]);
       if (nftRes.status === "fulfilled") {
         // Client-side safety: filter out soulbound tokens from burn selection
@@ -105,7 +112,7 @@ export default function MintPage() {
       const prepRes = await fetch(API + "/api/burn-to-become/prepare-mint", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet: walletAddr, flow }),
+        body: JSON.stringify({ wallet: walletAddr, profileId: profileId || undefined, flow }),
       });
       if (!prepRes.ok) { const err = await prepRes.json(); throw new Error(err.error || "Failed to prepare mint"); }
       const prepData = await prepRes.json();
@@ -121,7 +128,7 @@ export default function MintPage() {
         const confirmRes = await fetch(API + "/api/burn-to-become/confirm-mint", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wallet: walletAddr, signature: sig, asset: prepData.asset, boaId: prepData.boaId, flow, imageUri: prepData.imageUri, metadataUri: prepData.metadataUri, boaName: prepData.boaName }),
+          body: JSON.stringify({ wallet: walletAddr, profileId: profileId || undefined, signature: sig, asset: prepData.asset, boaId: prepData.boaId, flow, imageUri: prepData.imageUri, metadataUri: prepData.metadataUri, boaName: prepData.boaName }),
         });
         const confirmData = await confirmRes.json().catch(() => ({}));
         // Use actual mint response if available, fall back to prepData
@@ -179,7 +186,7 @@ export default function MintPage() {
         const res = await fetch(`${API}/api/burn-to-become/mint-boa`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wallet: walletAddr }),
+          body: JSON.stringify({ wallet: walletAddr, profileId: profileId || undefined }),
         });
         if (!res.ok) { const err = await res.json(); throw new Error(err.error || err.message || "Mint failed"); }
         const data = await res.json();
@@ -217,7 +224,7 @@ export default function MintPage() {
         const mintRes = await fetch(`${API}/api/burn-to-become/mint-boa`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wallet: walletAddr, paymentTx: paymentSig }),
+          body: JSON.stringify({ wallet: walletAddr, profileId: profileId || undefined, paymentTx: paymentSig }),
         });
         if (!mintRes.ok) { const err = await mintRes.json(); throw new Error(err.error || err.message || "Mint failed after payment"); }
         const mintData = await mintRes.json();
@@ -251,7 +258,7 @@ export default function MintPage() {
           const completeRes = await fetch(`${API}/api/burn-to-become/mint-boa`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ wallet: wallet.publicKey.toBase58(), txSignature: burnTx }),
+            body: JSON.stringify({ wallet: wallet.publicKey.toBase58(), profileId: profileId || undefined, txSignature: burnTx }),
           });
           if (completeRes.ok) {
             const nftData = await completeRes.json();

@@ -211,9 +211,23 @@ async function getNormalizedTrustForProfile(profileId) {
   return { level, rep };
 }
 
-async function resolveBestProfileForWallet(db, wallet) {
+async function resolveBestProfileForWallet(db, wallet, options = {}) {
   const profiles = db.prepare('SELECT * FROM profiles').all().filter((profile) => profileMatchesWallet(profile, wallet));
   if (!profiles.length) return null;
+
+  const preferredProfileId = options?.preferredProfileId ? String(options.preferredProfileId) : null;
+  if (preferredProfileId) {
+    const preferred = profiles.find((profile) => String(profile.id) === preferredProfileId);
+    if (preferred) {
+      const trust = await getNormalizedTrustForProfile(preferred.id);
+      return {
+        profile: preferred,
+        level: trust.level || 0,
+        rep: trust.rep || 0,
+        createdAtMs: getProfileCreatedAtMs(preferred),
+      };
+    }
+  }
 
   const ranked = [];
   for (const profile of profiles) {
@@ -840,6 +854,7 @@ function handleBurnToBecome(req, res, url) {
   // GET /api/burn-to-become/eligibility?wallet=... — check BOA mint eligibility (Level + Rep)
   if (url.pathname === '/api/burn-to-become/eligibility' && req.method === 'GET') {
     const wallet = (req?.query?.wallet || (() => { try { return url?.searchParams?.get ? url.searchParams.get('wallet') : new URL(req.originalUrl || req.url || '', 'http://localhost').searchParams.get('wallet'); } catch { return null; } })());
+    const profileId = (req?.query?.profileId || (() => { try { return url?.searchParams?.get ? url.searchParams.get('profileId') : new URL(req.originalUrl || req.url || '', 'http://localhost').searchParams.get('profileId'); } catch { return null; } })());
     if (!wallet) return sendJson(400, { error: 'wallet required' });
     (async () => {
       try {
@@ -848,7 +863,7 @@ function handleBurnToBecome(req, res, url) {
         let getCompleteScore; try { getCompleteScore = require('../lib/scoring-engine-v2').getCompleteScore; } catch(_) { getCompleteScore = () => ({ overall: 0, level: 'Unverified' }); } const fs = require('fs');
         const LEVEL_NAMES = ['Unregistered', 'Registered', 'Verified', 'On-Chain', 'Trusted', 'Sovereign'];
         const LEVEL_BADGES = ['⚪', '🟡', '🔵', '🟢', '🟠', '👑'];
-        const resolvedProfile = await resolveBestProfileForWallet(db, wallet);
+        const resolvedProfile = await resolveBestProfileForWallet(db, wallet, { preferredProfileId: profileId });
         let matchedProfile = resolvedProfile?.profile || null;
         if (!matchedProfile) {
           const score = await getSatpScore(wallet);
@@ -1318,6 +1333,7 @@ function handleBurnToBecome(req, res, url) {
   if (url.pathname === "/api/burn-to-become/prepare-mint" && req.method === "POST") {
     const wallet = req.body && req.body.wallet;
     const flow = req.body && req.body.flow;
+    const requestedProfileId = req.body && req.body.profileId;
     if (!wallet) return sendJson(400, { error: "wallet required" });
     if (!flow || !["free", "paid"].includes(flow)) return sendJson(400, { error: "flow must be 'free' or 'paid'" });
 
@@ -1329,7 +1345,7 @@ function handleBurnToBecome(req, res, url) {
         const Database = require("better-sqlite3");
         const dbPath = require("path").join(__dirname, "../../data/agentfolio.db");
         const db = new Database(dbPath, { readonly: true });
-        const resolvedProfile = await resolveBestProfileForWallet(db, wallet);
+        const resolvedProfile = await resolveBestProfileForWallet(db, wallet, { preferredProfileId: requestedProfileId });
         const profileId = resolvedProfile?.profile?.id || null;
         db.close();
 
@@ -1451,8 +1467,9 @@ function handleBurnToBecome(req, res, url) {
         // This is wallet-rotation proof — Genesis Record PDA is permanent identity.
         let v3IsBorn = false;
         let agentIdForCount = null;
+        const requestedProfileId = req.body && req.body.profileId;
         const countDb = new Database(dbPath, { readonly: true });
-        const resolvedProfile = await resolveBestProfileForWallet(countDb, wallet);
+        const resolvedProfile = await resolveBestProfileForWallet(countDb, wallet, { preferredProfileId: requestedProfileId });
         agentIdForCount = resolvedProfile?.profile?.id || null;
         countDb.close();
         
@@ -1738,7 +1755,7 @@ try {
 
   // POST /api/burn-to-become/confirm-mint — record a client-signed mint after TX confirms
   if (url.pathname === '/api/burn-to-become/confirm-mint' && req.method === 'POST') {
-    const { wallet, signature, asset, boaId, flow, imageUri: bodyImageUri, metadataUri: bodyMetadataUri, boaName: bodyBoaName } = req.body || {};
+    const { wallet, profileId, signature, asset, boaId, flow, imageUri: bodyImageUri, metadataUri: bodyMetadataUri, boaName: bodyBoaName } = req.body || {};
     if (!wallet || !signature) return sendJson(400, { error: 'wallet and signature required' });
     
     (async () => {
@@ -1772,7 +1789,7 @@ try {
         let agentId = null;
         try {
           const db = new Database(dbPath, { readonly: true });
-          const resolvedProfile = await resolveBestProfileForWallet(db, wallet);
+          const resolvedProfile = await resolveBestProfileForWallet(db, wallet, { preferredProfileId: profileId });
           agentId = resolvedProfile?.profile?.id || null;
           db.close();
         } catch {}

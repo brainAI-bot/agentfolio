@@ -46,7 +46,11 @@ export function Navbar() {
       ? { href: `/profile/${myProfileId}`, label: "My Profile", highlight: true }
       : { href: "/register", label: "Register", highlight: true },
     { href: "/import/github", label: "Import" },
-    ...staticNavLinks.slice(1),
+    ...staticNavLinks.slice(1).map((link) =>
+      link.href === "/mint" && myProfileId
+        ? { ...link, href: `/mint?profileId=${encodeURIComponent(myProfileId)}` }
+        : link
+    ),
   ];
 
   return (
