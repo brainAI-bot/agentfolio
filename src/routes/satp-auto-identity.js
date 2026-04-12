@@ -309,11 +309,47 @@ function registerSATPAutoIdentityRoutes(app) {
       }
 
       const [identityPDA] = getIdentityPDA(new PublicKey(walletAddress));
+      const existsOnChain = await hasIdentity(walletAddress);
+      if (!existsOnChain) {
+        return res.status(400).json({ error: 'SATP identity not found on-chain for wallet. Complete the real create_identity transaction first.' });
+      }
 
       // Update profile with SATP identity info
       try {
         const Database = require('better-sqlite3');
         const db = new Database(path.join(__dirname, '../../data/agentfolio.db'));
+        const profile = db.prepare('SELECT verification_data FROM profiles WHERE id = ?').get(profileId);
+        if (!profile) {
+          db.close();
+          return res.status(404).json({ error: 'Profile not found' });
+        }
+
+        let vd = {};
+        try { vd = JSON.parse(profile.verification_data || '{}'); } catch {}
+        const verifiedSolana = vd?.solana?.address || vd?.solana?.identifier || null;
+        if (!verifiedSolana) {
+          db.close();
+          return res.status(400).json({ error: 'Profile has no verified Solana wallet to bind SATP identity to' });
+        }
+        if (verifiedSolana !== walletAddress) {
+          db.close();
+          return res.status(403).json({ error: 'walletAddress must match the profile\'s verified Solana wallet' });
+        }
+
+        const existingSatp = vd?.satp || {};
+        const satpRecord = {
+          ...existingSatp,
+          verified: true,
+          linked: true,
+          address: verifiedSolana,
+          identifier: verifiedSolana,
+          identityPDA: identityPDA.toBase58(),
+          program: SATP_IDENTITY_PROGRAM.toBase58(),
+          network: NETWORK,
+          verifiedAt: existingSatp.verifiedAt || new Date().toISOString(),
+          source: existingSatp.source || 'satp-auto-identity-confirm',
+        };
+        if (txSignature && !existingSatp.txSignature) satpRecord.txSignature = txSignature;
 
         // Store SATP verification in verifications table
         const { v4: uuid } = require('uuid');
@@ -324,37 +360,31 @@ function registerSATPAutoIdentityRoutes(app) {
         `).run(
           verificationId,
           profileId,
-          walletAddress,
-          JSON.stringify({
-            identityPDA: identityPDA.toBase58(),
-            txSignature,
-            network: NETWORK,
-            program: SATP_IDENTITY_PROGRAM.toBase58(),
-            verifiedAt: new Date().toISOString(),
-          })
+          verifiedSolana,
+          JSON.stringify(satpRecord)
         );
 
-        // Also update profile's verification_data JSON if it exists
-        const profile = db.prepare('SELECT verification_data FROM profiles WHERE id = ?').get(profileId);
-        if (profile) {
-          let vd = {};
-          try { vd = JSON.parse(profile.verification_data || '{}'); } catch {}
-          vd.satp = {
-            verified: true,
-            identityPDA: identityPDA.toBase58(),
-            txSignature,
-            program: SATP_IDENTITY_PROGRAM.toBase58(),
-            network: NETWORK,
-            verifiedAt: new Date().toISOString(),
-          };
-          db.prepare('UPDATE profiles SET verification_data = ? WHERE id = ?')
-            .run(JSON.stringify(vd), profileId);
+        vd.satp = satpRecord;
+        db.prepare('UPDATE profiles SET verification_data = ? WHERE id = ?')
+          .run(JSON.stringify(vd), profileId);
+        db.close();
+
+        try {
+          const profileJsonPath = path.join(__dirname, '../../data/profiles', `${profileId}.json`);
+          if (fs.existsSync(profileJsonPath)) {
+            const profileJson = JSON.parse(fs.readFileSync(profileJsonPath, 'utf8'));
+            if (!profileJson.verificationData) profileJson.verificationData = {};
+            profileJson.verificationData.satp = satpRecord;
+            fs.writeFileSync(profileJsonPath, JSON.stringify(profileJson, null, 2));
+          }
+        } catch (syncErr) {
+          console.warn('[SATP AutoID] JSON sync failed (non-blocking):', syncErr.message);
         }
 
-        db.close();
-        console.log(`[SATP AutoID] Identity confirmed for ${profileId}: PDA=${identityPDA.toBase58()}, TX=${txSignature}`);
+        console.log(`[SATP AutoID] Identity confirmed for ${profileId}: PDA=${identityPDA.toBase58()}, wallet=${walletAddress}`);
       } catch (dbErr) {
-        console.warn('[SATP AutoID] DB update failed (non-blocking):', dbErr.message);
+        console.warn('[SATP AutoID] DB update failed:', dbErr.message);
+        return res.status(500).json({ error: 'Failed to persist SATP identity', detail: dbErr.message });
       }
 
       res.json({
