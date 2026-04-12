@@ -33,6 +33,26 @@ function resolveApplicantId(applicantId) {
   return applicantId;
 }
 
+function resolveExistingApplicantProfileId(applicantId) {
+  const resolvedApplicantId = resolveApplicantId(applicantId);
+  try {
+    const profileStore = require('./profile-store');
+    const db = profileStore.getDb();
+
+    let row = db.prepare('SELECT id FROM profiles WHERE id = ?').get(resolvedApplicantId);
+    if (!row && typeof resolvedApplicantId === 'string' && !resolvedApplicantId.startsWith('agent_')) {
+      row = db.prepare('SELECT id FROM profiles WHERE id = ?').get('agent_' + resolvedApplicantId.toLowerCase());
+    }
+    if (!row && typeof resolvedApplicantId === 'string') {
+      row = db.prepare('SELECT id FROM profiles WHERE LOWER(name) = ?').get(resolvedApplicantId.toLowerCase());
+    }
+
+    return row ? row.id : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 // Ensure data dirs exist
 ['jobs', 'applications', 'escrow', 'deliverables'].forEach(dir => {
   const p = path.join(DATA_DIR, dir);
@@ -223,7 +243,8 @@ function registerRoutes(app) {
 
     let { applicantId, proposal, bidAmount } = req.body;
     if (!applicantId || !proposal) return res.status(400).json({ error: 'applicantId and proposal required' });
-    applicantId = resolveApplicantId(applicantId);  // resolve wallet -> profile ID
+    applicantId = resolveExistingApplicantProfileId(applicantId);
+    if (!applicantId) return res.status(400).json({ error: 'applicantId must reference an existing profile' });
     if (applicantId === job.postedBy || applicantId === job.clientId) return res.status(400).json({ error: 'Cannot apply to your own job' });
 
     // Bug fix: Prevent duplicate applications from same agent
@@ -279,7 +300,13 @@ function registerRoutes(app) {
       return res.status(400).json({ error: `Job is ${job.status}, not open for acceptance` });
     }
 
+    const resolvedApplicantId = resolveExistingApplicantProfileId(application.applicantId);
+    if (!resolvedApplicantId) {
+      return res.status(400).json({ error: 'Cannot accept application for nonexistent applicant profile' });
+    }
+
     // Accept this application, reject others
+    application.applicantId = resolvedApplicantId;
     application.status = 'accepted';
     application.acceptedAt = new Date().toISOString();
     writeJSON(appPath, application);
