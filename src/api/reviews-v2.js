@@ -6,9 +6,20 @@
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
+const { Connection } = require('@solana/web3.js');
 
 const DB_PATH = '/home/ubuntu/agentfolio/data/agentfolio.db';
 const MARKETPLACE_JOBS_DIR = '/home/ubuntu/agentfolio/data/marketplace/jobs';
+const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY';
+
+let solanaConnection = null;
+
+function getSolanaConnection() {
+  if (!solanaConnection) {
+    solanaConnection = new Connection(SOLANA_RPC_URL, 'confirmed');
+  }
+  return solanaConnection;
+}
 
 let nacl, bs58;
 try { nacl = require('tweetnacl'); } catch (e) { console.warn('[Reviews v2] tweetnacl not available'); }
@@ -113,6 +124,48 @@ function verifyReviewAuth(reviewerId, revieweeId, wallet, signature, signedMessa
   }
 
   return { ok: true };
+}
+
+async function verifyReviewTxBackedAuth(reviewerId, txSignature) {
+  if (!txSignature) {
+    return { ok: false, status: 400, error: 'tx_signature required for tx-backed review auth.' };
+  }
+
+  const profileWallet = getProfileWallet(reviewerId);
+  if (!profileWallet) {
+    return { ok: false, status: 403, error: 'Reviewer profile has no linked Solana wallet. Verify your wallet first.' };
+  }
+
+  try {
+    const conn = getSolanaConnection();
+    const txInfo = await conn.getTransaction(txSignature, {
+      commitment: 'confirmed',
+      maxSupportedTransactionVersion: 0,
+    });
+
+    if (!txInfo || txInfo.meta?.err) {
+      return { ok: false, status: 400, error: 'Submitted tx_signature is not confirmed on-chain.' };
+    }
+
+    const message = txInfo.transaction?.message;
+    const rawKeys = Array.isArray(message?.accountKeys)
+      ? message.accountKeys
+      : Array.isArray(message?.staticAccountKeys)
+        ? message.staticAccountKeys
+        : [];
+
+    const accountKeys = rawKeys
+      .map((key) => (typeof key === 'string' ? key : key?.toBase58?.() || null))
+      .filter(Boolean);
+
+    if (!accountKeys.includes(profileWallet)) {
+      return { ok: false, status: 403, error: 'tx_signature does not include the reviewer profile wallet.' };
+    }
+
+    return { ok: true, authMode: 'tx_signature', wallet: profileWallet, txConfirmed: true };
+  } catch (e) {
+    return { ok: false, status: 502, error: 'Unable to verify tx_signature on-chain right now.', detail: e.message };
+  }
 }
 
 function getReviewerRepWeight(db, reviewerId) {
@@ -249,7 +302,7 @@ function registerReviewsV2Routes(app) {
   try { migrateReviewsV2(); } catch (e) { console.error('[Reviews v2] Migration error:', e.message); }
 
   // POST /api/reviews/v2 — submit review with wallet signature auth
-  app.post('/api/reviews/v2', (req, res) => {
+  app.post('/api/reviews/v2', async (req, res) => {
     const {
       reviewer_id, reviewee_id, rating, text, job_id,
       category_quality, category_reliability, category_communication,
@@ -264,11 +317,14 @@ function registerReviewsV2Routes(app) {
       return res.status(400).json({ error: 'Cannot review yourself' });
     }
 
-    const auth = verifyReviewAuth(reviewer_id, reviewee_id, wallet, signature, signedMessage);
+    const auth = tx_signature && !wallet && !signature && !signedMessage
+      ? await verifyReviewTxBackedAuth(reviewer_id, tx_signature)
+      : verifyReviewAuth(reviewer_id, reviewee_id, wallet, signature, signedMessage);
     if (!auth.ok) {
       const payload = { error: auth.error };
       if (auth.hint) payload.hint = auth.hint;
       if (auth.expected) payload.expected = auth.expected;
+      if (auth.detail) payload.detail = auth.detail;
       return res.status(auth.status).json(payload);
     }
 
@@ -293,7 +349,10 @@ function registerReviewsV2Routes(app) {
       });
       db.close();
 
-      console.log(`[Reviews v2] Authenticated review: ${reviewer_id} -> ${reviewee_id} (wallet: ${wallet.slice(0, 8)}...)`);
+      const authLabel = auth.authMode === 'tx_signature'
+        ? `tx ${String(tx_signature || '').slice(0, 8)}...`
+        : `wallet: ${String(auth.wallet || wallet || '').slice(0, 8)}...`;
+      console.log(`[Reviews v2] Authenticated review (${auth.authMode || 'wallet_signature'}): ${reviewer_id} -> ${reviewee_id} (${authLabel})`);
 
       res.status(201).json({
         id: record.id,
@@ -307,9 +366,19 @@ function registerReviewsV2Routes(app) {
         reviewer_rep_weight: reviewer_rep_weight || 0,
         tx_signature: tx_signature || null,
         authenticated: true,
+        auth_mode: auth.authMode || 'wallet_signature',
         created_at: record.createdAt,
       });
     } catch (e) {
+      if (e && (e.code == 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint failed/i.test(String(e.message || '')))) {
+        return res.status(409).json({
+          error: 'Reviewer already submitted a review for this job',
+          reviewer_id,
+          reviewee_id,
+          job_id: job_id || 'direct',
+          auth_mode: auth.authMode || 'wallet_signature',
+        });
+      }
       res.status(500).json({ error: e.message });
     }
   });
