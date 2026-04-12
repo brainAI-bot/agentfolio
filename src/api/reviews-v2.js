@@ -335,6 +335,20 @@ function registerReviewsV2Routes(app) {
 
     try {
       const db = getDb(false);
+      if (job_id) {
+        const existing = db.prepare('SELECT id FROM reviews WHERE job_id = ? AND reviewer_id = ? AND reviewee_id = ? LIMIT 1').get(job_id, reviewer_id, reviewee_id);
+        if (existing) {
+          db.close();
+          return res.status(409).json({
+            error: 'Reviewer already submitted a review for this job',
+            reviewer_id,
+            reviewee_id,
+            job_id,
+            existing_review_id: existing.id,
+            auth_mode: auth.authMode || 'wallet_signature',
+          });
+        }
+      }
       const record = insertReviewRecord(db, {
         job_id,
         reviewer_id,
