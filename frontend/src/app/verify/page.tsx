@@ -29,6 +29,19 @@ interface VerificationState {
 
 const initialState: VerificationState = { loading: false, success: false, error: "", result: null };
 
+function getVerificationRecord(verifications: Record<string, any>, type: string) {
+  if (!verifications) return undefined;
+  const aliases: Record<string, string[]> = {
+    ethereum: ["ethereum", "eth"],
+    x: ["x", "twitter"],
+    satp: ["satp", "satp_v3"],
+  };
+  for (const key of aliases[type] || [type]) {
+    if (verifications[key]) return verifications[key];
+  }
+  return undefined;
+}
+
 export default function VerifyPage() {
   const { publicKey, connected, sendTransaction, signMessage } = useWallet();
   const { setVisible } = useWalletModal();
@@ -122,8 +135,9 @@ export default function VerifyPage() {
             setSolanaAddress(linkedSolana);
           }
           // Pre-fill ETH address if already linked
-          if (vData.ethereum?.address) {
-            setEthAddress(vData.ethereum.address);
+          const existingEthVerification = getVerificationRecord(vData, "ethereum");
+          if (existingEthVerification?.address || existingEthVerification?.identifier) {
+            setEthAddress(existingEthVerification.address || existingEthVerification.identifier);
           }
           if (vData.agentmail?.verified) {
             setAgentmailState({ loading: false, success: true, error: "", result: { verified: true } });
@@ -1373,6 +1387,7 @@ export default function VerifyPage() {
               </div>
               {catCards.map((v: any) => {
           const Icon = v.icon;
+          const existingVerification = getVerificationRecord(existingVerifications, v.type);
           return (
             <div
               key={v.type}
@@ -1380,7 +1395,7 @@ export default function VerifyPage() {
               style={{
                 background: "var(--bg-secondary)",
                 border: "1px solid var(--border)",
-                borderLeftColor: (v.state.success || existingVerifications?.[v.type]?.verified) ? "var(--success)" : v.color,
+                borderLeftColor: (v.state.success || existingVerification?.verified) ? "var(--success)" : v.color,
               }}
             >
               <div className="flex items-start gap-4">
@@ -1394,9 +1409,9 @@ export default function VerifyPage() {
                     </h3>
                     <span
                       className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded max-w-[180px] truncate"
-                      style={{ fontFamily: "var(--font-mono)", background: (v.state.success || existingVerifications?.[v.type]?.verified) ? "rgba(16,185,129,0.15)" : "rgba(16,185,129,0.1)", color: (v.state.success || existingVerifications?.[v.type]?.verified) ? "var(--success)" : "var(--success)" }}
+                      style={{ fontFamily: "var(--font-mono)", background: (v.state.success || existingVerification?.verified) ? "rgba(16,185,129,0.15)" : "rgba(16,185,129,0.1)", color: (v.state.success || existingVerification?.verified) ? "var(--success)" : "var(--success)" }}
                     >
-                      {(v.state.success || existingVerifications?.[v.type]?.verified) ? "✅ Verified" : v.reward}
+                      {(v.state.success || existingVerification?.verified) ? "✅ Verified" : v.reward}
                     </span>
                   </div>
                   <p className="text-xs mb-1" style={{ color: "var(--text-tertiary)" }}>
@@ -1412,10 +1427,10 @@ export default function VerifyPage() {
                       {v.state.error}
                     </div>
                   )}
-                  {(v.state.success || existingVerifications?.[v.type]?.verified) && (
+                  {(v.state.success || existingVerification?.verified) && (
                     <div className="flex items-center gap-2 mt-2 text-xs" style={{ color: "var(--success)" }}>
                       <CheckCircle size={12} />
-                      {existingVerifications?.[v.type]?.verified ? "Previously verified ✓" : "Verified successfully!"}
+                      {existingVerification?.verified ? "Previously verified ✓" : "Verified successfully!"}
                     </div>
                   )}
 
@@ -1425,13 +1440,13 @@ export default function VerifyPage() {
                     className="mt-3 flex items-center gap-2 px-4 py-2 rounded-lg text-[11px] font-semibold uppercase tracking-wider transition-all disabled:opacity-40"
                     style={{
                       fontFamily: "var(--font-mono)",
-                      background: v.state.success ? "var(--success)" : existingVerifications?.[v.type]?.verified ? "var(--accent)" : "var(--accent)",
+                      background: v.state.success ? "var(--success)" : existingVerification?.verified ? "var(--accent)" : "var(--accent)",
                       color: "#fff",
                     }}
                   >
                     {v.state.loading ? (
                       <>Verifying... <Loader2 size={12} className="animate-spin" /></>
-                    ) : existingVerifications?.[v.type]?.verified && !v.state.success ? (
+                    ) : existingVerification?.verified && !v.state.success ? (
                       <>Re-verify <ArrowRight size={12} /></>
                     ) : v.state.success ? (
                       <>Verified <CheckCircle size={12} /></>
