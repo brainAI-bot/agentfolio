@@ -705,6 +705,12 @@ function registerRestoredRoutes(app) {
           };
           profile.updatedAt = new Date().toISOString();
           dbSaveProfileFn(profile);
+          upsertActiveVerification(profileId, 'a2a', agentUrl, {
+            url: agentUrl,
+            agentName: result.agentName,
+            identifier: agentUrl,
+            verifiedAt: profile.verificationData.a2a.verifiedAt
+          });
           addActivityAndBroadcast(profileId, 'verification_a2a', { url: agentUrl, agentName: result.agentName }, DATA_DIR);
         }
       }
