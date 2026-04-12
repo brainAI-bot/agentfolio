@@ -265,6 +265,21 @@ app.get('/.well-known/agentfolio.json', (req, res) => {
   res.type('application/json').send(fs.readFileSync(filePath, 'utf8'));
 });
 
+app.get('/.well-known/agent.json', (req, res) => {
+  const candidatePaths = [
+    path.join(__dirname, '..', 'frontend', 'public', '.well-known', 'agent.json'),
+    path.join(__dirname, '..', 'public', '.well-known', 'agent.json')
+  ];
+
+  const filePath = candidatePaths.find((candidate) => fs.existsSync(candidate));
+  if (!filePath) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  res.set('Access-Control-Allow-Origin', '*');
+  res.type('application/json').send(fs.readFileSync(filePath, 'utf8'));
+});
+
 app.get('/directory', (req, res) => {
   res.redirect(302, '/leaderboard');
 });
