@@ -12,7 +12,7 @@ const MARKETPLACE_JOBS_DIR = '/home/ubuntu/agentfolio/data/marketplace/jobs';
 
 let nacl, bs58;
 try { nacl = require('tweetnacl'); } catch (e) { console.warn('[Reviews v2] tweetnacl not available'); }
-try { bs58 = require('bs58'); } catch (e) { console.warn('[Reviews v2] bs58 not available'); }
+try { const _bs58 = require('bs58'); bs58 = _bs58.default || _bs58; } catch (e) { console.warn('[Reviews v2] bs58 not available'); }
 
 function getDb(readonly = true) {
   return new Database(DB_PATH, { readonly });
