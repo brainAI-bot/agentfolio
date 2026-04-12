@@ -150,6 +150,71 @@ async function getSatpScore(walletAddress) {
   }
 }
 
+function safeJsonParse(raw, fallback) {
+  try { return raw ? JSON.parse(raw) : fallback; } catch { return fallback; }
+}
+
+function getProfileCreatedAtMs(profile) {
+  const parsed = Date.parse(profile?.created_at || profile?.updated_at || '');
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function profileMatchesWallet(profile, wallet) {
+  if (!profile || !wallet) return false;
+  if (profile.wallet === wallet) return true;
+  const verificationData = safeJsonParse(profile.verification_data, {});
+  if (verificationData?.solana?.address === wallet) return true;
+  const wallets = safeJsonParse(profile.wallets, {});
+  if (wallets?.solana === wallet) return true;
+  return false;
+}
+
+async function getNormalizedTrustForProfile(profileId) {
+  let level = 0, rep = 0;
+  try {
+    const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
+    const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(profileId)}/trust-score`);
+    if (trustRes.ok) {
+      const trustJson = await trustRes.json();
+      const trust = trustJson?.data;
+      if (trust && typeof trust.reputationScore === 'number') {
+        level = trust.verificationLevel || 0;
+        rep = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
+      }
+    }
+  } catch {}
+  return { level, rep };
+}
+
+async function resolveBestProfileForWallet(db, wallet) {
+  const profiles = db.prepare('SELECT * FROM profiles').all().filter((profile) => profileMatchesWallet(profile, wallet));
+  if (!profiles.length) return null;
+
+  const ranked = [];
+  for (const profile of profiles) {
+    const trust = await getNormalizedTrustForProfile(profile.id);
+    ranked.push({
+      profile,
+      level: trust.level || 0,
+      rep: trust.rep || 0,
+      createdAtMs: getProfileCreatedAtMs(profile),
+    });
+  }
+
+  ranked.sort((a, b) =>
+    (b.level - a.level) ||
+    (b.rep - a.rep) ||
+    (b.createdAtMs - a.createdAtMs) ||
+    String(b.profile.id || '').localeCompare(String(a.profile.id || ''))
+  );
+
+  if (ranked.length > 1) {
+    console.log('[BurnPublic] Multiple profiles matched wallet', wallet, '=>', ranked.map((item) => `${item.profile.id}:${item.level}/${item.rep}`).join(', '), 'selected', ranked[0].profile.id);
+  }
+
+  return ranked[0];
+}
+
 /**
  * Fetch NFTs from a wallet using Helius DAS API or fallback to getTokenAccountsByOwner
  */
@@ -758,11 +823,8 @@ function handleBurnToBecome(req, res, url) {
         let getCompleteScore; try { getCompleteScore = require('../lib/scoring-engine-v2').getCompleteScore; } catch(_) { getCompleteScore = () => ({ overall: 0, level: 'Unverified' }); } const fs = require('fs');
         const LEVEL_NAMES = ['Unregistered', 'Registered', 'Verified', 'On-Chain', 'Trusted', 'Sovereign'];
         const LEVEL_BADGES = ['⚪', '🟡', '🔵', '🟢', '🟠', '👑'];
-        const profiles = db.prepare('SELECT * FROM profiles').all();
-        let matchedProfile = db.prepare("SELECT * FROM profiles WHERE wallet = ?").get(wallet) || null;
-        if (!matchedProfile) for (const p of profiles) {
-          try { const vd = JSON.parse(p.verification_data || '{}'); if (vd.solana?.address === wallet) { matchedProfile = p; break; } } catch {}
-        }
+        const resolvedProfile = await resolveBestProfileForWallet(db, wallet);
+        let matchedProfile = resolvedProfile?.profile || null;
         if (!matchedProfile) {
           const score = await getSatpScore(wallet);
           db.close();
@@ -789,7 +851,7 @@ function handleBurnToBecome(req, res, url) {
         } catch (e) {}
         // Profile-facing burn eligibility should use the same normalized trust source as the
         // rest of the public API, with old best-of logic only as a fallback.
-        let level = 0, reputation = 0;
+        let level = resolvedProfile?.level || 0, reputation = resolvedProfile?.rep || 0;
         let v3Lev = 0, v3Rp = 0, v2Lev = 0, v2Rp = 0;
         try {
           const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
@@ -1228,21 +1290,18 @@ function handleBurnToBecome(req, res, url) {
         const { PublicKey } = require("@solana/web3.js");
         try { new PublicKey(wallet); } catch { return sendJson(400, { error: "Invalid wallet" }); }
 
+        const Database = require("better-sqlite3");
+        const dbPath = require("path").join(__dirname, "../../data/agentfolio.db");
+        const db = new Database(dbPath, { readonly: true });
+        const resolvedProfile = await resolveBestProfileForWallet(db, wallet);
+        const profileId = resolvedProfile?.profile?.id || null;
+        db.close();
+
         // Free flow: check eligibility
         if (flow === "free") {
-          const Database = require("better-sqlite3");
-          const dbPath = require("path").join(__dirname, "../../data/agentfolio.db");
-          const db = new Database(dbPath, { readonly: true });
-          let profileId = null;
-          const profiles = db.prepare("SELECT * FROM profiles").all();
-          for (const p of profiles) {
-            try { const vd = JSON.parse(p.verification_data || "{}"); if (vd.solana && vd.solana.address === wallet) { profileId = p.id; break; } } catch {}
-            try { const w = JSON.parse(p.wallets || "{}"); if (w.solana === wallet) { profileId = p.id; break; } } catch {}
-          }
-          db.close();
           if (!profileId) return sendJson(403, { error: "No profile found for this wallet" });
           
-          let level = 0, rep = 0, isBorn = false;
+          let level = resolvedProfile?.level || 0, rep = resolvedProfile?.rep || 0, isBorn = false;
           try {
             const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
             const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(profileId)}/trust-score`);
@@ -1265,18 +1324,7 @@ function handleBurnToBecome(req, res, url) {
         }
 
         // === ANTI-GAMING: PDA check DISABLED (2026-03-31) — using isBorn via V3 Genesis Record instead ===
-        let agentIdForPda = null;
-        try {
-          const Database = require("better-sqlite3");
-          const dbPath2 = require("path").join(__dirname, "../../data/agentfolio.db");
-          const db2 = new Database(dbPath2, { readonly: true });
-          const profs = db2.prepare("SELECT * FROM profiles").all();
-          for (const p of profs) {
-            try { const vd = JSON.parse(p.verification_data || "{}"); if (vd.solana && vd.solana.address === wallet) { agentIdForPda = p.id; break; } } catch {}
-            try { const w = JSON.parse(p.wallets || "{}"); if (w.solana === wallet) { agentIdForPda = p.id; break; } } catch {}
-          }
-          db2.close();
-        } catch (e) { console.warn("[PrepareMint] DB lookup:", e.message); }
+        const agentIdForPda = profileId;
 
         if (agentIdForPda) {
           try {
@@ -1361,18 +1409,8 @@ function handleBurnToBecome(req, res, url) {
         let v3IsBorn = false;
         let agentIdForCount = null;
         const countDb = new Database(dbPath, { readonly: true });
-        const allProfiles = countDb.prepare("SELECT * FROM profiles").all();
-        for (const p of allProfiles) {
-          try {
-            const vd = JSON.parse(p.verification_data || "{}");
-            if (vd.solana && vd.solana.address === wallet) { agentIdForCount = p.id; break; }
-          } catch {}
-          try {
-            const w = JSON.parse(p.wallets || "{}");
-            if (w.solana === wallet) { agentIdForCount = p.id; break; }
-          } catch {}
-          if (!agentIdForCount && p.wallet === wallet) { agentIdForCount = p.id; }
-        }
+        const resolvedProfile = await resolveBestProfileForWallet(countDb, wallet);
+        agentIdForCount = resolvedProfile?.profile?.id || null;
         countDb.close();
         
         // Check V3 Genesis Record isBorn (on-chain source of truth)
@@ -1402,27 +1440,13 @@ function handleBurnToBecome(req, res, url) {
 
         // === 2. Unified eligibility check (DB level + rep) ===
         const checkDb = new Database(dbPath, { readonly: true });
-        let profileId = null;
+        let profileId = resolvedProfile?.profile?.id || null;
         let isEligibleFree = false;
-        
-        // Find profile by wallet
-        const profiles = checkDb.prepare("SELECT * FROM profiles").all();
-        for (const p of profiles) {
-          try {
-            const vd = JSON.parse(p.verification_data || "{}");
-            if (vd.solana && vd.solana.address === wallet) { profileId = p.id; break; }
-          } catch {}
-          try {
-            const w = JSON.parse(p.wallets || "{}");
-            if (w.solana === wallet) { profileId = p.id; break; }
-          if (!profileId && p.wallet === wallet) { profileId = p.id; break; }
-          } catch {}
-        }
         
         if (profileId) {
           // Use normalized profile trust first, with raw/V2 scoring only as fallback.
           let v3Level = 0, v3Rep = 0, v2Level = 0, v2Rep = 0;
-          let level = 0, rep = 0;
+          let level = resolvedProfile?.level || 0, rep = resolvedProfile?.rep || 0;
           try {
             const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
             const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(profileId)}/trust-score`);
