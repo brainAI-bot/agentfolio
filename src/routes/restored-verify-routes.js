@@ -550,7 +550,7 @@ function registerRestoredRoutes(app) {
     const address = req.query.address;
     if (!address) return res.status(400).json({ error: 'address query param required' });
     getPolymarketStats(address).then(stats => {
-      res.json(stats);
+      res.status(stats?.error ? 400 : 200).json(stats);
     }).catch(err => {
       res.status(500).json({ error: err.message });
     });
