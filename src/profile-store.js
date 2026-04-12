@@ -188,6 +188,8 @@ function initSchema() {
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_reviews_fk ON reviews(${reviewFk})`); } catch {}
   // Store for use in queries
   module.exports._reviewFk = reviewFk;
+  try { db.exec("ALTER TABLE endorsements ADD COLUMN endorser_wallet TEXT DEFAULT ''"); } catch {}
+  try { db.exec("ALTER TABLE endorsements ADD COLUMN endorser_level INTEGER DEFAULT 0"); } catch {}
 }
 
 // Review auth: challenge-response with wallet signing
@@ -1525,22 +1527,57 @@ function registerRoutes(app) {
     if (!endorser_id || !skill) return res.status(400).json({ error: 'endorser_id and skill are required' });
 
     const d = getDb();
-    const profile = d.prepare('SELECT id FROM profiles WHERE id = ?').get(req.params.id);
+    const apiKey = (req.headers['x-api-key'] || (req.headers['authorization'] || '').replace('Bearer ', '') || '').trim();
+    const walletSig = req.headers['x-wallet-signature'];
+    const walletAddr = req.headers['x-wallet-address'];
+    const profile = d.prepare('SELECT * FROM profiles WHERE id = ?').get(req.params.id);
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
-    if (endorser_id === req.params.id) return res.status(400).json({ error: 'Cannot self-endorse' });
+
+    const endorser = d.prepare('SELECT * FROM profiles WHERE id = ?').get(endorser_id);
+    if (!endorser) return res.status(404).json({ error: 'Endorser profile not found' });
+
+    const parseWallets = (row) => {
+      try {
+        const wallets = typeof row.wallets === 'string' ? JSON.parse(row.wallets || '{}') : (row.wallets || {});
+        return { solana: wallets.solana || row.wallet || '' };
+      } catch (_) {
+        return { solana: row.wallet || '' };
+      }
+    };
+
+    const targetWallet = parseWallets(profile).solana;
+    const endorserWallet = parseWallets(endorser).solana;
+    if (endorser_id === req.params.id || (targetWallet && endorserWallet && targetWallet === endorserWallet)) {
+      return res.status(400).json({ error: 'Cannot self-endorse' });
+    }
+
+    let authed = false;
+    if (apiKey && endorser.api_key === apiKey) {
+      authed = true;
+    } else if (walletSig && walletAddr && endorserWallet && endorserWallet === walletAddr) {
+      try {
+        const sigBytes = Buffer.from(walletSig, 'base64');
+        const msgBytes = Buffer.from(`agentfolio-endorse:${req.params.id}:${endorser_id}`);
+        const pubBytes = bs58.decode(walletAddr);
+        if (nacl.sign.detached.verify(msgBytes, sigBytes, pubBytes)) authed = true;
+      } catch (e) {
+        console.error('[ENDORSE] Wallet auth failed:', e.message);
+      }
+    }
+    if (!authed) return res.status(403).json({ error: 'Invalid api_key or wallet signature' });
+
+    const enrichedEndorser = enrichProfile(endorser);
+    const computedName = enrichedEndorser.name || endorser.name || endorser_name || endorser_id;
+    const endorserLevel = Number(enrichedEndorser.verificationLevel || enrichedEndorser.level || 0);
 
     const id = genId('end');
     try {
       d.prepare(`
-        INSERT INTO endorsements (id, profile_id, endorser_id, endorser_name, skill, comment, weight)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(id, req.params.id, endorser_id, endorser_name || '', skill, comment || '', weight || 1);
-      addActivity(req.params.id, 'endorsement', { endorser_id, endorser_name, skill });
-      // Fire-and-forget: send welcome email if agent provided an email
-      if (resolvedEmail) {
-        sendWelcomeEmail(resolvedEmail, { id, name: name.trim(), handle: h });
-      }
-      res.status(201).json({ id, message: 'Endorsement added' });
+        INSERT INTO endorsements (id, profile_id, endorser_id, endorser_name, endorser_wallet, endorser_level, skill, comment, weight)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, req.params.id, endorser_id, computedName, endorserWallet || '', endorserLevel, skill, comment || '', weight || 1);
+      addActivity(req.params.id, 'endorsement', { endorser_id, endorser_name: computedName, endorser_level: endorserLevel, skill });
+      res.status(201).json({ id, message: 'Endorsement added', endorserLevel });
     } catch (e) {
       if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Duplicate endorsement (same endorser + skill)' });
       res.status(500).json({ error: e.message });
