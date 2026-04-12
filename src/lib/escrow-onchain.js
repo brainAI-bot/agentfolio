@@ -262,6 +262,15 @@ async function buildSubmitWorkTx(agentWallet, jobId) {
  */
 async function confirmTransaction(signedTxBase64) {
   const connection = await getConnection();
+
+  if (typeof signedTxBase64 === 'string'
+      && signedTxBase64.length >= 80
+      && !signedTxBase64.includes('=')
+      && !signedTxBase64.includes('/')) {
+    await connection.confirmTransaction(signedTxBase64, 'confirmed');
+    return { success: true, signature: signedTxBase64, explorerUrl: `https://explorer.solana.com/tx/${signedTxBase64}` };
+  }
+
   const txBytes = Buffer.from(signedTxBase64, 'base64');
   const sig = await connection.sendRawTransaction(txBytes, { skipPreflight: false });
   await connection.confirmTransaction(sig, 'confirmed');
