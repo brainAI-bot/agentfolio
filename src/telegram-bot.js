@@ -21,6 +21,7 @@ const http = require('http');
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const AGENTFOLIO_API = process.env.AGENTFOLIO_API_URL || 'http://localhost:3333';
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'agentfolio-admin-2026';
 
 if (!BOT_TOKEN) {
   console.error('❌ TELEGRAM_BOT_TOKEN not found in .env');
@@ -82,7 +83,8 @@ function agentfolioAPI(endpoint, data) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData)
+        'Content-Length': Buffer.byteLength(postData),
+        'X-API-Key': ADMIN_API_KEY
       }
     };
 
