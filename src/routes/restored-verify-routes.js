@@ -364,30 +364,9 @@ function registerRestoredRoutes(app) {
 
   // POST /api/verify/satp
   app.post('/api/verify/satp', express.json(), (req, res) => {
-    try {
-      const { profileId, wallet, txSignature } = req.body;
-      if (!profileId || !wallet) {
-        return res.status(400).json({ error: 'profileId and wallet required' });
-      }
-      const profilePath = path.join(PROFILES_DIR, profileId + '.json');
-      if (!fs.existsSync(profilePath)) {
-        return res.status(404).json({ error: 'Profile not found' });
-      }
-      const profile = JSON.parse(fs.readFileSync(profilePath, 'utf-8'));
-      if (!profile.verificationData) profile.verificationData = {};
-      profile.verificationData.satp = {
-        verified: true,
-        did: `did:satp:sol:${wallet}`,
-        wallet,
-        txSignature: txSignature || null,
-        verifiedAt: new Date().toISOString(),
-      };
-      profile.updatedAt = new Date().toISOString();
-      fs.writeFileSync(profilePath, JSON.stringify(profile, null, 2));
-      res.json({ success: true, satp: profile.verificationData.satp });
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
+    return res.status(403).json({
+      error: 'Public SATP self-report is disabled. Use /api/register/atomic or the authenticated /api/verify/satp/headless flow.'
+    });
   });
 
   // POST /api/verify/telegram/start
