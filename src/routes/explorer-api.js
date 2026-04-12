@@ -102,6 +102,25 @@ router.get('/agents', async (req, res) => {
       if (typeof val === 'object') return val;
       try { return JSON.parse(val); } catch { return fallback; }
     };
+    const { computeUnifiedTrustScore } = require('../lib/unified-trust-score');
+    const resolveProfileRow = (agent) => {
+      const derivedProfileId = 'agent_' + String(agent.agentName || '').trim().toLowerCase().replace(/\s+/g, '_');
+      return db.prepare(`
+        SELECT * FROM profiles
+        WHERE wallet = ?
+           OR lower(id) = lower(?)
+           OR lower(handle) = lower(?)
+        ORDER BY
+          CASE
+            WHEN wallet = ? THEN 0
+            WHEN lower(id) = lower(?) THEN 1
+            WHEN lower(handle) = lower(?) THEN 2
+            ELSE 3
+          END,
+          created_at DESC
+        LIMIT 1
+      `).get(agent.authority, derivedProfileId, derivedProfileId.replace(/^agent_/, ''), agent.authority, derivedProfileId, derivedProfileId.replace(/^agent_/, '')) || null;
+    };
     
     let agents = await v3Explorer.fetchAllV3Agents();
     
@@ -135,8 +154,8 @@ router.get('/agents', async (req, res) => {
     
     // Enrich with chain-cache attestation data
     const enriched = agents.map(a => {
-      const profileId = 'agent_' + a.agentName.toLowerCase();
-      const profileRow = db.prepare('SELECT created_at, nft_avatar, verification_data FROM profiles WHERE id = ?').get(profileId) || {};
+      const profileRow = resolveProfileRow(a) || {};
+      const profileId = profileRow.id || ('agent_' + String(a.agentName || '').trim().toLowerCase().replace(/\s+/g, '_'));
       const verificationData = parseJson(profileRow.verification_data, {});
       const attestations = chainCache.getVerifications(profileId, profileRow.created_at) || [];
       const txHints = new Map();
@@ -217,23 +236,25 @@ router.get('/agents', async (req, res) => {
       return {
         pda: a.pda,
         authority: a.authority,
-        name: a.agentName,
+        name: profileRow.name || a.agentName,
         profileId,
-        description: a.description,
+        description: profileRow.bio || profileRow.description || a.description,
         category: a.category,
-        capabilities: a.capabilities,
-        // A1: compute-score overlay for consistency across all surfaces
+        capabilities: parseJson(profileRow.capabilities, a.capabilities || []),
         ...(() => {
           try {
-            const { computeScore } = require('../lib/compute-score');
-            const Database = require('better-sqlite3');
-            const _path = require('path');
-            const _db = new Database(_path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
-            const verifs = _db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profileId);
-            _db.close();
-            const hasSatp = verifs.some(v => v.platform === 'satp');
-            const result = computeScore(verifs, { hasSatpIdentity: hasSatp, claimed: true });
-            return { reputationScore: result.score, verificationLevel: result.level, tier: result.levelName, tierLabel: result.levelName };
+            const hasPersistedSatp = Boolean(verificationData?.satp_v3?.verified || verificationData?.satp?.verified);
+            const unified = computeUnifiedTrustScore(db, { ...profileRow, id: profileId }, {
+              v3Score: {
+                reputationScore: a.reputationScore || 0,
+                verificationLevel: a.verificationLevel || (hasPersistedSatp ? 1 : 0),
+                verificationLabel: a.tierLabel || a.tier || 'Registered',
+                isBorn: a.isBorn,
+                onChain: a,
+              },
+              hasBoaAvatar: a.isBorn,
+            });
+            return { reputationScore: unified.score, verificationLevel: unified.level, tier: unified.levelName, tierLabel: unified.levelName };
           } catch (_) {
             return { reputationScore: a.reputationScore, verificationLevel: a.verificationLevel, tier: a.tier, tierLabel: a.tierLabel };
           }
