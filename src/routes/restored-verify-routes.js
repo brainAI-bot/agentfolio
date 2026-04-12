@@ -415,6 +415,12 @@ function registerRestoredRoutes(app) {
           };
           updatedProfile.updatedAt = new Date().toISOString();
           dbSaveProfileFn(updatedProfile);
+          upsertActiveVerification(result.profileId, 'telegram', result.telegramHandle, {
+            handle: result.telegramHandle,
+            telegramId: result.telegramId,
+            identifier: result.telegramHandle,
+            verifiedAt: updatedProfile.verificationData.telegram.verifiedAt
+          });
           addActivityAndBroadcast(result.profileId, 'verification_telegram', { handle: result.telegramHandle }, DATA_DIR);
           triggerWebhooks(WEBHOOK_EVENTS.VERIFICATION_COMPLETE || 'verification_complete', {
             agentId: result.profileId, platform: 'telegram', handle: result.telegramHandle,
