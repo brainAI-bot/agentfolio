@@ -26,6 +26,7 @@ const { registerSATPAutoIdentityRoutes } = require("./routes/satp-auto-identity"
 const { registerSATPAutoIdentityV3Routes } = require("./routes/satp-auto-identity-v3");
 const { registerBoaLinkerV3Routes } = require("./routes/satp-boa-linker-v3");
 const { registerReviewsV2Routes } = require("./api/reviews-v2");
+const { API_DOCS, generateDocsHTML } = require('./api/docs');
 
 // Profile Store (SQLite-backed persistent profiles, endorsements, reviews)
 const profileStore = require('./profile-store');
@@ -1134,6 +1135,21 @@ app.get('/docs', (req, res) => {
   </div>
 </body>
 </html>`);
+});
+
+app.get('/api/docs', (req, res) => {
+  const wantsJson = req.query.format === 'json'
+    || ((req.get('accept') || '').includes('application/json') && !(req.get('accept') || '').includes('text/html'));
+
+  if (wantsJson) {
+    return res.json(API_DOCS);
+  }
+
+  res.type('html').send(generateDocsHTML());
+});
+
+app.get('/api/docs.json', (req, res) => {
+  res.json(API_DOCS);
 });
 
 // Health check endpoint
