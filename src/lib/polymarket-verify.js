@@ -3,7 +3,23 @@
  * Verify agent trading performance on Polymarket
  */
 
-const GAMMA_API = 'https://gamma-api.polymarket.com';
+const DATA_API = 'https://data-api.polymarket.com';
+
+async function fetchJson(url) {
+  const res = await fetch(url, {
+    headers: {
+      'Accept': 'application/json',
+      'User-Agent': 'AgentFolio-Verify/1.0'
+    }
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+
+  return res.json();
+}
 
 /**
  * Fetch user's trading history from Polymarket
@@ -12,48 +28,49 @@ const GAMMA_API = 'https://gamma-api.polymarket.com';
  */
 async function getPolymarketStats(address) {
   try {
-    // Fetch user's positions
-    const positionsRes = await fetch(`${GAMMA_API}/users/${address}/positions`);
-    if (!positionsRes.ok) {
-      return { error: 'Failed to fetch positions', status: positionsRes.status };
+    const normalized = String(address || '').trim().toLowerCase();
+    if (!/^0x[a-f0-9]{40}$/.test(normalized)) {
+      return { error: 'Invalid wallet address' };
     }
-    const positions = await positionsRes.json();
 
-    // Fetch user's trade history
-    const tradesRes = await fetch(`${GAMMA_API}/users/${address}/trades?limit=1000`);
-    const trades = tradesRes.ok ? await tradesRes.json() : [];
+    const [positionsRaw, tradesRaw] = await Promise.all([
+      fetchJson(`${DATA_API}/positions?user=${encodeURIComponent(normalized)}&limit=500`),
+      fetchJson(`${DATA_API}/trades?user=${encodeURIComponent(normalized)}&limit=1000`),
+    ]);
 
-    // Calculate stats
-    let totalTrades = trades.length;
+    const positions = Array.isArray(positionsRaw) ? positionsRaw : [];
+    const trades = Array.isArray(tradesRaw) ? tradesRaw : [];
+
     let totalVolume = 0;
     let realizedPnL = 0;
     let wins = 0;
     let losses = 0;
 
-    // Analyze resolved positions
-    for (const position of positions) {
-      if (position.resolved) {
-        const pnl = parseFloat(position.pnl || 0);
-        realizedPnL += pnl;
-        if (pnl > 0) wins++;
-        else if (pnl < 0) losses++;
-      }
-      totalVolume += parseFloat(position.value || 0);
+    for (const trade of trades) {
+      const size = parseFloat(trade.size || 0);
+      const price = parseFloat(trade.price || 0);
+      totalVolume += size * price;
     }
 
-    // Calculate win rate
+    for (const position of positions) {
+      const pnl = parseFloat(position.realizedPnl ?? position.cashPnl ?? 0);
+      realizedPnL += pnl;
+      if (pnl > 0) wins++;
+      else if (pnl < 0) losses++;
+    }
+
     const resolvedTrades = wins + losses;
-    const winRate = resolvedTrades > 0 ? (wins / resolvedTrades * 100).toFixed(1) : 0;
+    const winRate = resolvedTrades > 0 ? (wins / resolvedTrades * 100) : 0;
 
     return {
-      address,
-      totalTrades,
+      address: normalized,
+      totalTrades: trades.length,
       totalVolume: totalVolume.toFixed(2),
       realizedPnL: realizedPnL.toFixed(2),
       wins,
       losses,
-      winRate: parseFloat(winRate),
-      openPositions: positions.filter(p => !p.resolved).length,
+      winRate: parseFloat(winRate.toFixed(1)),
+      openPositions: positions.filter(p => Math.abs(parseFloat(p.size || 0)) > 0).length,
       resolvedPositions: resolvedTrades,
       fetchedAt: new Date().toISOString()
     };
