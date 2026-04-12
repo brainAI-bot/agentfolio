@@ -133,7 +133,59 @@ function registerMarketplaceEscrowOnchain(app) {
     }
   });
 
-  // 3. Release payment (build unsigned TX)
+  // 3. Agent accepts escrow on-chain (build unsigned TX)
+  app.post('/api/marketplace/jobs/:id/escrow/accept/onchain', async (req, res) => {
+    try {
+      const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
+      const job = readJSON(jobPath);
+      if (!job) return res.status(404).json({ error: 'Job not found' });
+      if (!job.onchainEscrowPDA) return res.status(400).json({ error: 'On-chain escrow not created for this job' });
+
+      const { agentWallet } = req.body;
+      if (!agentWallet) return res.status(400).json({ error: 'agentWallet required' });
+
+      const result = await escrowOnchain.buildAcceptJobTx(agentWallet, req.params.id);
+      if (!result.success) return res.status(500).json({ error: 'Failed to build accept_job TX' });
+
+      res.json({
+        transaction: result.transaction,
+        escrowPDA: result.escrowPDA,
+        jobId: req.params.id,
+        message: 'Sign this transaction with the accepted agent wallet to accept the on-chain escrow'
+      });
+    } catch (e) {
+      console.error('[Marketplace Escrow] Accept build error:', e.message);
+      res.status(500).json({ error: 'Failed to build accept transaction', details: e.message });
+    }
+  });
+
+  // 4. Agent submits work on-chain (build unsigned TX)
+  app.post('/api/marketplace/jobs/:id/escrow/submit/onchain', async (req, res) => {
+    try {
+      const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
+      const job = readJSON(jobPath);
+      if (!job) return res.status(404).json({ error: 'Job not found' });
+      if (!job.onchainEscrowPDA) return res.status(400).json({ error: 'On-chain escrow not created for this job' });
+
+      const { agentWallet } = req.body;
+      if (!agentWallet) return res.status(400).json({ error: 'agentWallet required' });
+
+      const result = await escrowOnchain.buildSubmitWorkTx(agentWallet, req.params.id);
+      if (!result.success) return res.status(500).json({ error: 'Failed to build submit_work TX' });
+
+      res.json({
+        transaction: result.transaction,
+        escrowPDA: result.escrowPDA,
+        jobId: req.params.id,
+        message: 'Sign this transaction with the accepted agent wallet to submit work on-chain'
+      });
+    } catch (e) {
+      console.error('[Marketplace Escrow] Submit build error:', e.message);
+      res.status(500).json({ error: 'Failed to build submit transaction', details: e.message });
+    }
+  });
+
+  // 5. Release payment (build unsigned TX)
   app.post('/api/marketplace/escrow/:id/release/onchain', async (req, res) => {
     try {
       const escrowPath = path.join(DATA_DIR, 'escrow', `${req.params.id}.json`);
@@ -293,7 +345,7 @@ function registerMarketplaceEscrowOnchain(app) {
     }
   });
 
-  console.log('[Marketplace Escrow] ✅ On-chain escrow routes mounted (7 endpoints)');
+  console.log('[Marketplace Escrow] ✅ On-chain escrow routes mounted (9 endpoints)');
 }
 
 module.exports = { registerMarketplaceEscrowOnchain };
