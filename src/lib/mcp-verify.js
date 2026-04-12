@@ -49,7 +49,7 @@ async function verifyMcpEndpoint(mcpUrl, expectedProfileId) {
         if (data.profileId === expectedProfileId) {
           return {
             verified: true,
-            url: mcpUrl,
+            url: baseUrl,
             method: 'well-known',
             profileId: expectedProfileId,
             toolCount: data.tools?.length || 0,
@@ -90,7 +90,7 @@ async function verifyMcpEndpoint(mcpUrl, expectedProfileId) {
           if (hasOwnershipReference(data, expectedProfileId)) {
             return {
               verified: true,
-              url: mcpUrl,
+              url: baseUrl,
               method: 'json-rpc',
               profileId: expectedProfileId,
               toolCount: data.result.tools.length,
