@@ -186,6 +186,7 @@ export default function VerifyPage() {
       .catch(() => {});
   }, [connected, publicKey]);
 
+  const [discordChallenge, setDiscordChallenge] = useState<any>(null);
   // Discord verification
   const verifyDiscord = async () => {
     if (!profileId || !discordUsername) return;
@@ -197,7 +198,8 @@ export default function VerifyPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Discord verification failed");
-      setDiscordState({ loading: false, success: true, error: "", result: data });
+      setDiscordChallenge(data);
+      setDiscordState({ loading: false, success: false, error: "", result: { challenge: data, step: "pending" } });
     } catch (err: any) {
       setDiscordState({ loading: false, success: false, error: err.message, result: null });
     }
@@ -1122,23 +1124,33 @@ export default function VerifyPage() {
       type: "discord",
       icon: Globe,
       title: "Discord",
-      desc: "Verify your Discord account via OAuth",
+      desc: "Generate a Discord challenge message for manual bot verification",
       reward: "+1 Verification · Counts toward Level",
       color: "#5865F2",
       bg: "rgba(88, 101, 242, 0.15)",
       state: discordState,
       input: (
-        <input
-          type="text"
-          value={discordUsername}
-          onChange={(e: any) => setDiscordUsername(e.target.value)}
-          placeholder="Discord username"
-          className="w-full px-3 py-2 rounded-lg text-xs outline-none mt-3"
-          style={{ fontFamily: "var(--font-mono)", background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
-        />
+        <div>
+          <input
+            type="text"
+            value={discordUsername}
+            onChange={(e: any) => setDiscordUsername(e.target.value)}
+            placeholder="Discord username"
+            className="w-full px-3 py-2 rounded-lg text-xs outline-none mt-3"
+            style={{ fontFamily: "var(--font-mono)", background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+          />
+          {discordChallenge?.challengeId && (
+            <div className="mt-3 p-3 rounded-lg text-xs" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
+              <p className="font-semibold mb-2" style={{ color: "var(--text-primary)" }}>Discord challenge generated</p>
+              <p className="mb-2" style={{ color: "var(--text-tertiary)" }}>{discordChallenge.instructions}</p>
+              <pre className="p-2 rounded text-[10px] overflow-x-auto whitespace-pre-wrap break-all" style={{ background: "rgba(0,0,0,0.3)", color: "var(--text-secondary)" }}>{discordChallenge.messageToPost || discordChallenge.challengeString}</pre>
+              <p className="mt-2" style={{ color: "var(--warning, #F59E0B)" }}>Challenge generated only. This page should not mark Discord as verified until bot confirmation completes.</p>
+            </div>
+          )}
+        </div>
       ),
       onVerify: verifyDiscord,
-      canVerify: !!profileId && !!discordUsername,
+      canVerify: !!profileId && !!discordUsername && !discordChallenge,
     },
     {
       category: "platforms",
