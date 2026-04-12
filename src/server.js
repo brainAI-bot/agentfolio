@@ -1212,7 +1212,7 @@ app.post('/api/verification/discord/verify', async (req, res) => {
         profileStore.addVerification(challenge.profileId, 'discord', result.discordUsername, { challengeId, messageId: result.messageId, verifiedAt: new Date().toISOString() });
       }
     }
-    res.json(result);
+    res.status(result.verified ? 200 : 400).json(result);
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
