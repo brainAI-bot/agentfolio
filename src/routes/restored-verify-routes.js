@@ -765,6 +765,12 @@ function registerRestoredRoutes(app) {
             profile.links.website = result.websiteUrl;
             profile.updatedAt = new Date().toISOString();
             dbSaveProfileFn(profile);
+            upsertActiveVerification(result.profileId, 'website', result.websiteUrl, {
+              url: result.websiteUrl,
+              method: 'website-well-known',
+              identifier: result.websiteUrl,
+              verifiedAt: profile.verificationData.website.verifiedAt
+            });
             addActivityAndBroadcast(result.profileId, 'verification_website', { url: result.websiteUrl }, DATA_DIR);
           }
         }
