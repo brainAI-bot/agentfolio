@@ -104,22 +104,34 @@ router.get('/agents', async (req, res) => {
     };
     const { computeUnifiedTrustScore } = require('../lib/unified-trust-score');
     const resolveProfileRow = (agent) => {
+      const metadataProfileId = (() => {
+        try {
+          const uri = String(agent.metadataUri || '').trim();
+          const match = uri.match(/\/api\/profile\/([^/?#]+)/i);
+          return match ? decodeURIComponent(match[1]) : null;
+        } catch {
+          return null;
+        }
+      })();
       const derivedProfileId = 'agent_' + String(agent.agentName || '').trim().toLowerCase().replace(/\s+/g, '_');
+      const handleCandidate = derivedProfileId.replace(/^agent_/, '');
       return db.prepare(`
         SELECT * FROM profiles
-        WHERE wallet = ?
+        WHERE lower(id) = lower(?)
            OR lower(id) = lower(?)
            OR lower(handle) = lower(?)
+           OR wallet = ?
         ORDER BY
           CASE
-            WHEN wallet = ? THEN 0
+            WHEN lower(id) = lower(?) THEN 0
             WHEN lower(id) = lower(?) THEN 1
             WHEN lower(handle) = lower(?) THEN 2
-            ELSE 3
+            WHEN wallet = ? THEN 3
+            ELSE 4
           END,
           created_at DESC
         LIMIT 1
-      `).get(agent.authority, derivedProfileId, derivedProfileId.replace(/^agent_/, ''), agent.authority, derivedProfileId, derivedProfileId.replace(/^agent_/, '')) || null;
+      `).get(metadataProfileId, derivedProfileId, handleCandidate, agent.authority, metadataProfileId, derivedProfileId, handleCandidate, agent.authority) || null;
     };
     
     let agents = await v3Explorer.fetchAllV3Agents();
