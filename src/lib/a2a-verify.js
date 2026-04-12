@@ -65,7 +65,7 @@ async function verifyA2aAgentCard(agentUrl, expectedProfileId) {
 
     return {
       verified: true,
-      url: agentUrl,
+      url: baseUrl,
       profileId: expectedProfileId,
       agentName: agentCard.name || agentCard.id,
       agentCard,

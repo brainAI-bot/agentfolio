@@ -660,25 +660,26 @@ function registerRestoredRoutes(app) {
       if (!profile) return res.status(404).json({ error: 'Profile not found' });
       const result = await verifyMcpEndpoint(mcpUrl, profileId);
       if (result.verified) {
+        const verifiedUrl = result.url || mcpUrl;
         let onchainSucceeded = true;
         if (postVerificationHookFn) {
-          onchainSucceeded = await postVerificationHookFn(profileId, 'mcp', mcpUrl, { method: 'mcp-endpoint' });
+          onchainSucceeded = await postVerificationHookFn(profileId, 'mcp', verifiedUrl, { method: 'mcp-endpoint' });
         }
         if (onchainSucceeded) {
           profile.verificationData = profile.verificationData || {};
           profile.verificationData.mcp = {
-            verified: true, url: mcpUrl, method: result.method, toolCount: result.toolCount || 0, verifiedAt: new Date().toISOString()
+            verified: true, url: verifiedUrl, method: result.method, toolCount: result.toolCount || 0, verifiedAt: new Date().toISOString()
           };
           profile.updatedAt = new Date().toISOString();
           dbSaveProfileFn(profile);
-          upsertActiveVerification(profileId, 'mcp', mcpUrl, {
-            url: mcpUrl,
+          upsertActiveVerification(profileId, 'mcp', verifiedUrl, {
+            url: verifiedUrl,
             method: result.method,
             toolCount: result.toolCount || 0,
-            identifier: mcpUrl,
+            identifier: verifiedUrl,
             verifiedAt: profile.verificationData.mcp.verifiedAt
           });
-          addActivityAndBroadcast(profileId, 'verification_mcp', { url: mcpUrl, method: result.method, tools: result.toolCount || 0 }, DATA_DIR);
+          addActivityAndBroadcast(profileId, 'verification_mcp', { url: verifiedUrl, method: result.method, tools: result.toolCount || 0 }, DATA_DIR);
         }
       }
       res.status(result.verified ? 200 : 400).json(result);
@@ -694,24 +695,25 @@ function registerRestoredRoutes(app) {
       if (!profile) return res.status(404).json({ error: 'Profile not found' });
       const result = await verifyA2aAgentCard(agentUrl, profileId);
       if (result.verified) {
+        const verifiedUrl = result.url || agentUrl;
         let onchainSucceeded = true;
         if (postVerificationHookFn) {
-          onchainSucceeded = await postVerificationHookFn(profileId, 'a2a', agentUrl, { method: 'a2a-card' });
+          onchainSucceeded = await postVerificationHookFn(profileId, 'a2a', verifiedUrl, { method: 'a2a-card' });
         }
         if (onchainSucceeded) {
           profile.verificationData = profile.verificationData || {};
           profile.verificationData.a2a = {
-            verified: true, url: agentUrl, agentName: result.agentName, verifiedAt: new Date().toISOString()
+            verified: true, url: verifiedUrl, agentName: result.agentName, verifiedAt: new Date().toISOString()
           };
           profile.updatedAt = new Date().toISOString();
           dbSaveProfileFn(profile);
-          upsertActiveVerification(profileId, 'a2a', agentUrl, {
-            url: agentUrl,
+          upsertActiveVerification(profileId, 'a2a', verifiedUrl, {
+            url: verifiedUrl,
             agentName: result.agentName,
-            identifier: agentUrl,
+            identifier: verifiedUrl,
             verifiedAt: profile.verificationData.a2a.verifiedAt
           });
-          addActivityAndBroadcast(profileId, 'verification_a2a', { url: agentUrl, agentName: result.agentName }, DATA_DIR);
+          addActivityAndBroadcast(profileId, 'verification_a2a', { url: verifiedUrl, agentName: result.agentName }, DATA_DIR);
         }
       }
       res.status(result.verified ? 200 : 400).json(result);
