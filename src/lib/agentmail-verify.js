@@ -243,6 +243,21 @@ function getPendingStatus(profileId, email) {
   };
 }
 
+function listPendingEmailsForProfile(profileId) {
+  const pending = loadPending();
+  const now = Date.now();
+  const emails = [];
+
+  for (const [key, verification] of Object.entries(pending)) {
+    if (!key.startsWith(`${profileId}:`)) continue;
+    if (!verification || verification.expiresAt < now) continue;
+    const email = String(verification.email || key.slice(profileId.length + 1) || '').toLowerCase().trim();
+    if (email) emails.push(email);
+  }
+
+  return [...new Set(emails)];
+}
+
 /**
  * Check if AgentMail verification is available
  */
@@ -254,6 +269,7 @@ module.exports = {
   startVerification,
   confirmVerification,
   getPendingStatus,
+  listPendingEmailsForProfile,
   isVerificationAvailable,
   SENDER_INBOX
 };

@@ -1966,11 +1966,82 @@ app.post('/api/verify/solana/confirm', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// AgentMail: challenge -> send code (or manual fallback) -> confirm
+// AgentMail: challenge -> send code -> confirm
+function resolveAgentmailForProfile(profileId) {
+  if (!profileId) return null;
+  try {
+    const Database = require('better-sqlite3');
+    const path = require('path');
+    const db = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
+    const row = db.prepare('SELECT email FROM profiles WHERE id = ?').get(profileId);
+    db.close();
+    const email = String(row?.email || '').toLowerCase().trim();
+    return email || null;
+  } catch (err) {
+    console.warn('[AgentMail] Failed to resolve profile email:', err.message);
+    return null;
+  }
+}
+
+function persistVerifiedAgentmail(profileId, email, verifiedAt) {
+  try {
+    const Database = require('better-sqlite3');
+    const path = require('path');
+    const db = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'));
+    const row = db.prepare('SELECT verification_data, email FROM profiles WHERE id = ?').get(profileId);
+    if (row) {
+      let verificationData = {};
+      try { verificationData = JSON.parse(row.verification_data || '{}'); } catch {}
+      verificationData.agentmail = {
+        ...(verificationData.agentmail || {}),
+        verified: true,
+        linked: true,
+        email,
+        address: email,
+        identifier: email,
+        verifiedAt
+      };
+      db.prepare('UPDATE profiles SET email = ?, verification_data = ?, updated_at = ? WHERE id = ?')
+        .run(email, JSON.stringify(verificationData), new Date().toISOString(), profileId);
+    }
+    db.close();
+  } catch (err) {
+    console.warn('[AgentMail] Failed to persist verified email:', err.message);
+  }
+
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const profileJsonPath = path.join('/home/ubuntu/agentfolio/data/profiles', profileId + '.json');
+    if (fs.existsSync(profileJsonPath)) {
+      const profileJson = JSON.parse(fs.readFileSync(profileJsonPath, 'utf-8'));
+      profileJson.email = email;
+      if (!profileJson.verificationData) profileJson.verificationData = {};
+      profileJson.verificationData.agentmail = {
+        ...(profileJson.verificationData.agentmail || {}),
+        verified: true,
+        linked: true,
+        email,
+        address: email,
+        identifier: email,
+        verifiedAt
+      };
+      fs.writeFileSync(profileJsonPath, JSON.stringify(profileJson, null, 2));
+    }
+  } catch (err) {
+    console.warn('[AgentMail] Failed to sync verified email JSON:', err.message);
+  }
+}
+
 app.post('/api/verify/agentmail/challenge', async (req, res) => {
   try {
-    const { profileId, email } = req.body;
-    if (!profileId || !email) return res.status(400).json({ error: 'profileId and email required' });
+    const { profileId } = req.body;
+    let { email } = req.body;
+    if (!profileId) return res.status(400).json({ error: 'profileId required' });
+    if (!email) email = resolveAgentmailForProfile(profileId);
+    if (!email) {
+      return res.status(400).json({ error: 'profileId and email required. Save an @agentmail.to address on your profile first.' });
+    }
 
     const normalizedEmail = String(email).toLowerCase().trim();
     if (!normalizedEmail.endsWith('@agentmail.to')) {
@@ -1987,11 +2058,11 @@ app.post('/api/verify/agentmail/challenge', async (req, res) => {
     res.json({
       success: true,
       challengeId,
+      id: challengeId,
       email: normalizedEmail,
       instructions: result.message,
       manualOnly: !!result.manualOnly,
       emailSent: !!result.emailSent,
-      code: result.code,
       expiresInMinutes: 30
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -2005,29 +2076,43 @@ app.post('/api/verify/agentmail/confirm', async (req, res) => {
       profileId = String(challengeId).slice(0, idx);
       email = String(challengeId).slice(idx + 1);
     }
+    const { confirmVerification, listPendingEmailsForProfile } = require('./lib/agentmail-verify');
+    if (profileId && !email) {
+      const profileEmail = resolveAgentmailForProfile(profileId);
+      const pendingEmails = listPendingEmailsForProfile(profileId);
+      if (profileEmail && pendingEmails.includes(profileEmail)) {
+        email = profileEmail;
+      } else if (pendingEmails.length === 1) {
+        email = pendingEmails[0];
+      } else if (profileEmail && pendingEmails.length === 0) {
+        email = profileEmail;
+      }
+    }
     if (!profileId || !email || !code) {
-      return res.status(400).json({ error: 'profileId/email/code or challengeId/code required' });
+      return res.status(400).json({ error: 'profileId/code required, plus either challengeId, email, or a single pending AgentMail verification on the profile' });
     }
 
     const normalizedEmail = String(email).toLowerCase().trim();
-    const { confirmVerification } = require('./lib/agentmail-verify');
     const result = confirmVerification(profileId, normalizedEmail, code);
     if (!result.success) {
       return res.status(400).json({ error: result.message || 'Invalid verification code' });
     }
 
+    const verifiedAt = result.verifiedAt || new Date().toISOString();
     const proofChallengeId = challengeId || `${profileId}:${normalizedEmail}`;
     profileStore.addVerification(profileId, 'agentmail', normalizedEmail, {
       challengeId: proofChallengeId,
-      verifiedAt: result.verifiedAt || new Date().toISOString()
+      verifiedAt
     });
+    persistVerifiedAgentmail(profileId, normalizedEmail, verifiedAt);
 
     res.json({
       verified: true,
       platform: 'agentmail',
       identifier: normalizedEmail,
+      email: normalizedEmail,
       proof: { challengeId: proofChallengeId },
-      verifiedAt: result.verifiedAt || new Date().toISOString()
+      verifiedAt
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
