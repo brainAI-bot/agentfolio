@@ -48,7 +48,7 @@ function buildVerificationList(db, profileId) {
     txSignature: extractTxSignature(row.proof),
     timestamp: row.verified_at || null,
     proof: parseProof(row.proof),
-  })), { includeSatp: false, dedupe: true });
+  })), { includeSatp: true, dedupe: true });
 }
 
 function getStats(db, profileId) {
