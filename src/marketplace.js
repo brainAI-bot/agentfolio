@@ -203,7 +203,10 @@ function registerRoutes(app) {
   app.get('/api/marketplace/jobs', (req, res) => {
     const jobs = getAllFiles(path.join(DATA_DIR, 'jobs'));
     const status = req.query.status;
-    const filtered = status ? jobs.filter(j => j.status === status) : jobs;
+    const normalizedStatus = typeof status === "string" ? status.trim().toLowerCase() : "";
+    const filtered = normalizedStatus && normalizedStatus !== "all"
+      ? jobs.filter(j => String(j.status || "").toLowerCase() === normalizedStatus)
+      : jobs;
     // Hydrate application IDs into full application objects (with profile enrichment)
     const hydrated = filtered.map(job => {
       if (Array.isArray(job.applications)) {
