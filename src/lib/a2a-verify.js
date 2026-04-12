@@ -5,6 +5,17 @@
 
 const TIMEOUT_MS = 10000;
 
+function hasOwnershipReference(agentCard, expectedProfileId) {
+  if (!agentCard || typeof agentCard !== 'object') return false;
+  if (agentCard.agentfolio === expectedProfileId) return true;
+  const ref = `agentfolio:${expectedProfileId}`;
+  try {
+    return JSON.stringify(agentCard).includes(ref);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Verify A2A agent card by checking .well-known/agent.json
  */
@@ -42,11 +53,11 @@ async function verifyA2aAgentCard(agentUrl, expectedProfileId) {
       };
     }
 
-    // Check if profileId matches
-    if (agentCard.agentfolio !== expectedProfileId && agentCard.id !== expectedProfileId) {
+    // Check for explicit AgentFolio ownership proof
+    if (!hasOwnershipReference(agentCard, expectedProfileId)) {
       return {
         verified: false,
-        error: `ProfileId mismatch: agent.json has "${agentCard.agentfolio || agentCard.id}", expected "${expectedProfileId}"`,
+        error: `Ownership proof missing: agent.json must include agentfolio="${expectedProfileId}" or reference "agentfolio:${expectedProfileId}"`,
         url: agentUrl,
         agentCard
       };
