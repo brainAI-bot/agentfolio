@@ -299,6 +299,11 @@ function registerRestoredRoutes(app) {
 
   // POST /api/verify/discord/headless
   app.post('/api/verify/discord/headless', express.json(), (req, res) => {
+    const authKey = req.headers['x-api-key'] || (req.headers['authorization'] || '').replace('Bearer ', '');
+    const ADMIN_KEY = process.env.ADMIN_API_KEY || 'agentfolio-admin-2026';
+    if (authKey !== ADMIN_KEY) {
+      return res.status(403).json({ error: 'Admin access required. Public Discord verification must use the real challenge flow.' });
+    }
     try {
       const { profileId, discordUserId, discordUsername } = req.body;
       if (!profileId || !discordUserId) return res.status(400).json({ error: 'profileId and discordUserId required' });
