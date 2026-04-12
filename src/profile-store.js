@@ -545,6 +545,8 @@ function enrichProfile(row) {
 
   // V3 on-chain scores (cache populated by batch warm-up)
   let v3 = null;
+  const persistedVerificationData = parseJsonField(row.verification_data, {});
+  const persistedGenesisPDA = persistedVerificationData?.satp_v3?.genesisPDA || persistedVerificationData?.satp?.genesisPDA || null;
   if (v3ScoreService) {
     try {
       const cached = v3ScoreService._getFromCache ? v3ScoreService._getFromCache(row.id) : null;
@@ -561,6 +563,7 @@ function enrichProfile(row) {
   return {
     ...row,
     walletAddress: row.wallet || null,
+    genesisPDA: persistedGenesisPDA,
     avatar: resolvedAvatar ? resolvedAvatar.replace('node1.irys.xyz', 'gateway.irys.xyz') : resolvedAvatar,
     // Raw V3/genesis data is exposed via dedicated endpoints.
     // Omitting it here prevents contradictory profile payloads for API consumers.
@@ -1446,6 +1449,7 @@ function registerRoutes(app) {
         if (hasGenesis) {
           const v3Score = v3Data.reputationScore > 10000 ? Math.round(v3Data.reputationScore / 1000) : (v3Data.reputationScore || 0);
           enriched.onchain = v3Data;
+          enriched.genesisPDA = enriched.genesisPDA || v3Data.pda || null;
           enriched.isBorn = v3Data.isBorn;
           if (v3Data.faceImage) enriched.faceImage = v3Data.faceImage;
           if (v3Data.authority && !enriched.walletAddress) enriched.walletAddress = v3Data.authority;
