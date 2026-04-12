@@ -8,6 +8,9 @@
 
 'use strict';
 const express = require('express');
+const { loadProfile, saveProfile } = require('../lib/database');
+const { initiateHLVerification, completeHLVerification } = require('../lib/hyperliquid-verify-hardened');
+const { initiatePMVerification, completePMVerification } = require('../lib/polymarket-verify-hardened');
 
 function registerFrontendBridge(app, profileStore) {
   const getDbFn = typeof profileStore?.getDb === 'function' ? profileStore.getDb : (typeof profileStore === 'function' ? profileStore : () => profileStore);
@@ -190,6 +193,102 @@ function registerFrontendBridge(app, profileStore) {
   });
 
   console.log('[Bridge] Wired verification aliases (github/x/agentmail/discord/telegram/eth/domain/website)');
+
+  // ─── 3b. Hardened signed verification routes used by the shipped verify page ───
+  app.post('/api/profile/:profileId/verify/hyperliquid/initiate', express.json(), (req, res) => {
+    try {
+      const { profileId } = req.params;
+      const profile = loadProfile(profileId);
+      if (!profile) return res.status(404).json({ error: 'Profile not found' });
+      const walletAddress = req.body?.walletAddress || req.body?.address || profile.wallets?.hyperliquid;
+      if (!walletAddress) return res.status(400).json({ error: 'No Hyperliquid wallet. Provide walletAddress or set it on your profile.' });
+      const result = initiateHLVerification(profileId, walletAddress);
+      res.status(200).json({
+        ...result,
+        address: result.walletAddress,
+        message: result.signMessage,
+        challengeString: result.signMessage,
+      });
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/profile/:profileId/verify/hyperliquid/complete', express.json(), async (req, res) => {
+    try {
+      const { challengeId, signature } = req.body || {};
+      if (!challengeId || !signature) return res.status(400).json({ error: 'challengeId and signature required' });
+      const result = await completeHLVerification(challengeId, signature);
+      if (result?.verified && result.profileId) {
+        const profile = loadProfile(result.profileId);
+        if (profile) {
+          profile.verificationData = profile.verificationData || {};
+          profile.verificationData.hyperliquid = {
+            verified: true,
+            address: result.identifier || result.walletAddress,
+            method: 'hardened_sign',
+            verifiedAt: new Date().toISOString(),
+          };
+          profile.wallets = profile.wallets || {};
+          if (!profile.wallets.hyperliquid) profile.wallets.hyperliquid = result.identifier || result.walletAddress;
+          profile.updatedAt = new Date().toISOString();
+          saveProfile(profile);
+        }
+      }
+      res.status(result?.verified ? 200 : 400).json(result);
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/profile/:profileId/verify/polymarket/initiate', express.json(), (req, res) => {
+    try {
+      const { profileId } = req.params;
+      const profile = loadProfile(profileId);
+      if (!profile) return res.status(404).json({ error: 'Profile not found' });
+      const walletAddress = req.body?.walletAddress || req.body?.address || profile.wallets?.polymarket;
+      if (!walletAddress) return res.status(400).json({ error: 'No Polymarket wallet. Provide walletAddress or set it on your profile.' });
+      const result = initiatePMVerification(profileId, walletAddress);
+      res.status(200).json({
+        ...result,
+        address: result.walletAddress,
+        message: result.signMessage,
+        challengeString: result.signMessage,
+      });
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/profile/:profileId/verify/polymarket/complete', express.json(), async (req, res) => {
+    try {
+      const { challengeId, signature } = req.body || {};
+      if (!challengeId || !signature) return res.status(400).json({ error: 'challengeId and signature required' });
+      const result = await completePMVerification(challengeId, signature);
+      if (result?.verified && result.profileId) {
+        const profile = loadProfile(result.profileId);
+        if (profile) {
+          profile.verificationData = profile.verificationData || {};
+          profile.verificationData.polymarket = {
+            verified: true,
+            address: result.identifier || result.walletAddress,
+            method: 'hardened_sign',
+            verifiedAt: new Date().toISOString(),
+            stats: result.stats || null,
+          };
+          profile.wallets = profile.wallets || {};
+          if (!profile.wallets.polymarket) profile.wallets.polymarket = result.identifier || result.walletAddress;
+          profile.updatedAt = new Date().toISOString();
+          saveProfile(profile);
+        }
+      }
+      res.status(result?.verified ? 200 : 400).json(result);
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  console.log('[Bridge] Wired hardened hyperliquid/polymarket profile routes');
 
   // ─── 4. Wire restored-verify-routes (moltbook, mcp, a2a, polymarket/stats) ───
   try {
