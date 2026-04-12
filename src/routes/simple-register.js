@@ -422,6 +422,12 @@ function registerSimpleRoutes(app, getDb) {
 
       const profile = d.prepare('SELECT * FROM profiles WHERE id = ?').get(registration.id) || existingProfile;
       const scoring = computeUnifiedTrustScore(d, profile, { v3Score: { verificationLevel: 1 } });
+      try {
+        const v3Explorer = require('../v3-explorer');
+        if (typeof v3Explorer.clearCache === 'function') v3Explorer.clearCache();
+      } catch (cacheError) {
+        console.warn('[AtomicRegister] Failed to clear V3 explorer cache:', cacheError.message);
+      }
       notifyRegistration(registration.name, registration.id, 'atomic');
 
       res.status(201).json({
