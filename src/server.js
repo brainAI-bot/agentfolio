@@ -1377,7 +1377,7 @@ app.post('/api/verification/eth/verify', (req, res) => {
     if (result.verified && result.profileId) {
       profileStore.addVerification(result.profileId, 'eth', result.walletAddress, { challengeId, signature: signature.slice(0, 16) + '...', verifiedAt: new Date().toISOString() });
     }
-    res.json(result);
+    res.status(result.verified ? 200 : 400).json(result);
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
