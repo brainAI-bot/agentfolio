@@ -1896,7 +1896,13 @@ app.post('/api/verify/x/challenge', async (req, res) => {
     challenge.challengeData.instructions = `Post a tweet containing: agentfolio-verify:${challenge.id}`;
     challenge.challengeData.expectedContent = `agentfolio-verify:${challenge.id}`;
     await verificationChallenges.storeChallenge(challenge);
-    res.json({ challengeId: challenge.id, instructions: challenge.challengeData.instructions, expiresAt: challenge.challengeData.expiresAt });
+    res.json({
+      challengeId: challenge.id,
+      instructions: challenge.challengeData.instructions,
+      tweetContent: challenge.challengeData.expectedContent,
+      code: challenge.challengeData.expectedContent,
+      expiresAt: challenge.challengeData.expiresAt
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
