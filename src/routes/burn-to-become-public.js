@@ -1085,6 +1085,8 @@ function handleBurnToBecome(req, res, url) {
         const message = e && e.message ? e.message : 'Unknown error';
         const validationError = (
           message === 'Wallet does not own this SPL NFT' ||
+          message === 'Wallet does not own this Core NFT' ||
+          message === 'Unable to verify Core NFT ownership' ||
           message === 'Burn to Become requires exactly 1 token in the wallet account' ||
           message === 'Burn to Become only supports non-fungible SPL NFTs' ||
           message === 'Invalid wallet or nftMint' ||
