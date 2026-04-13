@@ -173,6 +173,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             assigneeId={(job as any).assigneeId}
             clientId={(job as any).clientId}
             escrowStatus={(job as any).escrowStatus}
+            jobPDA={(job as any).onchainEscrowPDA || (job as any).v3EscrowPDA || null}
           />
 
           <div className="mt-4 text-[11px] px-3 py-2 rounded-lg" style={{ background: "var(--bg-primary)", fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
@@ -186,7 +187,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             clientId={(job as any).clientId}
             assigneeId={(job as any).assigneeId}
             budget={job.budget}
-            onchainEscrowPDA={(job as any).v3EscrowPDA || (job as any).onchainEscrowPDA}
+            onchainEscrowPDA={(job as any).onchainEscrowPDA || (job as any).v3EscrowPDA}
           />
           </div>
         </div>
