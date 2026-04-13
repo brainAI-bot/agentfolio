@@ -136,11 +136,25 @@ function enrichApplication(app) {
   return app;
 }
 
-// Normalize job.applications to always be an array
-function readJob(filepath) {
-  const job = readJSON(filepath);
-  if (job && !Array.isArray(job.applications)) job.applications = [];
+// Normalize job.applications to always be an array and hydrate release state from escrow
+function hydrateJobEscrowState(job) {
+  if (!job) return job;
+  if (!Array.isArray(job.applications)) job.applications = [];
+
+  if (job.escrowId && !job.fundsReleased) {
+    const escrow = readJSON(path.join(DATA_DIR, 'escrow', `${job.escrowId}.json`));
+    if (escrow && (escrow.status === 'released' || escrow.status === 'auto_released')) {
+      job.fundsReleased = true;
+      if (!job.releaseTxHash && escrow.releaseTxHash) job.releaseTxHash = escrow.releaseTxHash;
+      if (!job.releasedAt && escrow.releasedAt) job.releasedAt = escrow.releasedAt;
+    }
+  }
+
   return job;
+}
+
+function readJob(filepath) {
+  return hydrateJobEscrowState(readJSON(filepath));
 }
 
 function writeJSON(filepath, data) {
@@ -201,7 +215,7 @@ function registerRoutes(app) {
 
   // GET /api/marketplace/jobs — List all jobs (with hydrated applications)
   app.get('/api/marketplace/jobs', (req, res) => {
-    const jobs = getAllFiles(path.join(DATA_DIR, 'jobs'));
+    const jobs = getAllFiles(path.join(DATA_DIR, 'jobs')).map(hydrateJobEscrowState);
     const status = req.query.status;
     const normalizedStatus = typeof status === "string" ? status.trim().toLowerCase() : "";
     const filtered = normalizedStatus && normalizedStatus !== "all"
@@ -429,6 +443,9 @@ function registerRoutes(app) {
       job.status = 'completed';
       job.completedAt = new Date().toISOString();
       job.updatedAt = new Date().toISOString();
+      job.fundsReleased = true;
+      job.releaseTxHash = releaseTxHash || job.releaseTxHash || null;
+      job.releasedAt = escrow.releasedAt || new Date().toISOString();
       writeJSON(jobPath, job);
     }
 
@@ -491,6 +508,10 @@ function registerRoutes(app) {
     job.approvedBy = approvedBy || clientId || 'unknown';
     job.completionNote = completionNote || '';
     job.fundsReleased = true;
+    if (releaseTxSignature) {
+      job.releaseTxHash = releaseTxSignature;
+      job.releasedAt = new Date().toISOString();
+    }
     if (v3Release && releaseTxSignature) {
       job.v3ReleaseTx = releaseTxSignature;
       job.v3ReleasedAt = new Date().toISOString();
