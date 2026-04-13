@@ -29,6 +29,7 @@ const sdk = new SATPSDK({ network, rpcUrl });
 
 const DB_PATH = '/home/ubuntu/agentfolio/data/agentfolio.db';
 const MARKETPLACE_JOBS_DIR = '/home/ubuntu/agentfolio/data/marketplace/jobs';
+const REVIEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 function anchorDiscriminator(name) {
   return crypto.createHash('sha256').update(`global:${name}`).digest().slice(0, 8);
@@ -96,9 +97,30 @@ function resolveMarketplaceReviewContext(job, reviewerWallet) {
   throw new Error('Reviewer wallet is not a participant on the marketplace job for this escrow PDA.');
 }
 
+function getMarketplaceReviewReleaseTime(job) {
+  const raw = job?.v3ReleasedAt || job?.completedAt || null;
+  if (!raw) return null;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function assertMarketplaceReviewWindow(job) {
+  const status = String(job?.status || '').toLowerCase();
+  const releasedAtMs = getMarketplaceReviewReleaseTime(job);
+
+  if (status !== 'completed' || !releasedAtMs) {
+    throw new Error('Reviews are only allowed for completed marketplace jobs with released escrow.');
+  }
+
+  if ((Date.now() - releasedAtMs) > REVIEW_WINDOW_MS) {
+    throw new Error('Review window expired for this marketplace job.');
+  }
+}
+
 async function buildMarketplaceReviewCompatTx({ reviewerWallet, jobPDA, rating, quality, reliability, communication, reviewerIdentity, commentUri, commentHash }) {
   const job = findMarketplaceJobByPda(jobPDA);
   if (!job) throw new Error('No marketplace job found for provided jobPDA.');
+  assertMarketplaceReviewWindow(job);
 
   const { revieweeWallet, revieweeId, reviewerRole } = resolveMarketplaceReviewContext(job, reviewerWallet);
   const reviewerKey = new PublicKey(reviewerWallet);
