@@ -164,28 +164,6 @@ export default function SATPExplorerPage() {
             const wallet = agent.authority;
             const profile = profilesByWallet[wallet] || null;
             
-            // Fetch trust score + verification level
-            let scores: any = {};
-            let reputation: any = {};
-            let reviewData: any = {};
-
-            try {
-              // 5s timeout per request to prevent hanging on RPC 429s
-              const fetchWithTimeout = (url: string, ms = 5000) => {
-                const ctrl = new AbortController();
-                const timer = setTimeout(() => ctrl.abort(), ms);
-                return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer)).catch(() => null);
-              };
-              const [scoresRes, repRes, revRes] = await Promise.all([
-                fetchWithTimeout(`/api/satp/scores/${wallet}`),
-                fetchWithTimeout(`/api/satp/reputation/${wallet}`),
-                fetchWithTimeout(`/api/satp/reviews/${wallet}`),
-              ]);
-              if (scoresRes?.ok) scores = await scoresRes.json();
-              if (repRes?.ok) reputation = await repRes.json();
-              if (revRes?.ok) reviewData = await revRes.json();
-            } catch {}
-
             // NFT avatar from profile cross-reference
             const nftAvatar = profile?.nftAvatar;
             
@@ -198,10 +176,10 @@ export default function SATPExplorerPage() {
 
             // Use profile name if available (more human-readable), else on-chain name
             const displayName = profile?.name || agent.name || "Unknown Agent";
-            const profileId = scores?.data?.profileId || scores?.profileId || profile?.id || null;
+            const profileId = agent.profileId || profile?.id || null;
 
-            const verificationLevel = agent.verificationLevel || scores?.data?.verificationLevel || scores?.verificationLevel || 0;
-            const verificationLevelName = agent.verificationLevelName || agent.verificationLabel || scores?.data?.verificationLabel || scores?.data?.levelName || ['Unverified','Registered','Verified','Established','Trusted','Sovereign'][verificationLevel] || 'Unverified';
+            const verificationLevel = agent.verificationLevel || 0;
+            const verificationLevelName = agent.verificationLevelName || agent.verificationLabel || ['Unverified','Registered','Verified','Established','Trusted','Sovereign'][verificationLevel] || 'Unverified';
             const verificationBadge = agent.verificationBadge || ['⚪','🟡','🔵','🟢','🟠','🟣'][verificationLevel] || '⚪';
             return {
               id: agent.pda, // Use PDA as unique ID
@@ -210,14 +188,14 @@ export default function SATPExplorerPage() {
               avatar: nftAvatar?.image || nftAvatar?.arweaveUrl || agent.nftImage || profile?.avatar || "",
               wallet,
               pda: agent.pda,
-              trustScore: agent.reputationScore || scores?.data?.trustScore || scores?.trustScore || 0,
-              tier: (agent.tier || scores?.data?.tier || scores?.tier || "unverified").toLowerCase(),
+              trustScore: agent.trustScore || agent.reputationScore || 0,
+              tier: (agent.tier || "unverified").toLowerCase(),
               verificationLevel,
               verificationLevelName,
               verificationBadge,
               platforms,
-              reviewCount: reviewData?.data?.stats?.total || reviewData?.stats?.total || 0,
-              reviewAvg: reviewData?.data?.stats?.avg_rating || reviewData?.stats?.avg_rating || 0,
+              reviewCount: agent.reviewCount || 0,
+              reviewAvg: agent.reviewAvg || 0,
               jobCount: profile?.stats?.jobsCompleted || 0,
               totalEarned: profile?.stats?.totalEarned || 0,
               onChainAttestations: agent.onChainAttestations || 0,

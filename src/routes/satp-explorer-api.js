@@ -104,6 +104,15 @@ async function getSatpAgents() {
     const { computeScore } = require('../lib/compute-score');
     const _db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
     const profiles = _db.prepare('SELECT id, name, wallet, claimed, claimed_by, wallets FROM profiles').all();
+    const reviewStatsRows = _db.prepare(`
+      SELECT
+        reviewee_id AS profile_id,
+        COUNT(*) AS total,
+        ROUND(AVG(COALESCE(rating, 0)), 2) AS avg_rating
+      FROM reviews
+      GROUP BY reviewee_id
+    `).all();
+    const reviewStatsByProfileId = new Map(reviewStatsRows.map((row) => [row.profile_id, row]));
 
     const matchesProfile = (agent) => profiles.find((profile) => {
       let wallets = {};
@@ -180,11 +189,12 @@ async function getSatpAgents() {
         if (res.ok) byAgentData = await res.json();
       } catch (_) {}
 
+      const reviewStats = reviewStatsByProfileId.get(profile.id) || { total: 0, avg_rating: 0 };
       const unified = computeUnifiedTrustScore(_db, profile, {
         v3Score: {
           reputationScore: agent.reputationScore || 0,
           verificationLevel: agent.verificationLevel || 0,
-          verificationLabel: agent.verificationLabel || LEVEL_LABELS[agent.verificationLevel || 0] || 'Unknown',
+          verificationLabel: agent.verificationLabel || levelLabels[agent.verificationLevel || 0] || 'Unknown',
           createdAt: agent.createdAt || null,
         },
       });
@@ -219,6 +229,8 @@ async function getSatpAgents() {
         verifications: explorerVerifications,
         attestationMemos: explorerAttestations,
         platforms,
+        reviewCount: Number(reviewStats.total || 0),
+        reviewAvg: Number(reviewStats.avg_rating || 0),
         onChainAttestations: explorerAttestations.length || explorerVerifications.length || platforms.length || 0,
       };
     }));
