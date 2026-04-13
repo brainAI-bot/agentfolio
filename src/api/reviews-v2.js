@@ -455,7 +455,7 @@ function registerReviewsV2Routes(app) {
   });
 
   // POST /api/marketplace/jobs/:id/review — escrow-gated marketplace review
-  app.post('/api/marketplace/jobs/:id/review', (req, res) => {
+  app.post('/api/marketplace/jobs/:id/review', async (req, res) => {
     const {
       rating,
       comment,
@@ -505,11 +505,17 @@ function registerReviewsV2Routes(app) {
       return res.status(400).json({ error: 'Invalid review participants' });
     }
 
-    const auth = verifyReviewAuth(reviewerId, revieweeId, wallet, signature, signedMessage);
+    const submittedTxSignature = txSignature || tx_signature || null;
+    if (!submittedTxSignature) {
+      return res.status(400).json({ error: 'Marketplace reviews require a confirmed on-chain tx_signature.' });
+    }
+
+    const auth = await verifyReviewTxBackedAuth(reviewerId, submittedTxSignature);
     if (!auth.ok) {
       const payload = { error: auth.error };
       if (auth.hint) payload.hint = auth.hint;
       if (auth.expected) payload.expected = auth.expected;
+      if (auth.detail) payload.detail = auth.detail;
       return res.status(auth.status).json(payload);
     }
 
@@ -537,7 +543,7 @@ function registerReviewsV2Routes(app) {
         category_reliability: cr,
         category_communication: cc,
         reviewer_rep_weight,
-        tx_signature: txSignature || tx_signature || null,
+        tx_signature: submittedTxSignature,
       });
       db.close();
 
@@ -554,7 +560,7 @@ function registerReviewsV2Routes(app) {
         category_reliability: cr,
         category_communication: cc,
         reviewer_rep_weight,
-        tx_signature: txSignature || tx_signature || null,
+        tx_signature: submittedTxSignature,
         authenticated: true,
         created_at: record.createdAt,
       });
