@@ -57,6 +57,7 @@ export interface Job {
   escrowStatus: "ready" | "locked" | "funded" | "released" | "disputed";
   escrowTx?: string | null;
   v3EscrowPDA?: string | null;
+  onchainEscrowPDA?: string | null;
   proposals: number;
   deadline: string;
   assignee?: string;

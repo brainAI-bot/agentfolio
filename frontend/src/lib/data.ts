@@ -88,6 +88,8 @@ interface RawJob {
   escrowFunded: boolean;
   depositConfirmedAt?: string | null;
   selectedAt?: string | null;
+  onchainEscrowPDA?: string | null;
+  v3EscrowPDA?: string | null;
   agreedBudget?: number | null;
   agreedTimeline?: string | null;
   fundsLocked?: boolean;
@@ -299,12 +301,12 @@ function loadAllJobs(): Job[] {
 
         jobs.push({
           id: raw.id,
-          title: raw.title,
-          description: raw.description,
+          title: raw.title || raw.id,
+          description: raw.description || "",
           poster: posterName,
           posterAvatar: "",
-          budget: `${raw.budgetAmount} ${raw.budgetCurrency}`,
-          skills: raw.skills,
+          budget: `${raw.budgetAmount ?? raw.agreedBudget ?? 0} ${raw.budgetCurrency || "USDC"}`,
+          skills: Array.isArray(raw.skills) ? raw.skills : [],
           status: statusMap[raw.status] || "open",
           escrowStatus,
           proposals: raw.applicationCount || (Array.isArray((raw as any).applications) ? (raw as any).applications.length : 0),
@@ -312,6 +314,8 @@ function loadAllJobs(): Job[] {
           assignee: assigneeName,
           assigneeId: raw.selectedAgentId || raw.acceptedApplicant || undefined,
           clientId: raw.clientId,
+          onchainEscrowPDA: raw.onchainEscrowPDA || raw.v3EscrowPDA || null,
+          v3EscrowPDA: raw.v3EscrowPDA || raw.onchainEscrowPDA || null,
           ...(() => {
             if (raw.deliverableId) {
               try {
