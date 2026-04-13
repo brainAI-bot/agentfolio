@@ -53,11 +53,33 @@ function registerSATPRoutes(app) {
   async function loadNormalizedTrust(profileId) {
     if (!profileId) return null;
     try {
-      const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
-      const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(profileId)}/trust-score`);
-      if (!trustRes.ok) return null;
-      const trustJson = await trustRes.json();
-      return trustJson?.data || null;
+      const profileStore = require('../profile-store');
+      const { computeUnifiedTrustScore } = require('../lib/unified-trust-score');
+      let getV3Score = async () => null;
+      try {
+        ({ getV3Score } = require('../v3-score-service'));
+      } catch (_) {}
+
+      const db = profileStore.getDb();
+      const row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
+      if (!row) return null;
+
+      const v3Score = await getV3Score(profileId).catch(() => null);
+      const unified = computeUnifiedTrustScore(db, row, { v3Score });
+      return {
+        profileId,
+        trustScore: unified.score,
+        score: unified.score,
+        reputationScore: unified.score,
+        verificationLevel: unified.level,
+        verificationLevelName: unified.levelName,
+        verificationLabel: unified.levelName,
+        breakdown: unified.breakdown || {},
+        trustScoreBreakdown: unified.breakdown || {},
+        isBorn: !!(v3Score && v3Score.isBorn),
+        faceImage: (v3Score && v3Score.faceImage) || null,
+        source: unified.source,
+      };
     } catch (_) {
       return null;
     }
@@ -350,22 +372,17 @@ function registerSATPRoutes(app) {
         }
         try { db.close(); } catch {}
         if (matchedProfile?.id) {
-          const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
-          const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(matchedProfile.id)}/trust-score`);
-          if (trustRes.ok) {
-            const trustJson = await trustRes.json();
-            const trust = trustJson?.data;
-            if (trust && typeof trust.reputationScore === 'number') {
-              const normalizedScore = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
-              scores.reputationScore = normalizedScore;
-              scores.trustScore = normalizedScore;
-              scores.verificationLevel = trust.verificationLevel || 0;
-              scores.verificationLabel = trust.verificationLabel || trust.levelName || scores.verificationLabel;
-              scores.reputationRank = satpIdentity.scoreToRank(normalizedScore);
-              scores.tier = trust.verificationLabel || trust.levelName || scores.tier;
-              scores.source = 'normalized-profile-trust';
-              scores.profileId = matchedProfile.id;
-            }
+          const trust = await loadNormalizedTrust(matchedProfile.id);
+          if (trust && typeof trust.reputationScore === 'number') {
+            const normalizedScore = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
+            scores.reputationScore = normalizedScore;
+            scores.trustScore = normalizedScore;
+            scores.verificationLevel = trust.verificationLevel || 0;
+            scores.verificationLabel = trust.verificationLabel || trust.levelName || scores.verificationLabel;
+            scores.reputationRank = satpIdentity.scoreToRank(normalizedScore);
+            scores.tier = trust.verificationLabel || trust.levelName || scores.tier;
+            scores.source = 'normalized-profile-trust';
+            scores.profileId = matchedProfile.id;
           }
         }
       } catch (_) {}
@@ -461,11 +478,7 @@ function registerSATPRoutes(app) {
           db.close();
         }
         if (profileId) {
-          const trustRes = await globalThis.fetch(`http://127.0.0.1:3333/api/profile/${encodeURIComponent(profileId)}/trust-score`);
-          if (trustRes.ok) {
-            const trustJson = await trustRes.json();
-            normalizedTrust = trustJson?.data || null;
-          }
+          normalizedTrust = await loadNormalizedTrust(profileId);
         }
       } catch (_) {}
 
@@ -667,11 +680,7 @@ function registerSATPRoutes(app) {
           db.close();
         }
         if (profileId) {
-          const trustRes = await globalThis.fetch(`http://127.0.0.1:3333/api/profile/${encodeURIComponent(profileId)}/trust-score`);
-          if (trustRes.ok) {
-            const trustJson = await trustRes.json();
-            normalizedTrust = trustJson?.data || null;
-          }
+          normalizedTrust = await loadNormalizedTrust(profileId);
         }
       } catch (_) {}
 
@@ -772,11 +781,7 @@ function registerSATPRoutes(app) {
 
       let normalizedTrust = null;
       try {
-        const trustRes = await globalThis.fetch(`http://127.0.0.1:3333/api/profile/${encodeURIComponent(req.params.agentId)}/trust-score`);
-        if (trustRes.ok) {
-          const trustJson = await trustRes.json();
-          normalizedTrust = trustJson?.data || null;
-        }
+        normalizedTrust = await loadNormalizedTrust(req.params.agentId);
       } catch (_) {}
 
       const reputationScore = normalizedTrust?.reputationScore ?? record.reputationScore;
