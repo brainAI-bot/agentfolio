@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const PIPELINE_DIR = "/home/ubuntu/agentfolio/boa-pipeline";
 const { safeBurnToBecome } = require('./safe-burn-to-become');
+const { loadNormalizedTrust } = require('../lib/normalized-trust');
 
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const connection = new Connection(RPC_URL, 'confirmed');
@@ -197,15 +198,10 @@ function profileMatchesWallet(profile, wallet) {
 async function getNormalizedTrustForProfile(profileId) {
   let level = 0, rep = 0;
   try {
-    const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
-    const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(profileId)}/trust-score`);
-    if (trustRes.ok) {
-      const trustJson = await trustRes.json();
-      const trust = trustJson?.data;
-      if (trust && typeof trust.reputationScore === 'number') {
-        level = trust.verificationLevel || 0;
-        rep = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
-      }
+    const trust = await loadNormalizedTrust(profileId);
+    if (trust && typeof trust.reputationScore === 'number') {
+      level = trust.verificationLevel || 0;
+      rep = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
     }
   } catch {}
   return { level, rep };
@@ -782,21 +778,17 @@ function handleBurnToBecome(req, res, url) {
         if (matchedProfile?.id) {
           const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
           try {
-            const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(matchedProfile.id)}/trust-score`);
-            if (trustRes.ok) {
-              const trustJson = await trustRes.json();
-              const trust = trustJson?.data;
-              if (trust && typeof trust.reputationScore === 'number') {
-                const normalizedScore = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
-                return sendJson(200, {
-                  score: normalizedScore,
-                  free: normalizedScore >= FREE_SCORE_THRESHOLD,
-                  level: trust.verificationLevel || 0,
-                  levelName: trust.verificationLabel || 'Unverified',
-                  source: 'normalized-profile-trust',
-                  profileId: matchedProfile.id,
-                });
-              }
+            const trust = await loadNormalizedTrust(matchedProfile.id);
+            if (trust && typeof trust.reputationScore === 'number') {
+              const normalizedScore = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
+              return sendJson(200, {
+                score: normalizedScore,
+                free: normalizedScore >= FREE_SCORE_THRESHOLD,
+                level: trust.verificationLevel || 0,
+                levelName: trust.verificationLabel || 'Unverified',
+                source: 'normalized-profile-trust',
+                profileId: matchedProfile.id,
+              });
             }
           } catch {}
         }
@@ -894,15 +886,10 @@ function handleBurnToBecome(req, res, url) {
         let level = resolvedProfile?.level || 0, reputation = resolvedProfile?.rep || 0;
         let v3Lev = 0, v3Rp = 0, v2Lev = 0, v2Rp = 0;
         try {
-          const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
-          const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(matchedProfile.id)}/trust-score`);
-          if (trustRes.ok) {
-            const trustJson = await trustRes.json();
-            const trust = trustJson?.data;
-            if (trust && typeof trust.reputationScore === 'number') {
-              level = trust.verificationLevel || 0;
-              reputation = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
-            }
+          const trust = await loadNormalizedTrust(matchedProfile.id);
+          if (trust && typeof trust.reputationScore === 'number') {
+            level = trust.verificationLevel || 0;
+            reputation = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
           }
         } catch {}
         if (!level && !reputation) {
@@ -1355,15 +1342,10 @@ function handleBurnToBecome(req, res, url) {
           
           let level = resolvedProfile?.level || 0, rep = resolvedProfile?.rep || 0, isBorn = false;
           try {
-            const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
-            const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(profileId)}/trust-score`);
-            if (trustRes.ok) {
-              const trustJson = await trustRes.json();
-              const trust = trustJson?.data;
-              if (trust && typeof trust.reputationScore === 'number') {
-                level = trust.verificationLevel || 0;
-                rep = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
-              }
+            const trust = await loadNormalizedTrust(profileId);
+            if (trust && typeof trust.reputationScore === 'number') {
+              level = trust.verificationLevel || 0;
+              rep = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
             }
           } catch {}
           try {
@@ -1519,15 +1501,10 @@ function handleBurnToBecome(req, res, url) {
           let v3Level = 0, v3Rep = 0, v2Level = 0, v2Rep = 0;
           let level = resolvedProfile?.level || 0, rep = resolvedProfile?.rep || 0;
           try {
-            const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
-            const trustRes = await globalThis.fetch(`${apiBase}/api/profile/${encodeURIComponent(profileId)}/trust-score`);
-            if (trustRes.ok) {
-              const trustJson = await trustRes.json();
-              const trust = trustJson?.data;
-              if (trust && typeof trust.reputationScore === 'number') {
-                level = trust.verificationLevel || 0;
-                rep = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
-              }
+            const trust = await loadNormalizedTrust(profileId);
+            if (trust && typeof trust.reputationScore === 'number') {
+              level = trust.verificationLevel || 0;
+              rep = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
             }
           } catch (e) { console.error('[BURN] normalized trust fetch error:', e.message); }
           try {
