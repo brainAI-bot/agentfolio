@@ -686,56 +686,107 @@ class SATPSDK {
     const acct = await this.connection.getAccountInfo(reviewKey);
     if (!acct) return null;
 
+    const raw = acct.data;
+    const data = raw.slice(8); // skip Anchor discriminator
+
+    const readString = (buf, offset) => {
+      const len = buf.readUInt32LE(offset);
+      offset += 4;
+      if (offset + len > buf.length) {
+        throw new Error(`invalid string length ${len} at offset ${offset - 4}`);
+      }
+      const value = buf.slice(offset, offset + len).toString('utf8');
+      return { value, offset: offset + len };
+    };
+
     try {
-      const data = acct.data.slice(8); // skip Anchor discriminator
+      // Live mainnet marketplace reviews currently use the legacy create_review layout
+      // from satp-idls/reviews.json.
       let offset = 0;
-
+      const agentId = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
       const reviewer = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
-      const reviewed = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
-      const jobId = Number(data.readBigUInt64LE(offset)); offset += 8;
-      const jobRef = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
       const rating = data[offset]; offset += 1;
-      const categoryQuality = data[offset]; offset += 1;
-      const categoryReliability = data[offset]; offset += 1;
-      const categoryCommunication = data[offset]; offset += 1;
-
-      // String: 4-byte length prefix + bytes
-      const uriLen = data.readUInt32LE(offset); offset += 4;
-      const commentUri = data.slice(offset, offset + uriLen).toString('utf8'); offset += uriLen;
-
-      const commentHash = data.slice(offset, offset + 32).toString('hex'); offset += 32;
-      const timestamp = Number(data.readBigInt64LE(offset)); offset += 8;
-      const hasResponse = data[offset] === 1; offset += 1;
-
-      // Response string
-      const resUriLen = data.readUInt32LE(offset); offset += 4;
-      const responseUri = data.slice(offset, offset + resUriLen).toString('utf8'); offset += resUriLen;
-
-      const responseHash = data.slice(offset, offset + 32).toString('hex'); offset += 32;
-      const responseTimestamp = Number(data.readBigInt64LE(offset)); offset += 8;
+      const reviewTextResult = readString(data, offset);
+      const reviewText = reviewTextResult.value;
+      offset = reviewTextResult.offset;
+      const metadataResult = readString(data, offset);
+      const metadata = metadataResult.value;
+      offset = metadataResult.offset;
+      const createdAt = Number(data.readBigInt64LE(offset)); offset += 8;
+      const updatedAt = Number(data.readBigInt64LE(offset)); offset += 8;
+      const isActive = data[offset] === 1; offset += 1;
       const bump = data[offset]; offset += 1;
+
+      let metadataJson = null;
+      try { metadataJson = JSON.parse(metadata); } catch (_) {}
 
       return {
         reviewer: reviewer.toBase58(),
-        reviewed: reviewed.toBase58(),
-        jobId,
-        jobRef: jobRef.toBase58(),
+        reviewed: agentId.toBase58(),
+        agentId: agentId.toBase58(),
         rating,
-        categoryQuality,
-        categoryReliability,
-        categoryCommunication,
-        commentUri,
-        commentHash,
-        timestamp,
-        hasResponse,
-        responseUri: hasResponse ? responseUri : null,
-        responseHash: hasResponse ? responseHash : null,
-        responseTimestamp: hasResponse ? responseTimestamp : null,
+        reviewText,
+        metadata,
+        metadataJson,
+        createdAt,
+        updatedAt,
+        isActive,
         bump,
+        layout: 'legacy_create_review',
         pda: reviewKey.toBase58(),
       };
-    } catch (e) {
-      return { pda: reviewKey.toBase58(), raw: acct.data.toString('hex'), error: e.message };
+    } catch (legacyErr) {
+      try {
+        // Fallback for older job-scoped review layout.
+        let offset = 0;
+        const reviewer = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
+        const reviewed = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
+        const jobId = Number(data.readBigUInt64LE(offset)); offset += 8;
+        const jobRef = new PublicKey(data.slice(offset, offset + 32)); offset += 32;
+        const rating = data[offset]; offset += 1;
+        const categoryQuality = data[offset]; offset += 1;
+        const categoryReliability = data[offset]; offset += 1;
+        const categoryCommunication = data[offset]; offset += 1;
+        const uriResult = readString(data, offset);
+        const commentUri = uriResult.value;
+        offset = uriResult.offset;
+        const commentHash = data.slice(offset, offset + 32).toString('hex'); offset += 32;
+        const timestamp = Number(data.readBigInt64LE(offset)); offset += 8;
+        const hasResponse = data[offset] === 1; offset += 1;
+        const resUriResult = readString(data, offset);
+        const responseUri = resUriResult.value;
+        offset = resUriResult.offset;
+        const responseHash = data.slice(offset, offset + 32).toString('hex'); offset += 32;
+        const responseTimestamp = Number(data.readBigInt64LE(offset)); offset += 8;
+        const bump = data[offset]; offset += 1;
+
+        return {
+          reviewer: reviewer.toBase58(),
+          reviewed: reviewed.toBase58(),
+          jobId,
+          jobRef: jobRef.toBase58(),
+          rating,
+          categoryQuality,
+          categoryReliability,
+          categoryCommunication,
+          commentUri,
+          commentHash,
+          timestamp,
+          hasResponse,
+          responseUri: hasResponse ? responseUri : null,
+          responseHash: hasResponse ? responseHash : null,
+          responseTimestamp: hasResponse ? responseTimestamp : null,
+          bump,
+          layout: 'job_scoped_review_v3',
+          pda: reviewKey.toBase58(),
+        };
+      } catch (jobScopedErr) {
+        return {
+          pda: reviewKey.toBase58(),
+          raw: raw.toString('hex'),
+          error: `${legacyErr.message}; fallback: ${jobScopedErr.message}`,
+        };
+      }
     }
   }
 
