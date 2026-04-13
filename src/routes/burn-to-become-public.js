@@ -1011,7 +1011,13 @@ function handleBurnToBecome(req, res, url) {
         }
 
         const burnSatpCheck = await checkSatpOnChain(wallet);
-        if (!burnSatpCheck.hasIdentity) {
+        let hasSatpIdentity = burnSatpCheck.hasIdentity;
+        try {
+          const { getV3Score } = require('../v3-score-service');
+          const v3 = await getV3Score(profileId);
+          if (v3) hasSatpIdentity = true;
+        } catch {}
+        if (!hasSatpIdentity) {
           return sendJson(403, { error: 'SATP identity required to burn. Verify your wallet at agentfolio.bot/verify first.' });
         }
         if (burnSatpCheck.hasBoaSoulbound) {
@@ -1088,7 +1094,13 @@ function handleBurnToBecome(req, res, url) {
         
         // ON-CHAIN SATP SECURITY: Identity + boa_soulbound attestation check
         const burnSatpCheck = await checkSatpOnChain(wallet);
-        if (!burnSatpCheck.hasIdentity) {
+        let hasSatpIdentity = burnSatpCheck.hasIdentity;
+        try {
+          const { getV3Score } = require('../v3-score-service');
+          const v3 = await getV3Score(resolvedProfileId);
+          if (v3) hasSatpIdentity = true;
+        } catch {}
+        if (!hasSatpIdentity) {
           console.log('[BurnPublic] BLOCKED: No SATP identity for', wallet);
           return sendJson(403, { error: 'SATP identity required to burn. Verify your wallet at agentfolio.bot/verify first.' });
         }
