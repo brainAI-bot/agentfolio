@@ -120,6 +120,8 @@ function assertMarketplaceReviewWindow(job) {
 
 function getReviewSubmitErrorStatus(message) {
   const clientErrors = [
+    'Invalid reviewer pubkey',
+    'Invalid reviewerIdentity pubkey',
     'No marketplace job found for provided jobPDA.',
     'Unable to resolve marketplace participant wallets for review build.',
     'Reviewer wallet is not a participant on the marketplace job for this escrow PDA.',
@@ -243,6 +245,14 @@ router.post('/submit', async (req, res, next) => {
       return res.status(400).json({
         error: 'Missing required fields: reviewer, reviewerIdentity, jobPDA, rating, commentUri',
       });
+    }
+
+    try { new PublicKey(reviewer); } catch {
+      return res.status(400).json({ error: 'Invalid reviewer pubkey' });
+    }
+
+    try { new PublicKey(reviewerIdentity); } catch {
+      return res.status(400).json({ error: 'Invalid reviewerIdentity pubkey' });
     }
 
     // Validate rating ranges
