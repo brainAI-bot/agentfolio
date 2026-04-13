@@ -237,24 +237,8 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
         response_text: r.response_text || null
       })).filter((r: any) => r.text);
     }
-    // Also fetch peer reviews / endorsements
-    const prRes = await fetch(`${API_BASE}/api/profile/${id}/endorsements`, { cache: "no-store" });
-    if (prRes.ok) {
-      const prData = await prRes.json();
-      const peerReviews = (prData.endorsements || []).map((r: any) => ({
-        author: r.from || r.fromName || "Anonymous",
-        rating: r.rating || 0,
-        text: r.text || r.comment || "",
-        date: r.created_at || null,
-        tx_signature: r.tx_signature || null,
-        source: r.tx_signature ? "solana" : "peer"
-      })).filter((r: any) => r.text);
-      // Deduplicate by text
-      const seen = new Set(reviews.map((r: any) => r.text));
-      for (const pr of peerReviews) {
-        if (!seen.has(pr.text)) { reviews.push(pr); seen.add(pr.text); }
-      }
-    }
+    // Endorsements are social proof, not reviews.
+    // Do not merge /endorsements into the reviews surface or rating math.
     // Also fetch SATP on-chain reviews (trustless, from Solana)
     const wallet = (agent as any).wallets?.solana || (agent as any).wallet;
     if (wallet) {
