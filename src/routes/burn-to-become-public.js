@@ -1189,7 +1189,64 @@ function handleBurnToBecome(req, res, url) {
           console.warn('[BurnPublic] DB permanent face check failed (non-blocking — on-chain SATP is authority):', checkErr.message);
         }
         
-        // 1. Submit the signed burn transaction
+        // 1. Validate the signed burn transaction before broadcast
+        const walletPubkey = new PublicKey(wallet);
+        const mintPubkey = new PublicKey(nftMint);
+        let submittedTx;
+        try {
+          submittedTx = Transaction.from(Buffer.from(signedTransaction, 'base64'));
+        } catch {
+          return sendJson(400, { error: 'Invalid signed transaction payload' });
+        }
+        if (!submittedTx.feePayer || !submittedTx.feePayer.equals(walletPubkey)) {
+          return sendJson(400, { error: 'Signed transaction fee payer does not match wallet' });
+        }
+        const submittedPrograms = submittedTx.instructions.map(ix => ix.programId.toBase58());
+        const allowedPrograms = new Set([
+          ComputeBudgetProgram.programId.toBase58(),
+          TOKEN_PROGRAM_ID.toBase58(),
+          'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d',
+        ]);
+        if (submittedPrograms.some(pid => !allowedPrograms.has(pid))) {
+          return sendJson(400, { error: 'Signed transaction contains unsupported instructions' });
+        }
+        const submittedMintAccount = await connection.getAccountInfo(mintPubkey);
+        if (!submittedMintAccount) {
+          return sendJson(400, { error: 'NFT account not found: ' + nftMint });
+        }
+        const METAPLEX_CORE_PROGRAM = new PublicKey('CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d');
+        if (submittedMintAccount.owner.equals(METAPLEX_CORE_PROGRAM)) {
+          const coreIx = submittedTx.instructions.find(ix => ix.programId.equals(METAPLEX_CORE_PROGRAM));
+          if (!coreIx) {
+            return sendJson(400, { error: 'Signed transaction does not contain the expected Core burn instruction' });
+          }
+          if (!coreIx.keys[0] || !coreIx.keys[0].pubkey.equals(mintPubkey)) {
+            return sendJson(400, { error: 'Signed transaction asset does not match requested nftMint' });
+          }
+          if (!coreIx.keys.some(k => k.pubkey.equals(walletPubkey) && k.isSigner)) {
+            return sendJson(400, { error: 'Signed transaction signer does not match wallet' });
+          }
+        } else if (submittedMintAccount.owner.equals(TOKEN_PROGRAM_ID)) {
+          const expectedAta = await getAssociatedTokenAddress(mintPubkey, walletPubkey, false, TOKEN_PROGRAM_ID);
+          let sawBurn = false;
+          let sawClose = false;
+          for (const ix of submittedTx.instructions.filter(ix => ix.programId.equals(TOKEN_PROGRAM_ID))) {
+            const opcode = ix.data && ix.data.length ? ix.data[0] : null;
+            if (opcode === 8 && ix.keys[0] && ix.keys[1] && ix.keys[2] && ix.keys[0].pubkey.equals(expectedAta) && ix.keys[1].pubkey.equals(mintPubkey) && ix.keys[2].pubkey.equals(walletPubkey) && ix.keys[2].isSigner) {
+              sawBurn = true;
+            }
+            if (opcode === 9 && ix.keys[0] && ix.keys[1] && ix.keys[2] && ix.keys[0].pubkey.equals(expectedAta) && ix.keys[1].pubkey.equals(walletPubkey) && ix.keys[2].pubkey.equals(walletPubkey) && ix.keys[2].isSigner) {
+              sawClose = true;
+            }
+          }
+          if (!sawBurn || !sawClose) {
+            return sendJson(400, { error: 'Signed transaction does not match the expected SPL burn flow' });
+          }
+        } else {
+          return sendJson(400, { error: 'Unsupported NFT program for burn: ' + submittedMintAccount.owner.toBase58() });
+        }
+
+        // 2. Submit the signed burn transaction
         const txBuffer = Buffer.from(signedTransaction, 'base64');
         const burnTx = await connection.sendRawTransaction(txBuffer);
         await connection.confirmTransaction(burnTx, 'confirmed');
