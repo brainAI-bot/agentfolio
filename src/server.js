@@ -12,6 +12,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const rateLimit = require('express-rate-limit');
+const logger = require('./logger');
 
 const SITE_URL = process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || 'https://agentfolio.bot';
 const SITE_HOSTNAME = (() => {
@@ -250,6 +251,7 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use(logger.httpMiddleware);
 app.use('/api', publicApiLimiter);
 
 app.get('/.well-known/agentfolio-verification.txt', (req, res) => {
@@ -2473,23 +2475,55 @@ try {
 }
 
 app.use((err, req, res, next) => {
-  console.error(`[ERROR] ${err.message}`, { 
+  logger.error('Unhandled express error', {
     path: req.path,
     method: req.method,
+    message: err.message,
     stack: NODE_ENV === 'development' ? err.stack : undefined
   });
-  
+
   res.status(500).json({
     error: NODE_ENV === 'production' ? 'Internal server error' : err.message
   });
 });
 
-// Graceful shutdown
-process.on('SIGINT', () => {
-  console.log(`[${new Date().toISOString()}] info: SIGINT received, shutting down gracefully...`, {service: "agentfolio"});
-  console.log(`[${new Date().toISOString()}] info: Server closed`, {service: "agentfolio"});
-  process.exit(0);
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught exception', {
+    message: err?.message || String(err),
+    stack: err?.stack
+  });
 });
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled rejection', {
+    reason: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined
+  });
+});
+
+let server = null;
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info('Shutdown signal received', { signal });
+  if (!server) {
+    logger.info('Server not yet initialized, exiting');
+    process.exit(0);
+    return;
+  }
+  server.close(() => {
+    logger.info('Server closed', { signal });
+    process.exit(0);
+  });
+  setTimeout(() => {
+    logger.warn('Forced shutdown after timeout', { signal });
+    process.exit(1);
+  }, 10000).unref();
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 // ============================================================
 // x402 Paid API Endpoints (USDC on Base)
@@ -2790,15 +2824,13 @@ app.get('/api/x402/pricing', (req, res) => {
 });
 
 if (X402_ENABLED) {
-  console.log(`[${new Date().toISOString()}] info: x402 payment layer initialized`, {
-    service: 'agentfolio',
+  logger.info('x402 payment layer initialized', {
     network: X402_NETWORK,
     receivingAddress: X402_RECEIVE_ADDRESS,
     paidEndpoints: ['GET /api/score?id=<profileId> ($0.01)', 'GET /api/profile/:id/trust-score ($0.01)', 'GET /api/leaderboard/scores ($0.05)'],
   });
 } else {
-  console.warn(`[${new Date().toISOString()}] warn: x402 payment layer disabled`, {
-    service: 'agentfolio',
+  logger.warn('x402 payment layer disabled', {
     reason: X402_DISABLE_REASON,
     network: X402_NETWORK || null,
     receivingAddress: X402_RECEIVE_ADDRESS || null,
@@ -2866,10 +2898,9 @@ if (X402_ENABLED) {
   });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`[${new Date().toISOString()}] info: AgentFolio server started`, { 
-    service: "agentfolio",
-    port: PORT, 
+server = app.listen(PORT, () => {
+  logger.info('AgentFolio server started', {
+    port: PORT,
     env: NODE_ENV,
     pid: process.pid
   });
@@ -2898,8 +2929,7 @@ app.listen(PORT, () => {
 
 
 
-  console.log(`[${new Date().toISOString()}] info: Available endpoints`, {
-    service: "agentfolio",
+  logger.info('Available endpoints', {
     endpoints: [
       "GET / - Profile directory",
       "GET /profile/:id - Profile page", 
@@ -2913,15 +2943,15 @@ app.listen(PORT, () => {
     ]
   });
   
-  console.log(`[${new Date().toISOString()}] info: 🔧 DISCORD VERIFICATION FIX ACTIVE`, {service: "agentfolio"});
-  console.log(`[${new Date().toISOString()}] info: ✓ Line 68 updated to hardened version`, {service: "agentfolio"});
+  logger.info('Discord verification fix active');
+  logger.info('Line 68 updated to hardened version');
   
   // Start chain-cache refresh loop (on-chain attestation data)
   try {
     chainCache.start();
-    console.log(`[${new Date().toISOString()}] info: ✓ Chain-cache started (120s refresh)`, {service: "agentfolio"});
+    logger.info('Chain-cache started', { refreshSeconds: 120 });
   } catch (e) {
-    console.warn(`[${new Date().toISOString()}] warn: Chain-cache start failed:`, e.message);
+    logger.warn('Chain-cache start failed', { message: e.message });
   }
 });
 
