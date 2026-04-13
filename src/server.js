@@ -2821,19 +2821,21 @@ app.get('/api/score', async (req, res) => {
   // A1: Single scoring function
   const resolvedId = row ? row.id : profileId;
   let _computed = { score: 0, level: 0, levelName: 'Unverified', source: 'none', verifications: [] };
+  let v3Score = null;
   try {
     const _sdb = new (require('better-sqlite3'))(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
-    const _profileForTrust = {
+    const _profileForTrust = row || {
       ...(profile || {}),
       id: resolvedId,
       claimed: profile?.claimed ?? row?.claimed ?? 0,
       wallet: solWallet || profile?.wallet || row?.wallet || null,
     };
-    _computed = computeUnifiedTrustScore(_sdb, _profileForTrust, {
-      v3Score: satpData?.onChain || satpData || null,
-    });
+    v3Score = await getV3Score(resolvedId).catch(() => null);
+    _computed = computeUnifiedTrustScore(_sdb, _profileForTrust, { v3Score });
     _sdb.close();
-  } catch (_) {}
+  } catch (err) {
+    try { console.error('[x402 /api/score] unified scoring failed:', err?.stack || err?.message || err); } catch {}
+  }
   
   {
     return res.json({
@@ -2844,7 +2846,7 @@ app.get('/api/score', async (req, res) => {
       tier: _computed.levelName,
       source: _computed.source || 'compute-score',
       verifications: _computed.verifications || verifications,
-      onChain: { reputationScore: _computed.score, verificationLevel: _computed.level, isBorn: false },
+      onChain: { reputationScore: _computed.score, verificationLevel: _computed.level, isBorn: !!(v3Score && v3Score.isBorn) },
       payment: { protocol: 'x402', enabled: X402_ENABLED, network: X402_ENABLED ? X402_NETWORK : null, price: X402_ENABLED ? '$0.01' : null, reason: X402_DISABLE_REASON },
     });
   }
