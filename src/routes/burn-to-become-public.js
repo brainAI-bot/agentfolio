@@ -1413,7 +1413,7 @@ function handleBurnToBecome(req, res, url) {
 
         // Build unsigned TX via worker (pass agentId for on-chain PDA creation)
         const { execFile } = require("child_process");
-        const workerArgs = ["/home/ubuntu/agentfolio/core-cm-v2/atomic-prepare-worker.mjs", wallet, flow];
+        const workerArgs = ["/home/ubuntu/agentfolio/core-cm-v2/core-cm-prepare-worker.mjs", wallet, flow];
         if (agentIdForPda) workerArgs.push(agentIdForPda);
         execFile("node", workerArgs, {
           timeout: 30000, cwd: "/home/ubuntu/agentfolio/core-cm-v2",
