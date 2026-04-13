@@ -804,42 +804,63 @@ function handleBurnToBecome(req, res, url) {
   // GET /api/burn-to-become/profile?wallet=... — resolve linked profile and normalized trust data
   if (url.pathname === '/api/burn-to-become/profile' && req.method === 'GET') {
     const wallet = (req?.query?.wallet || (() => { try { return url?.searchParams?.get ? url.searchParams.get('wallet') : new URL(req.originalUrl || req.url || '', 'http://localhost').searchParams.get('wallet'); } catch { return null; } })());
+    const profileId = (req?.query?.profileId || (() => { try { return url?.searchParams?.get ? url.searchParams.get('profileId') : new URL(req.originalUrl || req.url || '', 'http://localhost').searchParams.get('profileId'); } catch { return null; } })());
     if (!wallet) { sendJson(400, { error: 'wallet required' }); return true; }
-    try {
-      const Database = require('better-sqlite3');
-      const { computeScore } = require('../lib/compute-score');
-      const db = new Database(require('path').join(__dirname, '../../data/agentfolio.db'), { readonly: true });
-      const rows = db.prepare('SELECT * FROM profiles').all();
-      let matchedProfile = null;
-      for (const row of rows) {
-        try {
-          const wallets = row.wallets ? JSON.parse(row.wallets) : {};
-          const vd = row.verification_data ? JSON.parse(row.verification_data) : {};
-          const solWallet = wallets.solana || row.wallet || vd?.solana?.address;
-          if (solWallet === wallet) { matchedProfile = row; break; }
-        } catch {}
-      }
-      if (!matchedProfile) { try { db.close(); } catch {} sendJson(200, { found: false, wallet }); return true; }
+    (async () => {
+      try {
+        const Database = require('better-sqlite3');
+        const { computeScore } = require('../lib/compute-score');
+        const db = new Database(require('path').join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+        const resolvedProfile = await resolveBestProfileForWallet(db, wallet, { preferredProfileId: profileId });
+        const matchedProfile = resolvedProfile?.profile || null;
+        if (!matchedProfile) { try { db.close(); } catch {} sendJson(200, { found: false, wallet }); return; }
 
-      const verifs = db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(matchedProfile.id);
-      const computed = computeScore(verifs, { hasSatpIdentity: !!matchedProfile.wallet, claimed: !!matchedProfile.claimed });
-      try { db.close(); } catch {}
-      sendJson(200, {
-        found: true,
-        wallet,
-        profileId: matchedProfile.id,
-        agent: matchedProfile.id,
-        name: matchedProfile.name,
-        handle: matchedProfile.handle,
-        level: computed.level || 0,
-        levelName: computed.levelName || 'Unverified',
-        badge: computed.badge || '⚪',
-        reputation: computed.score || 0,
-      });
-    } catch (e) {
-      console.error('[BurnPublic] profile error:', e);
-      sendJson(500, { error: e.message });
-    }
+        let level = resolvedProfile?.level || 0;
+        let reputation = resolvedProfile?.rep || 0;
+        let levelName = 'Unverified';
+        let badge = '⚪';
+
+        try {
+          const trust = await loadNormalizedTrust(matchedProfile.id);
+          if (trust && typeof trust.reputationScore === 'number') {
+            level = trust.verificationLevel || 0;
+            reputation = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
+            levelName = trust.verificationLabel || levelName;
+          }
+        } catch {}
+
+        if (!level && !reputation) {
+          const verifs = db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(matchedProfile.id);
+          const computed = computeScore(verifs, { hasSatpIdentity: !!matchedProfile.wallet, claimed: !!matchedProfile.claimed });
+          level = computed.level || 0;
+          reputation = computed.score || 0;
+          levelName = computed.levelName || levelName;
+          badge = computed.badge || badge;
+        } else {
+          const LEVEL_NAMES = ['Unregistered', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
+          const LEVEL_BADGES = ['⚪', '🟡', '🔵', '🟢', '🟠', '👑'];
+          levelName = LEVEL_NAMES[level] || levelName;
+          badge = LEVEL_BADGES[level] || badge;
+        }
+
+        try { db.close(); } catch {}
+        sendJson(200, {
+          found: true,
+          wallet,
+          profileId: matchedProfile.id,
+          agent: matchedProfile.id,
+          name: matchedProfile.name,
+          handle: matchedProfile.handle,
+          level,
+          levelName,
+          badge,
+          reputation,
+        });
+      } catch (e) {
+        console.error('[BurnPublic] profile error:', e);
+        sendJson(500, { error: e.message });
+      }
+    })();
     return true;
   }
 
