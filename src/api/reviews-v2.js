@@ -78,8 +78,19 @@ function getMarketplaceParticipants(job) {
 }
 
 function hasReleasedEscrow(job) {
-  return !!(job && (job.fundsReleased || job.v3ReleaseTx || job.v3ReleasedAt || job.status === 'completed'));
+  if (!job) return false;
+
+  if (job.escrowId) {
+    try {
+      const escrowPath = path.join('/home/ubuntu/agentfolio/data/marketplace/escrow', String(job.escrowId) + '.json');
+      const escrow = JSON.parse(fs.readFileSync(escrowPath, 'utf8'));
+      if (escrow && (escrow.status === 'released' || escrow.status === 'auto_released')) return true;
+    } catch (_) {}
+  }
+
+  return !!(job.fundsReleased || job.v3ReleaseTx || job.v3ReleasedAt);
 }
+
 
 function verifyReviewAuth(reviewerId, revieweeId, wallet, signature, signedMessage) {
   if (!wallet || !signature || !signedMessage) {
