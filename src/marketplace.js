@@ -10,6 +10,7 @@ const path = require('path');
 const crypto = require('crypto');
 let addActivity;
 try { addActivity = require('./profile-store').addActivity; } catch { addActivity = () => {}; }
+const { syncMarketplaceJobToDb, syncMarketplaceApplicationToDb } = require('./lib/marketplace-db-sync');
 
 const DATA_DIR = path.join(__dirname, '..', 'data', 'marketplace');
 
@@ -280,8 +281,11 @@ function registerRoutes(app) {
     };
     writeJSON(path.join(DATA_DIR, 'applications', `${application.id}.json`), application);
     job.applications.push(application.id);
+    job.applicationCount = job.applications.length;
     job.updatedAt = new Date().toISOString();
     writeJSON(jobPath, job);
+    try { syncMarketplaceJobToDb(job); } catch (e) { console.warn('[Marketplace] job DB sync failed:', e.message); }
+    try { syncMarketplaceApplicationToDb(application); } catch (e) { console.warn('[Marketplace] application DB sync failed:', e.message); }
     res.status(201).json(application);
   };
   app.post('/api/marketplace/jobs/:id/apply', applyHandler);
@@ -333,15 +337,24 @@ function registerRoutes(app) {
         const other = readJSON(path.join(DATA_DIR, 'applications', `${appId}.json`));
         if (other && other.status === 'pending') {
           other.status = 'rejected';
+          other.updatedAt = new Date().toISOString();
           writeJSON(path.join(DATA_DIR, 'applications', `${appId}.json`), other);
+          try { syncMarketplaceApplicationToDb(other); } catch (e) { console.warn('[Marketplace] rejected application DB sync failed:', e.message); }
         }
       }
     });
 
     job.status = 'in_progress';
     job.acceptedApplicant = application.applicantId;
+    job.selectedAgentId = application.applicantId;
+    job.selectedAt = application.acceptedAt;
+    job.agreedBudget = Number(application.bidAmount || job.agreedBudget || job.budgetAmount || job.budget || 0);
+    job.applicationCount = job.applications.length;
     job.updatedAt = new Date().toISOString();
     writeJSON(jobPath, job);
+
+    try { syncMarketplaceApplicationToDb(application); } catch (e) { console.warn('[Marketplace] accepted application DB sync failed:', e.message); }
+    try { syncMarketplaceJobToDb(job); } catch (e) { console.warn('[Marketplace] accepted job DB sync failed:', e.message); }
 
     res.json({ message: 'Application accepted', application, job });
   });
