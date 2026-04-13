@@ -432,8 +432,28 @@ async function buildBurnTransaction(walletAddress, nftMint) {
   }
   
   // ═══ SPL TOKEN NFT: Original burn flow ═══
+  if (!accountInfo.owner.equals(TOKEN_PROGRAM_ID)) {
+    throw new Error('Unsupported NFT program for burn: ' + accountInfo.owner.toBase58());
+  }
   console.log('[BurnPublic] Detected SPL Token NFT, using SPL Token burn');
   const ata = await getAssociatedTokenAddress(mint, wallet, false, TOKEN_PROGRAM_ID);
+  const { getAccount, getMint } = require('@solana/spl-token');
+  let tokenAccount;
+  try {
+    tokenAccount = await getAccount(connection, ata, 'confirmed', TOKEN_PROGRAM_ID);
+  } catch {
+    throw new Error('Wallet does not own this SPL NFT');
+  }
+  if (!tokenAccount.owner.equals(wallet)) {
+    throw new Error('Wallet does not own this SPL NFT');
+  }
+  if (tokenAccount.amount !== 1n) {
+    throw new Error('Burn to Become requires exactly 1 token in the wallet account');
+  }
+  const mintInfo = await getMint(connection, mint, 'confirmed', TOKEN_PROGRAM_ID);
+  if (mintInfo.decimals !== 0 || mintInfo.supply !== 1n) {
+    throw new Error('Burn to Become only supports non-fungible SPL NFTs');
+  }
   
   const tx = new Transaction();
   tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 }));
