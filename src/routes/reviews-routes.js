@@ -107,8 +107,9 @@ function getMarketplaceReviewReleaseTime(job) {
 function assertMarketplaceReviewWindow(job) {
   const status = String(job?.status || '').toLowerCase();
   const releasedAtMs = getMarketplaceReviewReleaseTime(job);
+  const escrowReleased = job?.fundsReleased === true || Boolean(job?.v3ReleasedAt);
 
-  if (status !== 'completed' || !releasedAtMs) {
+  if (status !== 'completed' || !escrowReleased || !releasedAtMs) {
     throw new Error('Reviews are only allowed for completed marketplace jobs with released escrow.');
   }
 
