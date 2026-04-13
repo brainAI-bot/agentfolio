@@ -327,6 +327,11 @@ router.post('/respond', async (req, res) => {
       return res.status(400).json({ error: 'responseUri must be <= 200 characters' });
     }
 
+    const existingReview = await sdk.getReview(reviewPDA);
+    if (!existingReview || existingReview.error) {
+      return res.status(404).json({ error: 'Review not found' });
+    }
+
     const hashInput = responseHash || responseUri;
 
     const result = await sdk.buildRespondToReview(
