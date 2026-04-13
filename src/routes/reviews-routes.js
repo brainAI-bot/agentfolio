@@ -11,9 +11,13 @@
  * Server-stateless — no private keys needed.
  */
 
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const Database = require('better-sqlite3');
 const { Router } = require('express');
-const { PublicKey } = require('@solana/web3.js');
-const { SATPSDK, getReviewV3PDA } = require('../../satp-client/src/index');
+const { PublicKey, SystemProgram, Transaction, TransactionInstruction } = require('@solana/web3.js');
+const { SATPSDK, getReviewV3PDA, getReviewCounterPDA, getReviewPDA } = require('../../satp-client/src/index');
 
 const router = Router();
 
@@ -22,6 +26,141 @@ const rpcUrl = process.env.SOLANA_RPC_URL;
 const inferredNetwork = rpcUrl && /mainnet|helius|alchemy/i.test(rpcUrl) ? 'mainnet' : 'devnet';
 const network = process.env.SOLANA_NETWORK || inferredNetwork;
 const sdk = new SATPSDK({ network, rpcUrl });
+
+const DB_PATH = '/home/ubuntu/agentfolio/data/agentfolio.db';
+const MARKETPLACE_JOBS_DIR = '/home/ubuntu/agentfolio/data/marketplace/jobs';
+
+function anchorDiscriminator(name) {
+  return crypto.createHash('sha256').update(`global:${name}`).digest().slice(0, 8);
+}
+
+function serializeString(value) {
+  const buf = Buffer.from(String(value || ''), 'utf8');
+  const len = Buffer.alloc(4);
+  len.writeUInt32LE(buf.length, 0);
+  return Buffer.concat([len, buf]);
+}
+
+function getDb() {
+  return new Database(DB_PATH, { readonly: true });
+}
+
+function getProfileWallet(profileId) {
+  if (!profileId) return null;
+  try {
+    const db = getDb();
+    const row = db.prepare('SELECT wallet, wallets, verification_data FROM profiles WHERE id = ?').get(profileId);
+    db.close();
+    if (!row) return null;
+    if (row.wallet && row.wallet.length > 30) return row.wallet;
+    try {
+      const wallets = JSON.parse(row.wallets || '{}');
+      if (wallets.solana) return wallets.solana;
+    } catch (_) {}
+    try {
+      const vd = JSON.parse(row.verification_data || '{}');
+      if (vd.solana?.address) return vd.solana.address;
+    } catch (_) {}
+  } catch (_) {}
+  return null;
+}
+
+function findMarketplaceJobByPda(jobPDA) {
+  try {
+    for (const name of fs.readdirSync(MARKETPLACE_JOBS_DIR)) {
+      if (!name.endsWith('.json')) continue;
+      const job = JSON.parse(fs.readFileSync(path.join(MARKETPLACE_JOBS_DIR, name), 'utf8'));
+      if (job?.onchainEscrowPDA === jobPDA || job?.v3EscrowPDA === jobPDA) return job;
+    }
+  } catch (_) {}
+  return null;
+}
+
+function resolveMarketplaceReviewContext(job, reviewerWallet) {
+  const clientId = job?.clientId || job?.postedBy || null;
+  const agentId = job?.selectedAgentId || job?.acceptedApplicant || null;
+  const clientWallet = getProfileWallet(clientId);
+  const agentWallet = getProfileWallet(agentId);
+
+  if (!clientWallet || !agentWallet) {
+    throw new Error('Unable to resolve marketplace participant wallets for review build.');
+  }
+
+  if (reviewerWallet === clientWallet) {
+    return { revieweeWallet: agentWallet, revieweeId: agentId, reviewerRole: 'client' };
+  }
+  if (reviewerWallet === agentWallet) {
+    return { revieweeWallet: clientWallet, revieweeId: clientId, reviewerRole: 'agent' };
+  }
+
+  throw new Error('Reviewer wallet is not a participant on the marketplace job for this escrow PDA.');
+}
+
+async function buildMarketplaceReviewCompatTx({ reviewerWallet, jobPDA, rating, quality, reliability, communication, reviewerIdentity, commentUri, commentHash }) {
+  const job = findMarketplaceJobByPda(jobPDA);
+  if (!job) throw new Error('No marketplace job found for provided jobPDA.');
+
+  const { revieweeWallet, revieweeId, reviewerRole } = resolveMarketplaceReviewContext(job, reviewerWallet);
+  const reviewerKey = new PublicKey(reviewerWallet);
+  const revieweeKey = new PublicKey(revieweeWallet);
+  const jobKey = new PublicKey(jobPDA);
+  const [reviewCounterPDA] = getReviewCounterPDA(revieweeKey, network);
+  const [reviewPDA] = getReviewPDA(revieweeKey, reviewerKey, network);
+
+  const metadata = JSON.stringify({
+    kind: 'marketplace_review',
+    jobId: job.id,
+    jobPDA,
+    reviewerRole,
+    revieweeId,
+    reviewerIdentity: reviewerIdentity || null,
+    uri: String(commentUri || '').slice(0, 120),
+    hash: String(commentHash || '').slice(0, 64),
+    q: Number(quality || rating),
+    r: Number(reliability || rating),
+    c: Number(communication || rating),
+  }).slice(0, 240);
+
+  const reviewText = `Marketplace review for ${job.id}`.slice(0, 120);
+  const instructions = [];
+
+  if (!(await sdk.connection.getAccountInfo(reviewCounterPDA))) {
+    instructions.push(new TransactionInstruction({
+      programId: sdk.programIds.REVIEWS,
+      keys: [
+        { pubkey: reviewCounterPDA, isSigner: false, isWritable: true },
+        { pubkey: reviewerKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.concat([anchorDiscriminator('init_review_counter'), revieweeKey.toBuffer()]),
+    }));
+  }
+
+  instructions.push(new TransactionInstruction({
+    programId: sdk.programIds.REVIEWS,
+    keys: [
+      { pubkey: reviewPDA, isSigner: false, isWritable: true },
+      { pubkey: reviewCounterPDA, isSigner: false, isWritable: true },
+      { pubkey: reviewerKey, isSigner: true, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: jobKey, isSigner: false, isWritable: false },
+    ],
+    data: Buffer.concat([
+      anchorDiscriminator('create_review'),
+      revieweeKey.toBuffer(),
+      Buffer.from([Number(rating)]),
+      serializeString(reviewText),
+      serializeString(metadata),
+    ]),
+  }));
+
+  const tx = new Transaction();
+  tx.add(...instructions);
+  tx.feePayer = reviewerKey;
+  tx.recentBlockhash = (await sdk.connection.getLatestBlockhash()).blockhash;
+
+  return { transaction: tx, reviewPDA, jobId: job.id, revieweeWallet, revieweeId, reviewerRole, compatibilityMode: 'legacy_create_review_with_job_binding' };
+}
 
 
 /**
@@ -71,23 +210,30 @@ router.post('/submit', async (req, res, next) => {
       return res.status(400).json({ error: 'commentUri must be <= 200 characters' });
     }
 
-    // Hash or pass through
     const hashInput = commentHash || commentUri;
 
-    const result = await sdk.buildSubmitReview(
-      reviewer,
+    const result = await buildMarketplaceReviewCompatTx({
+      reviewerWallet: reviewer,
       reviewerIdentity,
       jobPDA,
-      ratings,
+      rating: ratings.rating,
+      quality: ratings.quality,
+      reliability: ratings.reliability,
+      communication: ratings.communication,
       commentUri,
-      hashInput,
-    );
+      commentHash: hashInput,
+    });
 
     const txBase64 = result.transaction.serialize({ requireAllSignatures: false }).toString('base64');
 
     res.json({
       transaction: txBase64,
       reviewPDA: result.reviewPDA.toBase58(),
+      jobId: result.jobId,
+      revieweeWallet: result.revieweeWallet,
+      revieweeId: result.revieweeId,
+      reviewerRole: result.reviewerRole,
+      compatibilityMode: result.compatibilityMode,
       message: 'Sign and send this transaction with your wallet',
     });
   } catch (e) {
