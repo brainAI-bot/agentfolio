@@ -218,6 +218,19 @@ app.get('/api/avatar/onchain', (req, res) => handleOnChainAvatarRequest(req, res
 const PORT = process.env.PORT || 3333;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
+const publicApiLimiter = rateLimit({
+  validate: false,
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => {
+    const ip = String(req.ip || req.socket?.remoteAddress || '');
+    return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+  },
+  message: { error: 'Too many API requests. Try again in 1 minute.' },
+});
+
 const registerApiLimiter = rateLimit({
   validate: false,
   windowMs: 60 * 60 * 1000,
@@ -237,6 +250,7 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use('/api', publicApiLimiter);
 
 app.get('/.well-known/agentfolio-verification.txt', (req, res) => {
   const candidatePaths = [
