@@ -13,6 +13,7 @@ const path = require('path');
 const fs = require('fs');
 const rateLimit = require('express-rate-limit');
 const logger = require('./logger');
+const { z, validateBody } = require('./lib/request-validation');
 
 const SITE_URL = process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || 'https://agentfolio.bot';
 const SITE_HOSTNAME = (() => {
@@ -218,6 +219,111 @@ app.set("trust proxy", 1);
 app.get('/api/avatar/onchain', (req, res) => handleOnChainAvatarRequest(req, res, new URL(req.originalUrl, `http://${req.get('host')}`)));
 const PORT = process.env.PORT || 3333;
 const NODE_ENV = process.env.NODE_ENV || 'development';
+
+const emptyToUndefined = (value) => typeof value === 'string' && value.trim() == '' ? undefined : value;
+const profileIdInput = z.string().trim().min(1).max(128);
+const challengeIdInput = z.string().trim().min(1).max(256);
+const optionalMethodInput = z.preprocess(emptyToUndefined, z.string().trim().min(1).max(64).optional());
+const urlInput = z.string().trim().url().max(500);
+const githubUsernameInput = z.string().trim().min(1).max(39).regex(/^[A-Za-z0-9-]+$/, 'Invalid GitHub username');
+const xHandleInput = z.string().trim().min(1).max(30).regex(/^@?[A-Za-z0-9_]{1,15}$/, 'Invalid X handle');
+const solanaAddressInput = z.string().trim().regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, 'Invalid Solana address');
+const ethAddressInput = z.string().trim().regex(/^0x[0-9a-fA-F]{40}$/, 'Invalid ETH address');
+const emailInput = z.string().trim().email('Invalid email address');
+const verificationSchemas = {
+  discordInitiate: z.object({
+    profileId: profileIdInput,
+    discordUsername: z.string().trim().min(2).max(64),
+  }),
+  discordVerify: z.object({
+    challengeId: challengeIdInput,
+    messageUrl: z.preprocess(emptyToUndefined, z.string().trim().url().max(500).optional()),
+  }),
+  telegramInitiate: z.object({
+    profileId: profileIdInput,
+    telegramUsername: z.string().trim().min(3).max(64).regex(/^@?[A-Za-z0-9_]{3,32}$/, 'Invalid Telegram username'),
+  }),
+  telegramVerify: z.object({
+    challengeId: challengeIdInput,
+  }),
+  domainInitiate: z.object({
+    profileId: profileIdInput,
+    domain: z.string().trim().min(3).max(253).regex(/^(?!https?:\/\/)(?!-)(?:[A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,63}$/, 'Invalid domain'),
+  }),
+  domainVerify: z.object({
+    challengeId: challengeIdInput,
+    method: optionalMethodInput,
+  }),
+  websiteInitiate: z.object({
+    profileId: profileIdInput,
+    websiteUrl: urlInput,
+  }),
+  websiteVerify: z.object({
+    challengeId: challengeIdInput,
+    method: optionalMethodInput,
+  }),
+  ethInitiate: z.object({
+    profileId: profileIdInput,
+    walletAddress: ethAddressInput,
+  }),
+  signatureVerify: z.object({
+    challengeId: challengeIdInput,
+    signature: z.string().trim().min(10).max(4096),
+  }),
+  ensInitiate: z.object({
+    profileId: profileIdInput,
+    ensName: z.string().trim().min(5).max(255).regex(/^[a-z0-9-]+(\.[a-z0-9-]+)*\.eth$/i, 'Invalid ENS name'),
+  }),
+  farcasterInitiate: z.object({
+    profileId: profileIdInput,
+    fid: z.union([z.string(), z.number()]).transform((value) => String(value).trim()).pipe(z.string().min(1).max(32).regex(/^\d+$/, 'Invalid fid')),
+  }),
+  farcasterVerify: z.object({
+    challengeId: challengeIdInput,
+    castHash: z.string().trim().min(3).max(256),
+  }),
+  githubChallenge: z.object({
+    profileId: profileIdInput,
+    githubUsername: z.preprocess(emptyToUndefined, githubUsernameInput.optional()),
+    username: z.preprocess(emptyToUndefined, githubUsernameInput.optional()),
+  }).refine((data) => data.githubUsername || data.username, {
+    path: ['githubUsername'],
+    message: 'githubUsername or username required',
+  }),
+  githubConfirm: z.object({
+    challengeId: challengeIdInput,
+    gistUrl: urlInput,
+  }),
+  xChallenge: z.object({
+    profileId: profileIdInput,
+    xHandle: xHandleInput,
+  }),
+  xConfirm: z.object({
+    challengeId: challengeIdInput,
+    tweetUrl: urlInput,
+  }),
+  solanaChallenge: z.object({
+    profileId: profileIdInput,
+    walletAddress: solanaAddressInput,
+  }),
+  solanaConfirm: z.object({
+    challengeId: challengeIdInput,
+    signature: z.string().trim().min(32).max(4096),
+  }),
+  agentmailChallenge: z.object({
+    profileId: profileIdInput,
+    email: z.preprocess(emptyToUndefined, emailInput.optional()),
+  }),
+  agentmailConfirm: z.object({
+    challengeId: z.preprocess(emptyToUndefined, challengeIdInput.optional()),
+    profileId: z.preprocess(emptyToUndefined, profileIdInput.optional()),
+    email: z.preprocess(emptyToUndefined, emailInput.optional()),
+    code: z.string().trim().min(1).max(64),
+  }).refine((data) => data.challengeId || data.profileId, {
+    path: ['challengeId'],
+    message: 'challengeId or profileId required',
+  }),
+};
 
 const publicApiLimiter = rateLimit({
   validate: false,
@@ -1205,11 +1311,9 @@ app.get('/api/verification/discord/status', (req, res) => {
 });
 
 app.post('/api/verification/discord/initiate', async (req, res) => {
-  const { profileId, discordUsername } = req.body;
-  
-  if (!profileId || !discordUsername) {
-    return res.status(400).json({ error: 'Missing profileId or discordUsername' });
-  }
+  const body = validateBody(verificationSchemas.discordInitiate, req, res);
+  if (!body) return;
+  const { profileId, discordUsername } = body;
 
   try {
     const result = await discordVerify.initiateDiscordVerification(profileId, discordUsername);
@@ -1220,8 +1324,9 @@ app.post('/api/verification/discord/initiate', async (req, res) => {
 });
 
 app.post('/api/verification/discord/verify', async (req, res) => {
-  const { challengeId, messageUrl } = req.body;
-  if (!challengeId) return res.status(400).json({ error: 'Missing challengeId' });
+  const body = validateBody(verificationSchemas.discordVerify, req, res);
+  if (!body) return;
+  const { challengeId, messageUrl } = body;
   try {
     const result = await discordVerify.verifyDiscordChallenge(challengeId, messageUrl);
     if (result.verified && result.discordUsername) {
@@ -1251,11 +1356,9 @@ app.get('/api/verification/telegram/status', async (req, res) => {
 });
 
 app.post('/api/verification/telegram/initiate', async (req, res) => {
-  const { profileId, telegramUsername } = req.body;
-  
-  if (!profileId || !telegramUsername) {
-    return res.status(400).json({ error: 'Missing profileId or telegramUsername' });
-  }
+  const body = validateBody(verificationSchemas.telegramInitiate, req, res);
+  if (!body) return;
+  const { profileId, telegramUsername } = body;
 
   try {
     const { initiateTelegramVerification } = require('./lib/telegram-verify-hardened');
@@ -1267,11 +1370,9 @@ app.post('/api/verification/telegram/initiate', async (req, res) => {
 });
 
 app.post('/api/verification/telegram/verify', async (req, res) => {
-  const { challengeId } = req.body;
-  
-  if (!challengeId) {
-    return res.status(400).json({ error: 'Missing challengeId' });
-  }
+  const body = validateBody(verificationSchemas.telegramVerify, req, res);
+  if (!body) return;
+  const { challengeId } = body;
 
   try {
     const { completeTelegramVerification } = require('./lib/telegram-verify-hardened');
@@ -1301,11 +1402,9 @@ app.get('/api/verification/domain/status', async (req, res) => {
 });
 
 app.post('/api/verification/domain/initiate', async (req, res) => {
-  const { profileId, domain } = req.body;
-  
-  if (!profileId || !domain) {
-    return res.status(400).json({ error: 'Missing profileId or domain' });
-  }
+  const body = validateBody(verificationSchemas.domainInitiate, req, res);
+  if (!body) return;
+  const { profileId, domain } = body;
 
   try {
     const result = await domainVerify.initiateDomainVerification(profileId, domain);
@@ -1316,11 +1415,9 @@ app.post('/api/verification/domain/initiate', async (req, res) => {
 });
 
 app.post('/api/verification/domain/verify', async (req, res) => {
-  const { challengeId, method } = req.body;
-  
-  if (!challengeId) {
-    return res.status(400).json({ error: 'Missing challengeId' });
-  }
+  const body = validateBody(verificationSchemas.domainVerify, req, res);
+  if (!body) return;
+  const { challengeId, method } = body;
 
   try {
     const result = await domainVerify.verifyDomainChallenge(challengeId, method || 'auto');
@@ -1347,11 +1444,9 @@ app.get('/api/verification/website/status', async (req, res) => {
 });
 
 app.post('/api/verification/website/initiate', async (req, res) => {
-  const { profileId, websiteUrl } = req.body;
-  
-  if (!profileId || !websiteUrl) {
-    return res.status(400).json({ error: 'Missing profileId or websiteUrl' });
-  }
+  const body = validateBody(verificationSchemas.websiteInitiate, req, res);
+  if (!body) return;
+  const { profileId, websiteUrl } = body;
 
   try {
     const result = await websiteVerify.initiateWebsiteVerification(profileId, websiteUrl);
@@ -1362,11 +1457,9 @@ app.post('/api/verification/website/initiate', async (req, res) => {
 });
 
 app.post('/api/verification/website/verify', async (req, res) => {
-  const { challengeId, method } = req.body;
-  
-  if (!challengeId) {
-    return res.status(400).json({ error: 'Missing challengeId' });
-  }
+  const body = validateBody(verificationSchemas.websiteVerify, req, res);
+  if (!body) return;
+  const { challengeId, method } = body;
 
   try {
     const result = await websiteVerify.verifyWebsiteChallenge(challengeId, method || 'auto');
@@ -1379,9 +1472,9 @@ app.post('/api/verification/website/verify', async (req, res) => {
 // ========== ETH WALLET VERIFICATION ==========
 app.post('/api/verification/eth/initiate', (req, res) => {
   try {
-    const { profileId, walletAddress } = req.body;
-    if (!profileId || !walletAddress) return res.status(400).json({ error: 'profileId and walletAddress required' });
-    if (!/^0x[0-9a-fA-F]{40}$/.test(walletAddress)) return res.status(400).json({ error: 'Invalid ETH address' });
+    const body = validateBody(verificationSchemas.ethInitiate, req, res);
+    if (!body) return;
+    const { profileId, walletAddress } = body;
     const challenge = ethVerify.generateChallenge(profileId, walletAddress);
     res.json({ success: true, ...challenge, instructions: 'Sign the message with your ETH wallet, then POST signature to /api/verification/eth/verify' });
   } catch (error) { res.status(500).json({ error: error.message }); }
@@ -1389,8 +1482,9 @@ app.post('/api/verification/eth/initiate', (req, res) => {
 
 app.post('/api/verification/eth/verify', (req, res) => {
   try {
-    const { challengeId, signature } = req.body;
-    if (!challengeId || !signature) return res.status(400).json({ error: 'challengeId and signature required' });
+    const body = validateBody(verificationSchemas.signatureVerify, req, res);
+    if (!body) return;
+    const { challengeId, signature } = body;
     const result = ethVerify.verifySignature(challengeId, signature);
     if (result.verified && result.profileId) {
       profileStore.addVerification(result.profileId, 'eth', result.walletAddress, { challengeId, signature: signature.slice(0, 16) + '...', verifiedAt: new Date().toISOString() });
@@ -1402,9 +1496,9 @@ app.post('/api/verification/eth/verify', (req, res) => {
 // ========== ENS VERIFICATION ==========
 app.post('/api/verification/ens/initiate', (req, res) => {
   try {
-    const { profileId, ensName } = req.body;
-    if (!profileId || !ensName) return res.status(400).json({ error: 'profileId and ensName required' });
-    if (!ensName.endsWith('.eth')) return res.status(400).json({ error: 'ENS name must end with .eth' });
+    const body = validateBody(verificationSchemas.ensInitiate, req, res);
+    if (!body) return;
+    const { profileId, ensName } = body;
     const challenge = ensVerify.generateChallenge(profileId, ensName);
     res.json({ success: true, ...challenge, instructions: 'Sign the message with the wallet that owns this ENS name, then POST to /api/verification/ens/verify' });
   } catch (error) { res.status(500).json({ error: error.message }); }
@@ -1432,8 +1526,9 @@ app.get('/api/verification/ens/resolve/:name', async (req, res) => {
 // ========== FARCASTER VERIFICATION ==========
 app.post('/api/verification/farcaster/initiate', (req, res) => {
   try {
-    const { profileId, fid } = req.body;
-    if (!profileId || !fid) return res.status(400).json({ error: 'profileId and fid required' });
+    const body = validateBody(verificationSchemas.farcasterInitiate, req, res);
+    if (!body) return;
+    const { profileId, fid } = body;
     const challenge = farcasterVerify.generateChallenge(profileId, fid);
     res.json({ success: true, ...challenge });
   } catch (error) { res.status(500).json({ error: error.message }); }
@@ -1441,8 +1536,9 @@ app.post('/api/verification/farcaster/initiate', (req, res) => {
 
 app.post('/api/verification/farcaster/verify', async (req, res) => {
   try {
-    const { challengeId, castHash } = req.body;
-    if (!challengeId || !castHash) return res.status(400).json({ error: 'challengeId and castHash required' });
+    const body = validateBody(verificationSchemas.farcasterVerify, req, res);
+    if (!body) return;
+    const { challengeId, castHash } = body;
     const result = await farcasterVerify.verifyCast(challengeId, castHash);
     if (result.verified && result.profileId) {
       profileStore.addVerification(result.profileId, 'farcaster', result.fid || result.identifier, { challengeId, castHash, verifiedAt: new Date().toISOString() });
@@ -1899,9 +1995,10 @@ const verificationChallenges = require('./verification-challenges');
 // GitHub: challenge → user creates gist → confirm
 app.post('/api/verify/github/challenge', async (req, res) => {
   try {
-    const { profileId, githubUsername, username } = req.body;
+    const body = validateBody(verificationSchemas.githubChallenge, req, res);
+    if (!body) return;
+    const { profileId, githubUsername, username } = body;
     const normalizedUsername = githubUsername || username;
-    if (!profileId || !normalizedUsername) return res.status(400).json({ error: 'profileId and githubUsername required' });
     const challenge = verificationChallenges.generateChallenge(profileId, 'github', normalizedUsername);
     challenge.challengeData.instructions = `Create a public gist containing: agentfolio-verify:${challenge.id}`;
     challenge.challengeData.expectedContent = `agentfolio-verify:${challenge.id}`;
@@ -1912,8 +2009,9 @@ app.post('/api/verify/github/challenge', async (req, res) => {
 
 app.post('/api/verify/github/confirm', async (req, res) => {
   try {
-    const { challengeId, gistUrl } = req.body;
-    if (!challengeId || !gistUrl) return res.status(400).json({ error: 'challengeId and gistUrl required' });
+    const body = validateBody(verificationSchemas.githubConfirm, req, res);
+    if (!body) return;
+    const { challengeId, gistUrl } = body;
     const challenge = await verificationChallenges.getChallenge(challengeId);
     if (!challenge) return res.status(404).json({ error: 'Challenge not found or expired' });
     // Fetch gist and verify content
@@ -1934,8 +2032,9 @@ app.post('/api/verify/github/confirm', async (req, res) => {
 // X/Twitter: challenge → user posts tweet → confirm
 app.post('/api/verify/x/challenge', async (req, res) => {
   try {
-    const { profileId, xHandle } = req.body;
-    if (!profileId || !xHandle) return res.status(400).json({ error: 'profileId and xHandle required' });
+    const body = validateBody(verificationSchemas.xChallenge, req, res);
+    if (!body) return;
+    const { profileId, xHandle } = body;
     const handle = xHandle.replace('@', '');
     const challenge = verificationChallenges.generateChallenge(profileId, 'x', handle);
     challenge.challengeData.instructions = `Post a tweet containing: agentfolio-verify:${challenge.id}`;
@@ -1953,8 +2052,9 @@ app.post('/api/verify/x/challenge', async (req, res) => {
 
 app.post('/api/verify/x/confirm', async (req, res) => {
   try {
-    const { challengeId, tweetUrl } = req.body;
-    if (!challengeId || !tweetUrl) return res.status(400).json({ error: 'challengeId and tweetUrl required' });
+    const body = validateBody(verificationSchemas.xConfirm, req, res);
+    if (!body) return;
+    const { challengeId, tweetUrl } = body;
     const challenge = await verificationChallenges.getChallenge(challengeId);
     if (!challenge) return res.status(404).json({ error: 'Challenge not found or expired' });
     // Verify via vxtwitter API
@@ -1974,8 +2074,9 @@ app.post('/api/verify/x/confirm', async (req, res) => {
 // Solana: challenge → user signs message → confirm (ed25519 verified)
 app.post('/api/verify/solana/challenge', async (req, res) => {
   try {
-    const { profileId, walletAddress } = req.body;
-    if (!profileId || !walletAddress) return res.status(400).json({ error: 'profileId and walletAddress required' });
+    const body = validateBody(verificationSchemas.solanaChallenge, req, res);
+    if (!body) return;
+    const { profileId, walletAddress } = body;
     const challenge = verificationChallenges.generateChallenge(profileId, 'solana', walletAddress);
     const message = `AgentFolio verification: ${challenge.id}`;
     challenge.challengeData.message = message;
@@ -1986,8 +2087,9 @@ app.post('/api/verify/solana/challenge', async (req, res) => {
 
 app.post('/api/verify/solana/confirm', async (req, res) => {
   try {
-    const { challengeId, signature } = req.body;
-    if (!challengeId || !signature) return res.status(400).json({ error: 'challengeId and signature required' });
+    const body = validateBody(verificationSchemas.solanaConfirm, req, res);
+    if (!body) return;
+    const { challengeId, signature } = body;
     const challenge = await verificationChallenges.getChallenge(challengeId);
     if (!challenge) return res.status(404).json({ error: 'Challenge not found or expired' });
 
@@ -2080,9 +2182,10 @@ function persistVerifiedAgentmail(profileId, email, verifiedAt) {
 
 app.post('/api/verify/agentmail/challenge', async (req, res) => {
   try {
-    const { profileId } = req.body;
-    let { email } = req.body;
-    if (!profileId) return res.status(400).json({ error: 'profileId required' });
+    const body = validateBody(verificationSchemas.agentmailChallenge, req, res);
+    if (!body) return;
+    const { profileId } = body;
+    let { email } = body;
     if (!email) email = resolveAgentmailForProfile(profileId);
     if (!email) {
       return res.status(400).json({ error: 'profileId and email required. Save an @agentmail.to address on your profile first.' });
@@ -2115,7 +2218,9 @@ app.post('/api/verify/agentmail/challenge', async (req, res) => {
 
 app.post('/api/verify/agentmail/confirm', async (req, res) => {
   try {
-    let { challengeId, profileId, email, code } = req.body;
+    const body = validateBody(verificationSchemas.agentmailConfirm, req, res);
+    if (!body) return;
+    let { challengeId, profileId, email, code } = body;
     if ((!profileId || !email) && challengeId && String(challengeId).includes(':')) {
       const idx = String(challengeId).indexOf(':');
       profileId = String(challengeId).slice(0, idx);
