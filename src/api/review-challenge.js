@@ -95,6 +95,20 @@ function registerReviewChallengeRoutes(app) {
         return res.status(400).json({ success: false, error: 'rating must be an integer 1-5' });
       }
 
+      const reviewerWallet = getProfileWallet(reviewerId);
+      const revieweeWallet = getProfileWallet(revieweeId);
+      if (!reviewerWallet || !revieweeWallet) {
+        return res.status(404).json({ success: false, error: 'Reviewer and reviewee must have linked Solana wallets.' });
+      }
+
+      const reviewRight = findReleasedEscrowReviewRight(reviewerId, revieweeId);
+      if (!reviewRight) {
+        return res.status(403).json({
+          success: false,
+          error: 'No released escrow job found between these agents. Reviews require completed funded escrow.',
+        });
+      }
+
       const challengeId = 'rc_' + crypto.randomBytes(16).toString('hex');
       const nonce = crypto.randomBytes(8).toString('hex');
       const message = `AgentFolio Review | reviewer=${reviewerId} | reviewee=${revieweeId} | rating=${parsedRating} | nonce=${nonce}`;
@@ -104,7 +118,7 @@ function registerReviewChallengeRoutes(app) {
         revieweeId,
         rating: parsedRating,
         chain: chain || 'solana',
-        jobId: jobId || null,
+        jobId: jobId || reviewRight.jobId || null,
         message,
         nonce,
         createdAt: Date.now(),
