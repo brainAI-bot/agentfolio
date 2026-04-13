@@ -416,7 +416,7 @@ router.get('/:pda', async (req, res) => {
     }
 
     const review = await sdk.getReview(pda);
-    if (!review) {
+    if (!review || review.error) {
       return res.status(404).json({ error: 'Review not found' });
     }
 
