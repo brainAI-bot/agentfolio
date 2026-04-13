@@ -1159,12 +1159,12 @@ function handleBurnToBecome(req, res, url) {
           const Database = require('better-sqlite3');
           const path = require('path');
           const checkDb = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
-          // Check by wallet (genesis registry) or by any profile with this wallet
-          // Look up profile by wallet in DB (covers genesis + regular agents)
-          let profileId = null;
-          const byWallet = checkDb.prepare("SELECT id FROM profiles WHERE wallets LIKE ?").get('%' + wallet + '%');
-          if (byWallet) profileId = byWallet.id;
-          // Also check nft_avatar column for any profile with this wallet
+          // Prefer the already resolved profile identity for this request.
+          let profileId = resolvedProfileId || null;
+          if (!profileId) {
+            const byWallet = checkDb.prepare("SELECT id FROM profiles WHERE wallets LIKE ?").get('%' + wallet + '%');
+            if (byWallet) profileId = byWallet.id;
+          }
           if (!profileId) {
             const byNftWallet = checkDb.prepare("SELECT id FROM profiles WHERE nft_avatar LIKE ?").get('%' + wallet + '%');
             if (byNftWallet) profileId = byNftWallet.id;
@@ -1314,11 +1314,9 @@ function handleBurnToBecome(req, res, url) {
             console.log("[BurnPublic] BOA→SATP link skipped:", linkResult.reason || "no deployer key");
           }
         
-        // V3: Mark agent as "Born" on-chain via burnToBecome (uses safe wrapper)
+        // V3: Mark agent as "Born" on-chain via burnToBecome (uses resolved profile identity)
         try {
-          const profileStore = require("../profile-store");
-          const profile = profileStore.getProfileByWallet ? profileStore.getProfileByWallet(wallet) : null;
-          const agentId = profile?.id || wallet;
+          const agentId = resolvedProfileId || wallet;
           const burnResult = await safeBurnToBecome(agentId, artworkUri || "", soulboundResult.soulboundMint || "", burnTx || "");
           if (burnResult.success) {
             console.log("[SATP V3] burnToBecome completed for " + agentId + ": tx=" + burnResult.txSignature);
@@ -1335,15 +1333,9 @@ function handleBurnToBecome(req, res, url) {
           console.warn("[BurnPublic] BOA→SATP link failed (non-blocking):", linkErr.message);
         }
         
-                // 3.6. V3 Genesis Record — burnToBecome (on-chain birth) — uses safe wrapper
+                // 3.6. V3 Genesis Record — burnToBecome (on-chain birth) — uses resolved profile identity
         try {
-          const profileStore = require('../profile-store');
-          const db = profileStore.getDb ? profileStore.getDb() : null;
-          let agentId = null;
-          if (db) {
-            const row = db.prepare("SELECT id FROM profiles WHERE wallets LIKE ? OR verification_data LIKE ?").get(`%${wallet}%`, `%${wallet}%`);
-            if (row) agentId = row.id;
-          }
+          const agentId = resolvedProfileId || null;
           
           if (agentId) {
             const burnResult = await safeBurnToBecome(agentId, artworkUri || '', soulboundResult.soulboundMint || '', burnTx || '');
@@ -1441,9 +1433,12 @@ function handleBurnToBecome(req, res, url) {
               const Database = require('better-sqlite3');
               const path = require('path');
               const lookupDb = new Database(path.join(__dirname, '../../data/agentfolio.db'));
-              const match = lookupDb.prepare("SELECT id FROM profiles WHERE wallets LIKE ?").get('%' + wallet + '%');
-              if (match) {
-                const profile = loadProfile(match.id);
+              const targetProfileId = resolvedProfileId || (() => {
+                const match = lookupDb.prepare("SELECT id FROM profiles WHERE wallets LIKE ?").get('%' + wallet + '%');
+                return match ? match.id : null;
+              })();
+              if (targetProfileId) {
+                const profile = loadProfile(targetProfileId);
                 if (profile) {
                   profile.nftAvatar = {
                     chain: 'solana',
@@ -1462,9 +1457,9 @@ function handleBurnToBecome(req, res, url) {
                   profile.avatar = artworkUri;
                   saveProfile(profile);
                   lookupDb.prepare('UPDATE profiles SET nft_avatar = ?, avatar = ?, updated_at = ? WHERE id = ?').run(
-                    JSON.stringify(profile.nftAvatar), artworkUri, new Date().toISOString(), match.id
+                    JSON.stringify(profile.nftAvatar), artworkUri, new Date().toISOString(), targetProfileId
                   );
-                  console.log('[BurnPublic] Profile updated by wallet lookup:', match.id);
+                  console.log('[BurnPublic] Profile updated by resolved profile id:', targetProfileId);
                 }
               }
               lookupDb.close();
@@ -1887,20 +1882,7 @@ try {
                   fs.writeFileSync(profileJsonPath, JSON.stringify(pf, null, 2));
                 }
                 console.log("[MintBOA] Avatar auto-updated for " + profileId);
-                // V3: Record burn-to-become on Genesis Record (uses safe wrapper)
-                if (profileId) {
-                  safeBurnToBecome(profileId, result.imageUri || "", result.mintAddress || "", "")
-                    .then(burnResult => {
-                      if (burnResult.success) {
-                        console.log("[SATP V3] burnToBecome recorded for " + profileId + ": tx=" + burnResult.txSignature);
-                      } else if (burnResult.needsClientSign) {
-                        console.log("[SATP V3] burnToBecome needs client sign for " + profileId + " (authority: " + burnResult.authority + ")");
-                      } else {
-                        console.log("[SATP V3] burnToBecome skipped for " + profileId + ": " + burnResult.reason);
-                      }
-                    })
-                    .catch(err => console.error("[SATP V3] burnToBecome failed for " + profileId + ":", err.message));
-                }
+                console.log("[MintBOA] Regular BOA mint recorded without permanent burn-to-become state for " + profileId);
               } catch (avatarErr) {
                 console.error("[MintBOA] Avatar update failed:", avatarErr.message);
               }
@@ -2049,12 +2031,11 @@ try {
           } catch (dasErr) { console.warn('[ConfirmMint] DAS artwork resolution failed:', dasErr.message); }
         }
         if (!metadataUri) metadataUri = artworkUri;
-        // Card 1/3: Regular tradable NFT — use the minted asset as the profile face reference.
-        let soulboundMintAddress = null;
-        const faceMintAddress = asset || soulboundMintAddress || null;
-        let burnToBecomeResult = null;
+        // Card 1/3: Regular tradable NFT — update visible avatar/boa refs only.
+        const soulboundMintAddress = null;
+        const faceMintAddress = asset || null;
+        let burnToBecomeResult = { success: false, skipped: true, reason: 'Regular BOA mint recorded. Burn to Become happens only in /prepare + /submit.' };
 
-        // Keep profile/avatar state in sync for client-signed mints, same as server-side mint-boa.
         if (agentId && artworkUri) {
           try {
             const { loadProfile, saveProfile: _rawSave } = require('../lib/profile');
@@ -2065,23 +2046,7 @@ try {
               try { fs.writeFileSync(path.join(__dirname, '../../data/profiles', profile.id + '.json'), JSON.stringify(profile, null, 2)); } catch (e) {}
             }
             const profile = loadProfile(agentId);
-            const nftAvatarPayload = {
-              chain: 'solana',
-              wallet,
-              identifier: faceMintAddress || asset || null,
-              name: nftName || boaName || 'Burned-Out Agent',
-              image: artworkUri,
-              arweaveUrl: artworkUri,
-              verifiedAt: new Date().toISOString(),
-              verifiedOnChain: true,
-              permanent: true,
-              burnTxSignature: signature || '',
-              soulboundMint: faceMintAddress || null,
-              boaId: effectiveBoaId,
-              mintedAt: new Date().toISOString(),
-            };
             if (profile) {
-              profile.nftAvatar = nftAvatarPayload;
               profile.avatar = artworkUri;
               profile.boaMint = faceMintAddress || profile.boaMint || null;
               profile.boaId = effectiveBoaId;
@@ -2090,8 +2055,7 @@ try {
             try {
               const Database = require('better-sqlite3');
               const directDb = new Database(require('path').join(__dirname, '../../data/agentfolio.db'));
-              directDb.prepare('UPDATE profiles SET nft_avatar = ?, avatar = ?, updated_at = ? WHERE id = ?').run(
-                JSON.stringify(nftAvatarPayload),
+              directDb.prepare('UPDATE profiles SET avatar = ?, updated_at = ? WHERE id = ?').run(
                 artworkUri,
                 new Date().toISOString(),
                 agentId
@@ -2104,43 +2068,6 @@ try {
           } catch (profileErr) {
             console.warn('[ConfirmMint] Profile avatar sync failed:', profileErr.message);
           }
-        }
-
-        // Try to finalize burnToBecome using the minted BOA asset, matching the server-side mint path.
-        if (agentId && faceMintAddress) {
-          try {
-            console.log('[ConfirmMint] Calling burnToBecome:', agentId, 'face:', artworkUri?.slice(0, 40), 'mint:', faceMintAddress?.slice(0, 16));
-            burnToBecomeResult = await safeBurnToBecome(agentId, artworkUri || '', faceMintAddress, signature || '');
-            if (burnToBecomeResult.success) {
-              console.log('[ConfirmMint] V3 burnToBecome recorded:', agentId, 'tx:', burnToBecomeResult.txSignature);
-              record.burnToBecomeTx = burnToBecomeResult.txSignature;
-            } else if (burnToBecomeResult.needsClientSign) {
-              console.log('[ConfirmMint] burnToBecome needs client sign:', agentId, 'authority:', burnToBecomeResult.authority);
-              try {
-                const v3sdk = require('@brainai/satp-v3');
-                const builders = new v3sdk.SatpV3Builders(process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb');
-                const userAuthority = new PublicKey(burnToBecomeResult.authority);
-                const faceMintPk = faceMintAddress ? new PublicKey(faceMintAddress) : PublicKey.default;
-                const clientBurnTx = await builders.burnToBecome({
-                  agentId,
-                  authority: userAuthority,
-                  faceImage: artworkUri || '',
-                  faceMint: faceMintPk,
-                  faceBurnTx: signature || '',
-                });
-                const latestBtb = await connection.getLatestBlockhash('confirmed');
-                clientBurnTx.feePayer = userAuthority;
-                clientBurnTx.recentBlockhash = latestBtb.blockhash;
-                record.burnToBecomeTx = clientBurnTx.serialize({ requireAllSignatures: false }).toString('base64');
-                record.burnToBecomeAuthority = burnToBecomeResult.authority;
-                console.log('[ConfirmMint] Built client burnToBecome TX for', agentId);
-              } catch (btbErr) {
-                console.warn('[ConfirmMint] Failed to build client burnToBecome TX:', btbErr.message);
-              }
-            } else {
-              console.log('[ConfirmMint] burnToBecome skipped:', agentId, burnToBecomeResult.reason);
-            }
-          } catch (e) { console.warn('[ConfirmMint] burnToBecome failed:', e.message); }
         }
 
         sendJson(200, { success: true, recorded: true, agentId, boaId: effectiveBoaId, soulboundMint: soulboundMintAddress, burnToBecome: burnToBecomeResult, ...record });
