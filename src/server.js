@@ -2863,34 +2863,25 @@ app.get('/api/score', async (req, res) => {
 app.get('/api/leaderboard/scores', async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 100);
 
-  // A1: Leaderboard via compute-score
+  // A1: Leaderboard via unified scoring
   const db = profileStore.getDb();
-  const allProfiles = db.prepare('SELECT id, name, avatar, handle, claimed FROM profiles').all();
-  const { computeScore: _lbScore } = require('./lib/compute-score');
-  const allVerifs = db.prepare('SELECT profile_id, platform, identifier, proof FROM verifications').all();
-  const vMap = {};
-  for (const v of allVerifs) {
-    if (v.platform === 'solana') {
-      let proof = {};
-      try { proof = typeof v.proof === 'string' ? JSON.parse(v.proof) : (v.proof || {}); } catch {}
-      if (!(proof.txSignature || proof.signature || proof.transactionSignature)) continue;
-    }
-    if (!vMap[v.profile_id]) vMap[v.profile_id] = [];
-    vMap[v.profile_id].push({ profile_id: v.profile_id, platform: v.platform, identifier: v.identifier });
-  }
-  const leaderboard = [];
-  for (const p of allProfiles) {
-    const verifs = vMap[p.id] || [];
-    const hasSatp = verifs.some(v => v.platform === 'satp');
-    const comp = _lbScore(verifs, { hasSatpIdentity: hasSatp, claimed: !!p.claimed });
-    if (comp.score > 0) {
-      leaderboard.push({
-        agentId: p.id, name: p.name, avatar: p.avatar, handle: p.handle,
-        score: comp.score, level: comp.level, levelName: comp.levelName,
-        source: 'compute-score',
-      });
-    }
-  }
+  const allProfiles = db.prepare('SELECT * FROM profiles').all();
+  const leaderboard = (await Promise.all(allProfiles.map(async (p) => {
+    const v3Score = await getV3Score(p.id).catch(() => null);
+    const comp = computeUnifiedTrustScore(db, p, { v3Score });
+    if (!(comp.score > 0)) return null;
+    return {
+      agentId: p.id,
+      name: p.name,
+      avatar: p.avatar,
+      handle: p.handle,
+      score: comp.score,
+      level: comp.level,
+      levelName: comp.levelName,
+      source: comp.source || 'scoring-v2-phase-a',
+      isBorn: !!(v3Score && v3Score.isBorn),
+    };
+  }))).filter(Boolean);
   leaderboard.sort((a, b) => b.score - a.score);
   leaderboard.splice(limit);
 
