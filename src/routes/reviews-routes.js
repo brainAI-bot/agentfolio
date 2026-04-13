@@ -107,19 +107,27 @@ async function buildMarketplaceReviewCompatTx({ reviewerWallet, jobPDA, rating, 
   const [reviewCounterPDA] = getReviewCounterPDA(revieweeKey, network);
   const [reviewPDA] = getReviewPDA(revieweeKey, reviewerKey, network);
 
-  const metadata = JSON.stringify({
-    kind: 'marketplace_review',
-    jobId: job.id,
-    jobPDA,
-    reviewerRole,
-    revieweeId,
-    reviewerIdentity: reviewerIdentity || null,
-    uri: String(commentUri || '').slice(0, 120),
-    hash: String(commentHash || '').slice(0, 64),
+  let metadata = JSON.stringify({
+    k: 'marketplace_review',
+    j: job.id,
+    p: jobPDA,
+    rr: reviewerRole,
+    re: revieweeId,
+    i: reviewerIdentity || '',
     q: Number(quality || rating),
-    r: Number(reliability || rating),
+    rl: Number(reliability || rating),
     c: Number(communication || rating),
-  }).slice(0, 240);
+  });
+
+  if (metadata.length > 240) {
+    metadata = JSON.stringify({
+      k: 'marketplace_review',
+      j: job.id,
+      p: jobPDA,
+      rr: reviewerRole,
+      re: revieweeId,
+    });
+  }
 
   const reviewText = `Marketplace review for ${job.id}`.slice(0, 120);
   const instructions = [];
