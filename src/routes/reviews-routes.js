@@ -17,9 +17,12 @@ const { SATPSDK, getReviewV3PDA } = require('../../satp-client/src/index');
 
 const router = Router();
 
-// Initialize SDK (uses env or defaults to devnet)
-const network = process.env.SOLANA_NETWORK || 'devnet';
-const sdk = new SATPSDK({ network, rpcUrl: process.env.SOLANA_RPC_URL });
+// Initialize SDK. On prod, infer mainnet when SOLANA_RPC_URL points at mainnet and SOLANA_NETWORK is unset.
+const rpcUrl = process.env.SOLANA_RPC_URL;
+const inferredNetwork = rpcUrl && /mainnet|helius|alchemy/i.test(rpcUrl) ? 'mainnet' : 'devnet';
+const network = process.env.SOLANA_NETWORK || inferredNetwork;
+const sdk = new SATPSDK({ network, rpcUrl });
+
 
 /**
  * POST /api/reviews/submit
