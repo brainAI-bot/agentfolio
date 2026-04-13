@@ -371,6 +371,22 @@ router.get('/pda/derive', async (req, res) => {
       return res.status(400).json({ error: 'Invalid reviewer pubkey' });
     }
 
+    const marketplaceJob = findMarketplaceJobByPda(job);
+    if (marketplaceJob) {
+      const { revieweeWallet, revieweeId, reviewerRole } = resolveMarketplaceReviewContext(marketplaceJob, reviewer);
+      const [pda, bump] = getReviewPDA(new PublicKey(revieweeWallet), new PublicKey(reviewer), network);
+      return res.json({
+        pda: pda.toBase58(),
+        bump,
+        job,
+        reviewer,
+        revieweeWallet,
+        revieweeId,
+        reviewerRole,
+        compatibilityMode: 'legacy_create_review_with_job_binding',
+      });
+    }
+
     const [pda, bump] = getReviewV3PDA(job, reviewer, network);
 
     res.json({
@@ -378,10 +394,11 @@ router.get('/pda/derive', async (req, res) => {
       bump,
       job,
       reviewer,
+      compatibilityMode: 'v3_job_scoped_review',
     });
   } catch (e) {
     console.error('GET /api/reviews/pda/derive error:', e.message);
-    res.status(500).json({ error: e.message });
+    res.status(getReviewSubmitErrorStatus(e.message)).json({ error: e.message });
   }
 });
 
