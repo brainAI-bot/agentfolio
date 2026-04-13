@@ -16,7 +16,7 @@ function readJson(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
 }
 
-function findReleasedEscrowReviewRight(reviewerId, revieweeId) {
+function findReleasedEscrowReviewRight(reviewerId, revieweeId, expectedJobId = null) {
   const jobsDir = path.join(MARKETPLACE_DIR, 'jobs');
   const escrowDir = path.join(MARKETPLACE_DIR, 'escrow');
   let files = [];
@@ -25,6 +25,8 @@ function findReleasedEscrowReviewRight(reviewerId, revieweeId) {
   for (const name of files) {
     const job = readJson(path.join(jobsDir, name));
     if (!job) continue;
+
+    if (expectedJobId && job.id !== expectedJobId) continue;
 
     const clientId = job.clientId || job.postedBy;
     const workerId = job.acceptedApplicant || job.selectedAgentId;
@@ -101,15 +103,18 @@ function registerReviewChallengeRoutes(app) {
         return res.status(404).json({ success: false, error: 'Reviewer and reviewee must have linked Solana wallets.' });
       }
 
-      const reviewRight = findReleasedEscrowReviewRight(reviewerId, revieweeId);
-      if (!reviewRight) {
+      const anyReviewRight = findReleasedEscrowReviewRight(reviewerId, revieweeId);
+      if (!anyReviewRight) {
         return res.status(403).json({
           success: false,
           error: 'No released escrow job found between these agents. Reviews require completed funded escrow.',
         });
       }
 
-      if (jobId && reviewRight.jobId && jobId !== reviewRight.jobId) {
+      const reviewRight = jobId
+        ? findReleasedEscrowReviewRight(reviewerId, revieweeId, jobId)
+        : anyReviewRight;
+      if (jobId && !reviewRight) {
         return res.status(400).json({
           success: false,
           error: 'jobId does not match the released escrow job between these agents.',
@@ -200,19 +205,18 @@ function registerReviewChallengeRoutes(app) {
         return res.status(400).json({ verified: false, error: 'Only Solana signed reviews are enabled on production.' });
       }
 
-      const reviewRight = findReleasedEscrowReviewRight(challenge.reviewerId, challenge.revieweeId);
+      const reviewRight = findReleasedEscrowReviewRight(
+        challenge.reviewerId,
+        challenge.revieweeId,
+        challenge.jobId || null,
+      );
       if (!reviewRight) {
-        return res.status(403).json({
-          verified: false,
-          error: 'No released escrow job found between these agents. Reviews require completed funded escrow.',
-        });
-      }
-
-      if (challenge.jobId && reviewRight.jobId && challenge.jobId !== reviewRight.jobId) {
         challenges.delete(challengeId);
-        return res.status(409).json({
+        return res.status(challenge.jobId ? 409 : 403).json({
           verified: false,
-          error: 'Challenge job binding no longer matches the released escrow job between these agents.',
+          error: challenge.jobId
+            ? 'Challenge job binding no longer matches a released escrow job between these agents.'
+            : 'No released escrow job found between these agents. Reviews require completed funded escrow.',
         });
       }
 
