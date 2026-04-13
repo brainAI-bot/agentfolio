@@ -86,6 +86,10 @@ function registerReviewChallengeRoutes(app) {
         return res.status(400).json({ success: false, error: 'Cannot review yourself' });
       }
 
+      if (chain && chain !== 'solana') {
+        return res.status(400).json({ success: false, error: 'Only Solana signed reviews are enabled on production.' });
+      }
+
       const parsedRating = Number(rating);
       if (!Number.isInteger(parsedRating) || parsedRating < 1 || parsedRating > 5) {
         return res.status(400).json({ success: false, error: 'rating must be an integer 1-5' });
