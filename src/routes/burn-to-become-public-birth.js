@@ -54,7 +54,7 @@ function handleBirthEndpoints(req, res, url) {
 
     (async () => {
       try {
-        const { signedTransaction } = req.body || {};
+        const { signedTransaction, agentId } = req.body || {};
         if (!signedTransaction) return sendJson(400, { error: 'signedTransaction required (base64)' });
         
         const RPC = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY';
@@ -62,9 +62,19 @@ function handleBirthEndpoints(req, res, url) {
         const txBuf = Buffer.from(signedTransaction, 'base64');
         const sig = await conn.sendRawTransaction(txBuf, { skipPreflight: false });
         await conn.confirmTransaction(sig, 'confirmed');
+
+        try {
+          const v3ScoreService = require('../v3-score-service');
+          if (v3ScoreService?.clearV3Cache) v3ScoreService.clearV3Cache();
+          if (agentId && v3ScoreService?.getV3Score) {
+            await v3ScoreService.getV3Score(agentId).catch(() => null);
+          }
+        } catch (cacheErr) {
+          console.warn('[Birth] V3 cache refresh failed:', cacheErr.message);
+        }
         
-        console.log('[Birth] burnToBecome TX confirmed:', sig);
-        sendJson(200, { success: true, signature: sig, solscan: 'https://solscan.io/tx/' + sig });
+        console.log('[Birth] burnToBecome TX confirmed:', sig, agentId ? ('agent=' + agentId) : '');
+        sendJson(200, { success: true, signature: sig, solscan: 'https://solscan.io/tx/' + sig, agentId: agentId || null });
       } catch (e) {
         console.error('[Birth] submit error:', e.message);
         sendJson(500, { error: e.message });
