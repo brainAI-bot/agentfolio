@@ -332,6 +332,10 @@ router.post('/respond', async (req, res) => {
       return res.status(404).json({ error: 'Review not found' });
     }
 
+    if (existingReview.reviewed !== responder) {
+      return res.status(403).json({ error: 'Only the reviewed wallet may respond to this review' });
+    }
+
     const hashInput = responseHash || responseUri;
 
     const result = await sdk.buildRespondToReview(
