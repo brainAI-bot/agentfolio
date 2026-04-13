@@ -130,6 +130,16 @@ function getReviewSubmitErrorStatus(message) {
   return clientErrors.includes(String(message || '')) ? 400 : 500;
 }
 
+function getReviewRespondErrorStatus(message) {
+  const clientErrors = [
+    'Invalid responder pubkey',
+    'Invalid reviewPDA pubkey',
+    'Non-base58 character',
+  ];
+
+  return clientErrors.includes(String(message || '')) ? 400 : 500;
+}
+
 async function buildMarketplaceReviewCompatTx({ reviewerWallet, jobPDA, rating, quality, reliability, communication, reviewerIdentity, commentUri, commentHash }) {
   const job = findMarketplaceJobByPda(jobPDA);
   if (!job) throw new Error('No marketplace job found for provided jobPDA.');
@@ -305,6 +315,14 @@ router.post('/respond', async (req, res) => {
       });
     }
 
+    try { new PublicKey(responder); } catch {
+      return res.status(400).json({ error: 'Invalid responder pubkey' });
+    }
+
+    try { new PublicKey(reviewPDA); } catch {
+      return res.status(400).json({ error: 'Invalid reviewPDA pubkey' });
+    }
+
     if (responseUri.length > 200) {
       return res.status(400).json({ error: 'responseUri must be <= 200 characters' });
     }
@@ -326,7 +344,7 @@ router.post('/respond', async (req, res) => {
     });
   } catch (e) {
     console.error('POST /api/reviews/respond error:', e.message);
-    res.status(500).json({ error: e.message });
+    res.status(getReviewRespondErrorStatus(e.message)).json({ error: e.message });
   }
 });
 
