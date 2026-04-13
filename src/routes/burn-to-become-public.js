@@ -978,7 +978,65 @@ function handleBurnToBecome(req, res, url) {
       try {
         const { wallet, nftMint } = req.body || {};
         if (!wallet || !nftMint) return sendJson(400, { error: 'wallet and nftMint required' });
-        
+
+        const { PublicKey } = require('@solana/web3.js');
+        try {
+          new PublicKey(wallet);
+          new PublicKey(nftMint);
+        } catch {
+          return sendJson(400, { error: 'Invalid wallet or nftMint' });
+        }
+
+        const Database = require('better-sqlite3');
+        const path = require('path');
+        const gateDb = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+        const resolvedProfile = await resolveBestProfileForWallet(gateDb, wallet);
+        const profileId = resolvedProfile?.profile?.id || null;
+        try { gateDb.close(); } catch {}
+        if (!profileId) {
+          return sendJson(403, { error: 'No AgentFolio profile linked to this wallet. Register at agentfolio.bot first.', wallet });
+        }
+
+        let level = resolvedProfile?.level || 0;
+        let rep = resolvedProfile?.rep || 0;
+        try {
+          const trust = await loadNormalizedTrust(profileId);
+          if (trust && typeof trust.reputationScore === 'number') {
+            level = trust.verificationLevel || 0;
+            rep = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
+          }
+        } catch {}
+        if (level < 3 || rep < 50) {
+          return sendJson(403, { error: 'Burn to Become requires Level 3+ and Rep 50+.', level, rep, profileId });
+        }
+
+        const burnSatpCheck = await checkSatpOnChain(wallet);
+        if (!burnSatpCheck.hasIdentity) {
+          return sendJson(403, { error: 'SATP identity required to burn. Verify your wallet at agentfolio.bot/verify first.' });
+        }
+        if (burnSatpCheck.hasBoaSoulbound) {
+          return sendJson(409, { error: 'This wallet already has a permanent face (boa_soulbound attestation on-chain). Each agent gets one.' });
+        }
+
+        try {
+          const checkDb = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+          const existing = checkDb.prepare('SELECT nft_avatar FROM profiles WHERE id = ?').get(profileId);
+          if (existing && existing.nft_avatar) {
+            const nftData = JSON.parse(existing.nft_avatar);
+            if (nftData.permanent === true) {
+              try { checkDb.close(); } catch {}
+              return sendJson(403, {
+                error: 'This agent already has a permanent soulbound face. Burn to Become is a one-time, irreversible process.',
+                existingSoulbound: nftData.soulboundMint,
+                existingImage: nftData.image,
+              });
+            }
+          }
+          try { checkDb.close(); } catch {}
+        } catch (checkErr) {
+          console.warn('[BurnPublic] prepare permanent face check failed (non-blocking — on-chain SATP is authority):', checkErr.message);
+        }
+
         const tx = await buildBurnTransaction(wallet, nftMint);
         const serialized = tx.serialize({ requireAllSignatures: false }).toString('base64');
         sendJson(200, { transaction: serialized });
@@ -996,6 +1054,37 @@ function handleBurnToBecome(req, res, url) {
       try {
         const { wallet, nftMint, signedTransaction } = req.body || {};
         if (!wallet || !nftMint || !signedTransaction) return sendJson(400, { error: 'wallet, nftMint, and signedTransaction required' });
+
+        const { PublicKey } = require('@solana/web3.js');
+        try {
+          new PublicKey(wallet);
+          new PublicKey(nftMint);
+        } catch {
+          return sendJson(400, { error: 'Invalid wallet or nftMint' });
+        }
+
+        const Database = require('better-sqlite3');
+        const path = require('path');
+        const gateDb = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+        const resolvedProfile = await resolveBestProfileForWallet(gateDb, wallet);
+        const resolvedProfileId = resolvedProfile?.profile?.id || null;
+        try { gateDb.close(); } catch {}
+        if (!resolvedProfileId) {
+          return sendJson(403, { error: 'No AgentFolio profile linked to this wallet. Register at agentfolio.bot first.', wallet });
+        }
+
+        let level = resolvedProfile?.level || 0;
+        let rep = resolvedProfile?.rep || 0;
+        try {
+          const trust = await loadNormalizedTrust(resolvedProfileId);
+          if (trust && typeof trust.reputationScore === 'number') {
+            level = trust.verificationLevel || 0;
+            rep = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
+          }
+        } catch {}
+        if (level < 3 || rep < 50) {
+          return sendJson(403, { error: 'Burn to Become requires Level 3+ and Rep 50+.', level, rep, profileId: resolvedProfileId });
+        }
         
         // ON-CHAIN SATP SECURITY: Identity + boa_soulbound attestation check
         const burnSatpCheck = await checkSatpOnChain(wallet);

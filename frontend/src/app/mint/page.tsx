@@ -624,19 +624,19 @@ export default function MintPage() {
                   </div>
 
                   <button
-                    onClick={() => nfts.length > 0 || genesisInfo ? setStep("select") : undefined}
-                    disabled={(!nfts.length && !genesisInfo) || !!(eligibility && eligibility.isBorn)}
+                    onClick={() => (eligibility?.eligible && (nfts.length > 0 || genesisInfo)) ? setStep("select") : undefined}
+                    disabled={!eligibility?.eligible || (!nfts.length && !genesisInfo) || !!(eligibility && eligibility.isBorn)}
                     className="w-full group inline-flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all hover:scale-[1.02]"
                     style={{
                       fontFamily: "var(--font-mono)",
-                      background: (eligibility && eligibility.isBorn) ? "var(--bg-tertiary)" : (nfts.length > 0 || genesisInfo) ? "linear-gradient(135deg, #10b981, #059669)" : "var(--bg-tertiary)",
-                      color: (eligibility && eligibility.isBorn) ? "var(--text-tertiary)" : (nfts.length > 0 || genesisInfo) ? "#fff" : "var(--text-tertiary)",
-                      border: (eligibility && eligibility.isBorn) || !(nfts.length > 0 || genesisInfo) ? "1px solid var(--border)" : "none",
-                      cursor: (eligibility && eligibility.isBorn) || !(nfts.length > 0 || genesisInfo) ? "not-allowed" : "pointer",
+                      background: (eligibility && eligibility.isBorn) ? "var(--bg-tertiary)" : (eligibility?.eligible && (nfts.length > 0 || genesisInfo)) ? "linear-gradient(135deg, #10b981, #059669)" : "var(--bg-tertiary)",
+                      color: (eligibility && eligibility.isBorn) ? "var(--text-tertiary)" : (eligibility?.eligible && (nfts.length > 0 || genesisInfo)) ? "#fff" : "var(--text-tertiary)",
+                      border: (eligibility && eligibility.isBorn) || !eligibility?.eligible || !(nfts.length > 0 || genesisInfo) ? "1px solid var(--border)" : "none",
+                      cursor: (eligibility && eligibility.isBorn) || !eligibility?.eligible || !(nfts.length > 0 || genesisInfo) ? "not-allowed" : "pointer",
                     }}
                   >
                     <Flame size={16} />
-                    {(eligibility && eligibility.isBorn) ? "Already Committed" : nfts.length > 0 ? "Select NFT to Burn" : genesisInfo ? "Burn Genesis 1/1" : "No NFTs — Collect One First ↓"}
+                    {(eligibility && eligibility.isBorn) ? "Already Committed" : !eligibility?.eligible ? "Need Level 3 + Rep 50" : nfts.length > 0 ? "Select NFT to Burn" : genesisInfo ? "Burn Genesis 1/1" : "No NFTs — Collect One First ↓"}
                   </button>
                 </div>
 
