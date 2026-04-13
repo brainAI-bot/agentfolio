@@ -408,8 +408,22 @@ async function buildBurnTransaction(walletAddress, nftMint) {
   const METAPLEX_CORE_PROGRAM = new PublicKey('CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d');
   
   if (accountInfo.owner.equals(METAPLEX_CORE_PROGRAM)) {
-    // ═══ CORE NFT: Use Core burn worker (returns unsigned TX) ═══
+    // ═══ CORE NFT: Validate ownership, then use Core burn worker (returns unsigned TX) ═══
     console.log('[BurnPublic] Detected Core NFT, using Metaplex Core burn');
+    try {
+      const assetResp = await fetch(HELIUS_RPC, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 'core-burn-asset', method: 'getAsset', params: { id: nftMint } }),
+      });
+      const assetData = await assetResp.json();
+      const owner = assetData?.result?.ownership?.owner || null;
+      if (!owner || owner !== walletAddress) {
+        throw new Error('Wallet does not own this Core NFT');
+      }
+    } catch (e) {
+      if (e && e.message === 'Wallet does not own this Core NFT') throw e;
+      throw new Error('Unable to verify Core NFT ownership');
+    }
     const { execFile } = require('child_process');
     return new Promise((resolve, reject) => {
       execFile('node', ['/home/ubuntu/agentfolio/core-cm-v2/core-burn-worker.mjs', nftMint, walletAddress, 'prepare'], {
@@ -417,7 +431,7 @@ async function buildBurnTransaction(walletAddress, nftMint) {
         cwd: '/home/ubuntu/agentfolio/core-cm-v2',
         env: { ...process.env, HOME: process.env.HOME },
       }, (err, stdout, stderr) => {
-        if (err) return reject(new Error('Core burn prepare failed: ' + err.message));
+        if (err) return reject(new Error('Core burn prepare failed'));
         try {
           const lines = stdout.trim().split('\n');
           const result = JSON.parse(lines[lines.length - 1]);
