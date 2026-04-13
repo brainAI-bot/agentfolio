@@ -7,10 +7,14 @@ const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 const { Connection } = require('@solana/web3.js');
+const { getProgramIds } = require('../satp-client/src/constants');
 
 const DB_PATH = '/home/ubuntu/agentfolio/data/agentfolio.db';
 const MARKETPLACE_JOBS_DIR = '/home/ubuntu/agentfolio/data/marketplace/jobs';
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+const SATP_NETWORK = /mainnet|helius|alchemy/i.test(SOLANA_RPC_URL) ? 'mainnet' : 'devnet';
+const SATP_PROGRAM_IDS = getProgramIds(SATP_NETWORK);
+const SATP_REVIEWS_PROGRAM_ID = SATP_PROGRAM_IDS.REVIEWS.toBase58();
 
 let solanaConnection = null;
 
@@ -137,7 +141,7 @@ function verifyReviewAuth(reviewerId, revieweeId, wallet, signature, signedMessa
   return { ok: true };
 }
 
-async function verifyReviewTxBackedAuth(reviewerId, txSignature) {
+async function verifyReviewTxBackedAuth(reviewerId, txSignature, opts = {}) {
   if (!txSignature) {
     return { ok: false, status: 400, error: 'tx_signature required for tx-backed review auth.' };
   }
@@ -171,6 +175,14 @@ async function verifyReviewTxBackedAuth(reviewerId, txSignature) {
 
     if (!accountKeys.includes(profileWallet)) {
       return { ok: false, status: 403, error: 'tx_signature does not include the reviewer profile wallet.' };
+    }
+
+    if (opts.requiredProgramId && !accountKeys.includes(opts.requiredProgramId)) {
+      return { ok: false, status: 403, error: 'tx_signature does not include the SATP reviews program.' };
+    }
+
+    if (opts.requiredAccount && !accountKeys.includes(opts.requiredAccount)) {
+      return { ok: false, status: 403, error: 'tx_signature does not include the expected marketplace escrow/job account.' };
     }
 
     return { ok: true, authMode: 'tx_signature', wallet: profileWallet, txConfirmed: true };
@@ -510,7 +522,11 @@ function registerReviewsV2Routes(app) {
       return res.status(400).json({ error: 'Marketplace reviews require a confirmed on-chain tx_signature.' });
     }
 
-    const auth = await verifyReviewTxBackedAuth(reviewerId, submittedTxSignature);
+    const expectedJobAccount = job.onchainEscrowPDA || job.v3EscrowPDA || null;
+    const auth = await verifyReviewTxBackedAuth(reviewerId, submittedTxSignature, {
+      requiredProgramId: SATP_REVIEWS_PROGRAM_ID,
+      requiredAccount: expectedJobAccount,
+    });
     if (!auth.ok) {
       const payload = { error: auth.error };
       if (auth.hint) payload.hint = auth.hint;
