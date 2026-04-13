@@ -765,18 +765,16 @@ function handleBurnToBecome(req, res, url) {
   // GET /api/burn-to-become/satp-score
   if (url.pathname === '/api/burn-to-become/satp-score' && req.method === 'GET') {
     const wallet = (req?.query?.wallet || (() => { try { return url?.searchParams?.get ? url.searchParams.get('wallet') : new URL(req.originalUrl || req.url || '', 'http://localhost').searchParams.get('wallet'); } catch { return null; } })());
+    const profileId = (req?.query?.profileId || (() => { try { return url?.searchParams?.get ? url.searchParams.get('profileId') : new URL(req.originalUrl || req.url || '', 'http://localhost').searchParams.get('profileId'); } catch { return null; } })());
     if (!wallet) return sendJson(400, { error: 'wallet required' });
     (async () => {
       try {
         const Database = require('better-sqlite3');
         const db = new Database(require('path').join(__dirname, '../../data/agentfolio.db'), { readonly: true });
-        let matchedProfile = db.prepare("SELECT * FROM profiles WHERE wallet = ?").get(wallet);
-        if (!matchedProfile) {
-          matchedProfile = db.prepare("SELECT * FROM profiles WHERE id IN (SELECT profile_id FROM verifications WHERE identifier = ?)").get(wallet);
-        }
+        const resolvedProfile = await resolveBestProfileForWallet(db, wallet, { preferredProfileId: profileId });
+        const matchedProfile = resolvedProfile?.profile || null;
         try { db.close(); } catch {}
         if (matchedProfile?.id) {
-          const apiBase = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3333';
           try {
             const trust = await loadNormalizedTrust(matchedProfile.id);
             if (trust && typeof trust.reputationScore === 'number') {
