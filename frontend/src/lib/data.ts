@@ -8,6 +8,7 @@ const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL
 const PROFILES_DIR = "/home/ubuntu/agentfolio/data/profiles";
 const JOBS_DIR = "/home/ubuntu/agentfolio/data/marketplace/jobs";
 const DELIVERABLES_DIR = "/home/ubuntu/agentfolio/data/marketplace/deliverables";
+const ESCROW_DIR = "/home/ubuntu/agentfolio/data/marketplace/escrow";
 // Pre-warm V3 cache on module load (runs once at server startup)
 if (typeof (globalThis as any).__v3WarmupDone === 'undefined') {
   (globalThis as any).__v3WarmupDone = true;
@@ -294,7 +295,15 @@ function loadAllJobs(): Job[] {
           cancelled: "open",
         };
 
-        const escrowStatus: Job["escrowStatus"] = raw.fundsReleased ? "released" :
+        let escrowReleased = !!(raw.fundsReleased || (raw as any).releaseTxHash || (raw as any).v3ReleaseTx || (raw as any).v3ReleasedAt);
+        if (!escrowReleased && raw.escrowId) {
+          try {
+            const escrow = JSON.parse(fs.readFileSync(path.join(ESCROW_DIR, `${raw.escrowId}.json`), "utf-8"));
+            escrowReleased = escrow?.status === "released" || escrow?.status === "auto_released";
+          } catch {}
+        }
+
+        const escrowStatus: Job["escrowStatus"] = escrowReleased ? "released" :
           raw.fundsLocked ? "locked" :
           raw.escrowFunded ? "locked" :
           "ready";
