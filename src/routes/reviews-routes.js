@@ -118,6 +118,18 @@ function assertMarketplaceReviewWindow(job) {
   }
 }
 
+function getReviewSubmitErrorStatus(message) {
+  const clientErrors = [
+    'No marketplace job found for provided jobPDA.',
+    'Unable to resolve marketplace participant wallets for review build.',
+    'Reviewer wallet is not a participant on the marketplace job for this escrow PDA.',
+    'Reviews are only allowed for completed marketplace jobs with released escrow.',
+    'Review window expired for this marketplace job.',
+  ];
+
+  return clientErrors.includes(String(message || '')) ? 400 : 500;
+}
+
 async function buildMarketplaceReviewCompatTx({ reviewerWallet, jobPDA, rating, quality, reliability, communication, reviewerIdentity, commentUri, commentHash }) {
   const job = findMarketplaceJobByPda(jobPDA);
   if (!job) throw new Error('No marketplace job found for provided jobPDA.');
@@ -269,7 +281,7 @@ router.post('/submit', async (req, res, next) => {
     });
   } catch (e) {
     console.error('POST /api/reviews/submit error:', e.message);
-    res.status(500).json({ error: e.message });
+    res.status(getReviewSubmitErrorStatus(e.message)).json({ error: e.message });
   }
 });
 
