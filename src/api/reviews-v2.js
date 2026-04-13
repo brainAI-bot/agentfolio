@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const { Connection } = require('@solana/web3.js');
 const { getProgramIds } = require('../satp-client/src/constants');
+const { computeVerificationLevel } = require('../lib/compute-level');
 
 const DB_PATH = '/home/ubuntu/agentfolio/data/agentfolio.db';
 const MARKETPLACE_JOBS_DIR = '/home/ubuntu/agentfolio/data/marketplace/jobs';
@@ -204,6 +205,186 @@ function getReviewerRepWeight(db, reviewerId) {
   }
 }
 
+function parseJson(value, fallback) {
+  if (value == null || value === '') return fallback;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    return fallback;
+  }
+}
+
+function tierToLevel(tier) {
+  return ({
+    unverified: 0,
+    unclaimed: 0,
+    registered: 1,
+    verified: 2,
+    established: 3,
+    trusted: 4,
+    sovereign: 5,
+  }[String(tier || '').toLowerCase()] || 0);
+}
+
+function getProfileRow(db, profileId) {
+  return db.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId) || null;
+}
+
+function getProfileReviewWeightContext(db, profileId) {
+  const row = getProfileRow(db, profileId);
+  if (!row) return null;
+
+  const verificationData = parseJson(row.verification_data, {}) || {};
+  const verification = parseJson(row.verification, {}) || {};
+  const wallets = parseJson(row.wallets, {}) || {};
+  const skills = parseJson(row.skills, []);
+  const portfolio = parseJson(row.portfolio, []);
+  const verifiedPlatforms = Array.isArray(verification.verifiedPlatforms)
+    ? verification.verifiedPlatforms
+    : Object.keys(verificationData).filter((platform) => verificationData?.[platform]?.verified);
+
+  const verifications = Object.entries(verificationData)
+    .filter(([platform, data]) => platform !== 'onboardingDismissed' && data && (data.verified || data.txSignature || data.address || data.handle || data.domain))
+    .map(([platform, data]) => ({
+      platform,
+      method: data.method || data.proofMethod || data.proof_type || '',
+    }));
+
+  const completedEscrowCount = Number(
+    db.prepare("SELECT COUNT(*) AS c FROM reviews WHERE reviewer_id = ? AND job_id IS NOT NULL AND job_id != 'direct'").get(profileId)?.c || 0
+  );
+  const receivedReviewCount = Number(db.prepare('SELECT COUNT(*) AS c FROM reviews WHERE reviewee_id = ?').get(profileId)?.c || 0);
+
+  const profile = {
+    ...row,
+    wallets,
+    skills,
+    portfolio,
+    verificationData,
+    verification,
+    avatar: row.avatar || row.avatar_url || '',
+    createdAt: row.created_at || row.createdAt || null,
+  };
+
+  const computedLevel = computeVerificationLevel({
+    profile,
+    verifications,
+    hasSatpIdentity: Boolean(verificationData?.satp_v3?.verified || verificationData?.satp?.verified || verifiedPlatforms.length > 0),
+    completedEscrowCount,
+    receivedReviewCount,
+    profileExists: true,
+  }).level;
+
+  const storedLevel = tierToLevel(verification?.tier || row.tier || null);
+
+  return {
+    level: Math.max(computedLevel, storedLevel),
+    verifiedPlatforms,
+  };
+}
+
+function getReviewerLevelWeight(level) {
+  return ({ 0: 0.3, 1: 0.3, 2: 0.6, 3: 0.8, 4: 1.0, 5: 1.2 }[Number(level) || 0] || 0.3);
+}
+
+function getJobAmount(db, jobId) {
+  if (!jobId || jobId === 'direct') return 0;
+
+  try {
+    const row = db.prepare('SELECT agreed_budget, budget_amount, budget_max FROM jobs WHERE id = ?').get(jobId);
+    const dbCandidates = [row?.agreed_budget, row?.budget_amount, row?.budget_max];
+    for (const candidate of dbCandidates) {
+      const value = Number(candidate);
+      if (Number.isFinite(value) && value > 0) return value;
+    }
+  } catch (_) {}
+
+  const job = readMarketplaceJob(jobId);
+  if (!job) return 0;
+  const candidates = [
+    job.agreedBudget,
+    job.agreed_budget,
+    job.budgetAmount,
+    job.budget_amount,
+    job.budget,
+    job.budgetMax,
+    job.budget_max,
+    job.amount,
+    job.paymentAmount,
+  ];
+
+  for (const candidate of candidates) {
+    const value = Number(candidate);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+
+  return 0;
+}
+
+function getJobValueWeight(amount) {
+  if (amount <= 0) return 0.5;
+  if (amount < 10) return 0.5;
+  if (amount <= 100) return 0.8;
+  if (amount <= 1000) return 1.0;
+  return 1.2;
+}
+
+function getReviewerHistoryMeta(db, reviewerId) {
+  try {
+    const row = db.prepare(`SELECT
+      COUNT(*) AS count,
+      SUM(CASE WHEN rating <= 2 THEN 1 ELSE 0 END) AS low_count
+      FROM reviews
+      WHERE reviewer_id = ?`).get(reviewerId) || {};
+    const count = Number(row.count || 0);
+    const lowCount = Number(row.low_count || 0);
+    const badRatio = count > 0 ? lowCount / count : 0;
+    const serialBadReviewer = count > 0 && badRatio > 0.5;
+
+    let weight = 0.5;
+    if (serialBadReviewer) weight = 0.3;
+    else if (count < 3) weight = 0.5;
+    else if (count < 10) weight = 0.8;
+    else if (count < 50) weight = 1.0;
+    else weight = 1.1;
+
+    return {
+      count,
+      lowCount,
+      badRatio: Math.round(badRatio * 1000) / 1000,
+      serialBadReviewer,
+      weight,
+    };
+  } catch (e) {
+    return { count: 0, lowCount: 0, badRatio: 0, serialBadReviewer: false, weight: 0.5 };
+  }
+}
+
+function computeReviewWeight(db, review) {
+  const reviewer = getProfileReviewWeightContext(db, review.reviewer_id) || { level: 0, verifiedPlatforms: [] };
+  const reviewerLevelWeight = getReviewerLevelWeight(reviewer.level);
+  const jobAmount = getJobAmount(db, review.job_id);
+  const jobValueWeight = getJobValueWeight(jobAmount);
+  const history = getReviewerHistoryMeta(db, review.reviewer_id);
+  const reviewWeight = reviewerLevelWeight * jobValueWeight * history.weight;
+
+  return {
+    review_weight: Math.round(reviewWeight * 1000) / 1000,
+    review_weight_breakdown: {
+      reviewer_level: reviewer.level,
+      reviewer_level_weight: reviewerLevelWeight,
+      job_value: jobAmount,
+      job_value_weight: jobValueWeight,
+      reviewer_history_count: history.count,
+      reviewer_low_rating_count: history.lowCount,
+      reviewer_low_rating_ratio: history.badRatio,
+      reviewer_history_weight: history.weight,
+      serial_bad_reviewer: history.serialBadReviewer,
+    },
+  };
+}
+
 function insertReviewRecord(db, {
   job_id,
   reviewer_id,
@@ -249,7 +430,8 @@ function getReviewsPayload(agent) {
     let simpleSum = 0;
 
     const formatted = reviews.map((r) => {
-      const weight = 100 + (r.reviewer_rep_weight || 0);
+      const weightMeta = computeReviewWeight(db, r);
+      const weight = Number(weightMeta.review_weight || 0);
       totalWeight += weight;
       weightedSum += r.rating * weight;
       simpleSum += r.rating;
@@ -265,6 +447,8 @@ function getReviewsPayload(agent) {
         category_reliability: r.category_reliability || 0,
         category_communication: r.category_communication || 0,
         reviewer_rep_weight: r.reviewer_rep_weight || 0,
+        review_weight: weightMeta.review_weight,
+        review_weight_breakdown: weightMeta.review_weight_breakdown,
         tx_signature: r.tx_signature || null,
         source: r.tx_signature ? 'solana' : 'database',
         has_response: !!r.has_response,
@@ -291,6 +475,11 @@ function getReviewsPayload(agent) {
       average_rating: Math.round(avgRating * 100) / 100,
       weighted_average: Math.round(weightedAvg * 100) / 100,
       category_averages: catAvg,
+      weighting_formula: {
+        reviewer_level_weight: 'Level 0-1 => 0.3, Level 2 => 0.6, Level 3 => 0.8, Level 4 => 1.0, Level 5 => 1.2',
+        job_value_weight: '< $10 => 0.5, $10-100 => 0.8, $100-1000 => 1.0, > $1000 => 1.2',
+        reviewer_history_weight: '<3 => 0.5, 3-10 => 0.8, 10-50 => 1.0, 50+ => 1.1, serial bad reviewer => 0.3',
+      },
     };
   } finally {
     db.close();
