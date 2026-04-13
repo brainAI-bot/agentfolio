@@ -86,14 +86,19 @@ function registerReviewChallengeRoutes(app) {
         return res.status(400).json({ success: false, error: 'Cannot review yourself' });
       }
 
+      const parsedRating = Number(rating);
+      if (!Number.isInteger(parsedRating) || parsedRating < 1 || parsedRating > 5) {
+        return res.status(400).json({ success: false, error: 'rating must be an integer 1-5' });
+      }
+
       const challengeId = 'rc_' + crypto.randomBytes(16).toString('hex');
       const nonce = crypto.randomBytes(8).toString('hex');
-      const message = `AgentFolio Review | reviewer=${reviewerId} | reviewee=${revieweeId} | rating=${rating} | nonce=${nonce}`;
+      const message = `AgentFolio Review | reviewer=${reviewerId} | reviewee=${revieweeId} | rating=${parsedRating} | nonce=${nonce}`;
 
       challenges.set(challengeId, {
         reviewerId,
         revieweeId,
-        rating: Math.min(5, Math.max(1, parseInt(rating))),
+        rating: parsedRating,
         chain: chain || 'solana',
         jobId: jobId || null,
         message,
