@@ -147,7 +147,14 @@ function registerReviewChallengeRoutes(app) {
         } catch {
           sigBytes = Buffer.from(signature, 'base64');
         }
-        const pubkeyBytes = bs58.decode(walletAddress);
+
+        let pubkeyBytes;
+        try {
+          pubkeyBytes = bs58.decode(walletAddress);
+        } catch {
+          return res.status(400).json({ verified: false, error: 'Invalid wallet format' });
+        }
+
         if (sigBytes.length !== 64 || pubkeyBytes.length !== 32) {
           return res.status(400).json({ verified: false, error: 'Invalid signature or wallet format' });
         }
