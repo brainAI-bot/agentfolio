@@ -109,16 +109,24 @@ function registerReviewChallengeRoutes(app) {
         });
       }
 
+      if (jobId && reviewRight.jobId && jobId !== reviewRight.jobId) {
+        return res.status(400).json({
+          success: false,
+          error: 'jobId does not match the released escrow job between these agents.',
+        });
+      }
+
+      const resolvedJobId = reviewRight.jobId || jobId || null;
       const challengeId = 'rc_' + crypto.randomBytes(16).toString('hex');
       const nonce = crypto.randomBytes(8).toString('hex');
-      const message = `AgentFolio Review | reviewer=${reviewerId} | reviewee=${revieweeId} | rating=${parsedRating} | nonce=${nonce}`;
+      const message = `AgentFolio Review | reviewer=${reviewerId} | reviewee=${revieweeId} | rating=${parsedRating} | jobId=${resolvedJobId} | nonce=${nonce}`;
 
       challenges.set(challengeId, {
         reviewerId,
         revieweeId,
         rating: parsedRating,
         chain: chain || 'solana',
-        jobId: jobId || reviewRight.jobId || null,
+        jobId: resolvedJobId,
         message,
         nonce,
         createdAt: Date.now(),
@@ -197,6 +205,14 @@ function registerReviewChallengeRoutes(app) {
         return res.status(403).json({
           verified: false,
           error: 'No released escrow job found between these agents. Reviews require completed funded escrow.',
+        });
+      }
+
+      if (challenge.jobId && reviewRight.jobId && challenge.jobId !== reviewRight.jobId) {
+        challenges.delete(challengeId);
+        return res.status(409).json({
+          verified: false,
+          error: 'Challenge job binding no longer matches the released escrow job between these agents.',
         });
       }
 
