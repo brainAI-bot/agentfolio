@@ -26,6 +26,18 @@ const rpcUrl = process.env.SOLANA_RPC_URL;
 const inferredNetwork = rpcUrl && /mainnet|helius|alchemy/i.test(rpcUrl) ? 'mainnet' : 'devnet';
 const network = process.env.SOLANA_NETWORK || inferredNetwork;
 const sdk = new SATPSDK({ network, rpcUrl });
+const REVIEWS_IDL_PATH = '/home/ubuntu/agentfolio/satp-idls/reviews.json';
+const REVIEWS_IDL_INSTRUCTIONS = (() => {
+  try {
+    const idl = JSON.parse(fs.readFileSync(REVIEWS_IDL_PATH, 'utf8'));
+    return new Set((idl.instructions || []).map((ix) => String(ix?.name || '').trim()).filter(Boolean));
+  } catch (_) {
+    return new Set();
+  }
+})();
+const SUPPORTS_RESPOND_TO_REVIEW =
+  REVIEWS_IDL_INSTRUCTIONS.has('respond_to_review') ||
+  REVIEWS_IDL_INSTRUCTIONS.has('respondToReview');
 
 const DB_PATH = '/home/ubuntu/agentfolio/data/agentfolio.db';
 const MARKETPLACE_JOBS_DIR = '/home/ubuntu/agentfolio/data/marketplace/jobs';
@@ -337,6 +349,14 @@ router.post('/submit', async (req, res, next) => {
 router.post('/respond', async (req, res) => {
   try {
     const { responder, reviewPDA, responseUri, responseHash } = req.body;
+
+    if (!SUPPORTS_RESPOND_TO_REVIEW) {
+      return res.status(501).json({
+        error: 'Review responses are not supported by the currently deployed reviews program.',
+        code: 'RESPOND_TO_REVIEW_UNAVAILABLE',
+        supportedInstructions: Array.from(REVIEWS_IDL_INSTRUCTIONS),
+      });
+    }
 
     if (!responder || !reviewPDA || !responseUri) {
       return res.status(400).json({
