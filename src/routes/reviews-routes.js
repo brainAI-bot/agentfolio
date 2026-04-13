@@ -66,6 +66,19 @@ function getProfileWallet(profileId) {
   return null;
 }
 
+function getProfileSatpIdentity(profileId) {
+  if (!profileId) return null;
+  try {
+    const db = getDb();
+    const row = db.prepare('SELECT verification_data FROM profiles WHERE id = ?').get(profileId);
+    db.close();
+    if (!row?.verification_data) return null;
+    const vd = JSON.parse(row.verification_data || '{}');
+    return vd?.satp_v3?.genesisPDA || vd?.satp?.genesisPDA || null;
+  } catch (_) {}
+  return null;
+}
+
 function findMarketplaceJobByPda(jobPDA) {
   try {
     for (const name of fs.readdirSync(MARKETPLACE_JOBS_DIR)) {
@@ -88,10 +101,10 @@ function resolveMarketplaceReviewContext(job, reviewerWallet) {
   }
 
   if (reviewerWallet === clientWallet) {
-    return { revieweeWallet: agentWallet, revieweeId: agentId, reviewerRole: 'client' };
+    return { revieweeWallet: agentWallet, revieweeId: agentId, reviewerRole: 'client', reviewerId: clientId };
   }
   if (reviewerWallet === agentWallet) {
-    return { revieweeWallet: clientWallet, revieweeId: clientId, reviewerRole: 'agent' };
+    return { revieweeWallet: clientWallet, revieweeId: clientId, reviewerRole: 'agent', reviewerId: agentId };
   }
 
   throw new Error('Reviewer wallet is not a participant on the marketplace job for this escrow PDA.');
@@ -122,6 +135,7 @@ function getReviewSubmitErrorStatus(message) {
   const clientErrors = [
     'Invalid reviewer pubkey',
     'Invalid reviewerIdentity pubkey',
+    'reviewerIdentity does not match reviewer profile.',
     'No marketplace job found for provided jobPDA.',
     'Unable to resolve marketplace participant wallets for review build.',
     'Reviewer wallet is not a participant on the marketplace job for this escrow PDA.',
@@ -147,7 +161,12 @@ async function buildMarketplaceReviewCompatTx({ reviewerWallet, jobPDA, rating, 
   if (!job) throw new Error('No marketplace job found for provided jobPDA.');
   assertMarketplaceReviewWindow(job);
 
-  const { revieweeWallet, revieweeId, reviewerRole } = resolveMarketplaceReviewContext(job, reviewerWallet);
+  const { revieweeWallet, revieweeId, reviewerRole, reviewerId } = resolveMarketplaceReviewContext(job, reviewerWallet);
+  const expectedReviewerIdentity = getProfileSatpIdentity(reviewerId);
+  if (expectedReviewerIdentity && reviewerIdentity !== expectedReviewerIdentity) {
+    throw new Error('reviewerIdentity does not match reviewer profile.');
+  }
+
   const reviewerKey = new PublicKey(reviewerWallet);
   const revieweeKey = new PublicKey(revieweeWallet);
   const jobKey = new PublicKey(jobPDA);
