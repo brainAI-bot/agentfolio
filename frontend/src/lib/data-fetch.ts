@@ -6,12 +6,10 @@ const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL
  * Fetch agent data via HTTP API instead of filesystem.
  * This allows Next.js ISR to work properly since no fs imports are used.
  */
-export async function fetchAgent(id: string): Promise<Agent | null> {
+export async function fetchAgent(id: string, opts: { live?: boolean } = {}): Promise<Agent | null> {
   try {
     const url = `${API_BASE}/api/profile/${encodeURIComponent(id)}`;
-    const res = await fetch(url, {
-      next: { revalidate: 30 },
-    });
+    const res = await fetch(url, opts.live ? { cache: "no-store" } : { next: { revalidate: 30 } });
     if (!res.ok) return null;
     const raw = await res.json();
     
