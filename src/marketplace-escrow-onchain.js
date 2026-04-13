@@ -237,6 +237,9 @@ function registerMarketplaceEscrowOnchain(app) {
         job.status = 'completed';
         job.completedAt = new Date().toISOString();
         job.updatedAt = new Date().toISOString();
+        job.fundsReleased = true;
+        job.releaseTxHash = txSignature;
+        job.releasedAt = escrow.releasedAt || new Date().toISOString();
         writeJSON(jobPath, job);
         if (job.deliverableId) {
           const dlvPath = path.join(DATA_DIR, 'deliverables', `${job.deliverableId}.json`);
