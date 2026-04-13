@@ -853,7 +853,7 @@ function handleBurnToBecome(req, res, url) {
         const Database = require('better-sqlite3');
         const db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
         let getCompleteScore; try { getCompleteScore = require('../lib/scoring-engine-v2').getCompleteScore; } catch(_) { getCompleteScore = () => ({ overall: 0, level: 'Unverified' }); } const fs = require('fs');
-        const LEVEL_NAMES = ['Unregistered', 'Registered', 'Verified', 'On-Chain', 'Trusted', 'Sovereign'];
+        const LEVEL_NAMES = ['Unregistered', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
         const LEVEL_BADGES = ['⚪', '🟡', '🔵', '🟢', '🟠', '👑'];
         const resolvedProfile = await resolveBestProfileForWallet(db, wallet, { preferredProfileId: profileId });
         let matchedProfile = resolvedProfile?.profile || null;
