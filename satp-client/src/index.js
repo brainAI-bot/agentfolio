@@ -718,7 +718,17 @@ class SATPSDK {
       const bump = data[offset]; offset += 1;
 
       let metadataJson = null;
-      try { metadataJson = JSON.parse(metadata); } catch (_) {}
+      try {
+        metadataJson = JSON.parse(metadata);
+      } catch (_) {
+        const recovered = {};
+        const pairRe = /"([^"]+)":"([^"]*)/g;
+        let match;
+        while ((match = pairRe.exec(metadata)) !== null) {
+          recovered[match[1]] = match[2];
+        }
+        metadataJson = Object.keys(recovered).length > 0 ? recovered : null;
+      }
 
       return {
         reviewer: reviewer.toBase58(),
