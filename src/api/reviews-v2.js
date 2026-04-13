@@ -523,6 +523,11 @@ function registerReviewsV2Routes(app) {
     }
 
     const expectedJobAccount = job.onchainEscrowPDA || job.v3EscrowPDA || null;
+    if (!expectedJobAccount) {
+      return res.status(409).json({
+        error: 'Marketplace tx-backed reviews require a job with an on-chain escrow PDA. JSON-only escrow jobs are not eligible for tx_signature review auth.',
+      });
+    }
     const auth = await verifyReviewTxBackedAuth(reviewerId, submittedTxSignature, {
       requiredProgramId: SATP_REVIEWS_PROGRAM_ID,
       requiredAccount: expectedJobAccount,
