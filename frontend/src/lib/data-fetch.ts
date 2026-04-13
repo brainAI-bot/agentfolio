@@ -94,19 +94,29 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
       wallet: raw.wallet || undefined,
       wallets: raw.wallets || undefined,
       profileCompleteness: (() => {
-        let filled = 0, total = 8;
-        if (raw.name?.trim()) filled++;
-        if ((raw.bio || raw.description)?.trim()) filled++;
-        if (raw.avatar?.trim()) filled++;
-        const skills = Array.isArray(raw.skills) ? raw.skills : [];
-        if (skills.length > 0) filled++;
-        const vd2 = raw.verifications || {};
-        const links = raw.links || {};
-        if (vd2.x?.verified || vd2.twitter?.verified || links.x) filled++;
-        if (vd2.github?.verified || links.github) filled++;
-        if (links.website) filled++;
-        if (raw.walletAddress || raw.wallets?.solana) filled++;
-        return Math.round((filled / total) * 100);
+        const profilePoints = (() => {
+          const authoritative = raw.trustBreakdown?.profile?.total;
+          if (Number.isFinite(authoritative)) return Math.max(0, Math.min(30, Number(authoritative)));
+
+          let points = 0;
+          const bio = String(raw.bio || raw.description || '').trim();
+          if (bio.length >= 50) points += 5;
+          if (String(raw.avatar || '').trim()) points += 5;
+
+          const skills = Array.isArray(raw.skills) ? raw.skills.filter(Boolean) : [];
+          if (skills.length >= 3) points += 5;
+
+          if (String(raw.handle || '').trim()) points += 5;
+
+          const portfolio = Array.isArray(raw.portfolio)
+            ? raw.portfolio.filter((item: any) => item && (String(item.title || '').trim() || String(item.url || '').trim() || String(item.description || '').trim()))
+            : [];
+          points += Math.min(2, portfolio.length) * 5;
+
+          return Math.max(0, Math.min(30, points));
+        })();
+
+        return Math.round((profilePoints / 30) * 100);
       })(),
       trustBreakdown,
     };
