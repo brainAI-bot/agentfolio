@@ -170,32 +170,17 @@ function registerReviewChallengeRoutes(app) {
         });
       }
 
-      // Save review
-      const db = getDb(false);
-      const id = 'rev_' + Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
-      
-      // Detect FK column
-      const reviewCols = db.prepare('PRAGMA table_info(reviews)').all().map(c => c.name);
-      const useRevieweeId = reviewCols.includes('reviewee_id');
-      
-      if (useRevieweeId) {
-        db.prepare(`INSERT INTO reviews (id, job_id, reviewer_id, reviewee_id, rating, comment, type, created_at)
-          VALUES (?,?,?,?,?,?,?,?)`)
-          .run(id, reviewRight.jobId || challenge.jobId || 'wallet-signed', challenge.reviewerId, challenge.revieweeId, challenge.rating, comment || '', 'review', new Date().toISOString());
-      } else {
-        db.prepare(`INSERT INTO reviews (id, profile_id, reviewer_id, reviewer_name, rating, comment, created_at)
-          VALUES (?,?,?,?,?,?,?)`)
-          .run(id, challenge.revieweeId, challenge.reviewerId, challenge.reviewerId, challenge.rating, comment || '', new Date().toISOString());
-      }
-      db.close();
-
-      // Cleanup used challenge
+      // Cleanup used challenge after signature verification. Legacy challenge-based review
+      // submission must NOT write DB-only reviews anymore. Reviews now require an
+      // on-chain transaction and tx_signature via the tx-backed marketplace flow.
       challenges.delete(challengeId);
 
-      res.json({
-        verified: true,
+      return res.status(409).json({
+        verifiedSignature: true,
+        reviewCreated: false,
+        requiresOnchainReview: true,
+        error: 'Legacy wallet-signed review submission is disabled. Reviews now require an on-chain transaction and tx_signature.',
         review: {
-          id,
           reviewer: challenge.reviewerId,
           reviewee: challenge.revieweeId,
           rating: challenge.rating,
@@ -204,7 +189,10 @@ function registerReviewChallengeRoutes(app) {
           chain: challenge.chain,
           jobId: reviewRight.jobId || challenge.jobId || null,
           escrowSource: reviewRight.source,
+          escrowPDA: reviewRight.escrowPDA || null,
+          releaseTx: reviewRight.releaseTx || null,
         },
+        nextStep: 'Build and sign an on-chain review transaction, then POST /api/marketplace/jobs/:id/review with tx_signature.',
       });
     } catch (e) {
       console.error('[ReviewChallenge] submit error:', e);
