@@ -1068,7 +1068,16 @@ function handleBurnToBecome(req, res, url) {
         sendJson(200, { transaction: serialized });
       } catch (e) {
         console.error('[BurnPublic] prepare error:', e);
-        sendJson(500, { error: e.message });
+        const message = e && e.message ? e.message : 'Unknown error';
+        const validationError = (
+          message === 'Wallet does not own this SPL NFT' ||
+          message === 'Burn to Become requires exactly 1 token in the wallet account' ||
+          message === 'Burn to Become only supports non-fungible SPL NFTs' ||
+          message === 'Invalid wallet or nftMint' ||
+          message.startsWith('Unsupported NFT program for burn:') ||
+          message.startsWith('NFT account not found:')
+        );
+        sendJson(validationError ? 400 : 500, { error: message });
       }
     })();
     return true;
