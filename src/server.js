@@ -3149,6 +3149,25 @@ server = app.listen(PORT, () => {
   }
 });
 
+app.get('/api/tokens/stats', (req, res) => {
+  try {
+    const { getTokenStats } = require('./lib/token-launch');
+    return res.json(getTokenStats());
+  } catch (e) {
+    return res.json({
+      totalTokens: 0,
+      totalLaunches: 0,
+      totalMcap: null,
+      platformBreakdown: { virtuals: 0, pumpfun: 0, existing: 0 },
+      chainBreakdown: { solana: 0, base: 0 },
+      totalBurned: 0,
+      bondingCount: 0,
+      graduatedCount: 0,
+      recentLaunches: []
+    });
+  }
+});
+
 // GitHub stats endpoint (used by frontend profile page)
 app.get('/api/verify/github/stats', async (req, res) => {
   const { username } = req.query;
