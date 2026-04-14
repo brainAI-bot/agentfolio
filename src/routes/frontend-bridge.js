@@ -12,6 +12,8 @@ const { loadProfile, saveProfile } = require('../lib/database');
 const { initiateHLVerification, completeHLVerification } = require('../lib/hyperliquid-verify-hardened');
 const { initiatePMVerification, completePMVerification } = require('../lib/polymarket-verify-hardened');
 const verificationChallenges = require('../verification-challenges');
+const { verifyGitHubProfile } = require('../lib/github-verify');
+const { generateDIDConfiguration } = require('../lib/did');
 
 function registerFrontendBridge(app, profileStore) {
   const getDbFn = typeof profileStore?.getDb === 'function' ? profileStore.getDb : (typeof profileStore === 'function' ? profileStore : () => profileStore);
@@ -129,6 +131,34 @@ function registerFrontendBridge(app, profileStore) {
 
   // ─── 3. Verification route aliases ───
   
+  // GitHub status alias expected by docs and older frontend flows
+  app.get('/api/verify/github', async (req, res) => {
+    try {
+      const username = req.query?.username;
+      const agentId = req.query?.agentId || req.query?.profileId || 'unknown';
+      if (!username) return res.status(400).json({ error: 'Username parameter required' });
+      const result = await verifyGitHubProfile(username, agentId);
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Domain linkage config expected by docs and relying clients
+  app.get('/.well-known/did-configuration.json', (req, res) => {
+    try {
+      const host = req.get('host') || 'agentfolio.bot';
+      const protocol = host.startsWith('127.0.0.1') || host.startsWith('localhost') ? 'http' : 'https';
+      const config = generateDIDConfiguration(`${protocol}://${host}`);
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.status(200).json(config);
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // GitHub: /api/verify/github/initiate → /api/verify/github/challenge
   app.post('/api/verify/github/initiate', express.json(), (req, res) => {
     req.url = '/api/verify/github/challenge';
