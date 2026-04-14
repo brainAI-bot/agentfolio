@@ -19,6 +19,9 @@
 
 const path = require('path');
 const fs = require('fs');
+const nacl = require('tweetnacl');
+const _bs58 = require('bs58');
+const bs58 = _bs58.default || _bs58;
 
 let escrowOnchain;
 try {
@@ -30,6 +33,7 @@ try {
 
 const DATA_DIR = path.join(__dirname, '..', 'data', 'marketplace');
 const { syncMarketplaceJobToDb, syncMarketplaceEscrowToDb } = require('./lib/marketplace-db-sync');
+const MARKETPLACE_AUTH_WINDOW_MS = 5 * 60 * 1000;
 
 function readJSON(p) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
@@ -100,6 +104,75 @@ function isAcceptedWorker(actorId, job) {
   return !!job && (matchesActor(actorId, job.acceptedApplicant) || matchesActor(actorId, job.selectedAgentId));
 }
 
+function buildMarketplaceAuthMessage({ action, jobId = '-', escrowId = '-', actorId = '-', walletAddress = '-', timestamp = '-' }) {
+  return [
+    'agentfolio-marketplace',
+    action,
+    jobId || '-',
+    '-',
+    escrowId || '-',
+    '-',
+    actorId || '-',
+    walletAddress || '-',
+    timestamp || '-',
+  ].join(':');
+}
+
+function verifyMarketplaceOnchainAction(req, { action, job, actorId, escrowId = '-' }) {
+  const walletAddress = String(req.headers['x-wallet-address'] || req.body?.walletAddress || '').trim();
+  const walletSignature = String(req.headers['x-wallet-signature'] || req.body?.walletSignature || '').trim();
+  const walletMessage = String(req.headers['x-wallet-message'] || req.body?.walletMessage || '').trim();
+  const walletTimestamp = String(req.headers['x-wallet-timestamp'] || req.body?.walletTimestamp || '').trim();
+
+  if (!walletAddress || !walletSignature || !walletMessage || !walletTimestamp) {
+    return { ok: false, status: 401, error: 'Wallet signature required for marketplace action' };
+  }
+  if (!/^\d{10,}$/.test(walletTimestamp)) {
+    return { ok: false, status: 400, error: 'Invalid wallet auth timestamp' };
+  }
+
+  const timestampNumber = Number(walletTimestamp);
+  if (!Number.isFinite(timestampNumber) || Math.abs(Date.now() - timestampNumber) > MARKETPLACE_AUTH_WINDOW_MS) {
+    return { ok: false, status: 401, error: 'Wallet auth expired. Please sign again.' };
+  }
+
+  const claimedActorId = actorId == null ? '' : String(actorId).trim();
+  const expectedMessage = buildMarketplaceAuthMessage({
+    action,
+    jobId: job?.id || req.params?.id || '-',
+    escrowId,
+    actorId: claimedActorId || '-',
+    walletAddress,
+    timestamp: walletTimestamp,
+  });
+
+  if (walletMessage !== expectedMessage) {
+    return { ok: false, status: 400, error: 'Wallet auth message mismatch' };
+  }
+
+  try {
+    const sigBytes = Buffer.from(walletSignature, 'base64');
+    const msgBytes = Buffer.from(walletMessage);
+    const pubBytes = bs58.decode(walletAddress);
+    if (!nacl.sign.detached.verify(msgBytes, sigBytes, pubBytes)) {
+      return { ok: false, status: 403, error: 'Invalid wallet signature' };
+    }
+  } catch (e) {
+    return { ok: false, status: 400, error: `Wallet auth verification failed: ${e.message}` };
+  }
+
+  const walletActorId = normalizeActorId(walletAddress) || walletAddress;
+  if (claimedActorId && !matchesActor(claimedActorId, walletActorId)) {
+    return { ok: false, status: 403, error: 'Signed wallet does not control the claimed marketplace actor' };
+  }
+  const effectiveActorId = normalizeActorId(claimedActorId || walletActorId) || claimedActorId || walletActorId;
+  if (job && !isJobPoster(effectiveActorId, job) && !isJobPoster(walletAddress, job)) {
+    return { ok: false, status: 403, error: 'Only the job poster can perform this action' };
+  }
+
+  return { ok: true, actorId: effectiveActorId, walletAddress, walletTimestamp: timestampNumber };
+}
+
 function registerMarketplaceEscrowOnchain(app) {
   if (!escrowOnchain) {
     console.warn('[Marketplace Escrow] Skipping on-chain routes (module not loaded)');
@@ -150,7 +223,16 @@ function registerMarketplaceEscrowOnchain(app) {
 
       const { txSignature, escrowPDA, clientWallet } = req.body;
       if (!txSignature || !escrowPDA) return res.status(400).json({ error: 'txSignature and escrowPDA required' });
-      if (clientWallet && !isJobPoster(clientWallet, job)) {
+      if (!clientWallet) return res.status(400).json({ error: 'clientWallet required' });
+
+      const auth = verifyMarketplaceOnchainAction(req, {
+        action: 'confirm_onchain_escrow',
+        job,
+        actorId: clientWallet,
+        escrowId: escrowPDA,
+      });
+      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+      if (!isJobPoster(auth.actorId, job) || !matchesActor(auth.actorId, clientWallet)) {
         return res.status(403).json({ error: 'Only the job poster can confirm escrow funding' });
       }
 
@@ -312,8 +394,24 @@ function registerMarketplaceEscrowOnchain(app) {
       const escrow = readJSON(escrowPath);
       if (!escrow) return res.status(404).json({ error: 'Escrow not found' });
 
-      const { txSignature } = req.body;
+      const { txSignature, clientWallet } = req.body;
       if (!txSignature) return res.status(400).json({ error: 'txSignature required' });
+      if (!clientWallet) return res.status(400).json({ error: 'clientWallet required' });
+
+      const jobPath = path.join(DATA_DIR, 'jobs', `${escrow.jobId}.json`);
+      const job = readJSON(jobPath);
+      if (!job) return res.status(404).json({ error: 'Job not found' });
+
+      const auth = verifyMarketplaceOnchainAction(req, {
+        action: 'confirm_onchain_release',
+        job,
+        actorId: clientWallet,
+        escrowId: escrow.id,
+      });
+      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+      if (!isJobPoster(auth.actorId, job) || !matchesActor(auth.actorId, escrow.fundedBy)) {
+        return res.status(403).json({ error: 'Only the job poster can confirm release' });
+      }
 
       const confirmed = await escrowOnchain.confirmTransaction(txSignature);
       if (!confirmed) return res.status(400).json({ error: 'Transaction not confirmed on-chain' });
@@ -330,8 +428,6 @@ function registerMarketplaceEscrowOnchain(app) {
       writeJSON(escrowPath, escrow);
       try { syncMarketplaceEscrowToDb(escrow); } catch (e) { console.warn('[Marketplace Escrow] escrow DB sync failed after release:', e.message); }
 
-      const jobPath = path.join(DATA_DIR, 'jobs', `${escrow.jobId}.json`);
-      const job = readJSON(jobPath);
       if (job) {
         job.status = 'completed';
         job.completedAt = new Date().toISOString();
@@ -401,8 +497,24 @@ function registerMarketplaceEscrowOnchain(app) {
       const escrow = readJSON(escrowPath);
       if (!escrow) return res.status(404).json({ error: 'Escrow not found' });
 
-      const { txSignature } = req.body;
+      const { txSignature, clientWallet } = req.body;
       if (!txSignature) return res.status(400).json({ error: 'txSignature required' });
+      if (!clientWallet) return res.status(400).json({ error: 'clientWallet required' });
+
+      const jobPath = path.join(DATA_DIR, 'jobs', `${escrow.jobId}.json`);
+      const job = readJSON(jobPath);
+      if (!job) return res.status(404).json({ error: 'Job not found' });
+
+      const auth = verifyMarketplaceOnchainAction(req, {
+        action: 'confirm_onchain_refund',
+        job,
+        actorId: clientWallet,
+        escrowId: escrow.id,
+      });
+      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+      if (!isJobPoster(auth.actorId, job) || !matchesActor(auth.actorId, escrow.fundedBy)) {
+        return res.status(403).json({ error: 'Only the job poster can confirm refund' });
+      }
 
       const confirmed = await escrowOnchain.confirmTransaction(txSignature);
       if (!confirmed) return res.status(400).json({ error: 'Transaction not confirmed on-chain' });
@@ -417,8 +529,6 @@ function registerMarketplaceEscrowOnchain(app) {
       writeJSON(escrowPath, escrow);
       try { syncMarketplaceEscrowToDb(escrow); } catch (e) { console.warn('[Marketplace Escrow] escrow DB sync failed after refund:', e.message); }
 
-      const jobPath = path.join(DATA_DIR, 'jobs', `${escrow.jobId}.json`);
-      const job = readJSON(jobPath);
       if (job) {
         job.status = 'cancelled';
         job.updatedAt = new Date().toISOString();
