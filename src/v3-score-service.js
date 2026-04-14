@@ -24,7 +24,7 @@ let _cacheTime = 0;
 let _connection = null;
 
 function getConnection() {
-  if (!_connection) _connection = new Connection(RPC, 'confirmed');
+  if (!_connection) _connection = new Connection(RPC, { commitment: 'confirmed', disableRetryOnRateLimit: true });
   return _connection;
 }
 

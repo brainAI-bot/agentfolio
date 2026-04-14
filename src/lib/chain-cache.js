@@ -35,7 +35,7 @@ const PLATFORM_SIGNER = process.env.SATP_PLATFORM_SIGNER || null;
 
 let _connection = null;
 function getConnection() {
-  if (!_connection) _connection = new Connection(RPC_URL, 'confirmed');
+  if (!_connection) _connection = new Connection(RPC_URL, { commitment: 'confirmed', disableRetryOnRateLimit: true });
   return _connection;
 }
 
