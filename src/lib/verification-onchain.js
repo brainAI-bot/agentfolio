@@ -40,7 +40,7 @@ function getKeypair() {
 }
 
 function getConnection() {
-  return new Connection(RPC_URL, 'confirmed');
+  return new Connection(RPC_URL, { commitment: 'confirmed', disableRetryOnRateLimit: true });
 }
 
 /**
