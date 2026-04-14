@@ -14,6 +14,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
+const bs58Module = require('bs58');
+const bs58 = bs58Module.encode ? bs58Module : bs58Module.default;
 
 const PROGRAM_ID = new PublicKey('4JUGpKNdhAbQPQc9EG1q25NyaJidziszMMQ4phtg5S4o');
 const TREASURY = new PublicKey('FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be');
@@ -42,8 +44,51 @@ function findPDA(seeds, programId) {
   return PublicKey.findProgramAddressSync(seeds, programId);
 }
 
+function normalizeAccountKey(key) {
+  if (!key) return null;
+  if (typeof key === 'string') return key;
+  if (key.pubkey) return normalizeAccountKey(key.pubkey);
+  if (typeof key.toBase58 === 'function') return key.toBase58();
+  return String(key);
+}
+
+function getMessageAccountKeys(message) {
+  return (message?.accountKeys || message?.staticAccountKeys || []).map(normalizeAccountKey);
+}
+
+function getInstructionProgramId(ix, accountKeys) {
+  if (ix?.programId) return normalizeAccountKey(ix.programId);
+  if (typeof ix?.programIdIndex === 'number') return accountKeys[ix.programIdIndex] || null;
+  return null;
+}
+
+function getInstructionAccounts(ix, accountKeys) {
+  const refs = ix?.accounts || ix?.accountKeyIndexes || [];
+  return refs.map((ref) => typeof ref === 'number' ? accountKeys[ref] : normalizeAccountKey(ref)).filter(Boolean);
+}
+
+function getInstructionData(ix) {
+  if (!ix || ix.data == null) return null;
+  if (typeof ix.data === 'string') return ix.data;
+  if (Buffer.isBuffer(ix.data)) return bs58.encode(ix.data);
+  if (ix.data instanceof Uint8Array) return bs58.encode(Buffer.from(ix.data));
+  return null;
+}
+
+function findVerifiedProfileByWallet(db, wallet) {
+  const profiles = db.prepare('SELECT * FROM profiles').all();
+  for (const p of profiles) {
+    try {
+      const vd = JSON.parse(p.verification_data || '{}');
+      if (vd.solana?.address === wallet && vd.solana?.verified) return p;
+    } catch {}
+  }
+  return null;
+}
+
 function registerBoaMintRoutes(app) {
   const { resolveAgentScore } = require('./eligibility');
+  const expectedMintInstructionData = bs58.encode(getInstructionDiscriminator('mint_nft'));
   
   // POST /api/boa/mint — Build and authority-sign a mint transaction
   app.post('/api/boa/mint', async (req, res) => {
@@ -72,17 +117,7 @@ function registerBoaMintRoutes(app) {
       const db = getDb();
       
       // Find profile linked to this wallet
-      const profiles = db.prepare('SELECT * FROM profiles').all();
-      let matchedProfile = null;
-      for (const p of profiles) {
-        try {
-          const vd = JSON.parse(p.verification_data || '{}');
-          if (vd.solana?.address === wallet && vd.solana?.verified) {
-            matchedProfile = p;
-            break;
-          }
-        } catch {}
-      }
+      const matchedProfile = findVerifiedProfileByWallet(db, wallet);
       
       if (!matchedProfile) {
         db.close();
@@ -257,10 +292,18 @@ module.exports = { registerBoaMintRoutes };
 // POST /api/boa/mint/complete — Called after payment TX confirms, creates the actual NFT
 // Body: { wallet: "<minter_pubkey>", txSignature: "<payment_tx_sig>" }
 function registerBoaMintCompleteRoute(app) {
+  const { resolveAgentScore } = require('./eligibility');
   app.post('/api/boa/mint/complete', async (req, res) => {
     const { wallet, txSignature } = req.body;
     if (!wallet || !txSignature) {
       return res.status(400).json({ error: 'wallet and txSignature required' });
+    }
+
+    let walletPubkey;
+    try {
+      walletPubkey = new PublicKey(wallet);
+    } catch {
+      return res.status(400).json({ error: 'Invalid wallet address' });
     }
     
     // Validate signature format (base58, 64-88 chars) before any RPC calls
@@ -271,6 +314,20 @@ function registerBoaMintCompleteRoute(app) {
     try {
       console.log('[BOA MINT COMPLETE] Request received:', { wallet, txSignature, txSigLength: txSignature.length });
       const connection = new Connection(RPC_URL, 'confirmed');
+      const db = getDb();
+      const matchedProfile = findVerifiedProfileByWallet(db, wallet);
+      if (!matchedProfile) {
+        db.close();
+        return res.status(403).json({ error: 'No verified AgentFolio profile linked to this wallet. Verify your Solana wallet on agentfolio.bot/verify first.' });
+      }
+      const { level, reputation } = await resolveAgentScore(matchedProfile.id, matchedProfile);
+      db.close();
+      if (level < 3) {
+        return res.status(403).json({ error: `Verification level ${level} insufficient. Need Level 3+.`, level, reputation });
+      }
+      if (reputation < 50) {
+        return res.status(403).json({ error: `Reputation ${reputation} insufficient. Need 50+.`, level, reputation });
+      }
       
       // Idempotency: verify cached mint exists on-chain before returning
       const boaRecordsDir = "/home/ubuntu/agentfolio/data/boa-mints";
@@ -316,6 +373,23 @@ function registerBoaMintCompleteRoute(app) {
       }
       if (txInfo.meta?.err) {
         return res.status(400).json({ error: 'Transaction failed on-chain', txErr: txInfo.meta.err });
+      }
+
+      const message = txInfo.transaction?.message;
+      const accountKeys = getMessageAccountKeys(message);
+      const requiredSigners = accountKeys.slice(0, message?.header?.numRequiredSignatures || 0);
+      const hasExpectedMintInstruction = (message?.instructions || []).some((ix) => {
+        const programId = getInstructionProgramId(ix, accountKeys);
+        const instructionAccounts = getInstructionAccounts(ix, accountKeys);
+        const instructionData = getInstructionData(ix);
+        return programId === PROGRAM_ID.toBase58()
+          && instructionData === expectedMintInstructionData
+          && instructionAccounts.includes(walletPubkey.toBase58())
+          && instructionAccounts.includes(TREASURY.toBase58());
+      });
+
+      if (!requiredSigners.includes(walletPubkey.toBase58()) || !hasExpectedMintInstruction) {
+        return res.status(403).json({ error: 'Transaction is not a confirmed BOA mint for this wallet.' });
       }
       
       // Get current mint count from collection state
