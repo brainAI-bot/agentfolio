@@ -26,10 +26,20 @@ interface Props {
   nftAvatar?: NFTAvatar | null;
   wallets: { chain: string; address: string; verified: boolean }[];
   apiKey?: string;
+  connectedWalletAddress?: string | null;
+  signMessage?: ((message: Uint8Array) => Promise<Uint8Array>) | null;
   onAvatarSet?: (avatar: NFTAvatar) => void;
 }
 
-export function NFTAvatarPicker({ profileId, currentAvatar, nftAvatar, wallets, apiKey, onAvatarSet }: Props) {
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
+}
+
+export function NFTAvatarPicker({ profileId, currentAvatar, nftAvatar, wallets, apiKey, connectedWalletAddress, signMessage, onAvatarSet }: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [nfts, setNfts] = useState<NFT[]>([]);
@@ -60,17 +70,37 @@ export function NFTAvatarPicker({ profileId, currentAvatar, nftAvatar, wallets, 
   }
 
   async function selectNFT(nft: NFT) {
-    if (!selectedWallet || !apiKey) return;
+    if (!selectedWallet) return;
     setSetting(nft.mint);
     setError(null);
     try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+
+      if (apiKey) {
+        headers["Authorization"] = `Bearer ${apiKey}`;
+        headers["x-api-key"] = apiKey;
+      } else {
+        if (!connectedWalletAddress || !signMessage) {
+          throw new Error("Connect the verified Solana wallet for this profile or use an API key");
+        }
+        if (selectedWallet.chain !== "solana" || selectedWallet.address !== connectedWalletAddress) {
+          throw new Error("Wallet auth currently requires selecting the connected verified Solana wallet");
+        }
+
+        const msg = new TextEncoder().encode(`agentfolio-edit:${profileId}`);
+        const sig = await signMessage(msg);
+        headers["x-wallet-address"] = connectedWalletAddress;
+        headers["x-wallet-signature"] = bytesToBase64(sig);
+        headers["x-profile-id"] = profileId;
+      }
+
       const res = await fetch("/api/avatar/set", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`
-        },
+        headers,
         body: JSON.stringify({
+          profileId,
           chain: selectedWallet.chain,
           walletAddress: selectedWallet.address,
           nftIdentifier: nft.mint,
