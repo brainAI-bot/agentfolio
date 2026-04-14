@@ -267,9 +267,33 @@ router.get('/agents', async (req, res) => {
               },
               hasBoaAvatar: a.isBorn,
             });
-            return { reputationScore: unified.score, verificationLevel: unified.level, tier: unified.levelName, tierLabel: unified.levelName };
+            return {
+              trustScore: unified.score,
+              score: unified.score,
+              reputationScore: unified.score,
+              level: unified.level,
+              levelName: unified.levelName,
+              verificationLevel: unified.level,
+              verificationLevelName: unified.levelName,
+              verificationLabel: unified.levelName,
+              tier: unified.levelName,
+              tierLabel: unified.levelName,
+              verificationBadge: unified.badge,
+            };
           } catch (_) {
-            return { reputationScore: a.reputationScore, verificationLevel: a.verificationLevel, tier: a.tier, tierLabel: a.tierLabel };
+            return {
+              trustScore: a.reputationScore,
+              score: a.reputationScore,
+              reputationScore: a.reputationScore,
+              level: a.verificationLevel,
+              levelName: a.tierLabel || a.tier,
+              verificationLevel: a.verificationLevel,
+              verificationLevelName: a.tierLabel || a.tier,
+              verificationLabel: a.tierLabel || a.tier,
+              tier: a.tier,
+              tierLabel: a.tierLabel,
+              verificationBadge: null,
+            };
           }
         })(),
         platforms: [...platformSet],
