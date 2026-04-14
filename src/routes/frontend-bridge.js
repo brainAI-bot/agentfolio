@@ -257,6 +257,10 @@ function registerFrontendBridge(app, profileStore) {
 
   // ETH: /api/verify/eth/initiate → /api/verification/eth/initiate
   app.post('/api/verify/eth/initiate', express.json(), (req, res) => {
+    req.body = {
+      ...(req.body || {}),
+      walletAddress: req.body?.walletAddress || req.body?.address || req.body?.wallet || null,
+    };
     req.url = '/api/verification/eth/initiate';
     app.handle(req, res);
   });
@@ -277,6 +281,10 @@ function registerFrontendBridge(app, profileStore) {
 
   // Website: keep public alias paths, but route them to restored challenge/confirm handlers
   app.post('/api/verify/website/initiate', express.json(), (req, res) => {
+    req.body = {
+      ...(req.body || {}),
+      websiteUrl: req.body?.websiteUrl || req.body?.url || req.body?.website || null,
+    };
     req.url = '/api/verify/website/challenge';
     app.handle(req, res);
   });
@@ -477,16 +485,28 @@ function registerFrontendBridge(app, profileStore) {
 
   // ─── 11. moltbook/mcp/a2a initiate aliases ───
   app.post('/api/verify/moltbook/initiate', express.json(), (req, res) => {
+    req.body = {
+      ...(req.body || {}),
+      moltbookUsername: req.body?.moltbookUsername || req.body?.username || req.body?.handle || null,
+    };
     req.url = '/api/verify/moltbook';
     req.method = 'POST';
     app.handle(req, res);
   });
   app.post('/api/verify/mcp/initiate', express.json(), (req, res) => {
+    req.body = {
+      ...(req.body || {}),
+      mcpUrl: req.body?.mcpUrl || req.body?.serverUrl || req.body?.url || null,
+    };
     req.url = '/api/verify/mcp';
     req.method = 'POST';
     app.handle(req, res);
   });
   app.post('/api/verify/a2a/initiate', express.json(), (req, res) => {
+    req.body = {
+      ...(req.body || {}),
+      agentUrl: req.body?.agentUrl || req.body?.url || req.body?.websiteUrl || null,
+    };
     req.url = '/api/verify/a2a';
     req.method = 'POST';
     app.handle(req, res);
