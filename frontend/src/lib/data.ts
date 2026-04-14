@@ -143,7 +143,11 @@ function mapProfile(p: RawProfile): Agent {
   // V3 on-chain scores override local scoring
   const v3 = (globalThis as any).__v3ScoresCache?.get(p.id);
   // Trust Score: SATP on-chain is source of truth (synced by backend score engine)
-  const trustScore = p.score || p.trust_score || (v3 ? v3.reputationScore : 0) || 0;
+  const trustScoreObj: any = (p as any).trust_score;
+  const rawTrustScore = typeof trustScoreObj === 'number'
+    ? trustScoreObj
+    : (trustScoreObj && typeof trustScoreObj === 'object' ? trustScoreObj.overall_score || 0 : 0);
+  const trustScore = p.score || rawTrustScore || (v3 ? v3.reputationScore : 0) || 0;
   const vd = p.verifications || p.verificationData || {};
   const tier: number = p.verificationLevel || p.level || (v3 ? v3.verificationLevel : 0) || 0;
 
@@ -186,7 +190,10 @@ function mapProfile(p: RawProfile): Agent {
         txSignature: vd.satp?.proof?.txSignature || "",
         verified: true,
       } : undefined,
-      ethereum: vd.ethereum?.verified ? { address: vd.ethereum.address || p.wallets?.ethereum || "", verified: true } : undefined,
+      ethereum: (vd.ethereum?.verified || vd.eth?.verified) ? {
+        address: vd.ethereum?.address || vd.eth?.address || p.wallets?.ethereum || p.wallets?.eth || "",
+        verified: true,
+      } : undefined,
       agentmail: vd.agentmail?.verified ? { email: vd.agentmail.email || "", verified: true } : undefined,
       moltbook: vd.moltbook?.verified ? { username: vd.moltbook.username || "", verified: true } : undefined,
       website: vd.website?.verified ? { url: vd.website.url || "", verified: true } : undefined,
@@ -359,18 +366,24 @@ export async function getAllAgents(): Promise<Agent[]> {
     if (res.ok) {
       const profiles = await res.json();
       const arr = Array.isArray(profiles) ? profiles : profiles.profiles || [];
-      return arr.map((p: any) => ({
-        id: p.id, name: p.name || "", handle: p.handle || "", bio: p.bio || p.description || "",
-        avatar: p.avatar || "", nftAvatar: null, trustScore: p.score || p.trust_score || 0,
-        tier: p.tier || p.levelName || "Unclaimed", verificationLevel: p.verificationLevel || p.level || 0,
-        verificationLevelName: p.verificationLevelName || p.tier || p.levelName || "Unclaimed",
-        verificationBadge: ["⚪","🟡","🔵","🟢","🟠","🟣"][p.verificationLevel || p.level || 0] || "⚪",
-        reputationScore: p.score || p.trust_score || 0, reputationRank: "Newcomer",
-        skills: [], verifications: p.verifications || {}, unclaimed: p.unclaimed || false,
-        status: p.unclaimed ? "unclaimed" : "online", jobsCompleted: 0, rating: 0,
-        registeredAt: p.created_at || "", createdAt: p.created_at || "", activity: [],
-        walletAddress: p.wallet || undefined, profileCompleteness: 0,
-      }));
+      return arr.map((p: any) => {
+        const rawTrustScore = typeof p.trust_score === 'number'
+          ? p.trust_score
+          : (p.trust_score && typeof p.trust_score === 'object' ? p.trust_score.overall_score || 0 : 0);
+        const trustScore = p.score || rawTrustScore || 0;
+        return {
+          id: p.id, name: p.name || "", handle: p.handle || "", bio: p.bio || p.description || "",
+          avatar: p.avatar || "", nftAvatar: null, trustScore,
+          tier: p.tier || p.levelName || "Unclaimed", verificationLevel: p.verificationLevel || p.level || 0,
+          verificationLevelName: p.verificationLevelName || p.tier || p.levelName || "Unclaimed",
+          verificationBadge: ["⚪","🟡","🔵","🟢","🟠","🟣"][p.verificationLevel || p.level || 0] || "⚪",
+          reputationScore: trustScore, reputationRank: "Newcomer",
+          skills: [], verifications: p.verifications || {}, unclaimed: p.unclaimed || false,
+          status: p.unclaimed ? "unclaimed" : "online", jobsCompleted: 0, rating: 0,
+          registeredAt: p.created_at || "", createdAt: p.created_at || "", activity: [],
+          walletAddress: p.wallet || undefined, profileCompleteness: 0,
+        };
+      });
     }
   } catch {}
   return [];
