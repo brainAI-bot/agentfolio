@@ -561,11 +561,53 @@ function enrichProfile(row) {
     } catch {}
   }
 
+  const unified = computeUnifiedTrustScore(getDb(), row, { v3Score: v3 });
+  const breakdown = unified.breakdown || {};
+  const normalizedMetadata = (() => {
+    const base = parseJsonField(row.metadata, {});
+    const items = [];
+    try {
+      const rows = getDb().prepare('SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
+      const seen = new Set();
+      for (const ver of rows) {
+        const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
+        if (!platform || platform === 'review' || !isPublicVerificationPlatform(platform) || seen.has(platform)) continue;
+        let proof = {};
+        try { proof = typeof ver.proof === 'string' ? JSON.parse(ver.proof) : (ver.proof || {}); } catch {}
+        const identifier = ver.identifier || proof.identifier || proof.address || proof.wallet || row.wallet || null;
+        if (!identifier) continue;
+        const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || null;
+        if (platform === 'solana' && !txSignature) continue;
+        items.push({
+          platform,
+          identifier,
+          proof,
+          verifiedAt: ver.verified_at || null,
+          status: 'verified',
+        });
+        seen.add(platform);
+      }
+    } catch (_) {}
+    return {
+      ...base,
+      verifications: items,
+      trustScore: unified.score,
+      verificationLevel: unified.level,
+      tier: String(unified.levelName || '').toLowerCase(),
+    };
+  })();
+  const normalizedVerification = JSON.stringify({
+    score: unified.score,
+    tier: String(unified.levelName || '').toLowerCase(),
+    verifiedPlatforms: (normalizedMetadata.verifications || []).map((item) => item.platform).filter(Boolean),
+  });
+
   return {
     ...row,
     walletAddress: row.wallet || null,
     genesisPDA: persistedGenesisPDA,
     avatar: resolvedAvatar ? resolvedAvatar.replace('node1.irys.xyz', 'gateway.irys.xyz') : resolvedAvatar,
+    verification: normalizedVerification,
     // Raw V3/genesis data is exposed via dedicated endpoints.
     // Omitting it here prevents contradictory profile payloads for API consumers.
     v3: undefined,
@@ -635,7 +677,7 @@ function enrichProfile(row) {
     portfolio: parseJsonField(row.portfolio),
     endorsements_given: endorsementsGiven,
     custom_badges: parseJsonField(row.custom_badges),
-    metadata: parseJsonField(row.metadata, {}),
+    metadata: normalizedMetadata,
     nft_avatar: parseJsonField(row.nft_avatar, {}),
     endorsements: { items: endorsements, total: endorsements.length },
     verifications: (() => {
@@ -729,8 +771,6 @@ function enrichProfile(row) {
     },
     // Scoring v2 Phase A: verification level and trust score are independent.
     ...(() => {
-      const unified = computeUnifiedTrustScore(getDb(), row, { v3Score: v3 });
-      const breakdown = unified.breakdown || {};
       return {
         trust_score: {
           overall_score: unified.score,
