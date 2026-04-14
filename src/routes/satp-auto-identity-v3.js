@@ -45,6 +45,11 @@ const RPC_URL = NETWORK === 'devnet'
   : (process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
 
 const connection = new Connection(RPC_URL, 'confirmed');
+const V3_PRIORITY_FEE_MICROLAMPORTS = 50000;
+const V3_PRIORITY_FEE_BUFFER_LAMPORTS = 20000;
+const FALLBACK_V3_GENESIS_ACCOUNT_SIZE_BYTES = 1384;
+let cachedV3GenesisAccountSizeBytes = null;
+let cachedV3GenesisRentLamports = null;
 
 // ─────────────────────────────────────────────
 //  ENCODING HELPERS (Borsh-compatible)
@@ -118,6 +123,36 @@ function getV2IdentityPDA(authority) {
   );
 }
 
+function lamportsToSol(lamports) {
+  return (Number(lamports || 0) / 1e9).toFixed(9);
+}
+
+async function getV3GenesisRentEstimateLamports() {
+  if (cachedV3GenesisRentLamports !== null) return cachedV3GenesisRentLamports;
+
+  try {
+    const accounts = await connection.getProgramAccounts(SATP_V3_IDENTITY_PROGRAM, {
+      dataSlice: { offset: 0, length: 0 },
+    });
+
+    if (accounts.length > 0) {
+      const sampleAccount = await connection.getAccountInfo(accounts[0].pubkey, 'confirmed');
+      if (sampleAccount?.data?.length) {
+        cachedV3GenesisAccountSizeBytes = sampleAccount.data.length;
+      }
+    }
+  } catch (error) {
+    console.warn('[SATP V3] Failed to sample genesis account size:', error.message);
+  }
+
+  if (!cachedV3GenesisAccountSizeBytes) {
+    cachedV3GenesisAccountSizeBytes = FALLBACK_V3_GENESIS_ACCOUNT_SIZE_BYTES;
+  }
+
+  cachedV3GenesisRentLamports = await connection.getMinimumBalanceForRentExemption(cachedV3GenesisAccountSizeBytes);
+  return cachedV3GenesisRentLamports;
+}
+
 // ─────────────────────────────────────────────
 //  TX BUILDER
 // ─────────────────────────────────────────────
@@ -180,12 +215,39 @@ async function buildCreateIdentityV3Tx(walletAddress, agentId, name, description
 
   const tx = new Transaction();
   // Priority fee for faster confirmation
-  tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50000 }));
+  tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: V3_PRIORITY_FEE_MICROLAMPORTS }));
   tx.add(ix);
   tx.feePayer = wallet;
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
   tx.recentBlockhash = blockhash;
   tx.lastValidBlockHeight = lastValidBlockHeight;
+
+  const [rentLamports, feeInfo, walletBalanceLamports] = await Promise.all([
+    getV3GenesisRentEstimateLamports(),
+    connection.getFeeForMessage(tx.compileMessage(), 'confirmed').catch(() => ({ value: null })),
+    connection.getBalance(wallet, 'confirmed'),
+  ]);
+
+  const networkFeeLamports = Number(feeInfo?.value || 5000);
+  const requiredLamports = rentLamports + networkFeeLamports + V3_PRIORITY_FEE_BUFFER_LAMPORTS;
+
+  if (walletBalanceLamports < requiredLamports) {
+    const error = new Error(
+      `Insufficient SOL for SATP registration. Wallet ${wallet.toBase58()} has ${walletBalanceLamports} lamports (${lamportsToSol(walletBalanceLamports)} SOL), but needs at least ${requiredLamports} lamports (${lamportsToSol(requiredLamports)} SOL) to cover SATP genesis rent (${rentLamports} lamports), transaction fee (~${networkFeeLamports} lamports), and priority fee buffer (${V3_PRIORITY_FEE_BUFFER_LAMPORTS} lamports). Fund the wallet and try again.`
+    );
+    error.statusCode = 400;
+    error.code = 'INSUFFICIENT_FUNDS';
+    error.details = {
+      walletAddress: wallet.toBase58(),
+      walletBalanceLamports,
+      rentLamports,
+      networkFeeLamports,
+      priorityFeeBufferLamports: V3_PRIORITY_FEE_BUFFER_LAMPORTS,
+      requiredLamports,
+      cachedV3GenesisAccountSizeBytes,
+    };
+    throw error;
+  }
 
   return {
     transaction: tx.serialize({ requireAllSignatures: false }).toString('base64'),
