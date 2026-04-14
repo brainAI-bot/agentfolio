@@ -205,6 +205,12 @@ async function getSatpAgents() {
       const explorerData = await fetchJsonWithRetries(`${explorerBase}/api/explorer/${encodeURIComponent(profile.id)}`, 3, 300);
       const byAgentData = await fetchJsonWithRetries(`${explorerBase}/api/satp/attestations/by-agent/${encodeURIComponent(profile.id)}`, 5, 500);
 
+      let profileNFTAvatar = null;
+      try {
+        profileNFTAvatar = typeof profile.nft_avatar === 'string' ? JSON.parse(profile.nft_avatar || '{}') : (profile.nft_avatar || null);
+      } catch (_) {}
+      const profileAvatar = profileNFTAvatar?.image || profileNFTAvatar?.arweaveUrl || profile.avatar || null;
+
       const reviewStats = reviewStatsByProfileId.get(profile.id) || { total: 0, avg_rating: 0 };
       const unified = computeUnifiedTrustScore(_db, profile, {
         v3Score: {
@@ -247,6 +253,9 @@ async function getSatpAgents() {
         verificationLevelName: unified.levelName || levelLabels[unified.level] || 'Unverified',
         verificationBadge: levelBadges[unified.level] || '⚪',
         trustCredentialUrl: `/trust/${encodeURIComponent(profile.id)}`,
+        avatar: profileAvatar || agent.nftImage || null,
+        nftImage: profileAvatar || agent.nftImage || null,
+        nftAvatar: profileNFTAvatar,
         verifications: explorerVerifications,
         attestationMemos: explorerAttestations,
         platforms,
