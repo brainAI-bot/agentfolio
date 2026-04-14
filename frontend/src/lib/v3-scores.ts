@@ -6,7 +6,7 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { deriveGenesisPda, verificationLabel as sdkVerificationLabel } from "@brainai/satp-v3";
 
-const RPC_URL = process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY";
+const RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 interface V3Score {

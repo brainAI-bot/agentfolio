@@ -925,7 +925,7 @@ function registerRestoredRoutes(app) {
   app.post('/api/satp/genesis/prepare', express.json(), async (req, res) => {
     try {
       const { createSATPClient, agentIdHash } = require('../satp-client/src');
-      const client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY' });
+      const client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com' });
       const { agentId, payer } = req.body;
       if (!agentId || !payer) return res.status(400).json({ error: 'agentId and payer required' });
 

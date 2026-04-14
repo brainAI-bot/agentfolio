@@ -16,7 +16,7 @@ export const ESCROW_PROGRAM_ID = new PublicKey(
 export const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
 export const SOLANA_RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || (
   SOLANA_CLUSTER === "mainnet-beta"
-    ? "https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY"
+    ? "https://api.mainnet-beta.solana.com"
     : `https://api.${SOLANA_CLUSTER}.solana.com`
 );
 

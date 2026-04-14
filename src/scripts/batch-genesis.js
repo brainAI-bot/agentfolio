@@ -18,7 +18,7 @@ const fs = require('fs');
 
 // ─── Config ──────────────────────────────────────────────
 const DB_PATH = path.resolve(__dirname, '../../data/agentfolio.db');
-const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY';
+const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const SIGNER_PATH = process.env.SATP_SIGNER_PATH || path.join(process.env.HOME, '.config/solana/id.json');
 
 const EXECUTE = process.argv.includes('--execute');

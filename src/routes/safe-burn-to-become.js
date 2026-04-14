@@ -10,7 +10,7 @@ const { Connection, Keypair, PublicKey } = require("@solana/web3.js");
 const fs = require("fs");
 
 const DEPLOYER_KEY_PATH = "/home/ubuntu/.config/solana/mainnet-deployer.json";
-const RPC_URL = process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY";
+const RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
 
 let _signer = null;
 function getSigner() {

@@ -28,7 +28,7 @@ const CONFIGURED_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubun
 const KEYPAIR_PATH = CONFIGURED_KEYPAIR_PATH === '/home/ubuntu/.config/solana/satp-mainnet-platform.json'
   ? '/home/ubuntu/.config/solana/mainnet-deployer.json'
   : CONFIGURED_KEYPAIR_PATH;
-const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY';
+const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 
 let _keypair = null;
 function getKeypair() {

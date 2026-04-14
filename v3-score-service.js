@@ -13,7 +13,7 @@ const crypto = require('crypto');
 
 const PROGRAM_ID = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
 const GENESIS_SEED = 'genesis';
-const RPC = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY';
+const RPC = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 let _cache = new Map();

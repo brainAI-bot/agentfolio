@@ -12,7 +12,7 @@ const { computeVerificationLevel } = require('../lib/compute-level');
 
 const DB_PATH = '/home/ubuntu/agentfolio/data/agentfolio.db';
 const MARKETPLACE_JOBS_DIR = '/home/ubuntu/agentfolio/data/marketplace/jobs';
-const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY';
+const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const SATP_NETWORK = /mainnet|helius|alchemy/i.test(SOLANA_RPC_URL) ? 'mainnet' : 'devnet';
 const SATP_PROGRAM_IDS = getProgramIds(SATP_NETWORK);
 const SATP_REVIEWS_PROGRAM_ID = SATP_PROGRAM_IDS.REVIEWS.toBase58();

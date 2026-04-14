@@ -22,7 +22,7 @@ const {
   connection: satpConnection,
 } = require('./satp-auto-identity-v3');
 
-const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY';
+const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const registrationConnection = satpConnection || new Connection(RPC_URL, 'confirmed');
 
 const simpleLimiter = rateLimit({

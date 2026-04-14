@@ -1,3 +1,26 @@
+const fs = require("fs");
+
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return {};
+  const out = {};
+  const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const idx = line.indexOf("=");
+    if (idx === -1) continue;
+    const key = line.slice(0, idx).trim();
+    let value = line.slice(idx + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+const secretEnv = loadEnvFile(process.env.AGENTFOLIO_ENV_FILE || "/home/ubuntu/.config/agentfolio/production.env");
+
 module.exports = {
   apps: [{
     name: "agentfolio",
@@ -12,14 +35,15 @@ module.exports = {
       PORT: 3333,
       BOA_CLUSTER: "mainnet",
       SATP_NETWORK: "mainnet",
-      SOLANA_RPC_URL: "https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY",
+      SOLANA_RPC_URL: "https://api.mainnet-beta.solana.com",
       SATP_PLATFORM_KEYPAIR: "/home/ubuntu/.config/solana/mainnet-deployer.json",
       X402_ENABLED: "true",
       X402_SCHEME: "svm",
       X402_NETWORK: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
       X402_FACILITATOR: "https://facilitator.payai.network",
       X402_RECEIVE_ADDRESS: "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be",
-      X402_RECEIVING_ADDRESS: "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be"
+      X402_RECEIVING_ADDRESS: "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be",
+      ...secretEnv,
     },
     kill_timeout: 5000,
     listen_timeout: 8000,

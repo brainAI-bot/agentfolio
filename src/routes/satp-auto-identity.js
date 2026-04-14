@@ -34,7 +34,7 @@ const NETWORK = process.env.SATP_NETWORK || 'mainnet';
 const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/agentfolio/config/platform-keypair.json';
 const RPC_URL = NETWORK === 'devnet' 
   ? 'https://api.devnet.solana.com' 
-  : (process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY');
+  : (process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
 
 const connection = new Connection(RPC_URL, 'confirmed');
 

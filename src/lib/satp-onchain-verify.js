@@ -7,7 +7,7 @@
 const { Connection, PublicKey } = require('@solana/web3.js');
 
 const SATP_V2_PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq');
-const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=REDACTED_HELIUS_API_KEY';
+const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const CACHE_TTL_MS = 60_000; // 60 seconds
 
 const _cache = new Map();
