@@ -30,6 +30,7 @@ const { registerSATPAutoIdentityRoutes } = require("./routes/satp-auto-identity"
 const { registerSATPAutoIdentityV3Routes } = require("./routes/satp-auto-identity-v3");
 const { registerBoaLinkerV3Routes } = require("./routes/satp-boa-linker-v3");
 const { registerBoaMintRoutes, registerBoaMintCompleteRoute, registerBoaAgentMintRoute } = require("./api/boa-mint");
+const { registerBoaMintFinalizeRoutes } = require("./api/boa-mint-finalize");
 const { registerReviewsV2Routes } = require("./api/reviews-v2");
 const { API_DOCS, generateDocsHTML } = require('./api/docs');
 
@@ -2632,6 +2633,7 @@ try {
   registerBoaMintRoutes(app);
   registerBoaMintCompleteRoute(app);
   registerBoaAgentMintRoute(app);
+  registerBoaMintFinalizeRoutes(app);
   registerReviewsV2Routes(app);
   console.log("[Eligibility API] Mounted — /api/mint/eligibility, /api/boa/eligibility");
 } catch (e) {
