@@ -57,7 +57,7 @@ function handleBirthEndpoints(req, res, url) {
         const { signedTransaction, agentId } = req.body || {};
         if (!signedTransaction) return sendJson(400, { error: 'signedTransaction required (base64)' });
         
-        const RPC = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+        const RPC = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
         const conn = new Connection(RPC, 'confirmed');
         const txBuf = Buffer.from(signedTransaction, 'base64');
         const sig = await conn.sendRawTransaction(txBuf, { skipPreflight: false });

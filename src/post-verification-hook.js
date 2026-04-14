@@ -25,7 +25,7 @@ function getSATPWriteClient() {
 function getV3SDK() {
   if (!v3sdk) {
     const { SATPV3SDK } = require('./satp-client/src/v3-sdk');
-    const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+    const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
     v3sdk = new SATPV3SDK({ rpcUrl: RPC_URL });
   }
   return v3sdk;

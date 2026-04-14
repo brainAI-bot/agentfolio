@@ -3,7 +3,7 @@ const { Keypair, Connection } = require("@solana/web3.js");
 const fs = require("fs");
 
 async function main() {
-  const rpc = process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb";
+  const rpc = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
   const client = createSATPClient({ rpcUrl: rpc });
   const connection = new Connection(rpc, "confirmed");
   

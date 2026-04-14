@@ -47,7 +47,7 @@ let satpV3;
 try {
   const { createSATPClient, SATPV3SDK: WrapperSDK, hashAgentId, getGenesisPDA } = require('./satp-client/src');
   const { SATPV3SDK } = require('./satp-client/src/v3-sdk');
-  const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+  const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
   const v3Client = new SATPV3SDK({ rpcUrl: RPC_URL, network: "mainnet" });
   satpV3 = { client: v3Client, SATPV3SDK, hashAgentId, getGenesisPDA };
   console.log('[SATP V3] SDK loaded (v3-sdk SATPV3SDK with getGenesisRecord)');
@@ -247,7 +247,7 @@ function calculateProfileCompletenessPercent(raw = {}) {
 async function loadPreferredSatpSignerKeypair() {
   const fs = require('fs');
   const { Connection, Keypair } = require('@solana/web3.js');
-  const rpcUrl = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+  const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
   const conn = new Connection(rpcUrl, 'confirmed');
   const candidatePaths = [
     process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/agentfolio/config/platform-keypair.json',
@@ -454,7 +454,7 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
     const notifReq = http.request({
       hostname: 'localhost', port: 3456, path: '/api/comms/push',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-HQ-Key': '8abe67cfdddd0152925a512175515820dabb7dfce8ebe258' },
+      headers: { 'Content-Type': 'application/json', 'X-HQ-Key': (process.env.X_HQ_KEY || process.env.HQ_API_KEY || '') },
       timeout: 3000,
     });
     notifReq.on('error', () => {});
@@ -1113,7 +1113,7 @@ function registerRoutes(app) {
         const notifReq = http.request({
           hostname: 'localhost', port: 3456, path: '/api/comms/push',
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-HQ-Key': '8abe67cfdddd0152925a512175515820dabb7dfce8ebe258' },
+          headers: { 'Content-Type': 'application/json', 'X-HQ-Key': (process.env.X_HQ_KEY || process.env.HQ_API_KEY || '') },
           timeout: 3000,
         });
         notifReq.on('error', () => {}); // fire-and-forget

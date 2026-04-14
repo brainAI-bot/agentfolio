@@ -15,7 +15,7 @@ const { Connection, PublicKey, Transaction, TransactionInstruction, ComputeBudge
 const crypto = require('crypto');
 
 const IDENTITY_V3 = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
-const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 
 function anchorDisc(name) {
   return crypto.createHash('sha256').update(`global:${name}`).digest().slice(0, 8);

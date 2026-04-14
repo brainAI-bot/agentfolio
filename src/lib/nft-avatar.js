@@ -12,14 +12,14 @@ const https = require('https');
 const { loadProfile, saveProfile } = require('./profile');
 
 const SOLANA_RPC = 'api.mainnet-beta.solana.com';
-const DEFAULT_HELIUS_API_KEY = '91c63e44-1c7a-4b98-830b-6135632565fb';
+const DEFAULT_HELIUS_API_KEY = null;
 let HELIUS_API_KEY = process.env.HELIUS_API_KEY || null;
 if (!HELIUS_API_KEY && process.env.SOLANA_RPC_URL) {
   try {
     HELIUS_API_KEY = new URL(process.env.SOLANA_RPC_URL).searchParams.get('api-key') || null;
   } catch (_) {}
 }
-HELIUS_API_KEY = HELIUS_API_KEY || DEFAULT_HELIUS_API_KEY;
+HELIUS_API_KEY = HELIUS_API_KEY || DEFAULT_HELIUS_API_KEY || null;
 const HELIUS_RPC = HELIUS_API_KEY ? 'mainnet.helius-rpc.com' : 'api.mainnet-beta.solana.com';
 const HELIUS_PATH = HELIUS_API_KEY ? ('/?api-key=' + HELIUS_API_KEY) : '/';
 

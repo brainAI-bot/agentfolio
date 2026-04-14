@@ -10,7 +10,7 @@ const { Connection, PublicKey } = require("@solana/web3.js");
 let profileStore;
 try { profileStore = require("../profile-store"); } catch(e) { profileStore = null; }
 const { computeUnifiedTrustScore } = require('../lib/unified-trust-score');
-const RPC = process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb";
+const RPC = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
 const TOKEN_2022 = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
 // V3 program + same parser as v3-score-service
