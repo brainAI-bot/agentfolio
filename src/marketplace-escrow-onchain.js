@@ -29,7 +29,7 @@ try {
 }
 
 const DATA_DIR = path.join(__dirname, '..', 'data', 'marketplace');
-const { syncMarketplaceJobToDb } = require('./lib/marketplace-db-sync');
+const { syncMarketplaceJobToDb, syncMarketplaceEscrowToDb } = require('./lib/marketplace-db-sync');
 
 function readJSON(p) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
@@ -183,6 +183,7 @@ function registerMarketplaceEscrowOnchain(app) {
         refundedAt: null
       };
       writeJSON(path.join(DATA_DIR, 'escrow', `${escrow.id}.json`), escrow);
+      try { syncMarketplaceEscrowToDb(escrow, job); } catch (e) { console.warn('[Marketplace Escrow] escrow DB sync failed after funding:', e.message); }
 
       job.escrowId = escrow.id;
       job.onchainEscrowPDA = escrowPDA;
@@ -327,6 +328,7 @@ function registerMarketplaceEscrowOnchain(app) {
       escrow.releaseTxHash = txSignature;
       escrow.releasedAt = new Date().toISOString();
       writeJSON(escrowPath, escrow);
+      try { syncMarketplaceEscrowToDb(escrow); } catch (e) { console.warn('[Marketplace Escrow] escrow DB sync failed after release:', e.message); }
 
       const jobPath = path.join(DATA_DIR, 'jobs', `${escrow.jobId}.json`);
       const job = readJSON(jobPath);
@@ -413,6 +415,7 @@ function registerMarketplaceEscrowOnchain(app) {
       escrow.refundTxHash = txSignature;
       escrow.refundedAt = new Date().toISOString();
       writeJSON(escrowPath, escrow);
+      try { syncMarketplaceEscrowToDb(escrow); } catch (e) { console.warn('[Marketplace Escrow] escrow DB sync failed after refund:', e.message); }
 
       const jobPath = path.join(DATA_DIR, 'jobs', `${escrow.jobId}.json`);
       const job = readJSON(jobPath);

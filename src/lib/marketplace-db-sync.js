@@ -2,6 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const db = require('./database');
 
+const WALLET_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
 const MARKETPLACE_DIR = path.join(__dirname, '..', '..', 'data', 'marketplace');
 
 function readJSON(filePath) {
@@ -84,8 +86,59 @@ function syncMarketplaceApplicationToDb(application = {}) {
   return db.saveApplication(normalized);
 }
 
+function normalizeEscrow(escrow = {}, jobInput = null) {
+  const job = jobInput || (escrow.jobId ? readJSON(path.join(MARKETPLACE_DIR, 'jobs', `${escrow.jobId}.json`)) : null) || {};
+  const amount = Number(escrow.amount || 0) || 0;
+  const platformFee = Number(escrow.platformFee ?? 0) || 0;
+  const fundedAt = escrow.fundedAt || escrow.depositConfirmedAt || escrow.createdAt || new Date().toISOString();
+  const updatedAt = escrow.updatedAt || escrow.releasedAt || escrow.refundedAt || fundedAt;
+  const clientId = job.clientId || job.postedBy || escrow.clientId || null;
+  const agentId = job.selectedAgentId || job.acceptedApplicant || escrow.agentId || escrow.worker || null;
+  if (!escrow.id || !(escrow.jobId || job.id) || !clientId) {
+    throw new Error(`Cannot sync escrow ${escrow.id || '(missing-id)'} without job/client context`);
+  }
+
+  return {
+    id: escrow.id,
+    jobId: escrow.jobId || job.id,
+    clientId,
+    clientWallet: escrow.clientWallet || (typeof escrow.fundedBy === 'string' && WALLET_RE.test(escrow.fundedBy) ? escrow.fundedBy : null),
+    agentId,
+    agentWallet: escrow.agentWallet || (typeof escrow.worker === 'string' && WALLET_RE.test(escrow.worker) ? escrow.worker : null),
+    amount,
+    currency: escrow.currency || job.budgetCurrency || job.currency || 'USDC',
+    platformFee,
+    agentPayout: Number(escrow.workerPayout ?? escrow.agentPayout ?? Math.max(amount - platformFee, 0)) || 0,
+    status: escrow.status || 'pending',
+    depositAddress: escrow.escrowPDA || escrow.depositAddress || null,
+    depositTxHash: escrow.txHash || escrow.depositTxHash || null,
+    depositConfirmedAt: escrow.fundedAt || escrow.depositConfirmedAt || null,
+    releaseTxHash: escrow.releaseTxHash || null,
+    releasedAt: escrow.releasedAt || null,
+    refundTxHash: escrow.refundTxHash || null,
+    refundedAt: escrow.refundedAt || null,
+    lockedAt: escrow.lockedAt || escrow.fundedAt || null,
+    expiresAt: escrow.expiresAt || null,
+    notes: [{
+      source: 'marketplace-json-sync',
+      onchain: Boolean(escrow.onchain),
+      escrowPDA: escrow.escrowPDA || null,
+      fundedBy: escrow.fundedBy || null,
+      worker: escrow.worker || null,
+    }],
+    createdAt: fundedAt,
+    updatedAt,
+  };
+}
+
+function syncMarketplaceEscrowToDb(escrow = {}, jobInput = null) {
+  return db.saveEscrow(normalizeEscrow(escrow, jobInput));
+}
+
 module.exports = {
   syncMarketplaceJobToDb,
   syncMarketplaceApplicationToDb,
+  syncMarketplaceEscrowToDb,
   normalizeJob,
+  normalizeEscrow,
 };
