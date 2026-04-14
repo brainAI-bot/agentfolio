@@ -67,8 +67,11 @@ export function WriteReviewForm({ targetProfileId }: WriteReviewFormProps) {
       .catch(() => setV3Available(false));
   }, []);
 
+  // Review UI is escrow-gated and wallet-gated: never show the form to anonymous visitors.
+  if (!publicKey) return null;
+
   // Don't render if wallet is connected but same as target (own profile)
-  if (publicKey && reviewerId === targetProfileId) return null;
+  if (reviewerId === targetProfileId) return null;
 
   // Don't render if escrow check completed and no completed escrow
   if (escrowCheck.checked && !escrowCheck.hasEscrow) return null;
