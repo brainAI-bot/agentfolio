@@ -50,6 +50,7 @@ const V3_PRIORITY_FEE_BUFFER_LAMPORTS = 20000;
 const FALLBACK_V3_GENESIS_ACCOUNT_SIZE_BYTES = 1384;
 let cachedV3GenesisAccountSizeBytes = null;
 let cachedV3GenesisRentLamports = null;
+let cachedSystemAccountRentLamports = null;
 
 // ─────────────────────────────────────────────
 //  ENCODING HELPERS (Borsh-compatible)
@@ -153,6 +154,12 @@ async function getV3GenesisRentEstimateLamports() {
   return cachedV3GenesisRentLamports;
 }
 
+async function getSystemAccountRentFloorLamports() {
+  if (cachedSystemAccountRentLamports !== null) return cachedSystemAccountRentLamports;
+  cachedSystemAccountRentLamports = await connection.getMinimumBalanceForRentExemption(0);
+  return cachedSystemAccountRentLamports;
+}
+
 // ─────────────────────────────────────────────
 //  TX BUILDER
 // ─────────────────────────────────────────────
@@ -222,18 +229,19 @@ async function buildCreateIdentityV3Tx(walletAddress, agentId, name, description
   tx.recentBlockhash = blockhash;
   tx.lastValidBlockHeight = lastValidBlockHeight;
 
-  const [rentLamports, feeInfo, walletBalanceLamports] = await Promise.all([
+  const [rentLamports, systemAccountRentFloorLamports, feeInfo, walletBalanceLamports] = await Promise.all([
     getV3GenesisRentEstimateLamports(),
+    getSystemAccountRentFloorLamports(),
     connection.getFeeForMessage(tx.compileMessage(), 'confirmed').catch(() => ({ value: null })),
     connection.getBalance(wallet, 'confirmed'),
   ]);
 
   const networkFeeLamports = Number(feeInfo?.value || 5000);
-  const requiredLamports = rentLamports + networkFeeLamports + V3_PRIORITY_FEE_BUFFER_LAMPORTS;
+  const requiredLamports = rentLamports + systemAccountRentFloorLamports + networkFeeLamports + V3_PRIORITY_FEE_BUFFER_LAMPORTS;
 
   if (walletBalanceLamports < requiredLamports) {
     const error = new Error(
-      `Insufficient SOL for SATP registration. Wallet ${wallet.toBase58()} has ${walletBalanceLamports} lamports (${lamportsToSol(walletBalanceLamports)} SOL), but needs at least ${requiredLamports} lamports (${lamportsToSol(requiredLamports)} SOL) to cover SATP genesis rent (${rentLamports} lamports), transaction fee (~${networkFeeLamports} lamports), and priority fee buffer (${V3_PRIORITY_FEE_BUFFER_LAMPORTS} lamports). Fund the wallet and try again.`
+      `Insufficient SOL for SATP registration. Wallet ${wallet.toBase58()} has ${walletBalanceLamports} lamports (${lamportsToSol(walletBalanceLamports)} SOL), but needs at least ${requiredLamports} lamports (${lamportsToSol(requiredLamports)} SOL) to cover SATP genesis rent (${rentLamports} lamports), payer rent floor (${systemAccountRentFloorLamports} lamports), transaction fee (~${networkFeeLamports} lamports), and priority fee buffer (${V3_PRIORITY_FEE_BUFFER_LAMPORTS} lamports). Fund the wallet and try again.`
     );
     error.statusCode = 400;
     error.code = 'INSUFFICIENT_FUNDS';
@@ -241,6 +249,7 @@ async function buildCreateIdentityV3Tx(walletAddress, agentId, name, description
       walletAddress: wallet.toBase58(),
       walletBalanceLamports,
       rentLamports,
+      systemAccountRentFloorLamports,
       networkFeeLamports,
       priorityFeeBufferLamports: V3_PRIORITY_FEE_BUFFER_LAMPORTS,
       requiredLamports,
