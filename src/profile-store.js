@@ -84,24 +84,6 @@ const SATP_NETWORK = process.env.SATP_NETWORK || 'mainnet';
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'agentfolio.db');
 
-const NON_PUBLIC_DIRECTORY_PROFILE_IDS = new Set([
-  'agent_sm423064591',
-  'agent_sm423302531',
-  'agent_sm423302532',
-  'agent_braintest',
-  'agent_braintest2',
-  'agent_forgetest',
-  'agent_forgetest2',
-]);
-
-function isPublicDirectoryProfile(profile) {
-  const id = String(profile?.id || '').toLowerCase();
-  if (!id) return false;
-  if (NON_PUBLIC_DIRECTORY_PROFILE_IDS.has(id)) return false;
-  if (id.startsWith('local_') || id.startsWith('lauc_') || id.startsWith('laur_')) return false;
-  return true;
-}
-
 let db;
 
 function getDb() {
@@ -206,8 +188,6 @@ function initSchema() {
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_reviews_fk ON reviews(${reviewFk})`); } catch {}
   // Store for use in queries
   module.exports._reviewFk = reviewFk;
-  try { db.exec("ALTER TABLE endorsements ADD COLUMN endorser_wallet TEXT DEFAULT ''"); } catch {}
-  try { db.exec("ALTER TABLE endorsements ADD COLUMN endorser_level INTEGER DEFAULT 0"); } catch {}
 }
 
 // Review auth: challenge-response with wallet signing
@@ -242,6 +222,26 @@ function parseJsonField(val, defaultVal = []) {
   if (val === null || val === undefined || val === '') return defaultVal;
   if (typeof val === 'object') return val; // already parsed
   try { return JSON.parse(val); } catch { return defaultVal; }
+}
+
+function calculateProfileCompletenessPercent(raw = {}) {
+  const vd = raw.verification_data || raw.verificationData || {};
+  const links = raw.links || {};
+  const wallets = raw.wallets || {};
+  const skills = Array.isArray(raw.skills) ? raw.skills.filter(Boolean) : [];
+  let filled = 0;
+  const total = 8;
+
+  if (String(raw.name || '').trim()) filled++;
+  if (String(raw.bio || raw.description || '').trim()) filled++;
+  if (String(raw.avatar || '').trim()) filled++;
+  if (skills.length > 0) filled++;
+  if (vd.x?.verified || vd.twitter?.verified || String(links.x || links.twitter || '').trim()) filled++;
+  if (vd.github?.verified || String(links.github || '').trim()) filled++;
+  if (String(links.website || raw.website || '').trim()) filled++;
+  if (raw.walletAddress || raw.wallet || wallets.solana || vd.solana?.address || vd.solana?.identifier) filled++;
+
+  return Math.round((filled / total) * 100);
 }
 
 async function loadPreferredSatpSignerKeypair() {
@@ -300,12 +300,6 @@ function chainAttestationMatchesWallet(att, row) {
   } catch {
     return false;
   }
-}
-
-function isPublicVerificationPlatform(platform) {
-  const normalized = String(platform || '').trim().toLowerCase();
-  if (!normalized) return false;
-  return !['satp', 'satp_v3', 'satp_verification'].includes(normalized);
 }
 
 // Score protection guard -- prevents corrupt scores from being written
@@ -382,81 +376,6 @@ function rollbackVerificationCache(profileId, platform) {
   }
 }
 
-function persistOnchainVerificationProof(profileId, platform, identifier, proof, bridgeResult) {
-  const d = getDb();
-  if (!profileId || !platform || !bridgeResult || typeof bridgeResult !== 'object') return;
-
-  const txSignature = bridgeResult.txSignature || null;
-  const attestationPDA = bridgeResult.attestationPDA || null;
-  const enrichedProof = {
-    ...(proof || {}),
-    bridgeResult,
-  };
-  if (txSignature) {
-    enrichedProof.txSignature = txSignature;
-    enrichedProof.transactionSignature = txSignature;
-    enrichedProof.solscanUrl = enrichedProof.solscanUrl || ('https://solana.fm/tx/' + txSignature);
-  }
-  if (attestationPDA) enrichedProof.attestationPDA = attestationPDA;
-
-  try {
-    d.prepare('UPDATE verifications SET proof = ? WHERE profile_id = ? AND platform = ?')
-      .run(JSON.stringify(enrichedProof), profileId, platform);
-  } catch (e) {
-    console.error('[PostVerify] Failed to persist verification proof:', e.message);
-  }
-
-  try {
-    const row = d.prepare('SELECT verification_data FROM profiles WHERE id = ?').get(profileId);
-    if (row) {
-      const vd = JSON.parse(row.verification_data || '{}');
-      const current = (vd && typeof vd[platform] === 'object' && vd[platform]) ? vd[platform] : { address: identifier, identifier };
-      vd[platform] = {
-        ...current,
-        address: current.address || identifier,
-        identifier: current.identifier || identifier,
-        verified: true,
-        linked: true,
-      };
-      if (txSignature) {
-        vd[platform].txSignature = txSignature;
-        vd[platform].transactionSignature = txSignature;
-        vd[platform].solscanUrl = vd[platform].solscanUrl || ('https://solana.fm/tx/' + txSignature);
-      }
-      if (attestationPDA) vd[platform].attestationPDA = attestationPDA;
-      d.prepare('UPDATE profiles SET verification_data = ?, updated_at = ? WHERE id = ?')
-        .run(JSON.stringify(vd), new Date().toISOString(), profileId);
-    }
-  } catch (e) {
-    console.error('[PostVerify] Failed to persist verification_data tx hint:', e.message);
-  }
-
-  try {
-    const profileJsonPath = require('path').join('/home/ubuntu/agentfolio/data/profiles', profileId + '.json');
-    if (require('fs').existsSync(profileJsonPath)) {
-      const profileJson = JSON.parse(require('fs').readFileSync(profileJsonPath, 'utf-8'));
-      if (!profileJson.verificationData) profileJson.verificationData = {};
-      const current = (profileJson.verificationData[platform] && typeof profileJson.verificationData[platform] === 'object') ? profileJson.verificationData[platform] : { address: identifier, identifier };
-      profileJson.verificationData[platform] = {
-        ...current,
-        address: current.address || identifier,
-        identifier: current.identifier || identifier,
-        verified: true,
-        linked: true,
-      };
-      if (txSignature) {
-        profileJson.verificationData[platform].txSignature = txSignature;
-        profileJson.verificationData[platform].transactionSignature = txSignature;
-        profileJson.verificationData[platform].solscanUrl = profileJson.verificationData[platform].solscanUrl || ('https://solana.fm/tx/' + txSignature);
-      }
-      if (attestationPDA) profileJson.verificationData[platform].attestationPDA = attestationPDA;
-      require('fs').writeFileSync(profileJsonPath, JSON.stringify(profileJson, null, 2));
-    }
-  } catch (e) {
-    console.error('[PostVerify] Failed to persist verification JSON tx hint:', e.message);
-  }
-}
-
 function addVerification(profileId, platform, identifier, proof, userPaidGenesis = false) {
   const d = getDb();
   const id = genId('ver');
@@ -491,27 +410,15 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
     console.error('Failed to sync verification to JSON file:', syncErr.message);
   }
 
-  try {
-    const satpRegistry = require('./lib/satp-registry');
-    const { loadProfile: loadProfileFromDb } = require('./lib/database');
-    if (satpRegistry.syncAttestationsFromProfile) {
-      const refreshedProfile = loadProfileFromDb(profileId);
-      if (refreshedProfile) satpRegistry.syncAttestationsFromProfile(refreshedProfile);
-    }
-  } catch (attErr) {
-    console.error('Failed to sync SATP attestations:', attErr.message);
-  }
 
   // Post-verification pipeline: DB cache must roll back if on-chain write fails.
   if (postVerificationHook) {
     postVerificationHook(profileId, platform, identifier, proof)
-      .then((bridgeResult) => {
-        if (!bridgeResult) {
+      .then(onchainSucceeded => {
+        if (!onchainSucceeded) {
           rollbackVerificationCache(profileId, platform);
           console.warn(`[PostVerify] Rolled back DB cache for ${profileId}/${platform} because on-chain write did not succeed`);
-          return;
         }
-        persistOnchainVerificationProof(profileId, platform, identifier, proof, bridgeResult);
       })
       .catch(e => {
         rollbackVerificationCache(profileId, platform);
@@ -547,7 +454,7 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
     const notifReq = http.request({
       hostname: 'localhost', port: 3456, path: '/api/comms/push',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-HQ-Key': process.env.HQ_API_KEY || 'REDACTED_HQ_KEY' },
+      headers: { 'Content-Type': 'application/json', 'X-HQ-Key': '8abe67cfdddd0152925a512175515820dabb7dfce8ebe258' },
       timeout: 3000,
     });
     notifReq.on('error', () => {});
@@ -582,7 +489,6 @@ function enrichProfile(row) {
   if (!row) return null;
   const d = getDb();
   const endorsements = d.prepare('SELECT * FROM endorsements WHERE profile_id = ? ORDER BY created_at DESC').all(row.id);
-  const endorsementsGiven = d.prepare('SELECT * FROM endorsements WHERE endorser_id = ? ORDER BY created_at DESC').all(row.id);
   // [P0 FIX] DB verifications query REMOVED -- chain-cache is sole source of truth
   const activity = d.prepare('SELECT * FROM activity_feed WHERE profile_id = ? ORDER BY created_at DESC LIMIT 20').all(row.id);
   const rfk = module.exports._reviewFk || 'profile_id';
@@ -623,8 +529,6 @@ function enrichProfile(row) {
 
   // V3 on-chain scores (cache populated by batch warm-up)
   let v3 = null;
-  const persistedVerificationData = parseJsonField(row.verification_data, {});
-  const persistedGenesisPDA = persistedVerificationData?.satp_v3?.genesisPDA || persistedVerificationData?.satp?.genesisPDA || null;
   if (v3ScoreService) {
     try {
       const cached = v3ScoreService._getFromCache ? v3ScoreService._getFromCache(row.id) : null;
@@ -638,112 +542,10 @@ function enrichProfile(row) {
     } catch {}
   }
 
-  const unified = computeUnifiedTrustScore(getDb(), row, { v3Score: v3 });
-  const breakdown = unified.breakdown || {};
-  const normalizedMetadata = (() => {
-    const base = parseJsonField(row.metadata, {});
-    const items = [];
-    try {
-      const rows = getDb().prepare('SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
-      const seen = new Set();
-      for (const ver of rows) {
-        const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
-        if (!platform || platform === 'review' || !isPublicVerificationPlatform(platform) || seen.has(platform)) continue;
-        let proof = {};
-        try { proof = typeof ver.proof === 'string' ? JSON.parse(ver.proof) : (ver.proof || {}); } catch {}
-        const identifier = ver.identifier || proof.identifier || proof.address || proof.wallet || row.wallet || null;
-        if (!identifier) continue;
-        const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || null;
-        if (platform === 'solana' && !txSignature) continue;
-        items.push({
-          platform,
-          identifier,
-          proof,
-          verifiedAt: ver.verified_at || null,
-          status: 'verified',
-        });
-        seen.add(platform);
-      }
-    } catch (_) {}
-    return {
-      ...base,
-      verifications: items,
-      trustScore: unified.score,
-      verificationLevel: unified.level,
-      tier: String(unified.levelName || '').toLowerCase(),
-    };
-  })();
-  const normalizedVerification = JSON.stringify({
-    score: unified.score,
-    tier: String(unified.levelName || '').toLowerCase(),
-    verifiedPlatforms: (normalizedMetadata.verifications || []).map((item) => item.platform).filter(Boolean),
-  });
-
-  const isSolanaProofPlatform = (platform) => platform === 'solana' || platform === 'satp' || platform === 'satp_v3';
-
-  function buildProofHint(platform, att = {}, proofData = {}) {
-    const txSignature = att.txSignature || proofData.txSignature || proofData.transactionSignature || null;
-    const verifiedAt = att.timestamp || att.verifiedAt || null;
-    const url = isSolanaProofPlatform(platform) && txSignature
-      ? (att.solscanUrl || ('https://solana.fm/tx/' + txSignature))
-      : null;
-    return { txSignature, verifiedAt, url };
-  }
-
-  function buildDisplayProof(platform, proof = {}, hint = {}) {
-    const verifiedAt = proof.verifiedAt || proof.timestamp || hint.verifiedAt || null;
-    if (isSolanaProofPlatform(platform)) {
-      const txSignature = proof.txSignature || proof.transactionSignature || hint.txSignature || null;
-      return {
-        txSignature,
-        timestamp: verifiedAt,
-        url: hint.url || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null),
-      };
-    }
-    const displayProof = {};
-    if (proof.challengeId) displayProof.challengeId = proof.challengeId;
-    if (proof.signature) displayProof.signature = proof.signature;
-    const transactionHash = proof.transactionHash || proof.txHash || proof.hash || null;
-    if (transactionHash) displayProof.transactionHash = transactionHash;
-    if (proof.type) displayProof.type = proof.type;
-    if (verifiedAt) displayProof.timestamp = verifiedAt;
-    if (proof.url || proof.explorerUrl) displayProof.url = proof.url || proof.explorerUrl;
-    if (hint.txSignature) {
-      displayProof.attestationTxSignature = hint.txSignature;
-      if (hint.url) displayProof.attestationUrl = hint.url;
-    }
-    return displayProof;
-  }
-
-  function buildVerificationEntry(platform, identifier, proof = {}, hint = {}, source = 'active-verification') {
-    const entry = {
-      verified: true,
-      address: proof.address || identifier,
-      identifier,
-      source,
-    };
-    const verifiedAt = proof.verifiedAt || proof.timestamp || hint.verifiedAt || null;
-    if (source != 'on-chain-attestation') entry.linked = true;
-    if (verifiedAt) entry.verifiedAt = verifiedAt;
-    if (isSolanaProofPlatform(platform)) {
-      const txSignature = proof.txSignature || proof.transactionSignature || hint.txSignature || null;
-      if (txSignature) entry.txSignature = txSignature;
-    } else {
-      if (proof.signature) entry.signature = proof.signature;
-      const transactionHash = proof.transactionHash || proof.txHash || proof.hash || null;
-      if (transactionHash) entry.transactionHash = transactionHash;
-      if (proof.challengeId) entry.challengeId = proof.challengeId;
-      if (hint.txSignature) entry.attestationTxSignature = hint.txSignature;
-    }
-    return entry;
-  }
-
   return {
     ...row,
     walletAddress: row.wallet || null,
-    genesisPDA: persistedGenesisPDA,
     avatar: resolvedAvatar ? resolvedAvatar.replace('node1.irys.xyz', 'gateway.irys.xyz') : resolvedAvatar,
-    verification: normalizedVerification,
     // Raw V3/genesis data is exposed via dedicated endpoints.
     // Omitting it here prevents contradictory profile payloads for API consumers.
     v3: undefined,
@@ -760,45 +562,72 @@ function enrichProfile(row) {
         const atts = chainCache.getVerifications(row.id, row.created_at) || [];
         const hints = new Map();
         for (const att of atts) {
-          if (!att.platform || att.platform === 'review' || !isPublicVerificationPlatform(att.platform)) continue;
+          if (!att.platform || att.platform === 'review') continue;
           if (!chainAttestationMatchesWallet(att, row)) continue;
           const plat = att.platform === 'twitter' ? 'x' : att.platform;
           if (hints.has(plat)) continue;
           let proofData = {};
           try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
-          hints.set(plat, buildProofHint(plat, att, proofData));
+          hints.set(plat, {
+            txSignature: att.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || null,
+            verifiedAt: att.timestamp || att.verifiedAt || null,
+          });
         }
         const rows = getDb().prepare('SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
         for (const ver of rows) {
           const plat = ver.platform === 'twitter' ? 'x' : ver.platform;
-          if (!plat || plat === 'review' || !isPublicVerificationPlatform(plat) || vd[plat]) continue;
+          if (!plat || plat === 'review' || vd[plat]) continue;
           let proof = {};
           try { proof = typeof ver.proof === 'string' ? JSON.parse(ver.proof) : (ver.proof || {}); } catch {}
           const displayId = ver.identifier || proof.identifier || proof.address || proof.wallet || row.wallet || null;
           if (!displayId) continue;
           const hint = hints.get(plat) || {};
-          const entry = buildVerificationEntry(plat, displayId, proof, hint, 'active-verification');
-          if (plat === 'solana' && !entry.txSignature) continue;
-          vd[plat] = entry;
+          const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || hint.txSignature || null;
+          if (plat === 'solana' && !txSignature) continue;
+          vd[plat] = {
+            verified: true,
+            address: proof.address || displayId,
+            identifier: displayId,
+            linked: true,
+            txSignature,
+            verifiedAt: ver.verified_at || hint.verifiedAt || null,
+            source: 'active-verification'
+          };
+        }
+        if (!vd.satp && row.wallet) {
+          const hint = hints.get('satp') || {};
+          vd.satp = {
+            verified: true,
+            address: row.wallet,
+            identifier: row.wallet,
+            linked: true,
+            txSignature: hint.txSignature || null,
+            verifiedAt: hint.verifiedAt || null,
+            source: 'active-verification'
+          };
         }
         const attRows = getDb().prepare('SELECT platform, tx_signature, memo, created_at FROM attestations WHERE profile_id = ? ORDER BY created_at DESC').all(row.id);
         for (const att of attRows) {
           const plat = att.platform === 'twitter' ? 'x' : att.platform;
-          if (!plat || plat === 'review' || !isPublicVerificationPlatform(plat) || vd[plat] || !att.tx_signature) continue;
+          if (!plat || plat === 'review' || vd[plat] || !att.tx_signature) continue;
           const fallbackId = plat === 'github' ? (row.github || row.handle || 'github') : plat === 'x' ? (row.twitter || row.handle || 'x') : (row.wallet || row.handle || plat);
-          vd[plat] = buildVerificationEntry(plat, fallbackId, {}, {
+          vd[plat] = {
+            verified: true,
+            address: fallbackId,
+            identifier: fallbackId,
+            linked: true,
             txSignature: att.tx_signature,
             verifiedAt: att.created_at || null,
-            url: isSolanaProofPlatform(plat) ? ('https://solana.fm/tx/' + att.tx_signature) : null,
-          }, 'on-chain-attestation');
+            source: 'on-chain-attestation'
+          };
         }
       } catch (_) {}
       return vd;
     })(),
     portfolio: parseJsonField(row.portfolio),
-    endorsements_given: endorsementsGiven,
+    endorsements_given: parseJsonField(row.endorsements_given),
     custom_badges: parseJsonField(row.custom_badges),
-    metadata: normalizedMetadata,
+    metadata: parseJsonField(row.metadata, {}),
     nft_avatar: parseJsonField(row.nft_avatar, {}),
     endorsements: { items: endorsements, total: endorsements.length },
     verifications: (() => {
@@ -808,48 +637,62 @@ function enrichProfile(row) {
         const atts = chainCache.getVerifications(row.id, row.created_at) || [];
         const hints = new Map();
         for (const att of atts) {
-          if (!att.platform || att.platform === 'review' || !isPublicVerificationPlatform(att.platform)) continue;
+          if (!att.platform || att.platform === 'review') continue;
           if (!chainAttestationMatchesWallet(att, row)) continue;
           const platform = att.platform === 'twitter' ? 'x' : att.platform;
           if (hints.has(platform)) continue;
           let proofData = {};
           try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
-          hints.set(platform, buildProofHint(platform, att, proofData));
+          const txSignature = att.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || null;
+          hints.set(platform, {
+            txSignature,
+            verifiedAt: att.timestamp || att.verifiedAt || null,
+            url: att.solscanUrl || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null),
+          });
         }
         const rows = getDb().prepare('SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
         for (const ver of rows) {
           const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
-          if (!platform || platform === 'review' || !isPublicVerificationPlatform(platform) || vMap[platform]) continue;
+          if (!platform || platform === 'review' || vMap[platform]) continue;
           let proof = {};
           try { proof = typeof ver.proof === 'string' ? JSON.parse(ver.proof) : (ver.proof || {}); } catch {}
           const displayId = ver.identifier || proof.identifier || proof.address || proof.wallet || row.wallet || null;
           if (!displayId) continue;
           const hint = hints.get(platform) || {};
-          const displayProof = buildDisplayProof(platform, proof, hint);
-          if (platform === 'solana' && !displayProof.txSignature) continue;
+          const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || hint.txSignature || null;
+          if (platform === 'solana' && !txSignature) continue;
+          const proofUrl = hint.url || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null);
           vMap[platform] = {
             verified: true,
             address: proof.address || displayId,
             identifier: displayId,
-            proof: displayProof,
+            proof: { txSignature, timestamp: ver.verified_at || hint.verifiedAt || null, url: proofUrl },
             verified_at: ver.verified_at || hint.verifiedAt || null,
+            source: 'active-verification',
+          };
+        }
+        if (!vMap.satp && row.wallet) {
+          const hint = hints.get('satp') || {};
+          const txSignature = hint.txSignature || null;
+          vMap.satp = {
+            verified: true,
+            address: row.wallet,
+            identifier: row.wallet,
+            proof: { txSignature, timestamp: hint.verifiedAt || null, url: hint.url || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null) },
+            verified_at: hint.verifiedAt || null,
             source: 'active-verification',
           };
         }
         const attRows = getDb().prepare('SELECT platform, tx_signature, memo, created_at FROM attestations WHERE profile_id = ? ORDER BY created_at DESC').all(row.id);
         for (const att of attRows) {
           const platform = att.platform === 'twitter' ? 'x' : att.platform;
-          if (!platform || platform === 'review' || !isPublicVerificationPlatform(platform) || vMap[platform] || !att.tx_signature) continue;
+          if (!platform || platform === 'review' || vMap[platform] || !att.tx_signature) continue;
           const fallbackId = platform === 'github' ? (row.github || row.handle || 'github') : platform === 'x' ? (row.twitter || row.handle || 'x') : (row.wallet || row.handle || platform);
           vMap[platform] = {
             verified: true,
             address: fallbackId,
             identifier: fallbackId,
-            proof: buildDisplayProof(platform, {}, {
-              txSignature: att.tx_signature,
-              verifiedAt: att.created_at || null,
-              url: isSolanaProofPlatform(platform) ? ('https://solana.fm/tx/' + att.tx_signature) : null,
-            }),
+            proof: { txSignature: att.tx_signature, timestamp: att.created_at || null, url: 'https://solana.fm/tx/' + att.tx_signature },
             verified_at: att.created_at || null,
             source: 'on-chain-attestation',
           };
@@ -890,6 +733,8 @@ function enrichProfile(row) {
     },
     // Scoring v2 Phase A: verification level and trust score are independent.
     ...(() => {
+      const unified = computeUnifiedTrustScore(getDb(), row, { v3Score: v3 });
+      const breakdown = unified.breakdown || {};
       return {
         trust_score: {
           overall_score: unified.score,
@@ -1268,7 +1113,7 @@ function registerRoutes(app) {
         const notifReq = http.request({
           hostname: 'localhost', port: 3456, path: '/api/comms/push',
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-HQ-Key': process.env.HQ_API_KEY || 'REDACTED_HQ_KEY' },
+          headers: { 'Content-Type': 'application/json', 'X-HQ-Key': '8abe67cfdddd0152925a512175515820dabb7dfce8ebe258' },
           timeout: 3000,
         });
         notifReq.on('error', () => {}); // fire-and-forget
@@ -1423,8 +1268,8 @@ function registerRoutes(app) {
     const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit) || 50));
     const offset = (page - 1) * limit;
     const status = req.query.status || 'active';
-    const search = String(req.query.search || '').trim().toLowerCase();
 
+    const total = d.prepare('SELECT COUNT(*) as c FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL)').get(status).c;
     let rows;
     try {
       rows = d.prepare(`
@@ -1440,7 +1285,7 @@ function registerRoutes(app) {
     }
 
     // Strip api_key from list responses
-    let profiles = rows.map(r => {
+    const profiles = rows.map(r => {
       const { api_key, ...rest } = r;
       // Resolve avatar: nft_avatar.image takes priority over avatar
       let resolvedAvatar = rest.avatar;
@@ -1462,54 +1307,10 @@ function registerRoutes(app) {
         } catch (_) {}
       }
       const { _trust_score: ts, _trust_level: dbLevel, ...cleanRest } = rest;
-      const enriched = enrichProfile(cleanRest) || {};
-      const _md = { ...parseJsonField(cleanRest.metadata), ...parseJsonField(enriched.metadata) };
+      const _md = parseJsonField(cleanRest.metadata);
       const unclaimed = (cleanRest.claimed === 0 || cleanRest.claimed === "0") || _md.unclaimed === true || _md.isPlaceholder === true || _md.placeholder === true;
-      return {
-        ...cleanRest,
-        avatar: resolvedAvatar,
-        capabilities: parseJsonField(cleanRest.capabilities),
-        tags: parseJsonField(cleanRest.tags),
-        links: parseJsonField(cleanRest.links),
-        wallets: parseJsonField(cleanRest.wallets),
-        skills: parseJsonField(cleanRest.skills),
-        verification_data: enriched.verification_data || {},
-        verifications: enriched.verifications || {},
-        onchain_verification_count: enriched.onchain_verification_count || 0,
-        genesisPDA: enriched.genesisPDA || null,
-        portfolio: parseJsonField(cleanRest.portfolio),
-        endorsements_given: parseJsonField(cleanRest.endorsements_given),
-        custom_badges: parseJsonField(cleanRest.custom_badges),
-        metadata: _md,
-        nft_avatar: parseJsonField(cleanRest.nft_avatar),
-        trust_score: ts || 0,
-        _dbLevel: dbLevel || null,
-        claimed,
-        unclaimed,
-      };
+      return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: {} /* [P0] chain-cache only, no DB reads */, portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: _md, nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, _dbLevel: dbLevel || null, claimed, unclaimed };
     });
-
-    profiles = profiles.filter(isPublicDirectoryProfile);
-
-    if (search) {
-      const matchesSearch = (p) => {
-        const wallets = p.wallets || {};
-        const haystacks = [
-          p.id,
-          p.name,
-          p.handle,
-          p.wallet,
-          p.claimed_by,
-          p.description,
-          p.bio,
-          wallets.solana,
-        ].filter(Boolean).map(v => String(v).toLowerCase());
-        return haystacks.some(v => v.includes(search));
-      };
-      profiles = profiles.filter(matchesSearch);
-    }
-
-    const total = profiles.length;
 
     // A1: Compute scores for all profiles using chain-cache-derived verifications
     {
@@ -1527,7 +1328,7 @@ function registerRoutes(app) {
       }
     }
     // Clean start: default scores stay at 0 unless V3 genesis exists.
-    profiles.sort((a, b) => (b.trustScore || 0) - (a.trustScore || 0));
+    profiles.sort((a, b) => (b.trust_score || 0) - (a.trust_score || 0));
 
     // P0-13: Paginate after V3 overlay sort
     // [FIX 3] Second chain-cache overlay REMOVED -- V3 genesis only
@@ -1552,8 +1353,7 @@ function registerRoutes(app) {
       p.verificationLabel = displayLabel;
       p.levelName = displayLabel;
       p.verificationBadge = unified.badge;
-      p.trust_score = displayScore;
-      p.trust_score_details = {
+      p.trust_score = {
         overall_score: displayScore,
         level: displayLabel,
         score_breakdown: unified.breakdown || {},
@@ -1568,12 +1368,13 @@ function registerRoutes(app) {
         source: unified.source,
       };
       p.verificationLevelName = displayLabel;
+      p.profileCompleteness = calculateProfileCompletenessPercent(p);
     }
     // Sort parameter: trust_desc (default), trust_asc, name_asc, name_desc, newest, oldest
     const sortParam = (req.query.sort || "trust_desc").toLowerCase();
     switch (sortParam) {
       case "trust_asc":
-        profiles.sort((a, b) => (a.trustScore || 0) - (b.trustScore || 0));
+        profiles.sort((a, b) => (a.trust_score || 0) - (b.trust_score || 0));
         break;
       case "name_asc":
         profiles.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
@@ -1589,7 +1390,7 @@ function registerRoutes(app) {
         break;
       case "trust_desc":
       default:
-        profiles.sort((a, b) => (b.trustScore || 0) - (a.trustScore || 0));
+        profiles.sort((a, b) => (b.trust_score || 0) - (a.trust_score || 0));
         break;
     }
 
@@ -1631,7 +1432,6 @@ function registerRoutes(app) {
         if (hasGenesis) {
           const v3Score = v3Data.reputationScore > 10000 ? Math.round(v3Data.reputationScore / 1000) : (v3Data.reputationScore || 0);
           enriched.onchain = v3Data;
-          enriched.genesisPDA = enriched.genesisPDA || v3Data.pda || null;
           enriched.isBorn = v3Data.isBorn;
           if (v3Data.faceImage) enriched.faceImage = v3Data.faceImage;
           if (v3Data.authority && !enriched.walletAddress) enriched.walletAddress = v3Data.authority;
@@ -1654,7 +1454,35 @@ function registerRoutes(app) {
         enriched.onchain = null;
       }
     }
+    if (enriched) {
+      enriched.profileCompleteness = calculateProfileCompletenessPercent(enriched);
+    }
     res.json(enriched);
+  });
+
+  // ── GET /api/profile/:id/completeness ──────────────────────────
+  app.get('/api/profile/:id/completeness', async (req, res) => {
+    const d = getDb();
+    let row = d.prepare('SELECT * FROM profiles WHERE id = ?').get(req.params.id);
+    if (!row) {
+      row = d.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(req.params.id);
+    }
+    if (!row) {
+      row = d.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + req.params.id.toLowerCase());
+    }
+    if (!row) return res.status(404).json({ error: 'Profile not found' });
+
+    const { api_key, ...safe } = row;
+    const enriched = enrichProfile(safe) || safe;
+    const score = calculateProfileCompletenessPercent(enriched);
+    res.json({
+      profileId: row.id,
+      score,
+      percentage: score,
+      profileCompleteness: score,
+      completedFields: Math.round((score / 100) * 8),
+      totalFields: 8,
+    });
   });
 
   // ── PATCH /api/profile/:id ─────────────────────────────────────
@@ -1694,7 +1522,7 @@ function registerRoutes(app) {
     }
     if (!authed) return res.status(403).json({ error: 'Invalid api_key or wallet signature' });
 
-    const allowed = ['name', 'bio', 'description', 'handle', 'avatar', 'website', 'framework', 'capabilities', 'tags', 'wallet', 'twitter', 'github', 'email', 'skills', 'wallets', 'links', 'portfolio'];
+    const allowed = ['name', 'bio', 'description', 'handle', 'avatar', 'website', 'framework', 'capabilities', 'tags', 'wallet', 'twitter', 'github', 'email', 'skills', 'wallets', 'links'];
     const sets = [];
     const vals = [];
     for (const k of allowed) {
@@ -1726,7 +1554,6 @@ function registerRoutes(app) {
         if (req.body.avatar !== undefined) existing.avatar = req.body.avatar;
         if (req.body.name !== undefined) existing.name = req.body.name;
         if (req.body.skills !== undefined) existing.skills = req.body.skills;
-        if (req.body.portfolio !== undefined) existing.portfolio = req.body.portfolio;
         existing.updatedAt = new Date().toISOString();
         require('fs').writeFileSync(existingPath, JSON.stringify(existing, null, 2));
       }
@@ -1743,62 +1570,22 @@ function registerRoutes(app) {
     if (!endorser_id || !skill) return res.status(400).json({ error: 'endorser_id and skill are required' });
 
     const d = getDb();
-    const apiKey = (req.headers['x-api-key'] || (req.headers['authorization'] || '').replace('Bearer ', '') || '').trim();
-    const walletSig = req.headers['x-wallet-signature'];
-    const walletAddr = req.headers['x-wallet-address'];
-    const profile = d.prepare('SELECT * FROM profiles WHERE id = ?').get(req.params.id);
+    const profile = d.prepare('SELECT id FROM profiles WHERE id = ?').get(req.params.id);
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
-
-    const endorser = d.prepare('SELECT * FROM profiles WHERE id = ?').get(endorser_id);
-    if (!endorser) return res.status(404).json({ error: 'Endorser profile not found' });
-
-    const parseWallets = (row) => {
-      try {
-        const wallets = typeof row.wallets === 'string' ? JSON.parse(row.wallets || '{}') : (row.wallets || {});
-        return { solana: wallets.solana || row.wallet || '' };
-      } catch (_) {
-        return { solana: row.wallet || '' };
-      }
-    };
-
-    const targetWallet = parseWallets(profile).solana;
-    const endorserWallet = parseWallets(endorser).solana;
-    if (endorser_id === req.params.id || (targetWallet && endorserWallet && targetWallet === endorserWallet)) {
-      return res.status(400).json({ error: 'Cannot self-endorse' });
-    }
-
-    let authed = false;
-    if (apiKey && endorser.api_key === apiKey) {
-      authed = true;
-    } else if (walletSig && walletAddr && endorserWallet && endorserWallet === walletAddr) {
-      try {
-        const sigBytes = Buffer.from(walletSig, 'base64');
-        const msgBytes = Buffer.from(`agentfolio-endorse:${req.params.id}:${endorser_id}`);
-        const pubBytes = bs58.decode(walletAddr);
-        if (nacl.sign.detached.verify(msgBytes, sigBytes, pubBytes)) authed = true;
-      } catch (e) {
-        console.error('[ENDORSE] Wallet auth failed:', e.message);
-      }
-    }
-    if (!authed) return res.status(403).json({ error: 'Invalid api_key or wallet signature' });
-
-    const enrichedEndorser = enrichProfile(endorser);
-    const computedName = enrichedEndorser.name || endorser.name || endorser_name || endorser_id;
-    const endorserLevel = Number(enrichedEndorser.verificationLevel || enrichedEndorser.level || 0);
-
-    const existingPair = d.prepare('SELECT id, skill FROM endorsements WHERE profile_id = ? AND endorser_id = ? ORDER BY created_at ASC LIMIT 1').get(req.params.id, endorser_id);
-    if (existingPair) {
-      return res.status(409).json({ error: 'Duplicate endorsement (same endorser pair)', existingEndorsementId: existingPair.id, existingSkill: existingPair.skill });
-    }
+    if (endorser_id === req.params.id) return res.status(400).json({ error: 'Cannot self-endorse' });
 
     const id = genId('end');
     try {
       d.prepare(`
-        INSERT INTO endorsements (id, profile_id, endorser_id, endorser_name, endorser_wallet, endorser_level, skill, comment, weight)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, req.params.id, endorser_id, computedName, endorserWallet || '', endorserLevel, skill, comment || '', weight || 1);
-      addActivity(req.params.id, 'endorsement', { endorser_id, endorser_name: computedName, endorser_level: endorserLevel, skill });
-      res.status(201).json({ id, message: 'Endorsement added', endorserLevel });
+        INSERT INTO endorsements (id, profile_id, endorser_id, endorser_name, skill, comment, weight)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(id, req.params.id, endorser_id, endorser_name || '', skill, comment || '', weight || 1);
+      addActivity(req.params.id, 'endorsement', { endorser_id, endorser_name, skill });
+      // Fire-and-forget: send welcome email if agent provided an email
+      if (resolvedEmail) {
+        sendWelcomeEmail(resolvedEmail, { id, name: name.trim(), handle: h });
+      }
+      res.status(201).json({ id, message: 'Endorsement added' });
     } catch (e) {
       if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Duplicate endorsement (same endorser + skill)' });
       res.status(500).json({ error: e.message });
@@ -1952,10 +1739,19 @@ function registerRoutes(app) {
     if (!wallet) return res.status(400).json({ found: false, error: 'wallet address required' });
     try {
       const db = getDb();
-      const like = `%${String(wallet || '').replace(/'/g, '')}%`;
-      const match = db.prepare(
-        'SELECT id, name FROM profiles WHERE wallet = ? OR claimed_by = ? OR wallets LIKE ? ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1'
-      ).get(wallet, wallet, like);
+      // Check wallet column directly
+      let match = db.prepare('SELECT id, name FROM profiles WHERE wallet = ?').get(wallet);
+      if (!match) match = db.prepare('SELECT id, name FROM profiles WHERE claimed_by = ?').get(wallet);
+      if (!match) {
+        // Check wallets JSON column
+        const all = db.prepare('SELECT id, name, wallets FROM profiles').all();
+        for (const p of all) {
+          try {
+            const w = JSON.parse(p.wallets || '{}');
+            if (w.solana === wallet) { match = { id: p.id, name: p.name }; break; }
+          } catch (_) {}
+        }
+      }
       if (match) {
         return res.json({ found: true, profileId: match.id, name: match.name, profile: { id: match.id, name: match.name } });
       }
@@ -1971,11 +1767,21 @@ function registerRoutes(app) {
     if (!wallet) return res.status(400).json({ error: 'wallet required' });
     try {
       const db = getDb();
-      const like = `%${String(wallet || '').replace(/'/g, '')}%`;
-      const match = db.prepare(
-        'SELECT id, name FROM profiles WHERE wallet = ? OR claimed_by = ? OR wallets LIKE ? ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1'
-      ).get(wallet, wallet, like);
-      if (match) return res.json({ id: match.id, name: match.name });
+      // Direct wallet column lookup (fast path)
+      const directMatch = db.prepare('SELECT id, name FROM profiles WHERE wallet = ?').get(wallet);
+      if (directMatch) return res.json({ id: directMatch.id, name: directMatch.name });
+      const claimedMatch = db.prepare('SELECT id, name FROM profiles WHERE claimed_by = ?').get(wallet);
+      if (claimedMatch) return res.json({ id: claimedMatch.id, name: claimedMatch.name });
+      const profiles = db.prepare('SELECT id, name, wallets FROM profiles').all();
+      for (const p of profiles) {
+        try {
+          // [P0 FIX] Check wallets column only -- no DB verification_data
+          const w = JSON.parse(p.wallets || '{}');
+          if (w.solana === wallet) {
+            return res.json({ id: p.id, name: p.name });
+          }
+        } catch (e2) {}
+      }
       return res.status(404).json({ error: 'No profile found for this wallet' });
     } catch (e) {
       return res.status(500).json({ error: e.message });
