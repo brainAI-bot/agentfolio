@@ -146,6 +146,32 @@ function registerFrontendBridge(app, profileStore) {
     app.handle(req, res);
   });
 
+  // Flow 2 compatibility aliases for documented profile-scoped endpoints
+  app.post('/api/profile/:profileId/verify/solana', express.json(), (req, res) => {
+    req.body = {
+      ...(req.body || {}),
+      profileId: req.params.profileId,
+      walletAddress: req.body?.walletAddress || req.body?.address || req.body?.wallet || null,
+    };
+    req.url = '/api/verify/solana/challenge';
+    app.handle(req, res);
+  });
+
+  app.post('/api/profile/:profileId/verify/x', express.json(), (req, res) => {
+    req.body = {
+      ...(req.body || {}),
+      profileId: req.params.profileId,
+      xHandle: req.body?.xHandle || req.body?.handle || req.body?.username || req.body?.twitterHandle || '',
+    };
+    req.url = '/api/verify/x/challenge';
+    app.handle(req, res);
+  });
+
+  app.post('/api/profile/:profileId/verify/hyperliquid', express.json(), (req, res) => {
+    req.url = `/api/profile/${encodeURIComponent(req.params.profileId)}/verify/hyperliquid/initiate`;
+    app.handle(req, res);
+  });
+
   // Discord: /api/verify/discord/initiate → /api/verification/discord/initiate
   app.post('/api/verify/discord/initiate', express.json(), (req, res) => {
     req.url = '/api/verification/discord/initiate';
