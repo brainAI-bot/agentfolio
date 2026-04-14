@@ -224,7 +224,12 @@ async function getSatpAgents() {
           ...att,
           platform: normalizePlatform(att?.platform || att?.type || att?.attestationType),
           memo: att?.memo || null,
-        }));
+        }))
+        .filter((att, index, list) => list.findIndex((candidate) =>
+          candidate.platform === att.platform
+          && String(candidate.txSignature || '') === String(att.txSignature || '')
+          && String(candidate.solscanUrl || '') === String(att.solscanUrl || '')
+        ) === index);
       const platforms = [...new Set([
         ...(Array.isArray(agent.platforms) ? agent.platforms : []),
         ...explorerVerifications.map(v => normalizePlatform(v.platform || v.type || v.label)),
