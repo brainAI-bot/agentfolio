@@ -181,6 +181,97 @@ async function revalidateProfileCache(profileId) {
   }
 }
 
+function persistVerificationTx(profileId, platform, identifier, proof, bridgeResult) {
+  try {
+    const txSignature = bridgeResult?.txSignature || null;
+    const attestationPDA = bridgeResult?.attestationPDA || null;
+    if (!txSignature && !attestationPDA) return;
+
+    const db = getProfileStore().getDb();
+    const verifiedAt = proof?.verifiedAt || new Date().toISOString();
+
+    const verificationRow = db.prepare(
+      'SELECT id, proof FROM verifications WHERE profile_id = ? AND platform = ? ORDER BY verified_at DESC LIMIT 1'
+    ).get(profileId, platform);
+    if (verificationRow) {
+      let existingProof = {};
+      try {
+        existingProof = typeof verificationRow.proof === 'string'
+          ? JSON.parse(verificationRow.proof || '{}')
+          : (verificationRow.proof || {});
+      } catch (_) {}
+
+      const mergedProof = {
+        ...existingProof,
+        ...(proof || {}),
+        verifiedAt: existingProof.verifiedAt || verifiedAt,
+      };
+      if (txSignature) {
+        mergedProof.txSignature = txSignature;
+        if (!mergedProof.transactionSignature) mergedProof.transactionSignature = txSignature;
+      }
+      if (attestationPDA && !mergedProof.attestationPDA) mergedProof.attestationPDA = attestationPDA;
+
+      db.prepare('UPDATE verifications SET proof = ? WHERE id = ?')
+        .run(JSON.stringify(mergedProof), verificationRow.id);
+    }
+
+    const profileRow = db.prepare('SELECT verification_data FROM profiles WHERE id = ?').get(profileId);
+    if (profileRow) {
+      let verificationData = {};
+      try { verificationData = JSON.parse(profileRow.verification_data || '{}'); } catch (_) {}
+
+      const current = verificationData && typeof verificationData[platform] === 'object'
+        ? verificationData[platform]
+        : {};
+
+      verificationData[platform] = {
+        ...current,
+        verified: true,
+        linked: true,
+        address: current.address || identifier,
+        identifier: current.identifier || identifier,
+        verifiedAt: current.verifiedAt || verifiedAt,
+      };
+      if (txSignature) verificationData[platform].txSignature = txSignature;
+      if (attestationPDA) verificationData[platform].attestationPDA = attestationPDA;
+
+      db.prepare('UPDATE profiles SET verification_data = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(verificationData), new Date().toISOString(), profileId);
+
+      try {
+        const profileJsonPath = path.join('/home/ubuntu/agentfolio/data/profiles', `${profileId}.json`);
+        if (fs.existsSync(profileJsonPath)) {
+          const profileJson = JSON.parse(fs.readFileSync(profileJsonPath, 'utf-8'));
+          if (!profileJson.verificationData || typeof profileJson.verificationData !== 'object') {
+            profileJson.verificationData = {};
+          }
+          const currentJson = profileJson.verificationData[platform] && typeof profileJson.verificationData[platform] === 'object'
+            ? profileJson.verificationData[platform]
+            : {};
+          profileJson.verificationData[platform] = {
+            ...currentJson,
+            verified: true,
+            linked: true,
+            address: currentJson.address || identifier,
+            identifier: currentJson.identifier || identifier,
+            verifiedAt: currentJson.verifiedAt || verifiedAt,
+          };
+          if (txSignature) profileJson.verificationData[platform].txSignature = txSignature;
+          if (attestationPDA) profileJson.verificationData[platform].attestationPDA = attestationPDA;
+          fs.writeFileSync(profileJsonPath, JSON.stringify(profileJson, null, 2));
+        }
+      } catch (e) {
+        console.warn('[PostVerify] Failed to sync tx hint to profile JSON:', e.message);
+      }
+    }
+
+    console.log(`[PostVerify] Persisted tx hint for ${profileId}/${platform}: tx=${txSignature || 'null'} attPDA=${attestationPDA || 'null'}`);
+  } catch (e) {
+    console.warn('[PostVerify] Failed to persist verification tx hint:', e.message);
+  }
+}
+
 /**
  * Main hook — called after every successful verification.
  * Fire-and-forget. Never throws to caller.
@@ -218,6 +309,7 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
   }
 
   if (onchainWriteSucceeded) {
+    persistVerificationTx(profileId, platform, identifier, proofData, bridgeResult);
     recomputeDBScore(profileId);
     revalidateProfileCache(profileId).catch(() => {});
     try {
@@ -242,4 +334,4 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
   return bridgeResult || null;
 }
 
-module.exports = { postVerificationHook, recomputeDBScore, revalidateProfileCache };
+module.exports = { postVerificationHook, recomputeDBScore, revalidateProfileCache, persistVerificationTx };
