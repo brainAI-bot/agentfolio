@@ -11,15 +11,71 @@ const crypto = require('crypto');
 const nacl = require('tweetnacl');
 
 const MARKETPLACE_DIR = path.join(__dirname, '..', '..', 'data', 'marketplace');
+const REVIEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 function readJson(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
 }
 
-function findReleasedEscrowReviewRight(reviewerId, revieweeId, expectedJobId = null) {
+function parseTimestampMs(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value < 1e12 ? value * 1000 : value;
+  }
+
+  const asNumber = Number(value);
+  if (Number.isFinite(asNumber) && String(value).trim() !== '') {
+    return asNumber < 1e12 ? asNumber * 1000 : asNumber;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getReleaseTimestampMs(job, escrow = null) {
+  const candidates = [
+    escrow?.releasedAt,
+    escrow?.releaseAt,
+    escrow?.released_at,
+    job?.v3ReleasedAt,
+    job?.fundsReleasedAt,
+    job?.releasedAt,
+    job?.releaseAt,
+    job?.released_at,
+    escrow?.updatedAt,
+    escrow?.completedAt,
+    job?.updatedAt,
+    job?.completedAt,
+    job?.createdAt,
+  ];
+
+  for (const value of candidates) {
+    const ts = parseTimestampMs(value);
+    if (ts) return ts;
+  }
+
+  return null;
+}
+
+function buildReviewRight(job, source, extra = {}, escrow = null) {
+  const releaseTs = getReleaseTimestampMs(job, escrow);
+  const deadlineTs = releaseTs ? releaseTs + REVIEW_WINDOW_MS : null;
+  return {
+    jobId: job.id,
+    source,
+    ...extra,
+    releaseAt: releaseTs ? new Date(releaseTs).toISOString() : null,
+    reviewDeadlineAt: deadlineTs ? new Date(deadlineTs).toISOString() : null,
+    reviewWindowOpen: deadlineTs ? Date.now() <= deadlineTs : true,
+  };
+}
+
+function findReleasedEscrowReviewRight(reviewerId, revieweeId, expectedJobId = null, opts = {}) {
+  const includeExpired = !!opts.includeExpired;
   const jobsDir = path.join(MARKETPLACE_DIR, 'jobs');
   const escrowDir = path.join(MARKETPLACE_DIR, 'escrow');
   let files = [];
+  let expiredMatch = null;
   try { files = fs.readdirSync(jobsDir).filter(name => name.endsWith('.json')); } catch { return null; }
 
   for (const name of files) {
@@ -35,17 +91,21 @@ function findReleasedEscrowReviewRight(reviewerId, revieweeId, expectedJobId = n
 
     if (job.escrowId) {
       const escrow = readJson(path.join(escrowDir, `${job.escrowId}.json`));
-      if (escrow && escrow.status === 'released') {
-        return { jobId: job.id, source: 'json_escrow', escrowId: job.escrowId };
+      if (escrow && (escrow.status === 'released' || escrow.status === 'auto_released')) {
+        const right = buildReviewRight(job, 'json_escrow', { escrowId: job.escrowId }, escrow);
+        if (right.reviewWindowOpen) return right;
+        if (includeExpired && !expiredMatch) expiredMatch = right;
       }
     }
 
     if (job.v3EscrowPDA && (job.v3ReleaseTx || job.v3ReleasedAt)) {
-      return { jobId: job.id, source: 'v3_escrow', escrowPDA: job.v3EscrowPDA, releaseTx: job.v3ReleaseTx || null };
+      const right = buildReviewRight(job, 'v3_escrow', { escrowPDA: job.v3EscrowPDA, releaseTx: job.v3ReleaseTx || null });
+      if (right.reviewWindowOpen) return right;
+      if (includeExpired && !expiredMatch) expiredMatch = right;
     }
   }
 
-  return null;
+  return includeExpired ? expiredMatch : null;
 }
 
 function getDb(readonly = true) {
@@ -103,7 +163,7 @@ function registerReviewChallengeRoutes(app) {
         return res.status(404).json({ success: false, error: 'Reviewer and reviewee must have linked Solana wallets.' });
       }
 
-      const anyReviewRight = findReleasedEscrowReviewRight(reviewerId, revieweeId);
+      const anyReviewRight = findReleasedEscrowReviewRight(reviewerId, revieweeId, null, { includeExpired: true });
       if (!anyReviewRight) {
         return res.status(403).json({
           success: false,
@@ -112,12 +172,21 @@ function registerReviewChallengeRoutes(app) {
       }
 
       const reviewRight = jobId
-        ? findReleasedEscrowReviewRight(reviewerId, revieweeId, jobId)
+        ? findReleasedEscrowReviewRight(reviewerId, revieweeId, jobId, { includeExpired: true })
         : anyReviewRight;
       if (jobId && !reviewRight) {
         return res.status(400).json({
           success: false,
           error: 'jobId does not match the released escrow job between these agents.',
+        });
+      }
+      if (reviewRight && !reviewRight.reviewWindowOpen) {
+        return res.status(409).json({
+          success: false,
+          error: 'Review window expired. Reviews must be submitted within 7 days of escrow release.',
+          jobId: reviewRight.jobId,
+          releaseAt: reviewRight.releaseAt,
+          reviewDeadlineAt: reviewRight.reviewDeadlineAt,
         });
       }
 
@@ -209,6 +278,7 @@ function registerReviewChallengeRoutes(app) {
         challenge.reviewerId,
         challenge.revieweeId,
         challenge.jobId || null,
+        { includeExpired: true },
       );
       if (!reviewRight) {
         challenges.delete(challengeId);
@@ -217,6 +287,16 @@ function registerReviewChallengeRoutes(app) {
           error: challenge.jobId
             ? 'Challenge job binding no longer matches a released escrow job between these agents.'
             : 'No released escrow job found between these agents. Reviews require completed funded escrow.',
+        });
+      }
+      if (!reviewRight.reviewWindowOpen) {
+        challenges.delete(challengeId);
+        return res.status(409).json({
+          verified: false,
+          error: 'Review window expired. Reviews must be submitted within 7 days of escrow release.',
+          jobId: reviewRight.jobId,
+          releaseAt: reviewRight.releaseAt,
+          reviewDeadlineAt: reviewRight.reviewDeadlineAt,
         });
       }
 
