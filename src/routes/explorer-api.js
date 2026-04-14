@@ -94,6 +94,7 @@ router.get('/agents', async (req, res) => {
       if (platform.startsWith('verification_')) return normalizePlatform(platform.slice('verification_'.length));
       if (platform.endsWith('_verification')) return normalizePlatform(platform.slice(0, -'_verification'.length));
       if (platform === 'solana_wallet') return 'solana';
+      if (platform === 'eth_wallet' || platform === 'ethereum') return 'eth';
       if (platform === 'review' || platform.includes('satp')) return null;
       return platform;
     };
