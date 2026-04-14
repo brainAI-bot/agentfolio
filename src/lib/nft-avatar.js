@@ -12,7 +12,14 @@ const https = require('https');
 const { loadProfile, saveProfile } = require('./profile');
 
 const SOLANA_RPC = 'api.mainnet-beta.solana.com';
-const HELIUS_API_KEY = process.env.SOLANA_RPC_URL ? new URL(process.env.SOLANA_RPC_URL).searchParams.get('api-key') : null;
+const DEFAULT_HELIUS_API_KEY = 'REDACTED_HELIUS_API_KEY';
+let HELIUS_API_KEY = process.env.HELIUS_API_KEY || null;
+if (!HELIUS_API_KEY && process.env.SOLANA_RPC_URL) {
+  try {
+    HELIUS_API_KEY = new URL(process.env.SOLANA_RPC_URL).searchParams.get('api-key') || null;
+  } catch (_) {}
+}
+HELIUS_API_KEY = HELIUS_API_KEY || DEFAULT_HELIUS_API_KEY;
 const HELIUS_RPC = HELIUS_API_KEY ? 'mainnet.helius-rpc.com' : 'api.mainnet-beta.solana.com';
 const HELIUS_PATH = HELIUS_API_KEY ? ('/?api-key=' + HELIUS_API_KEY) : '/';
 
@@ -186,7 +193,12 @@ async function getSolanaNFTs(walletAddress) {
       const postData = JSON.stringify({
         jsonrpc: '2.0', id: 1,
         method: 'getAssetsByOwner',
-        params: { ownerAddress: walletAddress, page: 1, limit: 50 }
+        params: {
+          ownerAddress: walletAddress,
+          page: 1,
+          limit: 50,
+          displayOptions: { showFungible: false, showNativeBalance: false }
+        }
       });
       const options = {
         hostname: HELIUS_RPC,
@@ -207,7 +219,11 @@ async function getSolanaNFTs(walletAddress) {
 
     if (result.result && result.result.items) {
       return result.result.items
-        .filter(item => item.interface === 'V1_NFT' || item.interface === 'ProgrammableNFT')
+        .filter(item => {
+          const iface = String(item.interface || '');
+          if (iface === 'FungibleToken' || iface === 'FungibleAsset') return false;
+          return iface === 'V1_NFT' || iface === 'ProgrammableNFT' || iface === 'MplCoreAsset';
+        })
         .map(item => ({
           mint: item.id,
           name: item.content?.metadata?.name || 'Unknown',
