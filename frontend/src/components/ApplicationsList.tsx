@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Shield, CheckCircle, Star, ExternalLink } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { Shield } from "lucide-react";
 import Link from "next/link";
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 interface Application {
@@ -51,20 +51,83 @@ function timeAgo(dateStr: string): string {
 }
 
 export function ApplicationsList({ jobId }: { jobId: string }) {
+  const { publicKey, connected } = useWallet();
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
+  const [resolvedId, setResolvedId] = useState<string | null>(null);
+  const [posterId, setPosterId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<string>("open");
+  const [actingId, setActingId] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<{ ok: boolean; msg: string } | null>(null);
 
-  useEffect(() => {
+  const walletAddr = publicKey?.toBase58() || "";
+
+  const loadJob = () => {
+    setLoading(true);
     fetch(`${API_BASE}/api/marketplace/jobs/${jobId}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data?.applications) {
-          setApps(data.applications.filter((a: any) => a && !a.error));
-        }
+        if (!data) return;
+        setApps((data.applications || []).filter((a: any) => a && !a.error));
+        setPosterId(data.clientId || data.postedBy || null);
+        setJobStatus(data.status || "open");
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadJob();
   }, [jobId]);
+
+  useEffect(() => {
+    if (!connected || !publicKey) {
+      setResolvedId(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`${API_BASE}/api/profile-by-wallet?wallet=${publicKey.toBase58()}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!cancelled) setResolvedId(data?.id || null);
+      })
+      .catch(() => {
+        if (!cancelled) setResolvedId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connected, publicKey]);
+
+  const isPoster = useMemo(() => {
+    if (!posterId) return false;
+    return posterId === resolvedId || posterId === walletAddr;
+  }, [posterId, resolvedId, walletAddr]);
+
+  const handleAccept = async (applicationId: string) => {
+    const acceptedBy = resolvedId || walletAddr;
+    if (!acceptedBy) {
+      setActionMsg({ ok: false, msg: "Connect the poster wallet to accept an application." });
+      return;
+    }
+    setActingId(applicationId);
+    setActionMsg(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/marketplace/jobs/${jobId}/accept`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applicationId, acceptedBy }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setActionMsg({ ok: true, msg: "Application accepted. Job moved to in progress." });
+      loadJob();
+    } catch (e: any) {
+      setActionMsg({ ok: false, msg: e.message || "Failed to accept application" });
+    } finally {
+      setActingId(null);
+    }
+  };
 
   if (loading) return (
     <div className="text-xs py-4 text-center" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
@@ -82,9 +145,9 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
     <div className="space-y-3">
       {apps.map(app => {
         const lvlColor = levelColors[app.verificationLevel ?? 0] || "#6b7280";
-        const profileUrl = app.applicantProfileId
-          ? `/profile/${app.applicantName || app.applicantProfileId}`
-          : null;
+        const profileId = app.applicantProfileId || app.applicantId;
+        const profileUrl = profileId ? `/profile/${profileId}` : null;
+        const canAccept = isPoster && jobStatus === "open" && app.status === "pending";
 
         return (
           <div
@@ -97,9 +160,7 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
                 : "1px solid var(--border)",
             }}
           >
-            {/* Applicant header */}
             <div className="flex items-center gap-3 mb-2">
-              {/* Avatar */}
               {app.applicantAvatar ? (
                 <img
                   src={app.applicantAvatar}
@@ -117,7 +178,7 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
               )}
 
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   {profileUrl ? (
                     <Link
                       href={profileUrl}
@@ -132,7 +193,6 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
                     </span>
                   )}
 
-                  {/* Verification level badge */}
                   {app.verificationLevel != null && app.verificationLevel > 0 && (
                     <span
                       className="text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
@@ -154,8 +214,7 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
                   )}
                 </div>
 
-                {/* Trust score + badges */}
-                <div className="flex items-center gap-2 mt-0.5">
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                   {app.trustScore != null && app.trustScore > 0 && (
                     <span className="text-[10px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
                       <Shield size={10} className="inline mr-0.5" style={{ verticalAlign: "middle" }} />
@@ -173,17 +232,27 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
                 </div>
               </div>
 
-              {/* Bid amount */}
-              {app.bidAmount != null && app.bidAmount > 0 && (
-                <div className="text-right">
-                  <span className="text-sm font-bold" style={{ color: "var(--solana, #9945ff)", fontFamily: "var(--font-mono)" }}>
-                    {app.bidAmount} USDC
-                  </span>
-                </div>
-              )}
+              <div className="text-right">
+                {app.bidAmount != null && app.bidAmount > 0 && (
+                  <div>
+                    <span className="text-sm font-bold" style={{ color: "var(--solana, #9945ff)", fontFamily: "var(--font-mono)" }}>
+                      {app.bidAmount} USDC
+                    </span>
+                  </div>
+                )}
+                {canAccept && (
+                  <button
+                    onClick={() => handleAccept(app.id)}
+                    disabled={actingId === app.id}
+                    className="mt-2 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50"
+                    style={{ background: "#22c55e", color: "white" }}
+                  >
+                    {actingId === app.id ? "Accepting..." : "Accept"}
+                  </button>
+                )}
+              </div>
             </div>
 
-            {/* Proposal text */}
             <div
               className="text-xs mt-2 leading-relaxed"
               style={{ color: "var(--text-secondary)", paddingLeft: "44px" }}
@@ -193,6 +262,20 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
           </div>
         );
       })}
+
+      {actionMsg && (
+        <div
+          className="text-xs px-3 py-2 rounded-lg"
+          style={{
+            background: actionMsg.ok ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)",
+            color: actionMsg.ok ? "#22c55e" : "#ef4444",
+            border: `1px solid ${actionMsg.ok ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)"}`,
+            fontFamily: "var(--font-mono)",
+          }}
+        >
+          {actionMsg.msg}
+        </div>
+      )}
     </div>
   );
 }

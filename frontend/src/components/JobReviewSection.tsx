@@ -110,11 +110,11 @@ export function JobReviewSection({
   }, [API_BASE, assigneeId, clientId, isCompleted, jobId]);
 
   const viewerRole = useMemo(() => {
-    if (!viewerProfileId) return null;
-    if (viewerProfileId === clientId) return "client";
-    if (viewerProfileId === assigneeId) return "agent";
+    if (!viewerProfileId && !walletAddr) return null;
+    if (viewerProfileId === clientId || walletAddr === clientId) return "client";
+    if (viewerProfileId === assigneeId || walletAddr === assigneeId) return "agent";
     return null;
-  }, [assigneeId, clientId, viewerProfileId]);
+  }, [assigneeId, clientId, viewerProfileId, walletAddr]);
 
   const reviewType = viewerRole === "client" ? "client_to_agent" : viewerRole === "agent" ? "agent_to_client" : null;
   const revieweeId = viewerRole === "client" ? assigneeId : viewerRole === "agent" ? clientId : null;
@@ -132,7 +132,7 @@ export function JobReviewSection({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          approvedBy: walletAddr,
+          approvedBy: viewerProfileId || walletAddr,
           completionNote: "Work approved and payment released.",
         }),
       });
@@ -159,7 +159,7 @@ export function JobReviewSection({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          requestedBy: walletAddr,
+          requestedBy: viewerProfileId || walletAddr,
           note: changeNote.trim(),
         }),
       });
