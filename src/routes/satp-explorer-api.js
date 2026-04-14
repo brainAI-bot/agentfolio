@@ -133,7 +133,8 @@ async function getSatpAgents() {
       const raw = String(value || '').trim().toLowerCase();
       if (!raw) return '';
       if (raw === 'twitter') return 'x';
-      if (raw === 'solana_wallet') return 'solana';
+      if (raw === 'solana_wallet' || raw === 'solana wallet') return 'solana';
+      if (raw === 'eth_wallet' || raw === 'eth wallet' || raw === 'ethereum' || raw === 'ethereum wallet') return 'eth';
       const normalized = raw
         .replace(/^verification_/, '')
         .replace(/_wallet_verification$/, '')
