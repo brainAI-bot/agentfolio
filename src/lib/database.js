@@ -1084,10 +1084,18 @@ function getApplicationCount(jobId) {
 
 const escrowStmts = {
   insert: db.prepare(`
-    INSERT INTO escrows (id, job_id, client_id, client_wallet, amount, currency,
-      platform_fee, agent_payout, status, deposit_address, expires_at, notes, created_at, updated_at)
-    VALUES (@id, @job_id, @client_id, @client_wallet, @amount, @currency,
-      @platform_fee, @agent_payout, @status, @deposit_address, @expires_at, @notes, @created_at, @updated_at)
+    INSERT INTO escrows (
+      id, job_id, client_id, client_wallet, agent_id, agent_wallet, amount, currency,
+      platform_fee, agent_payout, status, deposit_address, deposit_tx_hash, deposit_confirmed_at,
+      release_tx_hash, released_at, refund_tx_hash, refunded_at, locked_at, expires_at,
+      notes, created_at, updated_at
+    )
+    VALUES (
+      @id, @job_id, @client_id, @client_wallet, @agent_id, @agent_wallet, @amount, @currency,
+      @platform_fee, @agent_payout, @status, @deposit_address, @deposit_tx_hash, @deposit_confirmed_at,
+      @release_tx_hash, @released_at, @refund_tx_hash, @refunded_at, @locked_at, @expires_at,
+      @notes, @created_at, @updated_at
+    )
   `),
   
   update: db.prepare(`

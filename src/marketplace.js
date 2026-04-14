@@ -10,7 +10,7 @@ const path = require('path');
 const crypto = require('crypto');
 let addActivity;
 try { addActivity = require('./profile-store').addActivity; } catch { addActivity = () => {}; }
-const { syncMarketplaceJobToDb, syncMarketplaceApplicationToDb } = require('./lib/marketplace-db-sync');
+const { syncMarketplaceJobToDb, syncMarketplaceApplicationToDb, syncMarketplaceEscrowToDb } = require('./lib/marketplace-db-sync');
 let escrowOnchainLib;
 try { escrowOnchainLib = require('./lib/escrow-onchain'); } catch { escrowOnchainLib = null; }
 
@@ -505,6 +505,7 @@ function registerRoutes(app) {
       refundedAt: null
     };
     writeJSON(path.join(DATA_DIR, 'escrow', `${escrow.id}.json`), escrow);
+    try { syncMarketplaceEscrowToDb(escrow, job); } catch (e) { console.warn('[Marketplace] escrow DB sync failed after funding:', e.message); }
 
     job.escrowId = escrow.id;
     job.updatedAt = new Date().toISOString();
@@ -598,6 +599,7 @@ function registerRoutes(app) {
     escrow.releaseTxHash = releaseTxHash;
     escrow.releasedAt = new Date().toISOString();
     writeJSON(escrowPath, escrow);
+    try { syncMarketplaceEscrowToDb(escrow, job); } catch (e) { console.warn('[Marketplace] escrow DB sync failed after release:', e.message); }
 
     job.status = 'completed';
     job.completedAt = new Date().toISOString();
@@ -645,6 +647,7 @@ function registerRoutes(app) {
     escrow.refundReason = reason || 'No reason provided';
     escrow.refundedAt = new Date().toISOString();
     writeJSON(escrowPath, escrow);
+    try { syncMarketplaceEscrowToDb(escrow, job); } catch (e) { console.warn('[Marketplace] escrow DB sync failed after refund:', e.message); }
 
     job.status = 'closed';
     job.updatedAt = new Date().toISOString();
@@ -717,6 +720,7 @@ function registerRoutes(app) {
       fundingState.escrow.releaseTxHash = releaseTxSignature;
       fundingState.escrow.releasedAt = job.releasedAt;
       writeJSON(path.join(DATA_DIR, 'escrow', `${fundingState.escrow.id}.json`), fundingState.escrow);
+      try { syncMarketplaceEscrowToDb(fundingState.escrow, job); } catch (e) { console.warn('[Marketplace] escrow DB sync failed after complete:', e.message); }
     }
 
     const deliverable = getJobDeliverable(job);
