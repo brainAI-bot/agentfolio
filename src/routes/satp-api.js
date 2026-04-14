@@ -169,7 +169,20 @@ function registerSATPRoutes(app) {
     const txHints = resolvedProfileId ? loadAttestationTxHints(resolvedProfileId) : {};
 
     if (resolvedProfileId) {
-      const chainAttestations = chainCache.getVerifications(resolvedProfileId) || [];
+      const chainAttestations = (chainCache.getVerifications(resolvedProfileId) || []).map(att => ({ ...att }));
+      if (typeof chainCache.resolveAttestationTxHintByPda === 'function') {
+        for (const att of chainAttestations) {
+          if (att?.txSignature || !att?.pda) continue;
+          try {
+            const createdAtUnix = att?.timestamp ? Math.floor(new Date(att.timestamp).getTime() / 1000) : null;
+            const hint = await chainCache.resolveAttestationTxHintByPda(att.pda, createdAtUnix);
+            if (hint?.txSignature) {
+              att.txSignature = hint.txSignature;
+              if (!att.solscanUrl || /\/account\//.test(att.solscanUrl)) att.solscanUrl = hint.solscanUrl || att.solscanUrl;
+            }
+          } catch (_) {}
+        }
+      }
       const enriched = buildPublicAttestationEntries(chainAttestations, txHints, { includeSatp });
       if (enriched.length > 0 || Object.keys(txHints).length > 0) {
         return {
