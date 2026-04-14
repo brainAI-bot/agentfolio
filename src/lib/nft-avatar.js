@@ -311,11 +311,17 @@ async function setNFTAvatar(profileId, { chain, walletAddress, nftIdentifier, nf
   if (!profile) return { success: false, error: 'Profile not found' };
 
   // Check wallet is verified on this profile
-  const hasWallet = profile.verifications?.some(v =>
-    (v.type === 'solana' || v.type === 'ethereum' || v.type === 'base') &&
-    v.address?.toLowerCase() === walletAddress.toLowerCase() &&
-    v.verified
-  );
+  // Check wallet in verificationData (actual storage) or wallets object
+  const vd = typeof profile.verificationData === 'string' ? JSON.parse(profile.verificationData || '{}') : (profile.verificationData || {});
+  const wallets = typeof profile.wallets === 'string' ? JSON.parse(profile.wallets || '{}') : (profile.wallets || {});
+  const normalWallet = walletAddress.toLowerCase();
+  const hasWallet = 
+    (vd.solana?.address?.toLowerCase() === normalWallet && vd.solana?.verified) ||
+    (vd.eth?.address?.toLowerCase() === normalWallet && vd.eth?.verified) ||
+    (vd.ethereum?.address?.toLowerCase() === normalWallet && vd.ethereum?.verified) ||
+    (wallets.solana?.toLowerCase() === normalWallet) ||
+    (wallets.ethereum?.toLowerCase() === normalWallet) ||
+    (profile.wallet?.toLowerCase() === normalWallet);
 
   if (!hasWallet) {
     return { success: false, error: 'Wallet not verified on this profile. Verify your wallet first.' };

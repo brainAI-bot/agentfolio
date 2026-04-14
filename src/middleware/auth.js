@@ -5,7 +5,7 @@
  */
 const Database = require('better-sqlite3');
 const path = require('path');
-const bs58 = require('bs58');
+const bs58raw = require('bs58'); const bs58 = bs58raw.default || bs58raw;
 const nacl = require('tweetnacl');
 
 function openDb() {
