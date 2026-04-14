@@ -169,26 +169,32 @@ function enrichApplication(app) {
   try {
     const profileStore = require('./profile-store');
     const db = profileStore.getDb();
-    
+    const { computeUnifiedTrustScore } = require('./lib/unified-trust-score');
+    const v3ScoreService = require('./v3-score-service');
+
     // Try exact match, then lowercase with agent_ prefix, then case-insensitive name
-    let row = db.prepare('SELECT id, name, avatar, nft_avatar, verification_data FROM profiles WHERE id = ?').get(app.applicantId);
+    let row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(app.applicantId);
     if (!row) {
-      row = db.prepare('SELECT id, name, avatar, nft_avatar, verification_data FROM profiles WHERE id = ?').get('agent_' + app.applicantId.toLowerCase());
+      row = db.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + app.applicantId.toLowerCase());
     }
     if (!row) {
-      row = db.prepare('SELECT id, name, avatar, nft_avatar, verification_data FROM profiles WHERE LOWER(name) = ?').get(app.applicantId.toLowerCase());
+      row = db.prepare('SELECT * FROM profiles WHERE LOWER(name) = ?').get(app.applicantId.toLowerCase());
     }
-    
+
     if (row) {
-      const levelNames = ['Unverified', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
       const vd = JSON.parse(row.verification_data || '{}');
       const badges = [];
       if (vd.solana?.verified) badges.push('solana');
+      if (vd.eth?.verified || vd.eth_wallet?.verified || vd.ethereum?.verified) badges.push('eth');
       if (vd.github?.verified) badges.push('github');
-      if (vd.x?.verified) badges.push('x');
-      if (vd.satp?.verified) badges.push('satp');
+      if (vd.x?.verified || vd.twitter?.verified) badges.push('x');
+      if (vd.telegram?.verified) badges.push('telegram');
+      if (vd.satp?.verified || vd.satp_v3?.verified) badges.push('satp');
       if (vd.agentmail?.verified) badges.push('agentmail');
-      
+      if (vd.website?.verified) badges.push('website');
+      if (vd.a2a?.verified) badges.push('a2a');
+      if (vd.mcp?.verified) badges.push('mcp');
+
       // Resolve avatar (nft_avatar.image takes priority)
       let resolvedAvatar = row.avatar;
       if (row.nft_avatar) {
@@ -197,36 +203,38 @@ function enrichApplication(app) {
           if (nft.image || nft.arweaveUrl) resolvedAvatar = (nft.image || nft.arweaveUrl).replace('node1.irys.xyz', 'gateway.irys.xyz');
         } catch {}
       }
-      
-      // P0: DB trust score reads removed — v3 on-chain only
+
       let trustScore = 0;
       let verificationLevel = 0;
       let verificationLevelName = 'Unverified';
       try {
-        // trustRow DB lookup removed (P0)
-        if (trustRow) {
-          trustScore = trustRow.overall_score || 0;
-          // level can be a number or a string label
-          const lvl = trustRow.level;
-          if (typeof lvl === 'number') {
-            verificationLevel = lvl;
-            verificationLevelName = levelNames[lvl] || 'Unverified';
-          } else if (typeof lvl === 'string') {
-            // Map string labels to numbers
-            const labelMap = { 'UNVERIFIED': 0, 'REGISTERED': 1, 'VERIFIED': 2, 'ESTABLISHED': 3, 'TRUSTED': 4, 'SOVEREIGN': 5 };
-            verificationLevel = labelMap[lvl.toUpperCase()] ?? 0;
-            verificationLevelName = levelNames[verificationLevel] || lvl;
-          }
+        const cachedV3 = v3ScoreService && v3ScoreService._getFromCache ? v3ScoreService._getFromCache(row.id) : null;
+        let fallbackV3 = null;
+        if (!cachedV3 && (vd.satp_v3?.verified || vd.satp?.verified)) {
+          let persistedVerification = {};
+          try { persistedVerification = JSON.parse(row.verification || '{}'); } catch {}
+          fallbackV3 = {
+            reputationScore: Number(persistedVerification.score || 0) || 0,
+            verificationLevel: 1,
+            verificationLabel: 'Registered',
+            isBorn: Boolean(vd.satp_v3?.verified),
+          };
         }
-      } catch {}
-      
+        const unified = computeUnifiedTrustScore(db, row, { v3Score: cachedV3 || fallbackV3 || null });
+        trustScore = Number(unified.score || 0) || 0;
+        verificationLevel = Number(unified.level || 0) || 0;
+        verificationLevelName = unified.levelName || 'Unverified';
+      } catch (e) {
+        console.warn('[Marketplace] applicant unified score fallback failed:', e.message);
+      }
+
       app.applicantName = row.name;
       app.applicantAvatar = resolvedAvatar;
       app.applicantProfileId = row.id;
       app.trustScore = trustScore;
       app.verificationLevel = verificationLevel;
       app.verificationLevelName = verificationLevelName;
-      app.verificationBadges = badges;
+      app.verificationBadges = [...new Set(badges)];
     }
   } catch (e) { console.error('[Marketplace] enrichApplication error:', e.message); }
   return app;
