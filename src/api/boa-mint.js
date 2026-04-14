@@ -43,7 +43,7 @@ function findPDA(seeds, programId) {
 }
 
 function registerBoaMintRoutes(app) {
-  const { getCompleteScore, calculateVerificationLevel, calculateReputationScore } = require('../lib/scoring-engine-v2');
+  const { resolveAgentScore } = require('./eligibility');
   
   // POST /api/boa/mint — Build and authority-sign a mint transaction
   app.post('/api/boa/mint', async (req, res) => {
@@ -109,8 +109,7 @@ function registerBoaMintRoutes(app) {
           profileObj.moltbookStats = pf.moltbookStats || {};
         }
       } catch {}
-      const level = calculateVerificationLevel(profileObj);
-      const reputation = calculateReputationScore(profileObj);
+      const { level, reputation } = await resolveAgentScore(matchedProfile.id, matchedProfile);
       db.close();
       
       if (level < 3) {
@@ -421,11 +420,10 @@ function registerBoaAgentMintRoute(app) {
       for (const p of profiles) { try { const vd = JSON.parse(p.verification_data || '{}'); if (vd.solana?.address === wallet && vd.solana?.verified) { mp = p; break; } } catch {} }
       if (!mp) { db.close(); return res.status(403).json({ error: 'No verified profile linked to this wallet.' }); }
       if (mp.id !== agent_id) { db.close(); return res.status(403).json({ error: 'agent_id mismatch.' }); }
-      const { calculateVerificationLevel, calculateReputationScore } = require('../lib/scoring-engine-v2');
+      const { resolveAgentScore } = require('./eligibility');
       let po = { id: mp.id, name: mp.name, skills: JSON.parse(mp.skills || '[]'), verification: JSON.parse(mp.verification || '{}'), endorsements: JSON.parse(mp.endorsements || '[]'), portfolio: JSON.parse(mp.portfolio || '[]'), track_record: JSON.parse(mp.track_record || '{}') };
       try { const pp = require('path').join(__dirname, '..', '..', 'data', 'profiles', mp.id + '.json'); if (require('fs').existsSync(pp)) { const pf = JSON.parse(require('fs').readFileSync(pp, 'utf8')); po.verificationData = pf.verificationData || {}; po.stats = pf.stats || {}; po.endorsements = pf.endorsements || po.endorsements || []; po.moltbookStats = pf.moltbookStats || {}; } } catch {}
-      const level = calculateVerificationLevel(po);
-      const reputation = calculateReputationScore(po);
+      const { level, reputation } = await resolveAgentScore(mp.id, mp);
       db.close();
       if (level < 3) return res.status(403).json({ error: 'Level ' + level + ' insufficient. Need 3+.', level, reputation });
       if (reputation < 50) return res.status(403).json({ error: 'Rep ' + reputation + ' insufficient. Need 50+.', level, reputation });
