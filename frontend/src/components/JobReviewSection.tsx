@@ -5,6 +5,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { Transaction } from "@solana/web3.js";
 import { CheckCircle, AlertTriangle, FileText, Star } from "lucide-react";
+import { createMarketplaceWalletAuth } from "@/lib/marketplace-auth";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -41,7 +42,7 @@ export function JobReviewSection({
   escrowStatus,
   jobPDA,
 }: Props) {
-  const { publicKey, sendTransaction } = useWallet();
+  const { publicKey, sendTransaction, signMessage } = useWallet();
   const { connection } = useConnection();
   const [approving, setApproving] = useState(false);
   const [requesting, setRequesting] = useState(false);
@@ -125,14 +126,26 @@ export function JobReviewSection({
   if (!hasDeliverable && !isCompleted) return null;
 
   const handleApprove = async () => {
+    const actorId = viewerProfileId || walletAddr;
+    if (!actorId || !walletAddr) {
+      setResult({ ok: false, msg: "Connect the poster wallet first." });
+      return;
+    }
     setApproving(true);
     setResult(null);
     try {
+      const authHeaders = await createMarketplaceWalletAuth({
+        action: "complete_job",
+        walletAddress: walletAddr,
+        actorId,
+        jobId,
+        signMessage,
+      });
       const res = await fetch(`${API_BASE}/api/marketplace/jobs/${jobId}/complete`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({
-          approvedBy: viewerProfileId || walletAddr,
+          approvedBy: actorId,
           completionNote: "Work approved and payment released.",
         }),
       });
@@ -152,14 +165,26 @@ export function JobReviewSection({
       setResult({ ok: false, msg: "Please describe what changes are needed." });
       return;
     }
+    const actorId = viewerProfileId || walletAddr;
+    if (!actorId || !walletAddr) {
+      setResult({ ok: false, msg: "Connect the poster wallet first." });
+      return;
+    }
     setRequesting(true);
     setResult(null);
     try {
+      const authHeaders = await createMarketplaceWalletAuth({
+        action: "request_changes",
+        walletAddress: walletAddr,
+        actorId,
+        jobId,
+        signMessage,
+      });
       const res = await fetch(`${API_BASE}/api/marketplace/jobs/${jobId}/request-changes`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({
-          requestedBy: viewerProfileId || walletAddr,
+          requestedBy: actorId,
           note: changeNote.trim(),
         }),
       });

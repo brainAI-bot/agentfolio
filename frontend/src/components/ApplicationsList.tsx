@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { Shield } from "lucide-react";
 import Link from "next/link";
+import { createMarketplaceWalletAuth } from "@/lib/marketplace-auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -51,7 +52,7 @@ function timeAgo(dateStr: string): string {
 }
 
 export function ApplicationsList({ jobId }: { jobId: string }) {
-  const { publicKey, connected } = useWallet();
+  const { publicKey, connected, signMessage } = useWallet();
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [resolvedId, setResolvedId] = useState<string | null>(null);
@@ -65,8 +66,8 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
   const loadJob = () => {
     setLoading(true);
     fetch(`${API_BASE}/api/marketplace/jobs/${jobId}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
         if (!data) return;
         setApps((data.applications || []).filter((a: any) => a && !a.error));
         setPosterId(data.clientId || data.postedBy || null);
@@ -87,8 +88,8 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
     }
     let cancelled = false;
     fetch(`${API_BASE}/api/profile-by-wallet?wallet=${publicKey.toBase58()}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
         if (!cancelled) setResolvedId(data?.id || null);
       })
       .catch(() => {
@@ -106,16 +107,24 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
 
   const handleAccept = async (applicationId: string) => {
     const acceptedBy = resolvedId || walletAddr;
-    if (!acceptedBy) {
+    if (!acceptedBy || !walletAddr) {
       setActionMsg({ ok: false, msg: "Connect the poster wallet to accept an application." });
       return;
     }
     setActingId(applicationId);
     setActionMsg(null);
     try {
+      const authHeaders = await createMarketplaceWalletAuth({
+        action: "accept_application",
+        walletAddress: walletAddr,
+        actorId: acceptedBy,
+        jobId,
+        applicationId,
+        signMessage,
+      });
       const res = await fetch(`${API_BASE}/api/marketplace/jobs/${jobId}/accept`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({ applicationId, acceptedBy }),
       });
       const data = await res.json();
@@ -143,7 +152,7 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
 
   return (
     <div className="space-y-3">
-      {apps.map(app => {
+      {apps.map((app) => {
         const lvlColor = levelColors[app.verificationLevel ?? 0] || "#6b7280";
         const profileId = app.applicantProfileId || app.applicantId;
         const profileUrl = profileId ? `/profile/${profileId}` : null;
@@ -223,7 +232,7 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
                   )}
                   {app.verificationBadges && app.verificationBadges.length > 0 && (
                     <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
-                      {app.verificationBadges.map(b => badgeIcons[b] || b).join(" ")}
+                      {app.verificationBadges.map((b) => badgeIcons[b] || b).join(" ")}
                     </span>
                   )}
                   <span className="text-[10px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>

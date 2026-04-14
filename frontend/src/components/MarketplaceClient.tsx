@@ -18,6 +18,7 @@ import {
   resolveAgentWallet,
   getV3EscrowState,
 } from "@/lib/v3-escrow";
+import { createMarketplaceWalletAuth } from "@/lib/marketplace-auth";
 
 const SITE_URL = (typeof window !== "undefined" ? window.location.origin : "") || process.env.NEXT_PUBLIC_SITE_URL || "";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -77,6 +78,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   const publicKey = isDemo ? demoPublicKey : wallet.publicKey;
   const signTransaction = wallet.signTransaction;
   const sendTransaction = wallet.sendTransaction;
+  const signMessage = wallet.signMessage;
   const [filter, setFilter] = useState<string>("all");
   const [skillFilter, setSkillFilter] = useState<string>("");
   const [modal, setModal] = useState<ModalType>(null);
@@ -282,12 +284,22 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
       // User signs and sends via Phantom
       const sig = await signAndSendV3Tx(tx, connection, publicKey, sendTransaction);
 
+      const actorId = resolvedProfileId || publicKey.toBase58();
+      const authHeaders = await createMarketplaceWalletAuth({
+        action: "record_v3_escrow",
+        walletAddress: publicKey.toBase58(),
+        actorId,
+        jobId: selectedJob.id,
+        escrowId: escrowPDA,
+        signMessage,
+      });
+
       // Notify backend — store V3 escrow PDA on the job
       await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/v3-escrow-funded`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({
-          clientId: resolvedProfileId || publicKey.toBase58(),
+          clientId: actorId,
           escrowPDA,
           txSignature: sig,
           amount,
@@ -331,12 +343,21 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
         // User signs on-chain release
         const sig = await signAndSendV3Tx(tx, connection, publicKey, sendTransaction);
 
+        const actorId = resolvedProfileId || publicKey.toBase58();
+        const authHeaders = await createMarketplaceWalletAuth({
+          action: "complete_job",
+          walletAddress: publicKey.toBase58(),
+          actorId,
+          jobId: selectedJob.id,
+          signMessage,
+        });
+
         // Notify backend
         await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/complete`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...authHeaders },
           body: JSON.stringify({
-            clientId: resolvedProfileId || publicKey.toBase58(),
+            clientId: actorId,
             completionNote: "Work approved. V3 escrow released on-chain.",
             releaseTxSignature: sig,
             v3Release: true,
@@ -345,12 +366,21 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
 
         showMessage("success", `Funds released on-chain! TX: ${sig.slice(0, 16)}...`);
       } else {
+        const actorId = resolvedProfileId || publicKey.toBase58();
+        const authHeaders = await createMarketplaceWalletAuth({
+          action: "complete_job",
+          walletAddress: publicKey.toBase58(),
+          actorId,
+          jobId: selectedJob.id,
+          signMessage,
+        });
+
         // Fallback: legacy release (no V3 escrow)
         const res = await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/complete`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...authHeaders },
           body: JSON.stringify({
-            clientId: resolvedProfileId || publicKey.toBase58(),
+            clientId: actorId,
             completionNote: "Work completed and approved.",
           }),
         });
