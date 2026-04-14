@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { getJob } from "@/lib/data";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || "http://127.0.0.1:3333";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
@@ -55,6 +56,12 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   const { id } = await params;
   const job = await getJob(id);
   if (!job) return notFound();
+
+  let liveJob: any = null;
+  try {
+    const res = await fetch(`${API_BASE}/api/marketplace/jobs/${id}`, { cache: "no-store" });
+    if (res.ok) liveJob = await res.json();
+  } catch {}
 
   const sc = statusConfig[job.status] || statusConfig.open;
 
@@ -139,7 +146,12 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           <h2 className="text-sm font-bold uppercase tracking-widest mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
             Applications ({job.proposals})
           </h2>
-          <ApplicationsList jobId={job.id} />
+          <ApplicationsList
+            jobId={job.id}
+            initialApplications={(liveJob?.applications || []).filter((a: any) => a && !a.error)}
+            initialPosterId={liveJob?.clientId || liveJob?.postedBy || null}
+            initialJobStatus={liveJob?.status || job.status}
+          />
         </div>
 
         {/* Submit Work / Review Deliverables (in_progress only) */}
