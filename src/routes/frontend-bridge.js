@@ -11,6 +11,7 @@ const express = require('express');
 const { loadProfile, saveProfile } = require('../lib/database');
 const { initiateHLVerification, completeHLVerification } = require('../lib/hyperliquid-verify-hardened');
 const { initiatePMVerification, completePMVerification } = require('../lib/polymarket-verify-hardened');
+const verificationChallenges = require('../verification-challenges');
 
 function registerFrontendBridge(app, profileStore) {
   const getDbFn = typeof profileStore?.getDb === 'function' ? profileStore.getDb : (typeof profileStore === 'function' ? profileStore : () => profileStore);
@@ -147,29 +148,65 @@ function registerFrontendBridge(app, profileStore) {
   });
 
   // Flow 2 compatibility aliases for documented profile-scoped endpoints
-  app.post('/api/profile/:profileId/verify/solana', express.json(), (req, res) => {
-    req.body = {
-      ...(req.body || {}),
-      profileId: req.params.profileId,
-      walletAddress: req.body?.walletAddress || req.body?.address || req.body?.wallet || null,
-    };
-    req.url = '/api/verify/solana/challenge';
-    app.handle(req, res);
+  app.post('/api/profile/:profileId/verify/solana', express.json(), async (req, res) => {
+    try {
+      const profileId = req.params.profileId;
+      const walletAddress = req.body?.walletAddress || req.body?.address || req.body?.wallet || null;
+      if (!walletAddress) return res.status(400).json({ error: 'walletAddress required' });
+
+      const challenge = verificationChallenges.generateChallenge(profileId, 'solana', walletAddress);
+      const message = `AgentFolio verification: ${challenge.id}`;
+      challenge.challengeData.message = message;
+      await verificationChallenges.storeChallenge(challenge);
+
+      res.json({ challengeId: challenge.id, message, walletAddress, expiresAt: challenge.challengeData.expiresAt });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
-  app.post('/api/profile/:profileId/verify/x', express.json(), (req, res) => {
-    req.body = {
-      ...(req.body || {}),
-      profileId: req.params.profileId,
-      xHandle: req.body?.xHandle || req.body?.handle || req.body?.username || req.body?.twitterHandle || '',
-    };
-    req.url = '/api/verify/x/challenge';
-    app.handle(req, res);
+  app.post('/api/profile/:profileId/verify/x', express.json(), async (req, res) => {
+    try {
+      const profileId = req.params.profileId;
+      const rawHandle = req.body?.xHandle || req.body?.handle || req.body?.username || req.body?.twitterHandle || '';
+      const xHandle = String(rawHandle).replace(/^@/, '');
+      if (!xHandle) return res.status(400).json({ error: 'xHandle required' });
+
+      const challenge = verificationChallenges.generateChallenge(profileId, 'x', xHandle);
+      challenge.challengeData.instructions = `Post a tweet containing: agentfolio-verify:${challenge.id}`;
+      challenge.challengeData.expectedContent = `agentfolio-verify:${challenge.id}`;
+      await verificationChallenges.storeChallenge(challenge);
+
+      res.json({
+        challengeId: challenge.id,
+        instructions: challenge.challengeData.instructions,
+        tweetContent: challenge.challengeData.expectedContent,
+        code: challenge.challengeData.expectedContent,
+        expiresAt: challenge.challengeData.expiresAt
+      });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.post('/api/profile/:profileId/verify/hyperliquid', express.json(), (req, res) => {
-    req.url = `/api/profile/${encodeURIComponent(req.params.profileId)}/verify/hyperliquid/initiate`;
-    app.handle(req, res);
+    try {
+      const { profileId } = req.params;
+      const profile = loadProfile(profileId);
+      if (!profile) return res.status(404).json({ error: 'Profile not found' });
+      const walletAddress = req.body?.walletAddress || req.body?.address || profile.wallets?.hyperliquid;
+      if (!walletAddress) return res.status(400).json({ error: 'No Hyperliquid wallet. Provide walletAddress or set it on your profile.' });
+
+      const result = initiateHLVerification(profileId, walletAddress);
+      res.status(200).json({
+        ...result,
+        address: result.walletAddress,
+        message: result.signMessage,
+        challengeString: result.signMessage,
+      });
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
   });
 
   // Discord: /api/verify/discord/initiate → /api/verification/discord/initiate
