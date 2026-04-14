@@ -1463,7 +1463,12 @@ app.post('/api/verification/website/verify', async (req, res) => {
 
   try {
     const result = await websiteVerify.verifyWebsiteChallenge(challengeId, method || 'auto');
-    res.json(result);
+    const verifiedAt = new Date().toISOString();
+    persistVerifiedWebsite(result.profileId, result.identifier, verifiedAt);
+    res.json({
+      ...result,
+      verifiedAt
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -2130,15 +2135,70 @@ function resolveAgentmailForProfile(profileId) {
   }
 }
 
+function persistVerifiedWebsite(profileId, websiteUrl, verifiedAt) {
+  try {
+    const Database = require('better-sqlite3');
+    const path = require('path');
+    const db = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'));
+    const row = db.prepare('SELECT verification_data, links, website FROM profiles WHERE id = ?').get(profileId);
+    if (row) {
+      let verificationData = {};
+      let links = {};
+      try { verificationData = JSON.parse(row.verification_data || '{}'); } catch {}
+      try { links = JSON.parse(row.links || '{}'); } catch {}
+      verificationData.website = {
+        ...(verificationData.website || {}),
+        verified: true,
+        linked: true,
+        address: websiteUrl,
+        identifier: websiteUrl,
+        verifiedAt
+      };
+      links.website = websiteUrl;
+      db.prepare('UPDATE profiles SET website = ?, links = ?, verification_data = ?, updated_at = ? WHERE id = ?')
+        .run(websiteUrl, JSON.stringify(links), JSON.stringify(verificationData), new Date().toISOString(), profileId);
+    }
+    db.close();
+  } catch (err) {
+    console.warn('[Website] Failed to persist verified website:', err.message);
+  }
+
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const profileJsonPath = path.join('/home/ubuntu/agentfolio/data/profiles', profileId + '.json');
+    if (fs.existsSync(profileJsonPath)) {
+      const profileJson = JSON.parse(fs.readFileSync(profileJsonPath, 'utf-8'));
+      profileJson.website = websiteUrl;
+      if (!profileJson.links) profileJson.links = {};
+      profileJson.links.website = websiteUrl;
+      if (!profileJson.verificationData) profileJson.verificationData = {};
+      profileJson.verificationData.website = {
+        ...(profileJson.verificationData.website || {}),
+        verified: true,
+        linked: true,
+        address: websiteUrl,
+        identifier: websiteUrl,
+        verifiedAt
+      };
+      fs.writeFileSync(profileJsonPath, JSON.stringify(profileJson, null, 2));
+    }
+  } catch (err) {
+    console.warn('[Website] Failed to sync verified website JSON:', err.message);
+  }
+}
+
 function persistVerifiedAgentmail(profileId, email, verifiedAt) {
   try {
     const Database = require('better-sqlite3');
     const path = require('path');
     const db = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'));
-    const row = db.prepare('SELECT verification_data, email FROM profiles WHERE id = ?').get(profileId);
+    const row = db.prepare('SELECT verification_data, email, links FROM profiles WHERE id = ?').get(profileId);
     if (row) {
       let verificationData = {};
+      let links = {};
       try { verificationData = JSON.parse(row.verification_data || '{}'); } catch {}
+      try { links = JSON.parse(row.links || '{}'); } catch {}
       verificationData.agentmail = {
         ...(verificationData.agentmail || {}),
         verified: true,
@@ -2148,8 +2208,9 @@ function persistVerifiedAgentmail(profileId, email, verifiedAt) {
         identifier: email,
         verifiedAt
       };
-      db.prepare('UPDATE profiles SET email = ?, verification_data = ?, updated_at = ? WHERE id = ?')
-        .run(email, JSON.stringify(verificationData), new Date().toISOString(), profileId);
+      links.agentmail = email;
+      db.prepare('UPDATE profiles SET email = ?, links = ?, verification_data = ?, updated_at = ? WHERE id = ?')
+        .run(email, JSON.stringify(links), JSON.stringify(verificationData), new Date().toISOString(), profileId);
     }
     db.close();
   } catch (err) {
@@ -2163,6 +2224,8 @@ function persistVerifiedAgentmail(profileId, email, verifiedAt) {
     if (fs.existsSync(profileJsonPath)) {
       const profileJson = JSON.parse(fs.readFileSync(profileJsonPath, 'utf-8'));
       profileJson.email = email;
+      if (!profileJson.links) profileJson.links = {};
+      profileJson.links.agentmail = email;
       if (!profileJson.verificationData) profileJson.verificationData = {};
       profileJson.verificationData.agentmail = {
         ...(profileJson.verificationData.agentmail || {}),
