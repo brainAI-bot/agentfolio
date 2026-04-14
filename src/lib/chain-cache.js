@@ -66,6 +66,53 @@ const cache = {
 // Track known TX signatures to avoid re-fetching on each refresh cycle
 const _knownSigs = new Set();
 let _lastScannedSig = null;
+const _attestationTxHints = new Map();
+
+async function resolveAttestationTxHint(conn, pda, createdAtUnix) {
+  const pdaKey = pda?.toBase58 ? pda.toBase58() : String(pda || '').trim();
+  if (!pdaKey) return { txSignature: null, solscanUrl: null };
+  if (_attestationTxHints.has(pdaKey)) return _attestationTxHints.get(pdaKey);
+
+  let before = null;
+  let best = null;
+  const target = Number(createdAtUnix) || 0;
+
+  try {
+    for (let page = 0; page < 10; page++) {
+      const sigs = await conn.getSignaturesForAddress(new PublicKey(pdaKey), {
+        limit: 25,
+        ...(before ? { before } : {}),
+      });
+      if (!Array.isArray(sigs) || sigs.length === 0) break;
+
+      for (const sig of sigs) {
+        if (!sig?.signature || !sig.blockTime || sig.err) continue;
+        const delta = target > 0 ? Math.abs(sig.blockTime - target) : Number.MAX_SAFE_INTEGER;
+        if (!best || delta < best.delta) {
+          best = {
+            txSignature: sig.signature,
+            solscanUrl: `https://solana.fm/tx/${sig.signature}`,
+            blockTime: sig.blockTime,
+            delta,
+          };
+          if (delta === 0) break;
+        }
+      }
+
+      if (best?.delta === 0) break;
+      const oldest = sigs[sigs.length - 1];
+      if (!oldest?.signature) break;
+      if (target > 0 && oldest.blockTime && oldest.blockTime <= target) break;
+      before = oldest.signature;
+    }
+  } catch (_) {}
+
+  const hint = best
+    ? { txSignature: best.txSignature, solscanUrl: best.solscanUrl }
+    : { txSignature: null, solscanUrl: null };
+  _attestationTxHints.set(pdaKey, hint);
+  return hint;
+}
 
 // ============ REFRESH FROM CHAIN ============
 
@@ -344,16 +391,18 @@ async function mergeProgramAttestationsIntoMap(newAttestations) {
         try { parsedProof = typeof parsed.proofData === 'string' ? JSON.parse(parsed.proofData) : (parsed.proofData || {}); } catch {}
         const platform = normalizeAttestationPlatform(parsed.attestationType);
         if (!platform) continue;
+        const createdAtUnix = parsed.createdAt ? Number(parsed.createdAt) : null;
+        const recoveredHint = await resolveAttestationTxHint(conn, pubkey, createdAtUnix);
         upsertAttestation(newAttestations, parsed.agentId, {
           platform,
-          txSignature: null,
+          txSignature: recoveredHint.txSignature || parsedProof.txSignature || parsedProof.transactionSignature || parsedProof.signature || null,
           memo: `ATTESTATION|${parsed.attestationType}`,
           proofHash: null,
           proofData: parsed.proofData || JSON.stringify(parsedProof || {}),
           signer: parsed.issuer || null,
-          verifiedAt: parsed.createdAt ? new Date(Number(parsed.createdAt) * 1000).toISOString() : null,
-          timestamp: parsed.createdAt ? new Date(Number(parsed.createdAt) * 1000).toISOString() : new Date().toISOString(),
-          solscanUrl: `https://solscan.io/account/${pubkey.toBase58()}`,
+          verifiedAt: createdAtUnix ? new Date(createdAtUnix * 1000).toISOString() : null,
+          timestamp: createdAtUnix ? new Date(createdAtUnix * 1000).toISOString() : new Date().toISOString(),
+          solscanUrl: recoveredHint.solscanUrl || `https://solscan.io/account/${pubkey.toBase58()}`,
           pda: pubkey.toBase58(),
           source: 'attestation-program',
         });
