@@ -165,6 +165,39 @@ function hasReleasedEscrow(job) {
   return getMarketplaceReviewWindow(job).released;
 }
 
+function isCanonicalMarketplaceReviewRow(row) {
+  if (!row) return false;
+  const jobId = row.job_id;
+  if (!jobId || jobId === 'direct') return true;
+
+  const job = readMarketplaceJob(jobId);
+  if (!job) return true;
+
+  if (!hasReleasedEscrow(job)) return false;
+  if (!(job.onchainEscrowPDA || job.v3EscrowPDA)) return false;
+  if (!row.tx_signature) return false;
+  return true;
+}
+
+function filterCanonicalReviewRows(rows) {
+  const seenTxRows = new Set();
+  const filtered = [];
+
+  for (const row of rows || []) {
+    if (!isCanonicalMarketplaceReviewRow(row)) continue;
+
+    if (row.tx_signature) {
+      const dedupeKey = `${row.reviewer_id}::${row.reviewee_id}::${row.tx_signature}`;
+      if (seenTxRows.has(dedupeKey)) continue;
+      seenTxRows.add(dedupeKey);
+    }
+
+    filtered.push(row);
+  }
+
+  return filtered;
+}
+
 
 function verifyReviewAuth(reviewerId, revieweeId, wallet, signature, signedMessage) {
   if (!wallet || !signature || !signedMessage) {
@@ -401,13 +434,10 @@ function getJobValueWeight(amount) {
 
 function getReviewerHistoryMeta(db, reviewerId) {
   try {
-    const row = db.prepare(`SELECT
-      COUNT(*) AS count,
-      SUM(CASE WHEN rating <= 2 THEN 1 ELSE 0 END) AS low_count
-      FROM reviews
-      WHERE reviewer_id = ?`).get(reviewerId) || {};
-    const count = Number(row.count || 0);
-    const lowCount = Number(row.low_count || 0);
+    const rows = db.prepare('SELECT reviewer_id, reviewee_id, job_id, rating, tx_signature FROM reviews WHERE reviewer_id = ? ORDER BY created_at DESC').all(reviewerId);
+    const filtered = filterCanonicalReviewRows(rows);
+    const count = filtered.length;
+    const lowCount = filtered.filter((row) => Number(row.rating || 0) <= 2).length;
     const badRatio = count > 0 ? lowCount / count : 0;
     const serialBadReviewer = count > 0 && badRatio > 0.5;
 
@@ -492,7 +522,9 @@ function insertReviewRecord(db, {
 function getReviewsPayload(agent) {
   const db = getDb();
   try {
-    const reviews = db.prepare('SELECT * FROM reviews WHERE reviewee_id = ? ORDER BY created_at DESC').all(agent);
+    const reviews = filterCanonicalReviewRows(
+      db.prepare('SELECT * FROM reviews WHERE reviewee_id = ? ORDER BY created_at DESC').all(agent)
+    );
 
     let totalWeight = 0;
     let weightedSum = 0;
