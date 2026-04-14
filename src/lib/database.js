@@ -544,17 +544,17 @@ initializeSchema();
 
 const profileStmts = {
   insert: db.prepare(`
-    INSERT INTO profiles (id, name, handle, bio, avatar, links, wallets, skills, portfolio, 
+    INSERT INTO profiles (id, name, handle, bio, avatar, nft_avatar, links, wallets, skills, portfolio, 
       track_record, verification, verification_data, moltbook_stats, endorsements, 
       endorsements_given, metadata, created_at, updated_at)
-    VALUES (@id, @name, @handle, @bio, @avatar, @links, @wallets, @skills, @portfolio,
+    VALUES (@id, @name, @handle, @bio, @avatar, @nft_avatar, @links, @wallets, @skills, @portfolio,
       @track_record, @verification, @verification_data, @moltbook_stats, @endorsements,
       @endorsements_given, @metadata, @created_at, @updated_at)
   `),
   
   update: db.prepare(`
     UPDATE profiles SET
-      name = @name, handle = @handle, bio = @bio, avatar = @avatar, 
+      name = @name, handle = @handle, bio = @bio, avatar = @avatar, nft_avatar = @nft_avatar,
       links = @links, wallets = @wallets, skills = @skills, portfolio = @portfolio,
       track_record = @track_record, verification = @verification, 
       verification_data = @verification_data, moltbook_stats = @moltbook_stats,
@@ -580,7 +580,7 @@ function serializeProfile(profile) {
   // Collect known fields
   const knownKeys = new Set([
     'id', 'name', 'handle', 'bio', 'avatar', 'links', 'wallets', 'skills',
-    'portfolio', 'trackRecord', 'verification', 'verificationData',
+    'portfolio', 'trackRecord', 'verification', 'verificationData', 'nftAvatar',
     'moltbookStats', 'endorsements', 'endorsementsGiven', 'createdAt',
     'updatedAt', 'activity', 'metadata'
   ]);
@@ -599,6 +599,7 @@ function serializeProfile(profile) {
     handle: profile.handle,
     bio: profile.bio || '',
     avatar: profile.avatar || null,
+    nft_avatar: profile.nftAvatar ? JSON.stringify(profile.nftAvatar) : null,
     links: JSON.stringify(profile.links || {}),
     wallets: JSON.stringify(profile.wallets || {}),
     skills: JSON.stringify(profile.skills || []),

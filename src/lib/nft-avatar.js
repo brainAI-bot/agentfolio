@@ -9,7 +9,18 @@
  */
 
 const https = require('https');
-const { loadProfile, saveProfile } = require('./profile');
+const { getDb } = require('../profile-store');
+
+function parseJson(value, fallback = null) {
+  if (value == null || value === '') return fallback;
+  if (typeof value !== 'string') return value;
+  try { return JSON.parse(value); } catch (_) { return fallback; }
+}
+
+function loadProfileRow(profileId) {
+  const db = getDb();
+  return db.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId) || null;
+}
 
 const SOLANA_RPC = 'api.mainnet-beta.solana.com';
 const DEFAULT_HELIUS_API_KEY = null;
@@ -306,35 +317,30 @@ async function setNFTAvatar(profileId, { chain, walletAddress, nftIdentifier, nf
     return { success: false, error: `Unsupported chain: ${chain}. Supported: ${SUPPORTED_CHAINS.join(', ')}` };
   }
 
-  // Verify the wallet is linked to this profile
-  const profile = loadProfile(profileId);
+  const profile = loadProfileRow(profileId);
   if (!profile) return { success: false, error: 'Profile not found' };
 
-  // Check wallet is verified on this profile
-  // Check wallet in verificationData (actual storage) or wallets object
-  const vd = typeof profile.verificationData === 'string' ? JSON.parse(profile.verificationData || '{}') : (profile.verificationData || {});
-  const wallets = typeof profile.wallets === 'string' ? JSON.parse(profile.wallets || '{}') : (profile.wallets || {});
-  const normalWallet = walletAddress.toLowerCase();
-  const hasWallet = 
+  const vd = parseJson(profile.verification_data, {});
+  const wallets = parseJson(profile.wallets, {});
+  const normalWallet = String(walletAddress || '').toLowerCase();
+  const hasWallet =
     (vd.solana?.address?.toLowerCase() === normalWallet && vd.solana?.verified) ||
     (vd.eth?.address?.toLowerCase() === normalWallet && vd.eth?.verified) ||
     (vd.ethereum?.address?.toLowerCase() === normalWallet && vd.ethereum?.verified) ||
     (wallets.solana?.toLowerCase() === normalWallet) ||
     (wallets.ethereum?.toLowerCase() === normalWallet) ||
-    (profile.wallet?.toLowerCase() === normalWallet);
+    (String(profile.wallet || '').toLowerCase() === normalWallet);
 
   if (!hasWallet) {
     return { success: false, error: 'Wallet not verified on this profile. Verify your wallet first.' };
   }
 
-  // Verify NFT ownership on-chain
   const owns = await verifyNFTOwnership(chain, walletAddress, nftIdentifier);
   if (!owns) {
     return { success: false, error: 'NFT ownership could not be verified on-chain' };
   }
 
-  // Set the avatar
-  profile.nftAvatar = {
+  const avatar = {
     chain,
     wallet: walletAddress,
     identifier: nftIdentifier,
@@ -344,30 +350,37 @@ async function setNFTAvatar(profileId, { chain, walletAddress, nftIdentifier, nf
     verifiedOnChain: true
   };
 
-  saveProfile(profile);
+  getDb().prepare('UPDATE profiles SET nft_avatar = ?, updated_at = ? WHERE id = ?').run(
+    JSON.stringify(avatar),
+    new Date().toISOString(),
+    profileId
+  );
 
-  return { success: true, avatar: profile.nftAvatar };
+  return { success: true, avatar };
 }
 
 /**
  * Get agent's verified NFT avatar
  */
 function getNFTAvatar(profileId) {
-  const profile = loadProfile(profileId);
-  if (!profile || !profile.nftAvatar) return null;
-  return profile.nftAvatar;
+  const profile = loadProfileRow(profileId);
+  if (!profile) return null;
+  const avatar = parseJson(profile.nft_avatar, null);
+  return avatar && typeof avatar === 'object' ? avatar : null;
 }
 
 /**
  * Remove NFT avatar
  */
 function removeNFTAvatar(profileId) {
-  const p = loadProfile(profileId);
-  if (p && p.nftAvatar && p.nftAvatar.permanent) return { success: false, error: "Avatar is permanently locked" };
-  const profile = loadProfile(profileId);
+  const avatar = getNFTAvatar(profileId);
+  if (avatar && avatar.permanent) return { success: false, error: "Avatar is permanently locked" };
+  const profile = loadProfileRow(profileId);
   if (!profile) return { success: false, error: 'Profile not found' };
-  delete profile.nftAvatar;
-  saveProfile(profile);
+  getDb().prepare('UPDATE profiles SET nft_avatar = NULL, updated_at = ? WHERE id = ?').run(
+    new Date().toISOString(),
+    profileId
+  );
   return { success: true };
 }
 
