@@ -119,6 +119,11 @@ function registerSATPRoutes(app) {
     return out;
   }
 
+  function isLikelySolanaTxSignature(value) {
+    const sig = String(value || '').trim();
+    return /^[1-9A-HJ-NP-Za-km-z]{60,120}$/.test(sig);
+  }
+
   function buildPublicAttestationEntries(attestations, txHints = {}, options = {}) {
     const includeSatp = options.includeSatp === true;
     const enriched = [];
@@ -172,13 +177,14 @@ function registerSATPRoutes(app) {
       const chainAttestations = (chainCache.getVerifications(resolvedProfileId) || []).map(att => ({ ...att }));
       if (typeof chainCache.resolveAttestationTxHintByPda === 'function') {
         for (const att of chainAttestations) {
-          if (att?.txSignature || !att?.pda) continue;
+          const currentTx = att?.txSignature || att?.tx_signature || null;
+          if (!att?.pda || isLikelySolanaTxSignature(currentTx)) continue;
           try {
             const createdAtUnix = att?.timestamp ? Math.floor(new Date(att.timestamp).getTime() / 1000) : null;
             const hint = await chainCache.resolveAttestationTxHintByPda(att.pda, createdAtUnix);
             if (hint?.txSignature) {
               att.txSignature = hint.txSignature;
-              if (!att.solscanUrl || /\/account\//.test(att.solscanUrl)) att.solscanUrl = hint.solscanUrl || att.solscanUrl;
+              att.solscanUrl = hint.solscanUrl || att.solscanUrl;
             }
           } catch (_) {}
         }
