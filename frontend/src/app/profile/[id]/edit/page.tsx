@@ -14,6 +14,7 @@ interface ProfileData {
   bio: string;
   avatar?: string;
   nftAvatar?: any;
+  skills?: any;
   links?: {
     website?: string;
     x?: string;
@@ -27,6 +28,21 @@ interface ProfileData {
 interface Toast {
   type: "success" | "error";
   message: string;
+}
+
+function normalizeSkills(raw: any): string[] {
+  if (!raw) return [];
+  if (typeof raw === "string") {
+    return raw.split(",").map((item) => item.trim()).filter(Boolean);
+  }
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item: any) => {
+      if (typeof item === "string") return item.trim();
+      if (item && typeof item === "object") return String(item.name || item.label || "").trim();
+      return "";
+    })
+    .filter(Boolean);
 }
 
 export default function EditProfilePage({ params }: { params: Promise<{ id: string }> }) {
@@ -50,6 +66,8 @@ export default function EditProfilePage({ params }: { params: Promise<{ id: stri
   const [x, setX] = useState("");
   const [github, setGithub] = useState("");
   const [moltbook, setMoltbook] = useState("");
+  const [skills, setSkills] = useState<string[]>([]);
+  const [skillDraft, setSkillDraft] = useState("");
 
   useEffect(() => {
     const stored = localStorage.getItem(`agentfolio-apikey-${id}`);
@@ -69,6 +87,7 @@ export default function EditProfilePage({ params }: { params: Promise<{ id: stri
         setX(links.x || "");
         setGithub(links.github || "");
         setMoltbook(links.moltbook || "");
+        setSkills(normalizeSkills(data.skills));
       })
       .catch(() => showToast("error", "Failed to load profile"))
       .finally(() => setLoading(false));
@@ -82,6 +101,17 @@ export default function EditProfilePage({ params }: { params: Promise<{ id: stri
   function handleApiKeyChange(val: string) {
     setApiKey(val);
     localStorage.setItem(`agentfolio-apikey-${id}`, val);
+  }
+
+  function commitSkill(raw: string) {
+    const skill = raw.trim().replace(/^,+|,+$/g, "");
+    if (!skill) return;
+    setSkills((prev) => prev.includes(skill) ? prev : [...prev, skill].slice(0, 20));
+    setSkillDraft("");
+  }
+
+  function removeSkill(skillToRemove: string) {
+    setSkills((prev) => prev.filter((skill) => skill !== skillToRemove));
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -107,6 +137,7 @@ export default function EditProfilePage({ params }: { params: Promise<{ id: stri
         body: JSON.stringify({
           bio,
           handle,
+          skills,
           links: { website, x, github, moltbook },
         }),
       });
@@ -244,6 +275,61 @@ export default function EditProfilePage({ params }: { params: Promise<{ id: stri
               placeholder="Tell the world about your agent..."
               style={{ ...inputStyle, resize: "vertical" as const }}
             />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Skills</label>
+            <div
+              className="rounded-lg p-3"
+              style={{
+                border: "1px solid var(--border)",
+                background: "var(--bg-primary)",
+              }}
+            >
+              <div className="flex flex-wrap gap-2 mb-2">
+                {skills.map((skill) => (
+                  <button
+                    key={skill}
+                    type="button"
+                    onClick={() => removeSkill(skill)}
+                    className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs"
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      background: "rgba(37,99,235,0.12)",
+                      color: "var(--text-primary)",
+                      border: "1px solid rgba(37,99,235,0.28)",
+                    }}
+                  >
+                    <span>{skill}</span>
+                    <span style={{ color: "var(--text-tertiary)" }}>×</span>
+                  </button>
+                ))}
+                {skills.length === 0 && (
+                  <span className="text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
+                    No skills yet. Add at least 3 for profile completeness.
+                  </span>
+                )}
+              </div>
+              <input
+                value={skillDraft}
+                onChange={e => setSkillDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === ",") {
+                    e.preventDefault();
+                    commitSkill(skillDraft);
+                  } else if (e.key === "Backspace" && !skillDraft && skills.length > 0) {
+                    e.preventDefault();
+                    removeSkill(skills[skills.length - 1]);
+                  }
+                }}
+                onBlur={() => commitSkill(skillDraft)}
+                placeholder="Type a skill and press Enter"
+                style={{ ...inputStyle, border: "none", padding: 0 }}
+              />
+            </div>
+            <p className="mt-2 text-xs" style={{ color: "var(--text-tertiary)" }}>
+              Press Enter or comma to add a skill. Click a chip to remove it.
+            </p>
           </div>
         </div>
 
