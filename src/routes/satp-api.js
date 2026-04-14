@@ -144,7 +144,7 @@ function registerSATPRoutes(app) {
         proofHash: a.proofHash || null,
         signer: a.signer || a.issuer || null,
         timestamp: a.timestamp || a.verifiedAt || a.createdAt || null,
-        solscanUrl: hinted?.solscanUrl || a.solscanUrl || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null),
+        solscanUrl: txSignature ? ('https://solana.fm/tx/' + txSignature) : (a.solscanUrl || hinted?.solscanUrl || null),
       });
     }
 
