@@ -51,20 +51,31 @@ function timeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
-export function ApplicationsList({ jobId }: { jobId: string }) {
+export function ApplicationsList({
+  jobId,
+  initialApplications = [],
+  initialPosterId = null,
+  initialJobStatus = "open",
+}: {
+  jobId: string;
+  initialApplications?: Application[];
+  initialPosterId?: string | null;
+  initialJobStatus?: string;
+}) {
   const { publicKey, connected, signMessage } = useWallet();
-  const [apps, setApps] = useState<Application[]>([]);
-  const [loading, setLoading] = useState(true);
+  const hasInitialData = initialApplications.length > 0 || !!initialPosterId || !!initialJobStatus;
+  const [apps, setApps] = useState<Application[]>(initialApplications);
+  const [loading, setLoading] = useState(!hasInitialData);
   const [resolvedId, setResolvedId] = useState<string | null>(null);
-  const [posterId, setPosterId] = useState<string | null>(null);
-  const [jobStatus, setJobStatus] = useState<string>("open");
+  const [posterId, setPosterId] = useState<string | null>(initialPosterId);
+  const [jobStatus, setJobStatus] = useState<string>(initialJobStatus || "open");
   const [actingId, setActingId] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<{ ok: boolean; msg: string } | null>(null);
 
   const walletAddr = publicKey?.toBase58() || "";
 
-  const loadJob = () => {
-    setLoading(true);
+  const loadJob = (showSpinner = !hasInitialData) => {
+    if (showSpinner) setLoading(true);
     fetch(`${API_BASE}/api/marketplace/jobs/${jobId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
@@ -78,7 +89,7 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
   };
 
   useEffect(() => {
-    loadJob();
+    loadJob(false);
   }, [jobId]);
 
   useEffect(() => {
