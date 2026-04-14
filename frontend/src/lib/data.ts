@@ -350,7 +350,7 @@ function loadAllJobs(): Job[] {
         });
       } catch { /* skip */ }
     }
-    jobs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    jobs.sort((a: Job, b: Job) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     _jobsCache = jobs;
     _jobsCacheTime = Date.now();
     return jobs;
@@ -430,12 +430,83 @@ export async function getTopVerifiedAgents(limit = 6): Promise<Agent[]> {
   return all.filter(a => a.trustScore > 0).sort((a, b) => b.trustScore - a.trustScore).slice(0, limit);
 }
 
-export function getAllJobs(): Job[] {
-  return loadAllJobs();
+function mapMarketplaceApiJob(raw: any): Job | null {
+  if (!raw || !raw.id) return null;
+  const applications = Array.isArray(raw.applications) ? raw.applications.filter(Boolean) : [];
+  const status = raw.status === "in_progress"
+    ? "in_progress"
+    : raw.status === "completed"
+      ? "completed"
+      : raw.status === "disputed"
+        ? "disputed"
+        : "open";
+  const escrowStatus: Job["escrowStatus"] = raw.fundsReleased
+    ? "released"
+    : raw.v3EscrowPDA
+      ? "funded"
+      : (raw.fundsLocked || raw.escrowFunded)
+        ? "locked"
+        : "ready";
+
+  return {
+    id: raw.id,
+    title: raw.title || raw.id,
+    description: raw.description || "",
+    poster: raw.clientId || raw.postedBy || "Unknown",
+    posterAvatar: "",
+    budget: `${raw.agreedBudget ?? raw.budgetAmount ?? raw.budget ?? 0} ${raw.budgetCurrency || raw.currency || "USDC"}`,
+    skills: Array.isArray(raw.skills) ? raw.skills : [],
+    status,
+    escrowStatus,
+    escrowTx: raw.v3EscrowTx || raw.escrowTx || raw.escrow_tx || raw.releaseTxHash || null,
+    v3EscrowPDA: raw.v3EscrowPDA || null,
+    onchainEscrowPDA: raw.onchainEscrowPDA || raw.v3EscrowPDA || null,
+    proposals: raw.applicationCount || applications.length,
+    deadline: typeof raw.timeline === "string" && raw.timeline ? raw.timeline.replaceAll("_", " ") : "Flexible",
+    assignee: raw.selectedAgentId || raw.acceptedApplicant || undefined,
+    assigneeId: raw.selectedAgentId || raw.acceptedApplicant || undefined,
+    clientId: raw.clientId || raw.postedBy || undefined,
+    deliverableId: raw.deliverableId || undefined,
+    deliverableDescription: raw.deliverableDescription || undefined,
+    deliverableStatus: raw.deliverableStatus || undefined,
+    deliverableSubmittedAt: raw.deliverableSubmittedAt || raw.submittedAt || undefined,
+    createdAt: raw.createdAt || new Date().toISOString(),
+  };
 }
 
-export function getJob(id: string): Job | undefined {
-  return loadAllJobs().find(j => j.id === id);
+async function fetchMarketplaceJobsFromApi(): Promise<Job[] | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/marketplace/jobs?status=all`, { next: { revalidate: 5 } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const list = Array.isArray(data) ? data : (data.jobs || []);
+    const jobs = list
+      .map((job: any) => mapMarketplaceApiJob(job))
+      .filter((job: Job | null): job is Job => !!job);
+    jobs.sort((a: Job, b: Job) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return jobs;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchMarketplaceJobFromApi(id: string): Promise<Job | undefined> {
+  try {
+    const res = await fetch(`${API_BASE}/api/marketplace/jobs/${encodeURIComponent(id)}`, { cache: "no-store" });
+    if (!res.ok) return undefined;
+    const data = await res.json();
+    return mapMarketplaceApiJob(data) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function getAllJobs(): Promise<Job[]> {
+  return (await fetchMarketplaceJobsFromApi()) || loadAllJobs();
+}
+
+export async function getJob(id: string): Promise<Job | undefined> {
+  return (await fetchMarketplaceJobFromApi(id)) || loadAllJobs().find(j => j.id === id);
 }
 
 export async function getActivityFeed(): Promise<Array<{agent: string; action: string; detail: string; date: string; time: string}>> {
