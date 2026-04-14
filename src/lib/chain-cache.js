@@ -71,7 +71,8 @@ const _attestationTxHints = new Map();
 async function resolveAttestationTxHint(conn, pda, createdAtUnix) {
   const pdaKey = pda?.toBase58 ? pda.toBase58() : String(pda || '').trim();
   if (!pdaKey) return { txSignature: null, solscanUrl: null };
-  if (_attestationTxHints.has(pdaKey)) return _attestationTxHints.get(pdaKey);
+  const cachedHint = _attestationTxHints.get(pdaKey);
+  if (cachedHint?.txSignature) return cachedHint;
 
   let before = null;
   let best = null;
@@ -110,7 +111,8 @@ async function resolveAttestationTxHint(conn, pda, createdAtUnix) {
   const hint = best
     ? { txSignature: best.txSignature, solscanUrl: best.solscanUrl }
     : { txSignature: null, solscanUrl: null };
-  _attestationTxHints.set(pdaKey, hint);
+  if (hint.txSignature) _attestationTxHints.set(pdaKey, hint);
+  else _attestationTxHints.delete(pdaKey);
   return hint;
 }
 
@@ -492,6 +494,10 @@ function getVerifications(profileId, createdAfter) {
   return allAtts;
 }
 
+async function resolveAttestationTxHintByPda(pda, createdAtUnix = null) {
+  return resolveAttestationTxHint(getConnection(), pda, createdAtUnix);
+}
+
 /**
  * Get verified platforms for a profile (from attestation TXs)
  * @param {string} profileId
@@ -759,6 +765,7 @@ module.exports = {
   getAllAgents,
   isVerified,
   getVerifications,
+  resolveAttestationTxHintByPda,
   getVerifiedPlatforms,
   getScore,
   getStats,
