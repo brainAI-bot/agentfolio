@@ -266,31 +266,44 @@ function registerRestoredRoutes(app) {
       }
       delete global._afChallenges[key];
       if (verified) {
+        const normalizedChain = verifyChain === 'evm' ? 'eth' : verifyChain;
+        const verificationDataKey = normalizedChain === 'eth' ? 'ethereum' : normalizedChain;
         const profile = loadProfile(profileId, DATA_DIR);
         let onchainSucceeded = true;
         if (postVerificationHookFn) {
-          onchainSucceeded = await postVerificationHookFn(profileId, verifyChain, publicKey, { method: 'headless-sign' });
+          onchainSucceeded = await postVerificationHookFn(profileId, normalizedChain, publicKey, { method: 'headless-sign' });
         }
         if (profile && onchainSucceeded) {
           profile.verificationData = profile.verificationData || {};
           profile.wallets = profile.wallets || {};
-          if (verifyChain === 'solana') {
+          if (normalizedChain === 'solana') {
             profile.wallets.solana = publicKey;
-            profile.verificationData.solana = { verified: true, address: publicKey, verifiedAt: new Date().toISOString(), method: 'headless-sign' };
-          } else if (verifyChain === 'evm') {
+          } else if (normalizedChain === 'eth') {
             profile.wallets.ethereum = publicKey;
-            profile.verificationData.ethereum = { verified: true, address: publicKey, verifiedAt: new Date().toISOString(), method: 'headless-sign' };
           }
+          profile.verificationData[verificationDataKey] = {
+            verified: true,
+            address: publicKey,
+            identifier: publicKey,
+            verifiedAt: new Date().toISOString(),
+            method: 'headless-sign'
+          };
+          upsertActiveVerification(profileId, normalizedChain, publicKey, {
+            address: publicKey,
+            identifier: publicKey,
+            method: 'headless-sign',
+            verifiedAt: profile.verificationData[verificationDataKey].verifiedAt,
+          });
           profile.updatedAt = new Date().toISOString();
           const trust = computeTrustData(profileId);
           profile.trustScore = trust.trustScore;
           profile.tier = trust.tier;
           dbSaveProfileFn(profile);
-          addActivity(profileId, 'verification_wallet', { chain: verifyChain, address: publicKey.slice(0, 8) + '...' + publicKey.slice(-4), method: 'headless' }, DATA_DIR);
-          triggerWebhooks(WEBHOOK_EVENTS.VERIFICATION_SOLANA, { agentId: profileId, platform: verifyChain, address: publicKey, method: 'headless-sign' }).catch(() => {});
+          addActivity(profileId, 'verification_wallet', { chain: normalizedChain, address: publicKey.slice(0, 8) + '...' + publicKey.slice(-4), method: 'headless' }, DATA_DIR);
+          triggerWebhooks(WEBHOOK_EVENTS.VERIFICATION_SOLANA, { agentId: profileId, platform: normalizedChain, address: publicKey, method: 'headless-sign' }).catch(() => {});
         }
         const updatedTrust = computeTrustData(profileId);
-        res.json({ verified: !!onchainSucceeded, chain: verifyChain, address: publicKey, trustScore: updatedTrust.trustScore, tier: updatedTrust.tier, message: onchainSucceeded ? 'Wallet verified successfully' : 'On-chain verification failed' });
+        res.json({ verified: !!onchainSucceeded, chain: normalizedChain, address: publicKey, trustScore: updatedTrust.trustScore, tier: updatedTrust.tier, message: onchainSucceeded ? 'Wallet verified successfully' : 'On-chain verification failed' });
       } else {
         res.status(400).json({ verified: false, error: 'Signature verification failed' });
       }
