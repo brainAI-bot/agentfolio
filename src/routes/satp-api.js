@@ -130,10 +130,12 @@ function registerSATPRoutes(app) {
       if (!isVisibleAttestationPlatform(platform, includeSatp)) continue;
       const hinted = txHints[platform] || txHints[String(platform || '').replace(/^verification_/, '').replace(/_verification$/, '')] || null;
       const txSignature = a.txSignature || a.tx_signature || proofData.txSignature || proofData.signature || proofData.transactionSignature || hinted?.txSignature || null;
+      const rawMemo = typeof a.memo === 'string' ? a.memo.trim() : null;
+      const memo = rawMemo && !/^ATTESTATION\|/i.test(rawMemo) ? rawMemo : null;
       enriched.push({
         platform,
         txSignature,
-        memo: a.memo || (a.attestationType ? ('ATTESTATION|' + a.attestationType) : null),
+        memo,
         proofHash: a.proofHash || null,
         signer: a.signer || a.issuer || null,
         timestamp: a.timestamp || a.verifiedAt || a.createdAt || null,
