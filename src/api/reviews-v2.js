@@ -16,6 +16,7 @@ const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc
 const SATP_NETWORK = /mainnet|helius|alchemy/i.test(SOLANA_RPC_URL) ? 'mainnet' : 'devnet';
 const SATP_PROGRAM_IDS = getProgramIds(SATP_NETWORK);
 const SATP_REVIEWS_PROGRAM_ID = SATP_PROGRAM_IDS.REVIEWS.toBase58();
+const REVIEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 let solanaConnection = null;
 
@@ -82,18 +83,86 @@ function getMarketplaceParticipants(job) {
   };
 }
 
-function hasReleasedEscrow(job) {
-  if (!job) return false;
+function parseTimestampMs(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value < 1e12 ? value * 1000 : value;
+  }
+
+  const asNumber = Number(value);
+  if (Number.isFinite(asNumber) && String(value).trim() !== '') {
+    return asNumber < 1e12 ? asNumber * 1000 : asNumber;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getReleaseTimestampMs(job, escrow = null) {
+  const candidates = [
+    escrow?.releasedAt,
+    escrow?.releaseAt,
+    escrow?.released_at,
+    job?.v3ReleasedAt,
+    job?.fundsReleasedAt,
+    job?.releasedAt,
+    job?.releaseAt,
+    job?.released_at,
+    escrow?.updatedAt,
+    escrow?.completedAt,
+    job?.updatedAt,
+    job?.completedAt,
+    job?.createdAt,
+  ];
+
+  for (const value of candidates) {
+    const ts = parseTimestampMs(value);
+    if (ts) return ts;
+  }
+
+  return null;
+}
+
+function getMarketplaceReviewWindow(job) {
+  if (!job) {
+    return { released: false, withinWindow: false, releaseAt: null, reviewDeadlineAt: null };
+  }
+
+  let escrow = null;
+  let released = false;
 
   if (job.escrowId) {
     try {
       const escrowPath = path.join('/home/ubuntu/agentfolio/data/marketplace/escrow', String(job.escrowId) + '.json');
-      const escrow = JSON.parse(fs.readFileSync(escrowPath, 'utf8'));
-      if (escrow && (escrow.status === 'released' || escrow.status === 'auto_released')) return true;
+      escrow = JSON.parse(fs.readFileSync(escrowPath, 'utf8'));
+      if (escrow && (escrow.status === 'released' || escrow.status === 'auto_released')) released = true;
     } catch (_) {}
   }
 
-  return !!(job.fundsReleased || job.v3ReleaseTx || job.v3ReleasedAt);
+  if (!released) {
+    released = !!(job.fundsReleased || job.v3ReleaseTx || job.v3ReleasedAt);
+  }
+
+  if (!released) {
+    return { released: false, withinWindow: false, releaseAt: null, reviewDeadlineAt: null };
+  }
+
+  const releaseTs = getReleaseTimestampMs(job, escrow);
+  if (!releaseTs) {
+    return { released: true, withinWindow: true, releaseAt: null, reviewDeadlineAt: null };
+  }
+
+  const deadlineTs = releaseTs + REVIEW_WINDOW_MS;
+  return {
+    released: true,
+    withinWindow: Date.now() <= deadlineTs,
+    releaseAt: new Date(releaseTs).toISOString(),
+    reviewDeadlineAt: new Date(deadlineTs).toISOString(),
+  };
+}
+
+function hasReleasedEscrow(job) {
+  return getMarketplaceReviewWindow(job).released;
 }
 
 
@@ -678,8 +747,17 @@ function registerReviewsV2Routes(app) {
 
     const job = readMarketplaceJob(req.params.id);
     if (!job) return res.status(404).json({ error: 'Job not found' });
-    if (!hasReleasedEscrow(job)) {
+
+    const reviewWindow = getMarketplaceReviewWindow(job);
+    if (!reviewWindow.released) {
       return res.status(400).json({ error: 'Reviews only allowed after funded escrow has been released for this job.' });
+    }
+    if (!reviewWindow.withinWindow) {
+      return res.status(409).json({
+        error: 'Review window expired. Reviews must be submitted within 7 days of escrow release.',
+        releaseAt: reviewWindow.releaseAt,
+        reviewDeadlineAt: reviewWindow.reviewDeadlineAt,
+      });
     }
 
     const { clientId, agentId } = getMarketplaceParticipants(job);
