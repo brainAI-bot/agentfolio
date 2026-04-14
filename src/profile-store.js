@@ -505,6 +505,7 @@ function enrichProfile(row) {
   if (!row) return null;
   const d = getDb();
   const endorsements = d.prepare('SELECT * FROM endorsements WHERE profile_id = ? ORDER BY created_at DESC').all(row.id);
+  const endorsementsGiven = d.prepare('SELECT * FROM endorsements WHERE endorser_id = ? ORDER BY created_at DESC').all(row.id);
   // [P0 FIX] DB verifications query REMOVED -- chain-cache is sole source of truth
   const activity = d.prepare('SELECT * FROM activity_feed WHERE profile_id = ? ORDER BY created_at DESC LIMIT 20').all(row.id);
   const rfk = module.exports._reviewFk || 'profile_id';
@@ -632,7 +633,7 @@ function enrichProfile(row) {
       return vd;
     })(),
     portfolio: parseJsonField(row.portfolio),
-    endorsements_given: parseJsonField(row.endorsements_given),
+    endorsements_given: endorsementsGiven,
     custom_badges: parseJsonField(row.custom_badges),
     metadata: parseJsonField(row.metadata, {}),
     nft_avatar: parseJsonField(row.nft_avatar, {}),
