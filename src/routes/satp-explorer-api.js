@@ -20,6 +20,15 @@ const v3ScoreService = require("../../v3-score-service");
 let agentCache = null;
 const CACHE_TTL = 5 * 60 * 1000;
 
+function hasIncompleteExplorerCache(data) {
+  const agents = Array.isArray(data?.agents) ? data.agents : [];
+  return agents.some((agent) => (Array.isArray(agent?.attestationMemos) ? agent.attestationMemos : []).some((att) => {
+    const tx = String(att?.txSignature || '').trim();
+    const url = String(att?.solscanUrl || '').trim();
+    return tx.startsWith('0x') || url.includes('/account/');
+  }));
+}
+
 function clearSatpExplorerCache() {
   agentCache = null;
 }
@@ -53,8 +62,11 @@ async function lookupNFT(conn, wallet) {
 }
 
 async function getSatpAgents() {
-  if (agentCache && (Date.now() - agentCache.timestamp < CACHE_TTL)) {
+  if (agentCache && (Date.now() - agentCache.timestamp < CACHE_TTL) && !hasIncompleteExplorerCache(agentCache.data)) {
     return agentCache.data;
+  }
+  if (agentCache && hasIncompleteExplorerCache(agentCache.data)) {
+    agentCache = null;
   }
 
   const conn = new Connection(RPC, "confirmed");
@@ -247,7 +259,11 @@ async function getSatpAgents() {
     }
 
     const result = { agents: dedupedAgents, count: dedupedAgents.length, source: "solana-mainnet-v3" };
-    agentCache = { data: result, timestamp: Date.now() };
+    if (!hasIncompleteExplorerCache(result)) {
+      agentCache = { data: result, timestamp: Date.now() };
+    } else {
+      agentCache = null;
+    }
     return result;
   } catch (e) {
     console.warn('[SATP Explorer] DB filter/overlay failed:', e.message);
