@@ -344,6 +344,8 @@ export default function EditProfilePage({ params }: { params: Promise<{ id: stri
             nftAvatar={(profile as any).nftAvatar || (profile as any).nft_avatar}
             wallets={wallets}
             apiKey={apiKey}
+            connectedWalletAddress={publicKey?.toBase58() || null}
+            signMessage={signMessage || null}
             onAvatarSet={(avatar) => setProfile(prev => prev ? { ...prev, nftAvatar: avatar } : prev)}
           />
         </div>
