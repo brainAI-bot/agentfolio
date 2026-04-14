@@ -81,6 +81,24 @@ function normalizeV3DisplayScore(v3Score) {
   return raw > 10000 ? Math.round(raw / 1000) : raw;
 }
 
+function hasPersistedBoaAvatar(profile) {
+  if (!profile || typeof profile !== 'object') return false;
+
+  const metadata = parseProof(profile.metadata);
+  const topLevelNftAvatar = parseProof(profile.nft_avatar || profile.nftAvatar);
+  const metadataNftAvatar = parseProof(metadata?.nftAvatar);
+
+  const candidates = [topLevelNftAvatar, metadataNftAvatar].filter(Boolean);
+  return candidates.some((avatar) => Boolean(
+    avatar?.permanent ||
+    avatar?.verifiedOnChain ||
+    avatar?.soulboundMint ||
+    avatar?.mintedAt ||
+    avatar?.burnTxSignature ||
+    avatar?.burnTx
+  )) || Boolean(profile?.boaMint || metadata?.boaMint || metadata?.boaId);
+}
+
 function computeUnifiedTrustScore(db, profile, options = {}) {
   const profileId = profile?.id || profile?.profileId || profile;
   const v3Score = options.v3Score || null;
@@ -89,6 +107,7 @@ function computeUnifiedTrustScore(db, profile, options = {}) {
     options.hasBoaAvatar ||
     profile?.hasBoaAvatar ||
     profile?.isBorn ||
+    hasPersistedBoaAvatar(profile) ||
     v3Score?.isBorn ||
     v3Score?.onChain?.isBorn
   );
