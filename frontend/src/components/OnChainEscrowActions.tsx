@@ -24,6 +24,12 @@ interface Props {
 
 type Step = "idle" | "building" | "signing" | "confirming" | "done" | "error";
 
+function formatBudgetLabel(budget: string | number | null | undefined): string {
+  const raw = String(budget ?? "").trim();
+  if (!raw) return "1 USDC";
+  return /\busdc\b/i.test(raw) ? raw : `${raw} USDC`;
+}
+
 export function OnChainEscrowActions({
   jobId, jobStatus, escrowStatus, escrowId, clientId, assigneeId, budget, onchainEscrowPDA
 }: Props) {
@@ -34,6 +40,7 @@ export function OnChainEscrowActions({
   const [action, setAction] = useState<"fund" | "release" | "refund" | null>(null);
 
   const walletAddr = publicKey?.toBase58() || "";
+  const budgetLabel = formatBudgetLabel(budget);
 
   const executeAction = useCallback(async (actionType: "fund" | "release" | "refund") => {
     if (!publicKey || !signTransaction) {
@@ -113,8 +120,6 @@ export function OnChainEscrowActions({
     }
   }, [publicKey, signTransaction, jobId, escrowId, budget, walletAddr]);
 
-  if (!publicKey) return null;
-
   // Determine which actions are available
   const canFund = jobStatus === "in_progress" && !onchainEscrowPDA && escrowStatus !== "released";
   const canRelease = !!onchainEscrowPDA && jobStatus !== "completed" && escrowStatus !== "released";
@@ -163,40 +168,50 @@ export function OnChainEscrowActions({
       <div className="flex flex-wrap gap-3">
         {canFund && (
           <button
-            onClick={() => executeAction("fund")}
-            disabled={isProcessing}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:brightness-110 disabled:opacity-50"
+            onClick={() => publicKey ? executeAction("fund") : null}
+            disabled={isProcessing || !publicKey}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ background: "#9945ff", color: "#fff" }}
+            title={!publicKey ? "Connect your Solana wallet to fund escrow" : undefined}
           >
             {isProcessing && action === "fund" ? <Loader2 size={14} className="animate-spin" /> : <Wallet size={14} />}
-            Fund Escrow ({budget} USDC)
+            {publicKey ? `Fund Escrow (${budgetLabel})` : `Connect Wallet to Fund Escrow (${budgetLabel})`}
           </button>
         )}
 
         {canRelease && (
           <button
-            onClick={() => executeAction("release")}
-            disabled={isProcessing}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:brightness-110 disabled:opacity-50"
+            onClick={() => publicKey ? executeAction("release") : null}
+            disabled={isProcessing || !publicKey}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ background: "#22c55e", color: "#fff" }}
+            title={!publicKey ? "Connect your Solana wallet to release escrow" : undefined}
           >
             {isProcessing && action === "release" ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-            Release Payment
+            {publicKey ? "Release Payment" : "Connect Wallet to Release Payment"}
           </button>
         )}
 
         {canRefund && (
           <button
-            onClick={() => executeAction("refund")}
-            disabled={isProcessing}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:brightness-110 disabled:opacity-50"
+            onClick={() => publicKey ? executeAction("refund") : null}
+            disabled={isProcessing || !publicKey}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)" }}
+            title={!publicKey ? "Connect your Solana wallet to refund escrow" : undefined}
           >
             {isProcessing && action === "refund" ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
-            Refund
+            {publicKey ? "Refund" : "Connect Wallet to Refund"}
           </button>
         )}
       </div>
+
+      {!publicKey && (canFund || canRelease || canRefund) && (
+        <div className="mt-3 flex items-center gap-2 text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
+          <Wallet size={12} />
+          Connect the poster wallet to sign the on-chain escrow transaction.
+        </div>
+      )}
 
       {isProcessing && (
         <div className="mt-3 flex items-center gap-2 text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
