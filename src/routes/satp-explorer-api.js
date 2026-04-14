@@ -61,6 +61,17 @@ async function lookupNFT(conn, wallet) {
   return null;
 }
 
+async function fetchJsonWithRetries(url, attempts = 3, delayMs = 400) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return await res.json();
+    } catch (_) {}
+    if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  return null;
+}
+
 async function getSatpAgents() {
   if (agentCache && (Date.now() - agentCache.timestamp < CACHE_TTL) && !hasIncompleteExplorerCache(agentCache.data)) {
     return agentCache.data;
@@ -191,16 +202,8 @@ async function getSatpAgents() {
       const profile = profiles.find((p) => p.id === agent.profileId);
       if (!profile) return agent;
 
-      let explorerData = null;
-      let byAgentData = null;
-      try {
-        const res = await fetch(`${explorerBase}/api/explorer/${encodeURIComponent(profile.id)}`);
-        if (res.ok) explorerData = await res.json();
-      } catch (_) {}
-      try {
-        const res = await fetch(`${explorerBase}/api/satp/attestations/by-agent/${encodeURIComponent(profile.id)}`);
-        if (res.ok) byAgentData = await res.json();
-      } catch (_) {}
+      const explorerData = await fetchJsonWithRetries(`${explorerBase}/api/explorer/${encodeURIComponent(profile.id)}`, 3, 300);
+      const byAgentData = await fetchJsonWithRetries(`${explorerBase}/api/satp/attestations/by-agent/${encodeURIComponent(profile.id)}`, 5, 500);
 
       const reviewStats = reviewStatsByProfileId.get(profile.id) || { total: 0, avg_rating: 0 };
       const unified = computeUnifiedTrustScore(_db, profile, {
