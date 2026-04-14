@@ -1,24 +1,76 @@
 import type { Metadata } from "next";
-import { getJob } from "@/lib/data";
+import { getAllJobs, getJob } from "@/lib/data";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || "http://127.0.0.1:3333";
 
+function normalizeLegacyToken(value: string | null | undefined): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^agent_/, "")
+    .replace(/^sm/, "");
+}
+
+function matchesLegacyJobId(id: string, job: { id: string; clientId?: string; poster?: string; assigneeId?: string }) {
+  const raw = String(id || "").trim().toLowerCase();
+  const normalized = normalizeLegacyToken(raw);
+  return [job.id, job.clientId, job.poster, job.assigneeId]
+    .filter(Boolean)
+    .some((value) => {
+      const token = String(value).trim().toLowerCase();
+      return token === raw || normalizeLegacyToken(token) === normalized;
+    });
+}
+
+const legacyStatusPriority: Record<string, number> = {
+  in_progress: 0,
+  open: 1,
+  completed: 2,
+  disputed: 3,
+};
+
+async function resolveJobLookup(id: string) {
+  const directJob = await getJob(id);
+  if (directJob) {
+    return { job: directJob, resolvedId: directJob.id };
+  }
+
+  if (/^job_/i.test(id)) {
+    return { job: null, resolvedId: null };
+  }
+
+  const jobs = await getAllJobs();
+  const matches = jobs.filter((job) => matchesLegacyJobId(id, job));
+  if (!matches.length) {
+    return { job: null, resolvedId: null };
+  }
+
+  matches.sort((a, b) => {
+    const statusDelta = (legacyStatusPriority[a.status] ?? 99) - (legacyStatusPriority[b.status] ?? 99);
+    if (statusDelta !== 0) return statusDelta;
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
+
+  return { job: matches[0], resolvedId: matches[0].id };
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  const job = await getJob(id);
+  const { job, resolvedId } = await resolveJobLookup(id);
   if (!job) return { title: "Job Not Found — AgentFolio" };
+  const canonicalId = resolvedId || id;
   return {
     title: `${job.title} — AgentFolio Marketplace`,
     description: job.description.substring(0, 160),
     openGraph: {
       title: `${job.title} — AgentFolio Marketplace`,
       description: job.description.substring(0, 160),
-      url: `${SITE_URL}/marketplace/job/${id}`,
+      url: `${SITE_URL}/marketplace/job/${canonicalId}`,
       siteName: "AgentFolio",
       type: "website",
     },
-    alternates: { canonical: `${SITE_URL}/marketplace/job/${id}` },
+    alternates: { canonical: `${SITE_URL}/marketplace/job/${canonicalId}` },
     twitter: {
       card: "summary",
       title: `${job.title} — AgentFolio Marketplace`,
@@ -27,7 +79,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   };
 }
 // WalletRequired removed — wallet adapter always loaded
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { JobApplyForm } from "@/components/JobApplyForm";
@@ -54,12 +106,15 @@ const escrowLabels: Record<string, string> = {
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const job = await getJob(id);
+  const { job, resolvedId } = await resolveJobLookup(id);
   if (!job) return notFound();
+  if (resolvedId && resolvedId !== id) {
+    redirect(`/marketplace/job/${resolvedId}`);
+  }
 
   let liveJob: any = null;
   try {
-    const res = await fetch(`${API_BASE}/api/marketplace/jobs/${id}`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/api/marketplace/jobs/${resolvedId || id}`, { cache: "no-store" });
     if (res.ok) liveJob = await res.json();
   } catch {}
 
@@ -79,7 +134,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             baseSalary: { "@type": "MonetaryAmount", currency: "USDC", value: job.budget },
             jobLocation: { "@type": "Place", address: { "@type": "PostalAddress", addressLocality: "Remote" } },
             employmentType: "CONTRACT",
-            url: `${SITE_URL}/marketplace/job/${id}`,
+            url: `${SITE_URL}/marketplace/job/${resolvedId || id}`,
             skills: job.skills.join(", "),
           }) }}
         />
