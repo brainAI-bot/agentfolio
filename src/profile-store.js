@@ -382,6 +382,81 @@ function rollbackVerificationCache(profileId, platform) {
   }
 }
 
+function persistOnchainVerificationProof(profileId, platform, identifier, proof, bridgeResult) {
+  const d = getDb();
+  if (!profileId || !platform || !bridgeResult || typeof bridgeResult !== 'object') return;
+
+  const txSignature = bridgeResult.txSignature || null;
+  const attestationPDA = bridgeResult.attestationPDA || null;
+  const enrichedProof = {
+    ...(proof || {}),
+    bridgeResult,
+  };
+  if (txSignature) {
+    enrichedProof.txSignature = txSignature;
+    enrichedProof.transactionSignature = txSignature;
+    enrichedProof.solscanUrl = enrichedProof.solscanUrl || ('https://solana.fm/tx/' + txSignature);
+  }
+  if (attestationPDA) enrichedProof.attestationPDA = attestationPDA;
+
+  try {
+    d.prepare('UPDATE verifications SET proof = ? WHERE profile_id = ? AND platform = ?')
+      .run(JSON.stringify(enrichedProof), profileId, platform);
+  } catch (e) {
+    console.error('[PostVerify] Failed to persist verification proof:', e.message);
+  }
+
+  try {
+    const row = d.prepare('SELECT verification_data FROM profiles WHERE id = ?').get(profileId);
+    if (row) {
+      const vd = JSON.parse(row.verification_data || '{}');
+      const current = (vd && typeof vd[platform] === 'object' && vd[platform]) ? vd[platform] : { address: identifier, identifier };
+      vd[platform] = {
+        ...current,
+        address: current.address || identifier,
+        identifier: current.identifier || identifier,
+        verified: true,
+        linked: true,
+      };
+      if (txSignature) {
+        vd[platform].txSignature = txSignature;
+        vd[platform].transactionSignature = txSignature;
+        vd[platform].solscanUrl = vd[platform].solscanUrl || ('https://solana.fm/tx/' + txSignature);
+      }
+      if (attestationPDA) vd[platform].attestationPDA = attestationPDA;
+      d.prepare('UPDATE profiles SET verification_data = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(vd), new Date().toISOString(), profileId);
+    }
+  } catch (e) {
+    console.error('[PostVerify] Failed to persist verification_data tx hint:', e.message);
+  }
+
+  try {
+    const profileJsonPath = require('path').join('/home/ubuntu/agentfolio/data/profiles', profileId + '.json');
+    if (require('fs').existsSync(profileJsonPath)) {
+      const profileJson = JSON.parse(require('fs').readFileSync(profileJsonPath, 'utf-8'));
+      if (!profileJson.verificationData) profileJson.verificationData = {};
+      const current = (profileJson.verificationData[platform] && typeof profileJson.verificationData[platform] === 'object') ? profileJson.verificationData[platform] : { address: identifier, identifier };
+      profileJson.verificationData[platform] = {
+        ...current,
+        address: current.address || identifier,
+        identifier: current.identifier || identifier,
+        verified: true,
+        linked: true,
+      };
+      if (txSignature) {
+        profileJson.verificationData[platform].txSignature = txSignature;
+        profileJson.verificationData[platform].transactionSignature = txSignature;
+        profileJson.verificationData[platform].solscanUrl = profileJson.verificationData[platform].solscanUrl || ('https://solana.fm/tx/' + txSignature);
+      }
+      if (attestationPDA) profileJson.verificationData[platform].attestationPDA = attestationPDA;
+      require('fs').writeFileSync(profileJsonPath, JSON.stringify(profileJson, null, 2));
+    }
+  } catch (e) {
+    console.error('[PostVerify] Failed to persist verification JSON tx hint:', e.message);
+  }
+}
+
 function addVerification(profileId, platform, identifier, proof, userPaidGenesis = false) {
   const d = getDb();
   const id = genId('ver');
@@ -430,11 +505,13 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
   // Post-verification pipeline: DB cache must roll back if on-chain write fails.
   if (postVerificationHook) {
     postVerificationHook(profileId, platform, identifier, proof)
-      .then(onchainSucceeded => {
-        if (!onchainSucceeded) {
+      .then((bridgeResult) => {
+        if (!bridgeResult) {
           rollbackVerificationCache(profileId, platform);
           console.warn(`[PostVerify] Rolled back DB cache for ${profileId}/${platform} because on-chain write did not succeed`);
+          return;
         }
+        persistOnchainVerificationProof(profileId, platform, identifier, proof, bridgeResult);
       })
       .catch(e => {
         rollbackVerificationCache(profileId, platform);
