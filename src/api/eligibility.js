@@ -262,4 +262,4 @@ function registerEligibilityRoutes(app) {
   });
 }
 
-module.exports = { registerEligibilityRoutes };
+module.exports = { registerEligibilityRoutes, resolveAgentScore, resolveProfile };
