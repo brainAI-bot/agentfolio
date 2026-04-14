@@ -88,15 +88,30 @@ function formatDateFull(dateStr: string | null | undefined): string {
   return d.toLocaleDateString();
 }
 
-function normalizePlatformLabel(value: string | null | undefined): string {
-  const normalized = String(value || "")
+function normalizePlatformKey(value: string | null | undefined): string {
+  const raw = String(value || "")
     .replace(/^verification_/, "")
     .replace(/_wallet_verification$/, "")
     .replace(/_verification$/, "")
-    .replace(/_/g, " ")
-    .trim();
-  if (!normalized) return "Unknown";
-  return normalized.split(" ").map(part => part ? part[0].toUpperCase() + part.slice(1) : "").join(" ");
+    .replace(/\s+/g, "_")
+    .trim()
+    .toLowerCase();
+  if (!raw) return "";
+  const aliases: Record<string, string> = {
+    eth: "ethereum",
+    eth_wallet: "ethereum",
+    ethereum_wallet: "ethereum",
+    sol: "solana",
+    solana_wallet: "solana",
+    twitter: "x",
+  };
+  return aliases[raw] || raw;
+}
+
+function normalizePlatformLabel(value: string | null | undefined): string {
+  const normalizedKey = normalizePlatformKey(value).replace(/_/g, " ").trim();
+  if (!normalizedKey) return "Unknown";
+  return normalizedKey.split(" ").map(part => part ? part[0].toUpperCase() + part.slice(1) : "").join(" ");
 }
 
 function normalizeAttestation(att: any) {
@@ -104,7 +119,7 @@ function normalizeAttestation(att: any) {
   try { proofData = typeof att?.proofData === "string" ? JSON.parse(att.proofData) : (att?.proofData || {}); } catch {}
   const txSignature = att?.txSignature || proofData?.txSignature || proofData?.signature || proofData?.transactionSignature || null;
   const rawPlatform = att?.platform || att?.type || att?.attestationType || proofData?.platform || "attestation";
-  const platform = String(rawPlatform).toLowerCase();
+  const platform = normalizePlatformKey(rawPlatform) || "attestation";
   const displayType = normalizePlatformLabel(rawPlatform);
   const displayLabel = (displayType || platform || "Attestation")
     .replace(/^X$/i, "Twitter")
@@ -168,10 +183,15 @@ export default function SATPExplorerPage() {
             const nftAvatar = profile?.nftAvatar;
             
             // Platforms: use on-chain agent.platforms as primary, merge with profile verifications
-            const onChainPlatforms: string[] = agent.platforms || [];
-            const profilePlatforms = profile ? Object.keys(profile.verifications || {}).filter((k: string) => 
-              profile.verifications?.[k]?.verified
-            ) : [];
+            const onChainPlatforms: string[] = Array.isArray(agent.platforms)
+              ? agent.platforms.map((p: string) => normalizePlatformKey(p)).filter(Boolean)
+              : [];
+            const profilePlatforms = profile
+              ? Object.keys(profile.verifications || {})
+                  .filter((k: string) => profile.verifications?.[k]?.verified)
+                  .map((k: string) => normalizePlatformKey(k))
+                  .filter(Boolean)
+              : [];
             const platforms = [...new Set([...onChainPlatforms, ...profilePlatforms])];
 
             // Use profile name if available (more human-readable), else on-chain name
