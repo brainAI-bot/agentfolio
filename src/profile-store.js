@@ -602,6 +602,65 @@ function enrichProfile(row) {
     verifiedPlatforms: (normalizedMetadata.verifications || []).map((item) => item.platform).filter(Boolean),
   });
 
+  const isSolanaProofPlatform = (platform) => platform === 'solana' || platform === 'satp' || platform === 'satp_v3';
+
+  function buildProofHint(platform, att = {}, proofData = {}) {
+    const txSignature = att.txSignature || proofData.txSignature || proofData.transactionSignature || null;
+    const verifiedAt = att.timestamp || att.verifiedAt || null;
+    const url = isSolanaProofPlatform(platform) && txSignature
+      ? (att.solscanUrl || ('https://solana.fm/tx/' + txSignature))
+      : null;
+    return { txSignature, verifiedAt, url };
+  }
+
+  function buildDisplayProof(platform, proof = {}, hint = {}) {
+    const verifiedAt = proof.verifiedAt || proof.timestamp || hint.verifiedAt || null;
+    if (isSolanaProofPlatform(platform)) {
+      const txSignature = proof.txSignature || proof.transactionSignature || hint.txSignature || null;
+      return {
+        txSignature,
+        timestamp: verifiedAt,
+        url: hint.url || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null),
+      };
+    }
+    const displayProof = {};
+    if (proof.challengeId) displayProof.challengeId = proof.challengeId;
+    if (proof.signature) displayProof.signature = proof.signature;
+    const transactionHash = proof.transactionHash || proof.txHash || proof.hash || null;
+    if (transactionHash) displayProof.transactionHash = transactionHash;
+    if (proof.type) displayProof.type = proof.type;
+    if (verifiedAt) displayProof.timestamp = verifiedAt;
+    if (proof.url || proof.explorerUrl) displayProof.url = proof.url || proof.explorerUrl;
+    if (hint.txSignature) {
+      displayProof.attestationTxSignature = hint.txSignature;
+      if (hint.url) displayProof.attestationUrl = hint.url;
+    }
+    return displayProof;
+  }
+
+  function buildVerificationEntry(platform, identifier, proof = {}, hint = {}, source = 'active-verification') {
+    const entry = {
+      verified: true,
+      address: proof.address || identifier,
+      identifier,
+      source,
+    };
+    const verifiedAt = proof.verifiedAt || proof.timestamp || hint.verifiedAt || null;
+    if (source != 'on-chain-attestation') entry.linked = true;
+    if (verifiedAt) entry.verifiedAt = verifiedAt;
+    if (isSolanaProofPlatform(platform)) {
+      const txSignature = proof.txSignature || proof.transactionSignature || hint.txSignature || null;
+      if (txSignature) entry.txSignature = txSignature;
+    } else {
+      if (proof.signature) entry.signature = proof.signature;
+      const transactionHash = proof.transactionHash || proof.txHash || proof.hash || null;
+      if (transactionHash) entry.transactionHash = transactionHash;
+      if (proof.challengeId) entry.challengeId = proof.challengeId;
+      if (hint.txSignature) entry.attestationTxSignature = hint.txSignature;
+    }
+    return entry;
+  }
+
   return {
     ...row,
     walletAddress: row.wallet || null,
@@ -630,10 +689,7 @@ function enrichProfile(row) {
           if (hints.has(plat)) continue;
           let proofData = {};
           try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
-          hints.set(plat, {
-            txSignature: att.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || null,
-            verifiedAt: att.timestamp || att.verifiedAt || null,
-          });
+          hints.set(plat, buildProofHint(plat, att, proofData));
         }
         const rows = getDb().prepare('SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
         for (const ver of rows) {
@@ -644,32 +700,20 @@ function enrichProfile(row) {
           const displayId = ver.identifier || proof.identifier || proof.address || proof.wallet || row.wallet || null;
           if (!displayId) continue;
           const hint = hints.get(plat) || {};
-          const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || hint.txSignature || null;
-          if (plat === 'solana' && !txSignature) continue;
-          vd[plat] = {
-            verified: true,
-            address: proof.address || displayId,
-            identifier: displayId,
-            linked: true,
-            txSignature,
-            verifiedAt: ver.verified_at || hint.verifiedAt || null,
-            source: 'active-verification'
-          };
+          const entry = buildVerificationEntry(plat, displayId, proof, hint, 'active-verification');
+          if (plat === 'solana' && !entry.txSignature) continue;
+          vd[plat] = entry;
         }
         const attRows = getDb().prepare('SELECT platform, tx_signature, memo, created_at FROM attestations WHERE profile_id = ? ORDER BY created_at DESC').all(row.id);
         for (const att of attRows) {
           const plat = att.platform === 'twitter' ? 'x' : att.platform;
           if (!plat || plat === 'review' || !isPublicVerificationPlatform(plat) || vd[plat] || !att.tx_signature) continue;
           const fallbackId = plat === 'github' ? (row.github || row.handle || 'github') : plat === 'x' ? (row.twitter || row.handle || 'x') : (row.wallet || row.handle || plat);
-          vd[plat] = {
-            verified: true,
-            address: fallbackId,
-            identifier: fallbackId,
-            linked: true,
+          vd[plat] = buildVerificationEntry(plat, fallbackId, {}, {
             txSignature: att.tx_signature,
             verifiedAt: att.created_at || null,
-            source: 'on-chain-attestation'
-          };
+            url: isSolanaProofPlatform(plat) ? ('https://solana.fm/tx/' + att.tx_signature) : null,
+          }, 'on-chain-attestation');
         }
       } catch (_) {}
       return vd;
@@ -693,12 +737,7 @@ function enrichProfile(row) {
           if (hints.has(platform)) continue;
           let proofData = {};
           try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
-          const txSignature = att.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || null;
-          hints.set(platform, {
-            txSignature,
-            verifiedAt: att.timestamp || att.verifiedAt || null,
-            url: att.solscanUrl || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null),
-          });
+          hints.set(platform, buildProofHint(platform, att, proofData));
         }
         const rows = getDb().prepare('SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
         for (const ver of rows) {
@@ -709,14 +748,13 @@ function enrichProfile(row) {
           const displayId = ver.identifier || proof.identifier || proof.address || proof.wallet || row.wallet || null;
           if (!displayId) continue;
           const hint = hints.get(platform) || {};
-          const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || hint.txSignature || null;
-          if (platform === 'solana' && !txSignature) continue;
-          const proofUrl = hint.url || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null);
+          const displayProof = buildDisplayProof(platform, proof, hint);
+          if (platform === 'solana' && !displayProof.txSignature) continue;
           vMap[platform] = {
             verified: true,
             address: proof.address || displayId,
             identifier: displayId,
-            proof: { txSignature, timestamp: ver.verified_at || hint.verifiedAt || null, url: proofUrl },
+            proof: displayProof,
             verified_at: ver.verified_at || hint.verifiedAt || null,
             source: 'active-verification',
           };
@@ -730,7 +768,11 @@ function enrichProfile(row) {
             verified: true,
             address: fallbackId,
             identifier: fallbackId,
-            proof: { txSignature: att.tx_signature, timestamp: att.created_at || null, url: 'https://solana.fm/tx/' + att.tx_signature },
+            proof: buildDisplayProof(platform, {}, {
+              txSignature: att.tx_signature,
+              verifiedAt: att.created_at || null,
+              url: isSolanaProofPlatform(platform) ? ('https://solana.fm/tx/' + att.tx_signature) : null,
+            }),
             verified_at: att.created_at || null,
             source: 'on-chain-attestation',
           };
