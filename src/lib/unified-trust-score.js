@@ -75,6 +75,12 @@ function getStats(db, profileId) {
   };
 }
 
+function normalizeV3DisplayScore(v3Score) {
+  const raw = Number(v3Score?.reputationScore || 0);
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  return raw > 10000 ? Math.round(raw / 1000) : raw;
+}
+
 function computeUnifiedTrustScore(db, profile, options = {}) {
   const profileId = profile?.id || profile?.profileId || profile;
   const v3Score = options.v3Score || null;
@@ -130,14 +136,23 @@ function computeUnifiedTrustScore(db, profile, options = {}) {
     },
   });
 
+  const normalizedV3Score = normalizeV3DisplayScore(v3Score);
+  const displayScore = Math.max(trust.trustScore || 0, normalizedV3Score);
+
   return {
-    score: trust.trustScore,
-    trustScore: trust.trustScore,
+    score: displayScore,
+    trustScore: displayScore,
     level: level.level,
     levelName: level.levelName,
     badge: level.badge,
     breakdown: trust.breakdown,
-    trustBreakdown: trust.details,
+    trustBreakdown: {
+      ...(trust.details || {}),
+      v3: {
+        rawReputationScore: Number(v3Score?.reputationScore || 0) || 0,
+        normalizedDisplayScore: normalizedV3Score,
+      },
+    },
     verificationCount: level.verificationCount,
     effectiveVerificationCount: level.effectiveVerificationCount,
     categories: level.categories,
@@ -148,7 +163,7 @@ function computeUnifiedTrustScore(db, profile, options = {}) {
     })),
     hasSatpIdentity,
     hasBoaAvatar,
-    source: 'scoring-v2-phase-a',
+    source: normalizedV3Score > (trust.trustScore || 0) ? 'scoring-v2-phase-a+v3-floor' : 'scoring-v2-phase-a',
   };
 }
 

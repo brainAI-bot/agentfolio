@@ -227,6 +227,12 @@ async function postVerificationHook(profileId, platform, identifier, proof) {
     } catch (e) {
       console.warn(`[PostVerify] Chain-cache refresh failed for ${profileId}: ${e.message}`);
     }
+    try {
+      require('./v3-score-service').clearV3Cache();
+      console.log(`[PostVerify] ✅ V3 score cache cleared after on-chain success for ${profileId}`);
+    } catch (e) {
+      console.warn(`[PostVerify] V3 score cache clear failed for ${profileId}: ${e.message}`);
+    }
     console.log(`[PostVerify] ✅ DB/cache refreshed after on-chain success for ${profileId}`);
   } else {
     console.warn(`[PostVerify] ⚠️ Skipped DB/cache refresh because on-chain write did not succeed for ${profileId}`);
