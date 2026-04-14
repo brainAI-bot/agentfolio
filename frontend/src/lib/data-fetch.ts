@@ -25,7 +25,19 @@ export async function fetchAgent(id: string, opts: { live?: boolean } = {}): Pro
 
     // Map backend response to frontend Agent type
     // Chain-cache ONLY — zero DB reads for verifications
-    const vd: Record<string, any> = raw.verifications || {};
+    const verificationEntries = Array.isArray(raw.metadata?.verifications) ? raw.metadata.verifications : [];
+    const metadataVerifications = Object.fromEntries(verificationEntries
+      .filter((entry: any) => entry && typeof entry.platform === "string")
+      .map((entry: any) => [entry.platform, { ...(entry.proof || {}), ...entry, verified: entry.status === "verified" }])
+    );
+    const vd: Record<string, any> = {
+      ...metadataVerifications,
+      ...(raw.verification_data || raw.verificationData || {}),
+      ...(raw.verifications || {}),
+    };
+    if (vd.eth && !vd.ethereum) vd.ethereum = vd.eth;
+    if (vd.solana_wallet && !vd.solana) vd.solana = vd.solana_wallet;
+    if (vd.twitter && !vd.x) vd.x = vd.twitter;
 
     // V3 on-chain Genesis Record is canonical — prefer trust_score/v3 fields
     // A1: Single scoring source — computeScore via API
@@ -64,11 +76,11 @@ export async function fetchAgent(id: string, opts: { live?: boolean } = {}): Pro
       skills: Array.isArray(raw.skills) ? raw.skills.map((s: any) => typeof s === "string" ? s : s.name || "").filter(Boolean) : [],
       verifications: {
         github: vd.github?.verified ? { username: vd.github.username || vd.github.handle || vd.github.identifier || vd.github.address || "", repos: vd.github.repos || 0, stars: vd.github.stars || 0, verified: true } : undefined,
-        solana: vd.solana?.verified ? { address: vd.solana.address || raw.walletAddress || "", txCount: vd.solana.txCount || 0, balance: vd.solana.balance || "0 SOL", verified: true } : undefined,
-        hyperliquid: vd.hyperliquid?.verified ? { address: vd.hyperliquid.address || "", volume: vd.hyperliquid.volume || "$0", verified: true } : undefined,
-        x: vd.x?.verified || vd.twitter?.verified ? { handle: vd.x?.handle || vd.twitter?.handle || "", verified: true } : undefined,
-        satp: vd.satp?.verified ? { did: vd.satp.did || "", identifier: vd.satp.identifier || vd.satp.address || "", identityPDA: vd.satp.proof?.identityPDA || "", txSignature: vd.satp.proof?.txSignature || "", verified: true } : undefined,
-        ethereum: vd.ethereum?.verified ? { address: vd.ethereum.address || "", verified: true } : undefined,
+        solana: vd.solana?.verified ? { address: vd.solana.address || vd.solana.identifier || raw.walletAddress || raw.wallet || raw.wallets?.solana || "", txCount: vd.solana.txCount || 0, balance: vd.solana.balance || "0 SOL", verified: true } : undefined,
+        hyperliquid: vd.hyperliquid?.verified ? { address: vd.hyperliquid.address || vd.hyperliquid.identifier || "", volume: vd.hyperliquid.volume || "$0", verified: true } : undefined,
+        x: vd.x?.verified || vd.twitter?.verified ? { handle: vd.x?.handle || vd.x?.username || vd.x?.identifier || vd.x?.address || vd.twitter?.handle || vd.twitter?.username || vd.twitter?.identifier || "", verified: true } : undefined,
+        satp: vd.satp?.verified ? { did: vd.satp.did || "", identifier: vd.satp.identifier || vd.satp.address || "", identityPDA: vd.satp.proof?.identityPDA || vd.satp.identityPDA || "", txSignature: vd.satp.proof?.txSignature || vd.satp.txSignature || "", verified: true } : undefined,
+        ethereum: vd.ethereum?.verified ? { address: vd.ethereum.address || vd.ethereum.identifier || "", verified: true } : undefined,
         agentmail: vd.agentmail?.verified ? { email: vd.agentmail.email || "", verified: true } : undefined,
         moltbook: vd.moltbook?.verified ? { username: vd.moltbook.username || "", verified: true } : undefined,
         polymarket: vd.polymarket?.verified ? { address: vd.polymarket.address || "", verified: true } : undefined,
@@ -92,29 +104,19 @@ export async function fetchAgent(id: string, opts: { live?: boolean } = {}): Pro
       wallet: raw.wallet || undefined,
       wallets: raw.wallets || undefined,
       profileCompleteness: (() => {
-        const profilePoints = (() => {
-          const authoritative = raw.trustBreakdown?.profile?.total;
-          if (Number.isFinite(authoritative)) return Math.max(0, Math.min(30, Number(authoritative)));
-
-          let points = 0;
-          const bio = String(raw.bio || raw.description || '').trim();
-          if (bio.length >= 50) points += 5;
-          if (String(raw.avatar || '').trim()) points += 5;
-
-          const skills = Array.isArray(raw.skills) ? raw.skills.filter(Boolean) : [];
-          if (skills.length >= 3) points += 5;
-
-          if (String(raw.handle || '').trim()) points += 5;
-
-          const portfolio = Array.isArray(raw.portfolio)
-            ? raw.portfolio.filter((item: any) => item && (String(item.title || '').trim() || String(item.url || '').trim() || String(item.description || '').trim()))
-            : [];
-          points += Math.min(2, portfolio.length) * 5;
-
-          return Math.max(0, Math.min(30, points));
-        })();
-
-        return Math.round((profilePoints / 30) * 100);
+        let filled = 0;
+        const total = 8;
+        if (String(raw.name || '').trim()) filled++;
+        if (String(raw.bio || raw.description || '').trim()) filled++;
+        if (String(raw.avatar || '').trim()) filled++;
+        const skills = Array.isArray(raw.skills) ? raw.skills.filter(Boolean) : [];
+        if (skills.length > 0) filled++;
+        const links = raw.links || {};
+        if (vd.x?.verified || vd.twitter?.verified || String(links.x || '').trim()) filled++;
+        if (vd.github?.verified || String(links.github || '').trim()) filled++;
+        if (String(links.website || '').trim()) filled++;
+        if (raw.walletAddress || raw.wallet || raw.wallets?.solana || vd.solana?.address || vd.solana?.identifier) filled++;
+        return Math.round((filled / total) * 100);
       })(),
       trustBreakdown,
     };
