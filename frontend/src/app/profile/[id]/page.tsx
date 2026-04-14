@@ -437,16 +437,22 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                   website: "Website", domain: "Domain", mcp: "MCP", a2a: "A2A", review: "Review",
                 };
                 const priority = ["satp","github","x","solana","ethereum","agentmail","moltbook","hyperliquid","polymarket","discord","telegram","website","domain","mcp","a2a","review"];
+                const platformAliases: Record<string, string[]> = {
+                  x: ["x", "twitter"],
+                  solana: ["solana", "solana_wallet"],
+                  ethereum: ["ethereum", "eth", "eth_wallet"],
+                };
                 // Chain attestation platforms (on-chain source of truth)
                 const chainPlatforms = new Set(chainAttestations.map(a => a.platform));
                 const chainTxMap = new Map(chainAttestations.map(a => [a.platform, a]));
                 
                 for (const t of priority) {
+                  const aliases = platformAliases[t] || [t];
                   // Profile page must only show real chain-cache attestations.
-                  const vEntry = (v as any)?.[t] || (t === "x" ? (v as any)?.twitter : null);
-                  const hasChainAttestation = chainPlatforms.has(t) || (t === "x" && chainPlatforms.has("twitter"));
+                  const vEntry = aliases.map(alias => (v as any)?.[alias]).find(Boolean) || null;
+                  const hasChainAttestation = aliases.some(alias => chainPlatforms.has(alias));
                   if (!hasChainAttestation) continue;
-                  const chainTx = chainTxMap.get(t) || (t === "x" ? chainTxMap.get("twitter") : null);
+                  const chainTx = aliases.map(alias => chainTxMap.get(alias)).find(Boolean) || null;
                   let detail = "On-Chain ⛓️";
                   if (t === "github") detail = `@${githubStats?.username || vEntry?.username || vEntry?.identifier || vEntry?.address || "?"} — ${githubStats?.repos ?? vEntry?.repos ?? 0} repos, ${(githubStats?.stars ?? vEntry?.stars ?? 0).toLocaleString()}⭐`;
                   else if (t === "solana" && vEntry?.address) detail = `${vEntry?.address.slice(0, 8)}...${vEntry?.address.slice(-4)}`;
