@@ -83,8 +83,7 @@ function scoreTier(score) {
 function registerTrustCredentialRoutes(app) {
   const profileStore = require('../profile-store');
   const { getV3Score } = require('../../v3-score-service');
-  const chainCache = require('../lib/chain-cache');
-  const { computeScore } = require('../lib/compute-score');
+  const { computeUnifiedTrustScore } = require('../lib/unified-trust-score');
 
   // ── Verify route MUST come before :agentId to avoid parameter capture ──
 
@@ -167,45 +166,13 @@ function registerTrustCredentialRoutes(app) {
       try { parsed.wallets = JSON.parse(profile.wallets || '{}'); } catch (_) {}
       try { const t = JSON.parse(profile.tags || '[]'); parsed.tags = Array.isArray(t) ? t : []; } catch (_) {}
       try { const s = JSON.parse(profile.skills || '[]'); parsed.skills = Array.isArray(s) ? s : []; } catch (_) {}
-
-      // 3. Normalized scoring from active verifications, not raw memo history.
+      // 3. Unified scoring from the shared SATP-backed cache/on-chain source.
       const v3Score = await getV3Score(profile.id).catch(() => null);
-      const dbVerifRows = db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(profile.id);
-      const seenPlatforms = new Set();
-      const activeVerifications = [];
-      const addVerification = (platform, identifier) => {
-        if (!platform || platform === 'review' || !identifier || seenPlatforms.has(platform)) return;
-        activeVerifications.push({ platform, identifier });
-        seenPlatforms.add(platform);
-        if (platform === 'x') seenPlatforms.add('twitter');
-        if (platform === 'twitter') seenPlatforms.add('x');
-      };
-      for (const verif of dbVerifRows) {
-        const platform = verif.platform === 'twitter' ? 'x' : verif.platform;
-        if (platform === 'solana') continue;
-        addVerification(platform, verif.identifier || null);
-      }
-      const identityVerified = !!(profile.wallet && (chainCache.isVerified(profile.wallet) || !!(v3Score && v3Score.verificationLevel >= 1)));
-      if (identityVerified && profile.wallet) {
-        addVerification('satp', profile.wallet);
-      }
-      try {
-        const solRows = db.prepare('SELECT proof FROM verifications WHERE profile_id = ? AND platform = ? ORDER BY verified_at DESC').all(profile.id, 'solana');
-        for (const sol of solRows) {
-          let proof = {};
-          try { proof = typeof sol.proof === 'string' ? JSON.parse(sol.proof) : (sol.proof || {}); } catch {}
-          const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || null;
-          if (txSignature) { addVerification('solana', profile.wallet); break; }
-        }
-      } catch (_) {}
-      const computed = computeScore(activeVerifications, {
-        hasSatpIdentity: identityVerified,
-        claimed: profile.claimed === 1 || profile.claimed === true,
-      });
-      const normalizedTrustScore = computed.score || 0;
-      const normalizedVerificationLevel = computed.level || 0;
-      const normalizedTier = (computed.levelName || 'Unverified').toUpperCase();
-      const onChainRegistered = identityVerified;
+      const unified = computeUnifiedTrustScore(db, parsed, { v3Score });
+      const normalizedTrustScore = Number(unified.score || 0);
+      const normalizedVerificationLevel = Number(unified.level || 0);
+      const normalizedTier = String(unified.levelName || 'Unverified').toUpperCase();
+      const onChainRegistered = Boolean(unified.hasSatpIdentity);
 
       // 4. Build W3C Verifiable Credential payload
       const now = new Date();
@@ -219,16 +186,15 @@ function registerTrustCredentialRoutes(app) {
         maxScore: 800,
         tier: normalizedTier,
         verificationLevel: normalizedVerificationLevel,
-        scoreVersion: 'attestation-compute',
-        verificationCount: computed.verificationCount || activeVerifications.length,
+        scoreVersion: unified.source || 'unified-satp-cache',
+        verificationCount: Number(unified.verificationCount || 0),
         onChainRegistered,
         breakdown: {
-          onChainReputation: computed.breakdown?.satp_identity || computed.breakdown?.satp || 0,
-          verifications: normalizedTrustScore - (computed.breakdown?.satp_identity || computed.breakdown?.satp || 0),
-          socialProof: 0,
-          completeness: 0,
-          marketplace: 0,
-          tenure: 0,
+          profile: Number(unified.breakdown?.profile || 0),
+          social: Number(unified.breakdown?.social || 0),
+          marketplace: Number(unified.breakdown?.marketplace || 0),
+          onchain: Number(unified.breakdown?.onchain || 0),
+          tenure: Number(unified.breakdown?.tenure || 0),
         },
       };
 

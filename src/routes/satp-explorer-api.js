@@ -126,7 +126,7 @@ async function getSatpAgents() {
     const path = require('path');
     const { computeScore } = require('../lib/compute-score');
     const _db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
-    const profiles = _db.prepare('SELECT id, name, wallet, claimed, claimed_by, wallets FROM profiles').all();
+    const profiles = _db.prepare('SELECT * FROM profiles').all();
     const reviewStatsRows = _db.prepare(`
       SELECT
         reviewee_id AS profile_id,
