@@ -78,22 +78,25 @@ export function NFTAvatarPicker({ profileId, currentAvatar, nftAvatar, wallets, 
         "Content-Type": "application/json",
       };
 
-      if (apiKey) {
+      const canUseWalletAuth = Boolean(
+        signMessage &&
+        connectedWalletAddress &&
+        selectedWallet.chain === "solana" &&
+        selectedWallet.address === connectedWalletAddress &&
+        verifiedWallets.some((wallet) => wallet.verified && wallet.chain === "solana" && wallet.address === connectedWalletAddress)
+      );
+
+      if (canUseWalletAuth) {
+        const msg = new TextEncoder().encode(`agentfolio-edit:${profileId}`);
+        const sig = await signMessage!(msg);
+        headers["x-wallet-address"] = connectedWalletAddress!;
+        headers["x-wallet-signature"] = bytesToBase64(sig);
+        headers["x-profile-id"] = profileId;
+      } else if (apiKey) {
         headers["Authorization"] = `Bearer ${apiKey}`;
         headers["x-api-key"] = apiKey;
       } else {
-        if (!connectedWalletAddress || !signMessage) {
-          throw new Error("Connect the verified Solana wallet for this profile or use an API key");
-        }
-        if (selectedWallet.chain !== "solana" || selectedWallet.address !== connectedWalletAddress) {
-          throw new Error("Wallet auth currently requires selecting the connected verified Solana wallet");
-        }
-
-        const msg = new TextEncoder().encode(`agentfolio-edit:${profileId}`);
-        const sig = await signMessage(msg);
-        headers["x-wallet-address"] = connectedWalletAddress;
-        headers["x-wallet-signature"] = bytesToBase64(sig);
-        headers["x-profile-id"] = profileId;
+        throw new Error("Connect the verified Solana wallet for this profile or use a valid API key");
       }
 
       const res = await fetch("/api/avatar/set", {
