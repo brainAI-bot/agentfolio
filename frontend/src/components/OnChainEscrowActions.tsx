@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
-import { Transaction } from "@solana/web3.js";
+import { Transaction, VersionedTransaction } from "@solana/web3.js";
 import { Shield, Wallet, ArrowRight, CheckCircle, AlertTriangle, Loader2 } from "lucide-react";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
@@ -83,10 +83,13 @@ export function OnChainEscrowActions({
 
       // Step 2: Deserialize and sign
       setStep("signing");
-      const txBytes = Buffer.from(buildData.transaction, "base64");
-      const tx = Transaction.from(txBytes);
-      const signed = await signTransaction(tx);
-      const serialized = signed.serialize().toString("base64");
+      const txBytes = Uint8Array.from(Buffer.from(buildData.transaction, "base64"));
+      const isVersioned = (txBytes[0] & 0x80) !== 0;
+      const tx = isVersioned
+        ? VersionedTransaction.deserialize(txBytes)
+        : Transaction.from(Buffer.from(txBytes));
+      const signed = await signTransaction(tx as any);
+      const serialized = Buffer.from(signed.serialize()).toString("base64");
 
       // Step 3: Confirm with backend
       setStep("confirming");
