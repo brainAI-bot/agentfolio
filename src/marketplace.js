@@ -8,6 +8,9 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const nacl = require('tweetnacl');
+const _bs58 = require('bs58');
+const bs58 = _bs58.default || _bs58;
 let addActivity;
 try { addActivity = require('./profile-store').addActivity; } catch { addActivity = () => {}; }
 const { syncMarketplaceJobToDb, syncMarketplaceApplicationToDb, syncMarketplaceEscrowToDb } = require('./lib/marketplace-db-sync');
@@ -15,6 +18,7 @@ let escrowOnchainLib;
 try { escrowOnchainLib = require('./lib/escrow-onchain'); } catch { escrowOnchainLib = null; }
 
 const DATA_DIR = path.join(__dirname, '..', 'data', 'marketplace');
+const MARKETPLACE_AUTH_WINDOW_MS = 5 * 60 * 1000;
 
 // Helper: resolve wallet address to profile ID
 function resolveApplicantId(applicantId) {
@@ -81,6 +85,87 @@ function isJobPoster(actorId, job) {
 
 function isAcceptedWorker(actorId, job) {
   return !!job && (matchesActor(actorId, job.acceptedApplicant) || matchesActor(actorId, job.selectedAgentId));
+}
+
+function buildMarketplaceAuthMessage({ action, jobId = '-', applicationId = '-', escrowId = '-', deliverableId = '-', actorId = '-', walletAddress = '-', timestamp = '-' }) {
+  return [
+    'agentfolio-marketplace',
+    action,
+    jobId || '-',
+    applicationId || '-',
+    escrowId || '-',
+    deliverableId || '-',
+    actorId || '-',
+    walletAddress || '-',
+    timestamp || '-',
+  ].join(':');
+}
+
+function verifyMarketplaceAction(req, { action, job = null, actorId = null, applicationId = '-', escrowId = '-', deliverableId = '-', requirePoster = false, requireWorker = false }) {
+  const walletAddress = String(req.headers['x-wallet-address'] || req.body?.walletAddress || '').trim();
+  const walletSignature = String(req.headers['x-wallet-signature'] || req.body?.walletSignature || '').trim();
+  const walletMessage = String(req.headers['x-wallet-message'] || req.body?.walletMessage || '').trim();
+  const walletTimestamp = String(req.headers['x-wallet-timestamp'] || req.body?.walletTimestamp || '').trim();
+
+  if (!walletAddress || !walletSignature || !walletMessage || !walletTimestamp) {
+    return { ok: false, status: 401, error: 'Wallet signature required for marketplace action' };
+  }
+  if (!/^\d{10,}$/.test(walletTimestamp)) {
+    return { ok: false, status: 400, error: 'Invalid wallet auth timestamp' };
+  }
+
+  const timestampNumber = Number(walletTimestamp);
+  if (!Number.isFinite(timestampNumber) || Math.abs(Date.now() - timestampNumber) > MARKETPLACE_AUTH_WINDOW_MS) {
+    return { ok: false, status: 401, error: 'Wallet auth expired. Please sign again.' };
+  }
+
+  const claimedActorId = actorId == null ? '' : String(actorId).trim();
+  const expectedMessage = buildMarketplaceAuthMessage({
+    action,
+    jobId: job?.id || req.params?.id || '-',
+    applicationId,
+    escrowId,
+    deliverableId,
+    actorId: claimedActorId || '-',
+    walletAddress,
+    timestamp: walletTimestamp,
+  });
+
+  if (walletMessage !== expectedMessage) {
+    return { ok: false, status: 400, error: 'Wallet auth message mismatch' };
+  }
+
+  try {
+    const sigBytes = Buffer.from(walletSignature, 'base64');
+    const msgBytes = Buffer.from(walletMessage);
+    const pubBytes = bs58.decode(walletAddress);
+    if (!nacl.sign.detached.verify(msgBytes, sigBytes, pubBytes)) {
+      return { ok: false, status: 403, error: 'Invalid wallet signature' };
+    }
+  } catch (e) {
+    return { ok: false, status: 400, error: `Wallet auth verification failed: ${e.message}` };
+  }
+
+  const walletActorId = normalizeActorId(walletAddress) || walletAddress;
+  if (claimedActorId && !matchesActor(claimedActorId, walletActorId)) {
+    return { ok: false, status: 403, error: 'Signed wallet does not control the claimed marketplace actor' };
+  }
+
+  const effectiveActorId = normalizeActorId(claimedActorId || walletActorId) || claimedActorId || walletActorId;
+  if (requirePoster && job && !isJobPoster(effectiveActorId, job) && !isJobPoster(walletAddress, job)) {
+    return { ok: false, status: 403, error: 'Only the job poster can perform this action' };
+  }
+  if (requireWorker && job && !isAcceptedWorker(effectiveActorId, job) && !isAcceptedWorker(walletAddress, job)) {
+    return { ok: false, status: 403, error: 'Only the accepted worker can perform this action' };
+  }
+
+  return {
+    ok: true,
+    actorId: effectiveActorId,
+    walletAddress,
+    walletMessage,
+    walletTimestamp: timestampNumber,
+  };
 }
 
 // Ensure data dirs exist
@@ -403,7 +488,7 @@ function registerRoutes(app) {
   });
 
   // 3. POST /api/marketplace/applications/:id/accept — Accept an application
-  const acceptApplication = (applicationId, actorId, res) => {
+  const acceptApplication = (req, applicationId, actorId, res) => {
     const appPath = path.join(DATA_DIR, 'applications', `${applicationId}.json`);
     const application = readJSON(appPath);
     if (!application) return res.status(404).json({ error: 'Application not found' });
@@ -413,9 +498,17 @@ function registerRoutes(app) {
     const job = readJob(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
     if (!actorId) return res.status(400).json({ error: 'acceptedBy required' });
-    if (!isJobPoster(actorId, job)) {
-      return res.status(403).json({ error: 'Only the job poster can accept applications' });
-    }
+
+    const auth = verifyMarketplaceAction(req, {
+      action: 'accept_application',
+      job,
+      actorId,
+      applicationId: application.id,
+      requirePoster: true,
+    });
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    actorId = auth.actorId;
+
     if (job.status !== 'open') {
       return res.status(400).json({ error: `Job is ${job.status}, not open for acceptance` });
     }
@@ -461,7 +554,7 @@ function registerRoutes(app) {
 
   app.post('/api/marketplace/applications/:id/accept', (req, res) => {
     const { acceptedBy } = req.body || {};
-    return acceptApplication(req.params.id, acceptedBy, res);
+    return acceptApplication(req, req.params.id, acceptedBy, res);
   });
 
   app.post('/api/marketplace/jobs/:id/accept', (req, res) => {
@@ -472,7 +565,7 @@ function registerRoutes(app) {
     if (!job.applications?.includes(applicationId)) {
       return res.status(400).json({ error: 'Application does not belong to this job' });
     }
-    return acceptApplication(applicationId, acceptedBy, res);
+    return acceptApplication(req, applicationId, acceptedBy, res);
   });
 
   // 4. POST /api/marketplace/jobs/:id/escrow — Fund escrow for a job
@@ -485,14 +578,20 @@ function registerRoutes(app) {
 
     const { fundedBy, amount, txHash } = req.body;
     if (!fundedBy || !amount) return res.status(400).json({ error: 'fundedBy and amount required' });
-    if (!isJobPoster(fundedBy, job)) {
-      return res.status(403).json({ error: 'Only the job poster can fund escrow' });
-    }
+
+    const auth = verifyMarketplaceAction(req, {
+      action: 'fund_escrow',
+      job,
+      actorId: fundedBy,
+      requirePoster: true,
+    });
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    const actorId = auth.actorId;
 
     const escrow = {
       id: genId('esc'),
       jobId: job.id,
-      fundedBy: normalizeActorId(fundedBy) || fundedBy,
+      fundedBy: normalizeActorId(actorId) || actorId,
       worker: job.acceptedApplicant,
       amount: parseFloat(amount),
       currency: job.currency,
@@ -511,7 +610,7 @@ function registerRoutes(app) {
     job.updatedAt = new Date().toISOString();
     writeJSON(jobPath, job);
 
-    try { addActivity(fundedBy, 'escrow_created', { escrowId: escrow.id, amount: escrow.amount, jobId: job.id }); } catch(e) {}
+    try { addActivity(actorId, 'escrow_created', { escrowId: escrow.id, amount: escrow.amount, jobId: job.id }); } catch(e) {}
     res.status(201).json(escrow);
   });
 
@@ -531,12 +630,20 @@ function registerRoutes(app) {
 
     const { submittedBy, deliverableUrl, description, files } = req.body;
     if (!submittedBy || !description) return res.status(400).json({ error: 'submittedBy and description required' });
-    if (!isAcceptedWorker(submittedBy, job)) return res.status(403).json({ error: 'Only the accepted worker can submit deliverables' });
+
+    const auth = verifyMarketplaceAction(req, {
+      action: 'submit_deliverable',
+      job,
+      actorId: submittedBy,
+      requireWorker: true,
+    });
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    const actorId = auth.actorId;
 
     const deliverable = {
       id: genId('dlv'),
       jobId: job.id,
-      submittedBy: normalizeActorId(submittedBy) || submittedBy,
+      submittedBy: normalizeActorId(actorId) || actorId,
       description,
       deliverableUrl: deliverableUrl || null,
       files: files || [],
@@ -565,7 +672,17 @@ function registerRoutes(app) {
 
     const { releasedBy, releaseTxHash } = req.body;
     if (!releasedBy) return res.status(400).json({ error: 'releasedBy required' });
-    if (!isJobPoster(releasedBy, job) || !matchesActor(releasedBy, escrow.fundedBy)) {
+
+    const auth = verifyMarketplaceAction(req, {
+      action: 'release_escrow',
+      job,
+      actorId: releasedBy,
+      escrowId: escrow.id,
+      requirePoster: true,
+    });
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    const actorId = auth.actorId;
+    if (!matchesActor(actorId, escrow.fundedBy)) {
       return res.status(403).json({ error: 'Only the job poster can release payment' });
     }
 
@@ -595,7 +712,7 @@ function registerRoutes(app) {
     }
 
     escrow.status = 'released';
-    escrow.releasedBy = normalizeActorId(releasedBy) || releasedBy;
+    escrow.releasedBy = normalizeActorId(actorId) || actorId;
     escrow.releaseTxHash = releaseTxHash;
     escrow.releasedAt = new Date().toISOString();
     writeJSON(escrowPath, escrow);
@@ -638,12 +755,22 @@ function registerRoutes(app) {
     const job = readJSON(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
     if (!refundedBy) return res.status(400).json({ error: 'refundedBy required' });
-    if (!isJobPoster(refundedBy, job) || !matchesActor(refundedBy, escrow.fundedBy)) {
+
+    const auth = verifyMarketplaceAction(req, {
+      action: 'refund_escrow',
+      job,
+      actorId: refundedBy,
+      escrowId: escrow.id,
+      requirePoster: true,
+    });
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    const actorId = auth.actorId;
+    if (!matchesActor(actorId, escrow.fundedBy)) {
       return res.status(403).json({ error: 'Only the job poster can refund escrow' });
     }
 
     escrow.status = 'refunded';
-    escrow.refundedBy = normalizeActorId(refundedBy) || refundedBy;
+    escrow.refundedBy = normalizeActorId(actorId) || actorId;
     escrow.refundReason = reason || 'No reason provided';
     escrow.refundedAt = new Date().toISOString();
     writeJSON(escrowPath, escrow);
@@ -666,11 +793,18 @@ function registerRoutes(app) {
     if (job.status !== 'in_progress') return res.status(400).json({ error: 'Job must be in_progress to complete' });
 
     const { approvedBy, completionNote, clientId, releaseTxSignature, v3Release } = req.body;
-    const actorId = approvedBy || clientId;
-    if (!actorId) return res.status(400).json({ error: 'approvedBy or clientId required' });
-    if (!isJobPoster(actorId, job)) {
-      return res.status(403).json({ error: 'Only the job poster can approve work and release payment' });
-    }
+    const requestedActorId = approvedBy || clientId;
+    if (!requestedActorId) return res.status(400).json({ error: 'approvedBy or clientId required' });
+
+    const auth = verifyMarketplaceAction(req, {
+      action: 'complete_job',
+      job,
+      actorId: requestedActorId,
+      requirePoster: true,
+    });
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    const actorId = auth.actorId;
+
     if (!job.acceptedApplicant && !job.selectedAgentId) {
       return res.status(400).json({ error: 'Job has no accepted worker' });
     }
@@ -741,9 +875,16 @@ function registerRoutes(app) {
 
     const { requestedBy, note } = req.body;
     if (!requestedBy) return res.status(400).json({ error: 'requestedBy required' });
-    if (!isJobPoster(requestedBy, job)) {
-      return res.status(403).json({ error: 'Only the job poster can request changes' });
-    }
+
+    const auth = verifyMarketplaceAction(req, {
+      action: 'request_changes',
+      job,
+      actorId: requestedBy,
+      requirePoster: true,
+    });
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    const actorId = auth.actorId;
+
     if (!note) return res.status(400).json({ error: 'Change note required' });
     if (!job.deliverableId) return res.status(400).json({ error: 'No submitted deliverable to revise' });
 
@@ -754,7 +895,7 @@ function registerRoutes(app) {
 
     if (!job.changeRequests) job.changeRequests = [];
     job.changeRequests.push({
-      requestedBy: normalizeActorId(requestedBy) || requestedBy,
+      requestedBy: normalizeActorId(actorId) || actorId,
       note,
       requestedAt: new Date().toISOString(),
     });
@@ -783,14 +924,24 @@ function registerRoutes(app) {
     const { txHash, confirmedBy } = req.body;
     if (!txHash) return res.status(400).json({ error: 'txHash required' });
     if (!confirmedBy) return res.status(400).json({ error: 'confirmedBy required' });
-    if (!isJobPoster(confirmedBy, job) || !matchesActor(confirmedBy, escrow.fundedBy)) {
+
+    const auth = verifyMarketplaceAction(req, {
+      action: 'confirm_deposit',
+      job,
+      actorId: confirmedBy,
+      escrowId: escrow.id,
+      requirePoster: true,
+    });
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    const actorId = auth.actorId;
+    if (!matchesActor(actorId, escrow.fundedBy)) {
       return res.status(403).json({ error: 'Only the job poster can confirm escrow funding' });
     }
 
     escrow.txHash = txHash;
     escrow.depositConfirmed = true;
     escrow.depositConfirmedAt = new Date().toISOString();
-    escrow.depositConfirmedBy = normalizeActorId(confirmedBy) || confirmedBy;
+    escrow.depositConfirmedBy = normalizeActorId(actorId) || actorId;
     writeJSON(escrowPath, escrow);
 
     res.json({ message: 'Deposit confirmed', escrow });
@@ -807,9 +958,16 @@ function registerRoutes(app) {
       return res.status(400).json({ error: "escrowPDA and txSignature required" });
     }
     if (!clientId) return res.status(400).json({ error: 'clientId required' });
-    if (!isJobPoster(clientId, job)) {
-      return res.status(403).json({ error: 'Only the job poster can record funded escrow' });
-    }
+
+    const auth = verifyMarketplaceAction(req, {
+      action: 'record_v3_escrow',
+      job,
+      actorId: clientId,
+      escrowId: escrowPDA,
+      requirePoster: true,
+    });
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    const actorId = auth.actorId;
 
     job.v3EscrowPDA = escrowPDA;
     job.v3EscrowTx = txSignature;
@@ -817,13 +975,13 @@ function registerRoutes(app) {
     job.v3EscrowAgentWallet = agentWallet || null;
     job.v3EscrowAgentId = agentId || null;
     job.v3EscrowFundedAt = new Date().toISOString();
-    job.v3EscrowFundedBy = normalizeActorId(clientId) || clientId;
+    job.v3EscrowFundedBy = normalizeActorId(actorId) || actorId;
     job.escrowFunded = true;
     job.updatedAt = new Date().toISOString();
 
     writeJSON(jobPath, job);
 
-    try { addActivity(clientId || "system", "v3_escrow_funded", { jobId: job.id, escrowPDA, txSignature, amount }); } catch(e) {}
+    try { addActivity(actorId || "system", "v3_escrow_funded", { jobId: job.id, escrowPDA, txSignature, amount }); } catch(e) {}
 
     res.json({
       message: "V3 escrow recorded on job",
@@ -842,14 +1000,20 @@ function registerRoutes(app) {
     if (dlv.status !== 'submitted') return res.status(400).json({ error: 'Deliverable not in submitted state' });
 
     const { requestedBy, reason } = req.body;
-    
+
     // Verify requestedBy is the job client
     const jobPath = path.join(DATA_DIR, 'jobs', `${dlv.jobId}.json`);
     const job = readJSON(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
-    if (!isJobPoster(requestedBy, job)) {
-      return res.status(403).json({ error: 'Only the job poster can request revisions' });
-    }
+
+    const auth = verifyMarketplaceAction(req, {
+      action: 'request_revision',
+      job,
+      actorId: requestedBy,
+      deliverableId: dlv.id,
+      requirePoster: true,
+    });
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
 
     dlv.status = 'revision_requested';
     dlv.revisionRequestedAt = new Date().toISOString();

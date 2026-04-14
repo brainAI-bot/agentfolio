@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { Send, Package, CheckCircle, AlertCircle } from "lucide-react";
+import { createMarketplaceWalletAuth } from "@/lib/marketplace-auth";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -28,41 +29,60 @@ export function SubmitWorkForm({
   deliverableStatus,
   deliverableSubmittedAt,
 }: SubmitWorkFormProps) {
-  const { connected, publicKey } = useWallet();
+  const { connected, publicKey, signMessage } = useWallet();
   const [resolvedId, setResolvedId] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [deliverableUrl, setDeliverableUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
-  // Review state (for client)
   const [reviewing, setReviewing] = useState(false);
   const [reviewResult, setReviewResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
-  // Resolve wallet → profile ID
   useEffect(() => {
-    if (!connected || !publicKey) { setResolvedId(null); return; }
+    if (!connected || !publicKey) {
+      setResolvedId(null);
+      return;
+    }
     let cancelled = false;
     fetch(`${API_BASE}/api/profile-by-wallet?wallet=${publicKey.toBase58()}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (!cancelled && data?.id) setResolvedId(data.id); })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && data?.id) setResolvedId(data.id);
+      })
       .catch(() => {});
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [connected, publicKey]);
 
   const isWorker = resolvedId && assigneeId && resolvedId === assigneeId;
   const isClient = resolvedId && clientId && resolvedId === clientId;
   const hasDeliverable = !!deliverableId;
 
-  // Worker: Submit deliverables
   const handleSubmitWork = async () => {
-    if (!description.trim()) { setResult({ ok: false, msg: "Please describe your deliverables" }); return; }
+    if (!description.trim()) {
+      setResult({ ok: false, msg: "Please describe your deliverables" });
+      return;
+    }
+    if (!resolvedId || !publicKey) {
+      setResult({ ok: false, msg: "Connect the accepted worker wallet first" });
+      return;
+    }
+
     setSubmitting(true);
     setResult(null);
     try {
+      const authHeaders = await createMarketplaceWalletAuth({
+        action: "submit_deliverable",
+        walletAddress: publicKey.toBase58(),
+        actorId: resolvedId,
+        jobId,
+        signMessage,
+      });
       const res = await fetch(`${API_BASE}/api/marketplace/jobs/${jobId}/deliver`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({
           submittedBy: resolvedId,
           description: description.trim(),
@@ -82,22 +102,32 @@ export function SubmitWorkForm({
     }
   };
 
-  // Client: Approve deliverable → release escrow
   const handleApprove = async () => {
+    if (!resolvedId || !publicKey) {
+      setReviewResult({ ok: false, msg: "Connect the poster wallet first" });
+      return;
+    }
+
     setReviewing(true);
     setReviewResult(null);
     try {
-      // First get the job to find the escrow ID
       const jobRes = await fetch(`${API_BASE}/api/marketplace/jobs/${jobId}`);
       const job = await jobRes.json();
       if (!job.escrowId) {
         setReviewResult({ ok: false, msg: "No escrow found for this job" });
         return;
       }
-      // Release the escrow
+      const authHeaders = await createMarketplaceWalletAuth({
+        action: "release_escrow",
+        walletAddress: publicKey.toBase58(),
+        actorId: resolvedId,
+        jobId,
+        escrowId: job.escrowId,
+        signMessage,
+      });
       const res = await fetch(`${API_BASE}/api/marketplace/escrow/${job.escrowId}/release`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({ releasedBy: resolvedId }),
       });
       const data = await res.json();
@@ -113,15 +143,26 @@ export function SubmitWorkForm({
     }
   };
 
-  // Client: Request changes
   const handleRequestChanges = async () => {
+    if (!resolvedId || !publicKey || !deliverableId) {
+      setReviewResult({ ok: false, msg: "Connect the poster wallet first" });
+      return;
+    }
+
     setReviewing(true);
     setReviewResult(null);
     try {
-      // Update deliverable status to revision_requested
+      const authHeaders = await createMarketplaceWalletAuth({
+        action: "request_revision",
+        walletAddress: publicKey.toBase58(),
+        actorId: resolvedId,
+        jobId,
+        deliverableId,
+        signMessage,
+      });
       const res = await fetch(`${API_BASE}/api/marketplace/deliverables/${deliverableId}/revision`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({ requestedBy: resolvedId }),
       });
       const data = await res.json();
@@ -137,10 +178,8 @@ export function SubmitWorkForm({
     }
   };
 
-  // Job not in progress — nothing to show
   if (jobStatus !== "in_progress") return null;
 
-  // Not connected
   if (!connected) {
     return (
       <div className="rounded-xl p-6" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
@@ -152,7 +191,6 @@ export function SubmitWorkForm({
     );
   }
 
-  // Deliverable already submitted — show it
   if (hasDeliverable) {
     return (
       <div className="rounded-xl p-6" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
@@ -172,7 +210,6 @@ export function SubmitWorkForm({
           </div>
         </div>
 
-        {/* Client review buttons */}
         {isClient && deliverableStatus === "submitted" && (
           <div>
             <div className="flex gap-3">
@@ -201,7 +238,6 @@ export function SubmitWorkForm({
           </div>
         )}
 
-        {/* Worker sees status */}
         {isWorker && deliverableStatus === "submitted" && (
           <div className="text-sm px-3 py-2 rounded-lg" style={{ background: "rgba(234,179,8,0.1)", color: "#eab308", border: "1px solid rgba(234,179,8,0.2)" }}>
             ⏳ Waiting for client review...
@@ -217,7 +253,6 @@ export function SubmitWorkForm({
     );
   }
 
-  // Worker: Submit work form
   if (isWorker) {
     return (
       <div className="rounded-xl p-6" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
@@ -270,7 +305,6 @@ export function SubmitWorkForm({
     );
   }
 
-  // Client waiting for work
   if (isClient) {
     return (
       <div className="rounded-xl p-6" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
@@ -284,6 +318,5 @@ export function SubmitWorkForm({
     );
   }
 
-  // Other user viewing an in-progress job
   return null;
 }
