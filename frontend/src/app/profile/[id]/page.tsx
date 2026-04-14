@@ -141,7 +141,10 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     const explorerRes = await fetch(`${API_BASE}/api/explorer/${id}`, { cache: "no-store" });
     if (explorerRes.ok) {
       const explorerData = await explorerRes.json();
-      chainAttestations = explorerData.verifications || explorerData.attestationMemos || [];
+      chainAttestations = (explorerData.verifications || explorerData.attestationMemos || []).map((entry: any) => ({
+        ...entry,
+        platform: entry?.platform === "eth" ? "ethereum" : entry?.platform === "solana_wallet" ? "solana" : entry?.platform === "twitter" ? "x" : entry?.platform,
+      }));
     }
   } catch {}
 
@@ -475,15 +478,15 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                       color={colorMap[t]}
                       href={
                         t === "satp" && vEntry?.proof?.identityPDA ? solanaExplorerUrl(`address/${vEntry?.proof?.identityPDA}`) :
-                        chainTx?.txSignature ? solanaExplorerUrl(`tx/${chainTx.txSignature}`) :
+                        t === "ethereum" && vEntry?.address ? `https://etherscan.io/address/${vEntry?.address}` :
+                        t === "solana" && vEntry?.address ? solanaExplorerUrl(`address/${vEntry?.address}`) :
                         chainTx?.solscanUrl ? chainTx.solscanUrl :
+                        chainTx?.txSignature ? solanaExplorerUrl(`tx/${chainTx.txSignature}`) :
                         t === "satp" ? `${SITE_URL}/api/satp/score/${encodeURIComponent(id)}` :
                         t === "x" && vEntry?.handle ? `https://x.com/${vEntry?.handle.replace("@","")}` :
                         t === "moltbook" && vEntry?.username ? `https://moltbook.com/u/${vEntry?.username}` :
                         t === "website" && vEntry?.url ? vEntry?.url :
                         t === "github" && vEntry?.username ? `https://github.com/${vEntry?.username}` :
-                        t === "solana" && vEntry?.address ? solanaExplorerUrl(`address/${vEntry?.address}`) :
-                        t === "ethereum" && vEntry?.address ? `https://etherscan.io/address/${vEntry?.address}` :
                         t === "domain" && vEntry?.domain ? `https://${vEntry?.domain}` :
                         undefined
                       }
