@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { Transaction, VersionedTransaction } from "@solana/web3.js";
 import { Shield, Wallet, ArrowRight, CheckCircle, AlertTriangle, Loader2 } from "lucide-react";
+import { createMarketplaceWalletAuth } from "@/lib/marketplace-auth";
+import { resolveAgentWallet } from "@/lib/v3-escrow";
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
 const SOLANA_EXPLORER_SUFFIX = SOLANA_CLUSTER === "mainnet-beta" ? "" : `?cluster=${SOLANA_CLUSTER}`;
@@ -23,6 +24,7 @@ interface Props {
 }
 
 type Step = "idle" | "building" | "signing" | "confirming" | "done" | "error";
+type EscrowAction = "fund" | "release" | "refund";
 
 function formatBudgetLabel(budget: string | number | null | undefined): string {
   const raw = String(budget ?? "").trim();
@@ -30,21 +32,62 @@ function formatBudgetLabel(budget: string | number | null | undefined): string {
   return /\busdc\b/i.test(raw) ? raw : `${raw} USDC`;
 }
 
+function parseBudgetAmount(budget: string | number | null | undefined): number {
+  const parsed = parseFloat(String(budget ?? "").trim());
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
 export function OnChainEscrowActions({
   jobId, jobStatus, escrowStatus, escrowId, clientId, assigneeId, budget, onchainEscrowPDA
 }: Props) {
-  const { publicKey, signTransaction } = useWallet();
+  const { publicKey, connected, signMessage, sendTransaction } = useWallet();
   const { connection } = useConnection();
   const [step, setStep] = useState<Step>("idle");
   const [msg, setMsg] = useState("");
-  const [action, setAction] = useState<"fund" | "release" | "refund" | null>(null);
+  const [action, setAction] = useState<EscrowAction | null>(null);
+  const [resolvedId, setResolvedId] = useState<string | null>(null);
 
   const walletAddr = publicKey?.toBase58() || "";
   const budgetLabel = formatBudgetLabel(budget);
 
-  const executeAction = useCallback(async (actionType: "fund" | "release" | "refund") => {
-    if (!publicKey || !signTransaction) {
-      setMsg("Connect your wallet first");
+  useEffect(() => {
+    if (!connected || !walletAddr) {
+      setResolvedId(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`${API_BASE}/api/profile-by-wallet?wallet=${walletAddr}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled) setResolvedId(data?.id || null);
+      })
+      .catch(() => {
+        if (!cancelled) setResolvedId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connected, walletAddr]);
+
+  const actorId = resolvedId || clientId || walletAddr;
+  const isPoster = useMemo(() => {
+    if (!clientId) return !!walletAddr;
+    return clientId === resolvedId || clientId === walletAddr;
+  }, [clientId, resolvedId, walletAddr]);
+
+  const executeAction = useCallback(async (actionType: EscrowAction) => {
+    if (!publicKey || !sendTransaction || !signMessage) {
+      setMsg("Connect a wallet that supports signing first");
+      setStep("error");
+      return;
+    }
+    if (!actorId) {
+      setMsg("Could not resolve the poster profile for this wallet");
+      setStep("error");
+      return;
+    }
+    if (!isPoster) {
+      setMsg("Only the job poster can manage escrow");
       setStep("error");
       return;
     }
@@ -54,23 +97,41 @@ export function OnChainEscrowActions({
     setMsg("");
 
     try {
-      // Step 1: Get unsigned transaction from backend
-      let buildUrl: string;
-      let buildBody: Record<string, any>;
+      let buildUrl = "";
+      let buildBody: Record<string, any> = {};
+      let confirmUrl = "";
+      let confirmBody: Record<string, any> = {};
+      let authAction = "";
+      let authEscrowId = escrowId || onchainEscrowPDA || "";
 
       if (actionType === "fund") {
         buildUrl = `${API_BASE}/api/marketplace/jobs/${jobId}/escrow/onchain`;
         buildBody = {
           clientWallet: walletAddr,
-          amount: parseFloat(budget) || 1,
-          deadlineUnix: Math.floor(Date.now() / 1000) + 30 * 86400, // 30 days
+          amount: parseBudgetAmount(budget),
+          deadlineUnix: Math.floor(Date.now() / 1000) + 30 * 86400,
         };
+        confirmUrl = `${API_BASE}/api/marketplace/jobs/${jobId}/escrow/confirm`;
+        authAction = "confirm_onchain_escrow";
       } else if (actionType === "release") {
+        if (!escrowId) throw new Error("Escrow record missing for release");
+        if (!assigneeId) throw new Error("No accepted worker assigned to this job");
+        const agentWallet = await resolveAgentWallet(assigneeId);
+        if (!agentWallet) throw new Error(`Could not resolve wallet for ${assigneeId}`);
         buildUrl = `${API_BASE}/api/marketplace/escrow/${escrowId}/release/onchain`;
-        buildBody = { clientWallet: walletAddr };
+        buildBody = { clientWallet: walletAddr, agentWallet };
+        confirmUrl = `${API_BASE}/api/marketplace/escrow/${escrowId}/release/confirm`;
+        confirmBody = { clientWallet: walletAddr };
+        authAction = "confirm_onchain_release";
+        authEscrowId = escrowId;
       } else {
+        if (!escrowId) throw new Error("Escrow record missing for refund");
         buildUrl = `${API_BASE}/api/marketplace/escrow/${escrowId}/refund/onchain`;
         buildBody = { clientWallet: walletAddr };
+        confirmUrl = `${API_BASE}/api/marketplace/escrow/${escrowId}/refund/confirm`;
+        confirmBody = { clientWallet: walletAddr };
+        authAction = "confirm_onchain_refund";
+        authEscrowId = escrowId;
       }
 
       const buildRes = await fetch(buildUrl, {
@@ -79,36 +140,48 @@ export function OnChainEscrowActions({
         body: JSON.stringify(buildBody),
       });
       const buildData = await buildRes.json();
-      if (buildData.error) throw new Error(buildData.error);
+      if (!buildRes.ok || buildData.error) throw new Error(buildData.error || `Failed to build ${actionType} transaction`);
 
-      // Step 2: Deserialize and sign
       setStep("signing");
       const txBytes = Uint8Array.from(Buffer.from(buildData.transaction, "base64"));
       const isVersioned = (txBytes[0] & 0x80) !== 0;
       const tx = isVersioned
         ? VersionedTransaction.deserialize(txBytes)
         : Transaction.from(Buffer.from(txBytes));
-      const signed = await signTransaction(tx as any);
-      const serialized = Buffer.from(signed.serialize()).toString("base64");
+      const txSignature = await sendTransaction(tx as any, connection);
+      await connection.confirmTransaction(txSignature, "confirmed");
 
-      // Step 3: Confirm with backend
       setStep("confirming");
-      let confirmUrl: string;
       if (actionType === "fund") {
-        confirmUrl = `${API_BASE}/api/marketplace/jobs/${jobId}/escrow/confirm`;
-      } else if (actionType === "release") {
-        confirmUrl = `${API_BASE}/api/marketplace/escrow/${escrowId}/release/confirm`;
+        confirmBody = {
+          txSignature,
+          escrowPDA: buildData.escrowPDA,
+          clientWallet: walletAddr,
+        };
+        authEscrowId = buildData.escrowPDA || authEscrowId;
       } else {
-        confirmUrl = `${API_BASE}/api/marketplace/escrow/${escrowId}/refund/confirm`;
+        confirmBody = {
+          ...confirmBody,
+          txSignature,
+        };
       }
+
+      const authHeaders = await createMarketplaceWalletAuth({
+        action: authAction,
+        walletAddress: walletAddr,
+        actorId,
+        jobId,
+        escrowId: authEscrowId,
+        signMessage,
+      });
 
       const confirmRes = await fetch(confirmUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ signedTransaction: serialized, wallet: walletAddr }),
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(confirmBody),
       });
       const confirmData = await confirmRes.json();
-      if (confirmData.error) throw new Error(confirmData.error);
+      if (!confirmRes.ok || confirmData.error) throw new Error(confirmData.error || `Failed to confirm ${actionType}`);
 
       setStep("done");
       setMsg(
@@ -121,12 +194,12 @@ export function OnChainEscrowActions({
       setStep("error");
       setMsg(e.message || "Transaction failed");
     }
-  }, [publicKey, signTransaction, jobId, escrowId, budget, walletAddr]);
+  }, [publicKey, sendTransaction, signMessage, actorId, isPoster, jobId, escrowId, onchainEscrowPDA, walletAddr, budget, assigneeId, connection]);
 
-  // Determine which actions are available
-  const canFund = jobStatus === "in_progress" && !onchainEscrowPDA && escrowStatus !== "released";
-  const canRelease = !!onchainEscrowPDA && jobStatus !== "completed" && escrowStatus !== "released";
-  const canRefund = !!onchainEscrowPDA && jobStatus !== "completed" && escrowStatus !== "released";
+  const posterGate = !publicKey || isPoster;
+  const canFund = posterGate && jobStatus === "in_progress" && !onchainEscrowPDA && escrowStatus !== "released" && !!assigneeId;
+  const canRelease = posterGate && !!onchainEscrowPDA && !!escrowId && jobStatus !== "completed" && escrowStatus !== "released";
+  const canRefund = posterGate && !!onchainEscrowPDA && !!escrowId && jobStatus !== "completed" && escrowStatus !== "released";
 
   if (!canFund && !canRelease && !canRefund) {
     if (onchainEscrowPDA) {
@@ -136,6 +209,11 @@ export function OnChainEscrowActions({
             <Shield size={14} style={{ color: "#9945ff" }} />
             On-chain escrow: <a href={`${solanaExplorerUrl(`account/${onchainEscrowPDA}`)}`} target="_blank" rel="noopener" className="underline" style={{ color: "#9945ff" }}>{onchainEscrowPDA.slice(0, 8)}...{onchainEscrowPDA.slice(-4)}</a>
           </div>
+          {publicKey && !isPoster && (
+            <div className="mt-2 text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
+              Only the job poster can manage this escrow.
+            </div>
+          )}
         </div>
       );
     }
@@ -145,8 +223,8 @@ export function OnChainEscrowActions({
   const stepLabels: Record<Step, string> = {
     idle: "",
     building: "Building transaction...",
-    signing: "Sign in your wallet...",
-    confirming: "Confirming on-chain...",
+    signing: "Approve in your wallet and broadcast on-chain...",
+    confirming: "Recording confirmed on-chain state...",
     done: "",
     error: "",
   };
@@ -212,7 +290,14 @@ export function OnChainEscrowActions({
       {!publicKey && (canFund || canRelease || canRefund) && (
         <div className="mt-3 flex items-center gap-2 text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
           <Wallet size={12} />
-          Connect the poster wallet to sign the on-chain escrow transaction.
+          Connect the poster wallet to sign and broadcast the escrow transaction.
+        </div>
+      )}
+
+      {publicKey && !isPoster && (
+        <div className="mt-3 flex items-center gap-2 text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
+          <AlertTriangle size={12} />
+          Only the job poster wallet can fund, release, or refund escrow.
         </div>
       )}
 
