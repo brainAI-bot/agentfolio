@@ -535,7 +535,7 @@ export default function SATPExplorerPage() {
                     </div>
                     <div className="flex justify-between">
                       <span style={{ color: "var(--text-tertiary)" }}>Verification Level</span>
-                      <span style={{ color: TIER_COLORS[agent.tier] || "var(--text-primary)" }}>{TIER_LABELS[agent.tier] || `L${agent.verificationLevel} · ${agent.tier}`}</span>
+                      <span style={{ color: TIER_COLORS[(agent.verificationLevelName || "").toLowerCase()] || "var(--text-primary)" }}>{agent.verificationBadge || ["⚪","🟡","🔵","🟢","🟠","🟣"][agent.verificationLevel] || "⚪"} L{agent.verificationLevel}{agent.verificationLevelName ? ` · ${agent.verificationLevelName}` : ""}</span>
                     </div>
                     <div className="flex justify-between">
                       <span style={{ color: "var(--text-tertiary)" }}>Born (Soulbound)</span>
