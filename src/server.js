@@ -2064,14 +2064,38 @@ app.post('/api/verify/x/confirm', async (req, res) => {
     const { challengeId, tweetUrl } = body;
     const challenge = await verificationChallenges.getChallenge(challengeId);
     if (!challenge) return res.status(404).json({ error: 'Challenge not found or expired' });
-    // Verify via vxtwitter API
-    const tweetId = tweetUrl.split('/').pop().split('?')[0];
+
+    const tweetMatch = tweetUrl.match(/(?:twitter|x)\.com\/([^/]+)\/status\/([0-9]+)/i);
+    if (!tweetMatch) return res.status(400).json({ error: 'Invalid tweet URL format' });
+
+    const [, urlHandle, tweetId] = tweetMatch;
     const handle = challenge.challengeData.identifier;
+    if (urlHandle.toLowerCase() !== handle.toLowerCase()) {
+      return res.status(400).json({ error: 'Tweet author does not match verification username' });
+    }
+
     const resp = await fetch(`https://api.vxtwitter.com/${handle}/status/${tweetId}`);
     if (!resp.ok) return res.status(400).json({ error: 'Could not fetch tweet' });
-    const tweet = await resp.json();
-    if (!tweet.text?.includes(challenge.challengeData.expectedContent)) return res.status(400).json({ error: 'Tweet does not contain challenge code' });
-    const proof = { tweetUrl, tweetId, verifiedAt: new Date().toISOString() };
+
+    const contentType = resp.headers.get('content-type') || '';
+    const raw = await resp.text();
+    let tweet;
+    try {
+      tweet = JSON.parse(raw);
+    } catch (_) {
+      return res.status(400).json({ error: 'Could not fetch tweet' });
+    }
+
+    if (!tweet?.text?.includes(challenge.challengeData.expectedContent)) {
+      return res.status(400).json({ error: 'Tweet does not contain challenge code' });
+    }
+
+    const proof = {
+      tweetUrl,
+      tweetId,
+      verifiedAt: new Date().toISOString(),
+      source: contentType || 'unknown'
+    };
     await verificationChallenges.completeChallenge(challengeId, proof);
     profileStore.addVerification(challenge.profileId, 'x', handle, proof);
     res.json({ verified: true, platform: 'x', identifier: handle, proof: { challengeId, tweetUrl } });
