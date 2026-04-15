@@ -56,6 +56,7 @@ export interface Job {
   status: "open" | "in_progress" | "completed" | "disputed";
   escrowStatus: "ready" | "locked" | "funded" | "released" | "disputed";
   escrowTx?: string | null;
+  escrowId?: string | null;
   v3EscrowPDA?: string | null;
   onchainEscrowPDA?: string | null;
   proposals: number;
