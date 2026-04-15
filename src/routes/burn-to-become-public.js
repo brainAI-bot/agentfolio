@@ -20,7 +20,7 @@ const PIPELINE_DIR = "/home/ubuntu/agentfolio/boa-pipeline";
 const { safeBurnToBecome } = require('./safe-burn-to-become');
 const { loadNormalizedTrust } = require('../lib/normalized-trust');
 
-const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
 const connection = new Connection(RPC_URL, 'confirmed');
 
 // Deployer keypair (for minting soulbound tokens server-side)
@@ -60,7 +60,7 @@ function getBoaSoulboundPDA(walletPubkey, issuerPubkey) {
 }
 
 const DEPLOYER_PUBKEY = 'Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc';
-const HELIUS_RPC = 'https://api.mainnet-beta.solana.com';
+const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
 
 async function checkSatpOnChain(wallet) {
   const { Connection } = require('@solana/web3.js');
@@ -88,7 +88,7 @@ const FREE_SCORE_THRESHOLD = 100;
  */
 async function checkOnChainMints(wallet) {
   const COLLECTION = 'CCw8NjAS3QpfDU4fBYkJ2kD4znNy468e3wqAJQKoJCFk';
-  const HELIUS_RPC = 'https://api.mainnet-beta.solana.com';
+  const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
   
   try {
     const resp = await fetch(HELIUS_RPC, {
@@ -1346,7 +1346,7 @@ function handleBurnToBecome(req, res, url) {
               // Build burnToBecome TX for client-side signing
               try {
                 const v3sdk = require('@brainai/satp-v3');
-                const builders = new v3sdk.SatpV3Builders(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+                const builders = new v3sdk.SatpV3Builders(process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb');
                 const userAuthority = new PublicKey(burnResult.authority);
                 const faceMintPk = soulboundResult.soulboundMint ? new PublicKey(soulboundResult.soulboundMint) : PublicKey.default;
                 const clientBurnTx = await builders.burnToBecome({
@@ -1588,7 +1588,7 @@ function handleBurnToBecome(req, res, url) {
           try {
             const { Connection: Conn2, SystemProgram: SP2, PublicKey: PK2 } = require("@solana/web3.js");
             const crypto2 = require("crypto");
-            const conn2 = new Conn2(process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com", "confirmed");
+            const conn2 = new Conn2(process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb", "confirmed");
             const cmState2 = JSON.parse(require("fs").readFileSync("/home/ubuntu/agentfolio/boa-pipeline/candy-machine-data/core-cm-state.json", "utf-8"));
             const agentHash2 = crypto2.createHash("sha256").update(agentIdForPda).digest();
             const cmBytes2 = new PK2(cmState2.candyMachine).toBuffer();
@@ -1798,7 +1798,7 @@ function handleBurnToBecome(req, res, url) {
           // Verify the payment TX on-chain
           try {
             const { Connection } = require("@solana/web3.js");
-            const conn = new Connection(process.env.SOLANA_RPC || "https://api.mainnet-beta.solana.com");
+            const conn = new Connection(process.env.SOLANA_RPC || "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb");
             // Validate tx signature format before RPC call
             if (!paymentTx || typeof paymentTx !== "string" || paymentTx.length < 80 || paymentTx.length > 90) {
               return sendJson(400, { error: "Invalid payment transaction signature format." });
@@ -1842,7 +1842,7 @@ function handleBurnToBecome(req, res, url) {
 let satpV3Client;
 try {
   const { createSATPClient } = require("../satp-client/src");
-  satpV3Client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com" });
+  satpV3Client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb" });
   console.log("[BurnToBecome] SATP V3 SDK loaded");
 } catch (e) {
   console.warn("[BurnToBecome] SATP V3 SDK not available:", e.message);
@@ -1853,7 +1853,7 @@ try {
         execFile("node", [workerPath, wallet], {
           timeout: 120000,
           cwd: "/home/ubuntu/agentfolio/core-cm-v2",
-          env: { ...process.env, HOME: process.env.HOME, SOLANA_RPC_URL: process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com" },
+          env: { ...process.env, HOME: process.env.HOME, SOLANA_RPC_URL: process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb" },
         }, (err, stdout, stderr) => {
           if (stderr) console.log("[MintBOA] stderr:", stderr.slice(0, 500));
           if (err) {
@@ -1962,7 +1962,7 @@ try {
     (async () => {
       try {
         const { Connection, PublicKey } = require('@solana/web3.js');
-        const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', 'confirmed');
+        const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb', 'confirmed');
         
         // Validate signature format (base58, 86-88 chars)
         if (!signature || typeof signature !== 'string' || signature.length < 80 || signature.length > 100) {
@@ -2035,7 +2035,7 @@ try {
         if (!artworkUri && asset) {
           // Try Helius DAS getAsset for the minted BOA
           try {
-            const HELIUS_RPC = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+            const HELIUS_RPC = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
             const dasResp = await fetch(HELIUS_RPC, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getAsset', params: { id: asset } }),
