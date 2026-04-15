@@ -155,9 +155,10 @@ function registerSATPRoutes(app) {
 
     if (enriched.length === 0) {
       for (const [platform, hint] of Object.entries(txHints || {})) {
-        if (!isVisibleAttestationPlatform(platform, includeSatp)) continue;
+        const normalizedPlatform = normalizeAttestationPlatform(platform) || platform;
+        if (!isVisibleAttestationPlatform(normalizedPlatform, includeSatp)) continue;
         enriched.push({
-          platform,
+          platform: normalizedPlatform,
           txSignature: hint?.txSignature || null,
           memo: null,
           proofHash: null,
