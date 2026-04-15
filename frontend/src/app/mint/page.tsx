@@ -116,13 +116,23 @@ export default function MintPage() {
       });
       if (!prepRes.ok) { const err = await prepRes.json(); throw new Error(err.error || "Failed to prepare mint"); }
       const prepData = await prepRes.json();
-      const { Transaction, Connection } = await import("@solana/web3.js");
-      const connection = new Connection(SOLANA_RPC_URL, "confirmed");
+      const { Transaction } = await import("@solana/web3.js");
       const txBuf = Buffer.from(prepData.transaction, "base64");
       const tx = Transaction.from(txBuf);
       const signed = await wallet.signTransaction(tx);
-      const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false });
-      await connection.confirmTransaction(sig, "confirmed");
+      const submitRes = await fetch(API + "/api/burn-to-become/submit-mint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          signedTransaction: Buffer.from(signed.serialize()).toString("base64"),
+        }),
+      });
+      if (!submitRes.ok) {
+        const err = await submitRes.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to submit mint transaction");
+      }
+      const submitData = await submitRes.json();
+      const sig = submitData.signature;
       // Record the mint server-side
       try {
         const confirmRes = await fetch(API + "/api/burn-to-become/confirm-mint", {
