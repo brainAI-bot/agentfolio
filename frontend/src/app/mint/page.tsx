@@ -238,6 +238,8 @@ export default function MintPage() {
         });
         if (!mintRes.ok) { const err = await mintRes.json(); throw new Error(err.error || err.message || "Mint failed after payment"); }
         const mintData = await mintRes.json();
+        const mintSig = mintData.signature || mintData.tx || paymentSig;
+        setBurnTx(mintSig);
         // Don't set soulboundMint — this is a regular Core NFT mint, not soulbound
         setMintedNft({ image: mintData.imageUri || mintData.image_uri || "", name: mintData.boaName || mintData.name || `BOA #${mintData.boaId || mintData.nft_number || 1}`, number: mintData.boaId || mintData.nft_number || 1, mint: mintData.mintAddress || mintData.mint || "" });
         await loadWalletData(walletAddr);
@@ -290,6 +292,18 @@ export default function MintPage() {
       setError(e.message || "Retry failed");
       setStep("error");
     }
+  };
+
+  const handleStartBurnFromMint = () => {
+    if (!mintedNft) return;
+    setSelectedNft({
+      mint: mintedNft.mint,
+      name: mintedNft.name,
+      image: mintedNft.image,
+      uri: "",
+      isGenesis: false,
+    });
+    setStep("choose");
   };
 
   const handleBurn = async () => {
@@ -862,7 +876,13 @@ export default function MintPage() {
                     </div>
                     <p className="text-center mt-2 font-bold text-sm" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{selectedNft?.name || mintedNft?.name || ""}</p>
                     <p className="mt-1 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>{soulboundMint ? "NON-TRANSFERABLE • PERMANENT" : "MINTED SUCCESSFULLY"}</p>
-                    {/* Burn button removed from success page — prevents duplicate burn actions */}
+                    {!soulboundMint && mintedNft?.mint && (
+                      <button onClick={handleStartBurnFromMint}
+                        className="mt-4 inline-flex items-center justify-center gap-2 w-full py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all hover:shadow-[0_0_30px_rgba(153,69,255,0.3)] hover:scale-[1.01]"
+                        style={{ fontFamily: "var(--font-mono)", background: "linear-gradient(135deg, var(--accent), #7c3aed)", color: "#fff" }}>
+                        <Flame size={14} /> Burn This BOA Now
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -897,7 +917,7 @@ export default function MintPage() {
                 {burnTx && (
                   <a href={solanaExplorerUrl(`tx/${burnTx}`)} target="_blank" rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 text-sm hover:underline" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
-                    Burn TX: {burnTx.slice(0, 16)}... <ExternalLink size={12} />
+                    {soulboundMint ? "Burn TX" : "Mint TX"}: {burnTx.slice(0, 16)}... <ExternalLink size={12} />
                   </a>
                 )}
                 {soulboundMint && (
