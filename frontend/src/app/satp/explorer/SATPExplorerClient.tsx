@@ -99,6 +99,7 @@ function normalizePlatformKey(value: string | null | undefined): string {
   if (!raw) return "";
   const aliases: Record<string, string> = {
     eth: "ethereum",
+    evm: "ethereum",
     eth_wallet: "ethereum",
     ethereum_wallet: "ethereum",
     sol: "solana",
@@ -125,12 +126,14 @@ function normalizeAttestation(att: any) {
     .replace(/^X$/i, "Twitter")
     .replace(/^Satp$/i, "SATP")
     .toUpperCase();
+  const rawMemo = att?.memo || proofData?.memo || proofData?.identifier || proofData?.wallet || proofData?.address || null;
+  const memo = typeof rawMemo === "string" && /^ATTESTATION\|/i.test(rawMemo.trim()) ? null : rawMemo;
   return {
     ...att,
     platform,
     displayType,
     displayLabel,
-    memo: att?.memo || proofData?.memo || proofData?.identifier || proofData?.wallet || proofData?.address || null,
+    memo,
     txSignature,
     solscanUrl: att?.solscanUrl || att?.url || att?.proof?.url || (txSignature ? `https://solana.fm/tx/${txSignature}` : (att?.pda ? `https://solscan.io/account/${att.pda}` : null)),
     timestamp: att?.timestamp || att?.verifiedAt || att?.verified_at || att?.createdAt || null,
