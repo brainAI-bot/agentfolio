@@ -763,7 +763,28 @@ async function maybeGateProgrammaticTrustScore(req, res, profileId) {
     }
 
     const gateBody = await gateRes.text();
-    res.status(gateRes.status).send(gateBody);
+    let responseBody = gateBody;
+    const trimmedGateBody = String(gateBody || '').trim();
+    if (trimmedGateBody === '{}' || trimmedGateBody === '') {
+      let paymentRequired = null;
+      const encodedPaymentRequired = res.getHeader('payment-required');
+      if (encodedPaymentRequired) {
+        try {
+          paymentRequired = JSON.parse(Buffer.from(String(encodedPaymentRequired), 'base64').toString('utf8'));
+        } catch {}
+      }
+      responseBody = JSON.stringify({
+        error: 'Payment Required',
+        code: 'X402_PAYMENT_REQUIRED',
+        paid: false,
+        profileId,
+        x402PaidUrl: '/api/score?id=' + encodeURIComponent(profileId),
+        x402PaidAliasUrl: '/api/profile/' + encodeURIComponent(profileId) + '/trust-score',
+        paymentRequired,
+      });
+      res.setHeader('content-type', 'application/json; charset=utf-8');
+    }
+    res.status(gateRes.status).send(responseBody);
     return true;
   }
 
