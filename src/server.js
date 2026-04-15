@@ -645,7 +645,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
         const normalizedPlatform = normalizeExplorerPlatform(platform);
         const hinted = attestationHints.get(normalizedPlatform) || null;
         const resolvedTxSignature = hinted?.txSignature || txSignature || null;
-        const resolvedSolscanUrl = hinted?.solscanUrl || solscanUrl || (isLikelySolanaTxSignature(resolvedTxSignature) ? ('https://solana.fm/tx/' + resolvedTxSignature) : null);
+        const resolvedSolscanUrl = hinted?.solscanUrl || (isLikelySolanaTxSignature(resolvedTxSignature) ? ('https://solana.fm/tx/' + resolvedTxSignature) : null);
         return {
           platform: normalizedPlatform || platform,
           verified,

@@ -98,6 +98,7 @@ router.get('/agents', async (req, res) => {
       if (platform === 'review' || platform.includes('satp')) return null;
       return platform;
     };
+    const isLikelySolanaTxSignature = (value) => /^[1-9A-HJ-NP-Za-km-z]{60,120}$/.test(String(value || "").trim());
     const parseJson = (val, fallback) => {
       if (val === null || val === undefined || val === '') return fallback;
       if (typeof val === 'object') return val;
@@ -174,7 +175,7 @@ router.get('/agents', async (req, res) => {
       const txHints = new Map();
       const addTxHint = (platform, txSignature, timestamp = null) => {
         const normalized = normalizePlatform(platform);
-        if (!normalized || !txSignature) return;
+        if (!normalized || !isLikelySolanaTxSignature(txSignature)) return;
         if (!txHints.has(normalized)) {
           txHints.set(normalized, {
             platform: normalized,
@@ -231,7 +232,7 @@ router.get('/agents', async (req, res) => {
           platform,
           txSignature,
           timestamp: att.timestamp || hinted?.timestamp || null,
-          solscanUrl: txSignature ? `https://solana.fm/tx/${txSignature}` : (hinted?.solscanUrl || null),
+          solscanUrl: hinted?.solscanUrl || (isLikelySolanaTxSignature(txSignature) ? `https://solana.fm/tx/${txSignature}` : null),
         });
       }
       for (const [platform, hinted] of txHints.entries()) {

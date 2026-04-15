@@ -396,7 +396,7 @@ for (const agent of filteredAgents) {
         ...verification,
         platform,
         txSignature,
-        solscanUrl: hinted?.solscanUrl || verification?.solscanUrl || (txSignature ? `https://solana.fm/tx/${txSignature}` : null),
+        solscanUrl: hinted?.solscanUrl || (isLikelySolanaTxSignature(txSignature) ? `https://solana.fm/tx/${txSignature}` : null),
         timestamp: verification?.timestamp || hinted?.timestamp || null,
       };
     });
@@ -416,7 +416,7 @@ for (const agent of filteredAgents) {
       memo: rawMemo && !/^ATTESTATION\|/i.test(rawMemo) ? rawMemo : null,
       txSignature,
       timestamp: att?.timestamp || hinted?.timestamp || null,
-      solscanUrl: att?.solscanUrl || hinted?.solscanUrl || (txSignature ? `https://solana.fm/tx/${txSignature}` : null),
+      solscanUrl: att?.solscanUrl || hinted?.solscanUrl || (isLikelySolanaTxSignature(txSignature) ? `https://solana.fm/tx/${txSignature}` : null),
     });
   }
   for (const [platform, hinted] of txHints.entries()) {
