@@ -37,6 +37,21 @@ function parseBudgetAmount(budget: string | number | null | undefined): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
+function deserializeEscrowTransaction(base64Tx: string): { tx: Transaction | VersionedTransaction; isVersioned: boolean } {
+  const raw = Buffer.from(base64Tx, "base64");
+  try {
+    return {
+      tx: VersionedTransaction.deserialize(raw),
+      isVersioned: true,
+    };
+  } catch {
+    return {
+      tx: Transaction.from(raw),
+      isVersioned: false,
+    };
+  }
+}
+
 export function OnChainEscrowActions({
   jobId, jobStatus, escrowStatus, escrowId, clientId, assigneeId, budget, onchainEscrowPDA
 }: Props) {
@@ -143,11 +158,7 @@ export function OnChainEscrowActions({
       if (!buildRes.ok || buildData.error) throw new Error(buildData.error || `Failed to build ${actionType} transaction`);
 
       setStep("signing");
-      const txBytes = Uint8Array.from(Buffer.from(buildData.transaction, "base64"));
-      const isVersioned = (txBytes[0] & 0x80) !== 0;
-      const tx = isVersioned
-        ? VersionedTransaction.deserialize(txBytes)
-        : Transaction.from(Buffer.from(txBytes));
+      const { tx, isVersioned } = deserializeEscrowTransaction(buildData.transaction);
 
       let txSignature = "";
       if (isVersioned) {

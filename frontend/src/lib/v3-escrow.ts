@@ -38,10 +38,12 @@ interface V3EscrowResult {
 export type WalletTransaction = Transaction | VersionedTransaction;
 
 function deserializeWalletTransaction(base64Tx: string): WalletTransaction {
-  const txBytes = Uint8Array.from(Buffer.from(base64Tx, 'base64'));
-  return (txBytes[0] & 0x80) !== 0
-    ? VersionedTransaction.deserialize(txBytes)
-    : Transaction.from(Buffer.from(txBytes));
+  const raw = Buffer.from(base64Tx, 'base64');
+  try {
+    return VersionedTransaction.deserialize(raw);
+  } catch {
+    return Transaction.from(raw);
+  }
 }
 
 /**
