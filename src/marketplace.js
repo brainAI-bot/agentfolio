@@ -428,6 +428,38 @@ function hydrateJobEscrowState(job) {
   if (!job) return job;
   if (!Array.isArray(job.applications)) job.applications = [];
 
+  const applicationIds = job.applications
+    .map((app) => (typeof app === 'string' ? app : app?.id))
+    .filter(Boolean);
+
+  let acceptedApplication = null;
+  if (applicationIds.length) {
+    for (const applicationId of applicationIds) {
+      const candidate = readJSON(path.join(DATA_DIR, 'applications', `${applicationId}.json`));
+      if (!candidate) continue;
+      if (candidate.status === 'accepted') {
+        acceptedApplication = candidate;
+        break;
+      }
+      if (!acceptedApplication && (candidate.applicantId === job.selectedAgentId || candidate.applicantId === job.acceptedApplicant)) {
+        acceptedApplication = candidate;
+      }
+    }
+  }
+
+  if (acceptedApplication) {
+    if (!job.acceptedApplicationId) job.acceptedApplicationId = acceptedApplication.id;
+    if (!job.acceptedApplicant) job.acceptedApplicant = acceptedApplication.applicantId;
+    if (!job.selectedAgentId) job.selectedAgentId = acceptedApplication.applicantId;
+  }
+
+  const acceptedWorkerId = job.selectedAgentId || job.acceptedApplicant || null;
+  if (acceptedWorkerId) {
+    if (!job.assignedTo) job.assignedTo = acceptedWorkerId;
+    if (!job.assigneeId) job.assigneeId = acceptedWorkerId;
+    if (!job.assignee) job.assignee = acceptedWorkerId;
+  }
+
   if (job.escrowId && !job.fundsReleased) {
     const escrow = readJSON(path.join(DATA_DIR, 'escrow', `${job.escrowId}.json`));
     if (escrow && (escrow.status === 'released' || escrow.status === 'auto_released')) {
@@ -635,8 +667,12 @@ function registerRoutes(app) {
     });
 
     job.status = 'in_progress';
+    job.acceptedApplicationId = application.id;
     job.acceptedApplicant = application.applicantId;
     job.selectedAgentId = application.applicantId;
+    job.assignedTo = application.applicantId;
+    job.assigneeId = application.applicantId;
+    job.assignee = application.applicantId;
     job.selectedAt = application.acceptedAt;
     job.acceptedBy = normalizeActorId(actorId) || actorId;
     job.agreedBudget = Number(application.bidAmount || job.agreedBudget || job.budgetAmount || job.budget || 0);
