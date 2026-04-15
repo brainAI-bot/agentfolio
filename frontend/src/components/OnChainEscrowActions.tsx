@@ -61,6 +61,7 @@ export function OnChainEscrowActions({
   const [msg, setMsg] = useState("");
   const [action, setAction] = useState<EscrowAction | null>(null);
   const [resolvedId, setResolvedId] = useState<string | null>(null);
+  const [resolvingActor, setResolvingActor] = useState(false);
 
   const walletAddr = publicKey?.toBase58() || "";
   const budgetLabel = formatBudgetLabel(budget);
@@ -68,9 +69,11 @@ export function OnChainEscrowActions({
   useEffect(() => {
     if (!connected || !walletAddr) {
       setResolvedId(null);
+      setResolvingActor(false);
       return;
     }
     let cancelled = false;
+    setResolvingActor(true);
     fetch(`${API_BASE}/api/profile-by-wallet?wallet=${walletAddr}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
@@ -78,6 +81,9 @@ export function OnChainEscrowActions({
       })
       .catch(() => {
         if (!cancelled) setResolvedId(null);
+      })
+      .finally(() => {
+        if (!cancelled) setResolvingActor(false);
       });
     return () => {
       cancelled = true;
@@ -220,10 +226,10 @@ export function OnChainEscrowActions({
     }
   }, [publicKey, sendTransaction, signTransaction, signMessage, actorId, isPoster, jobId, escrowId, onchainEscrowPDA, walletAddr, budget, assigneeId, connection]);
 
-  const posterGate = !publicKey || isPoster;
+  const posterGate = !publicKey || isPoster || resolvingActor;
   const canFund = posterGate && ["open", "in_progress"].includes(jobStatus) && !onchainEscrowPDA && escrowStatus !== "released";
-  const canRelease = posterGate && !!onchainEscrowPDA && !!escrowId && jobStatus !== "completed" && escrowStatus !== "released";
-  const canRefund = posterGate && !!onchainEscrowPDA && !!escrowId && jobStatus !== "completed" && escrowStatus !== "released";
+  const canRelease = !resolvingActor && posterGate && !!onchainEscrowPDA && !!escrowId && jobStatus !== "completed" && escrowStatus !== "released";
+  const canRefund = !resolvingActor && posterGate && !!onchainEscrowPDA && !!escrowId && jobStatus !== "completed" && escrowStatus !== "released";
 
   if (!canFund && !canRelease && !canRefund) {
     if (onchainEscrowPDA) {
@@ -274,20 +280,20 @@ export function OnChainEscrowActions({
         {canFund && (
           <button
             onClick={() => publicKey ? executeAction("fund") : null}
-            disabled={isProcessing || !publicKey}
+            disabled={isProcessing || !publicKey || resolvingActor}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ background: "#9945ff", color: "#fff" }}
-            title={!publicKey ? "Connect your Solana wallet to fund escrow" : undefined}
+            title={!publicKey ? "Connect your Solana wallet to fund escrow" : resolvingActor ? "Resolving poster profile for this wallet" : undefined}
           >
-            {isProcessing && action === "fund" ? <Loader2 size={14} className="animate-spin" /> : <Wallet size={14} />}
-            {publicKey ? `Fund Escrow (${budgetLabel})` : `Connect Wallet to Fund Escrow (${budgetLabel})`}
+            {isProcessing && action === "fund" ? <Loader2 size={14} className="animate-spin" /> : resolvingActor ? <Loader2 size={14} className="animate-spin" /> : <Wallet size={14} />}
+            {publicKey ? (resolvingActor ? "Resolving poster wallet..." : `Fund Escrow (${budgetLabel})`) : `Connect Wallet to Fund Escrow (${budgetLabel})`}
           </button>
         )}
 
         {canRelease && (
           <button
             onClick={() => publicKey ? executeAction("release") : null}
-            disabled={isProcessing || !publicKey}
+            disabled={isProcessing || !publicKey || resolvingActor}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ background: "#22c55e", color: "#fff" }}
             title={!publicKey ? "Connect your Solana wallet to release escrow" : undefined}
@@ -300,7 +306,7 @@ export function OnChainEscrowActions({
         {canRefund && (
           <button
             onClick={() => publicKey ? executeAction("refund") : null}
-            disabled={isProcessing || !publicKey}
+            disabled={isProcessing || !publicKey || resolvingActor}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)" }}
             title={!publicKey ? "Connect your Solana wallet to refund escrow" : undefined}
@@ -310,6 +316,13 @@ export function OnChainEscrowActions({
           </button>
         )}
       </div>
+
+      {publicKey && resolvingActor && canFund && (
+        <div className="mt-3 flex items-center gap-2 text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
+          <Loader2 size={12} className="animate-spin" />
+          Resolving the connected wallet to its poster profile so escrow can be funded safely.
+        </div>
+      )}
 
       {!publicKey && (canFund || canRelease || canRefund) && (
         <div className="mt-3 flex items-center gap-2 text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
