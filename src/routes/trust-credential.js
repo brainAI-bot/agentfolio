@@ -191,7 +191,8 @@ function registerTrustCredentialRoutes(app) {
       const unified = computeUnifiedTrustScore(db, parsed, { v3Score });
       const normalizedTrustScore = Number(unified.score || 0);
       const normalizedVerificationLevel = Number(unified.level || 0);
-      const normalizedTier = String(unified.levelName || 'Unverified').toUpperCase();
+      const normalizedTierLabel = String(unified.levelName || 'Unverified');
+      const normalizedTierKey = normalizedTierLabel.toUpperCase();
       const onChainRegistered = Boolean(unified.hasSatpIdentity);
 
       // 4. Build W3C Verifiable Credential payload
@@ -204,8 +205,10 @@ function registerTrustCredentialRoutes(app) {
         name: profile.name,
         trustScore: normalizedTrustScore,
         maxScore: 800,
-        tier: normalizedTier,
+        tier: normalizedTierLabel,
+        tierKey: normalizedTierKey,
         verificationLevel: normalizedVerificationLevel,
+        verificationLevelName: normalizedTierLabel,
         scoreVersion: unified.source || 'unified-satp-cache',
         verificationCount: Number(unified.verificationCount || 0),
         onChainRegistered,
@@ -239,9 +242,10 @@ function registerTrustCredentialRoutes(app) {
         trustScore: normalizedTrustScore,
         level: normalizedVerificationLevel,
         verificationLevel: normalizedVerificationLevel,
-        levelName: unified.levelName || 'Unverified',
-        verificationLevelName: unified.levelName || 'Unverified',
-        tier: normalizedTier,
+        levelName: normalizedTierLabel,
+        verificationLevelName: normalizedTierLabel,
+        tier: normalizedTierLabel,
+        tierKey: normalizedTierKey,
         trustBreakdown: credentialSubject.breakdown,
         verificationCount: Number(unified.verificationCount || 0),
         source: unified.source || 'unified-satp-cache',
