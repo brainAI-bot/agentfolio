@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { Shield } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createMarketplaceWalletAuth } from "@/lib/marketplace-auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -63,6 +64,7 @@ export function ApplicationsList({
   initialJobStatus?: string;
 }) {
   const { publicKey, connected, signMessage } = useWallet();
+  const router = useRouter();
   const hasInitialData = initialApplications.length > 0 || !!initialPosterId || !!initialJobStatus;
   const [apps, setApps] = useState<Application[]>(initialApplications);
   const [loading, setLoading] = useState(!hasInitialData);
@@ -140,8 +142,12 @@ export function ApplicationsList({
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setActionMsg({ ok: true, msg: "Application accepted. Job moved to in progress." });
-      loadJob();
+      setActionMsg({ ok: true, msg: "Application accepted. Refreshing job actions..." });
+      loadJob(false);
+      router.refresh();
+      setTimeout(() => {
+        window.location.reload();
+      }, 400);
     } catch (e: any) {
       setActionMsg({ ok: false, msg: e.message || "Failed to accept application" });
     } finally {
