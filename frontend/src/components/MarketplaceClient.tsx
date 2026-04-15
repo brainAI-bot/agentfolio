@@ -34,7 +34,7 @@ const statusConfig: Record<string, { label: string; color: string; icon: React.E
 };
 
 const escrowConfig: Record<string, { label: string; icon: React.ElementType }> = {
-  ready: { label: "Escrow Ready", icon: Unlock },
+  ready: { label: "Escrow Pending", icon: Unlock },
   locked: { label: "V3 Escrow Locked 🔒", icon: Lock },
   funded: { label: "V3 Escrow Funded 🔒", icon: Shield },
   released: { label: "Escrow Released", icon: CheckCircle },
