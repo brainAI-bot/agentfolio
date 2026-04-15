@@ -54,7 +54,7 @@ export interface Job {
   budget: string;
   skills: string[];
   status: "open" | "in_progress" | "completed" | "disputed";
-  escrowStatus: "ready" | "locked" | "funded" | "released" | "disputed";
+  escrowStatus: "ready" | "locked" | "funded" | "released" | "completed" | "disputed";
   escrowTx?: string | null;
   escrowId?: string | null;
   v3EscrowPDA?: string | null;

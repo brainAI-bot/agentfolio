@@ -477,13 +477,15 @@ function mapMarketplaceApiJob(raw: any): Job | null {
       : raw.status === "disputed"
         ? "disputed"
         : "open";
-  const escrowStatus: Job["escrowStatus"] = raw.fundsReleased
+  const escrowStatus: Job["escrowStatus"] = (raw.fundsReleased || raw.releasedAt || raw.v3ReleasedAt)
     ? "released"
-    : raw.v3EscrowPDA
-      ? "funded"
+    : (raw.v3EscrowPDA || raw.onchainEscrowPDA)
+      ? ((raw.fundsLocked || raw.escrowFunded) ? "locked" : "funded")
       : (raw.fundsLocked || raw.escrowFunded)
         ? "locked"
-        : "ready";
+        : status === "completed"
+          ? "completed"
+          : "ready";
 
   return {
     id: raw.id,
