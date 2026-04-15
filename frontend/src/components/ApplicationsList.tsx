@@ -165,7 +165,7 @@ export function ApplicationsList({
     <div className="space-y-3">
       {apps.map((app) => {
         const lvlColor = levelColors[app.verificationLevel ?? 0] || "#6b7280";
-        const profileId = app.applicantProfileId || app.applicantId;
+        const profileId = app.applicantProfileId || null;
         const profileUrl = profileId ? `/profile/${profileId}` : null;
         const canAccept = isPoster && jobStatus === "open" && app.status === "pending";
 
