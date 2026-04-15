@@ -371,7 +371,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
         const authHeaders = await createMarketplaceWalletAuth({
           action: "confirm_onchain_escrow",
           walletAddress,
-          actorId,
+          actorId: walletAddress,
           jobId: selectedJob.id,
           escrowId: buildData.escrowPDA,
           signMessage,
@@ -530,7 +530,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
         const authHeaders = await createMarketplaceWalletAuth({
           action: "confirm_onchain_release",
           walletAddress,
-          actorId,
+          actorId: walletAddress,
           jobId: selectedJob.id,
           escrowId: selectedJob.escrowId,
           signMessage,
