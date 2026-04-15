@@ -112,12 +112,15 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     }
   }, [connected, publicKey]);
 
+  const activeProfileId = resolvedProfileId || myProfileId;
+  const isResolvingConnectedProfile = connected && !!publicKey && resolvingProfile && !activeProfileId;
+
   const statusFiltered = filter === "all"
     ? jobs
     : filter === "my_jobs"
       ? jobs.filter((j) =>
           (connected && publicKey && j.poster === publicKey.toBase58()) ||
-          (myProfileId && (j.assigneeId === myProfileId || j.clientId === myProfileId))
+          (activeProfileId && (j.assigneeId === activeProfileId || j.clientId === activeProfileId))
         )
       : jobs.filter((j) => j.status === filter);
   const filtered = skillFilter
@@ -432,6 +435,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   const openJobAction = (job: Job, action: ModalType) => {
     if ((action === "apply" || action === "post-job") && publicKey && !resolvedProfileId) {
       resolveWalletProfile(publicKey.toBase58());
+      if (action === "apply") return;
     }
     setSelectedJob(job);
     setModal(action);
@@ -530,7 +534,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           const EscrowIcon = ec.icon;
           const isMyJob = Boolean(
             (connected && publicKey && job.clientId === publicKey.toBase58()) ||
-            (myProfileId && job.clientId === myProfileId)
+            (activeProfileId && job.clientId === activeProfileId)
           );
           const isMyAssignment = myProfileId && (job.assigneeId === myProfileId);
           const hasV3Escrow = !!job.v3EscrowPDA;
@@ -628,7 +632,15 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                   </span>
 
                   {/* Action buttons based on state */}
-                  {job.status === "open" && !isMyJob && connected && (
+                  {job.status === "open" && connected && isResolvingConnectedProfile && (
+                    <button
+                      disabled
+                      className="px-3 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wider opacity-70 cursor-not-allowed"
+                      style={{ fontFamily: "var(--font-mono)", background: "rgba(153,69,255,0.15)", color: "var(--solana)", border: "1px solid rgba(153,69,255,0.3)" }}>
+                      <Clock size={12} className="inline mr-1" /> Resolving Wallet...
+                    </button>
+                  )}
+                  {job.status === "open" && !isMyJob && connected && !isResolvingConnectedProfile && (
                     <button onClick={() => openJobAction(job, "apply")}
                       className="px-3 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wider transition-all hover:shadow-[0_0_15px_rgba(153,69,255,0.2)]"
                       style={{ fontFamily: "var(--font-mono)", background: "var(--accent)", color: "#fff" }}>
