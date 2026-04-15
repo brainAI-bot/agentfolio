@@ -528,7 +528,10 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           const ec = escrowConfig[job.escrowStatus] || escrowConfig.ready;
           const StatusIcon = sc.icon;
           const EscrowIcon = ec.icon;
-          const isMyJob = connected && publicKey && job.poster === publicKey.toBase58();
+          const isMyJob = Boolean(
+            (connected && publicKey && job.clientId === publicKey.toBase58()) ||
+            (myProfileId && job.clientId === myProfileId)
+          );
           const isMyAssignment = myProfileId && (job.assigneeId === myProfileId);
           const hasV3Escrow = !!job.v3EscrowPDA;
 

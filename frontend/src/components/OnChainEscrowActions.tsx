@@ -210,7 +210,7 @@ export function OnChainEscrowActions({
   }, [publicKey, sendTransaction, signTransaction, signMessage, actorId, isPoster, jobId, escrowId, onchainEscrowPDA, walletAddr, budget, assigneeId, connection]);
 
   const posterGate = !publicKey || isPoster;
-  const canFund = posterGate && jobStatus === "in_progress" && !onchainEscrowPDA && escrowStatus !== "released" && !!assigneeId;
+  const canFund = posterGate && ["open", "in_progress"].includes(jobStatus) && !onchainEscrowPDA && escrowStatus !== "released";
   const canRelease = posterGate && !!onchainEscrowPDA && !!escrowId && jobStatus !== "completed" && escrowStatus !== "released";
   const canRefund = posterGate && !!onchainEscrowPDA && !!escrowId && jobStatus !== "completed" && escrowStatus !== "released";
 
