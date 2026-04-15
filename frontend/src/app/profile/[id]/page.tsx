@@ -9,7 +9,7 @@ export async function generateStaticParams() {
 // import { WalletRequired } from "@/components/WalletRequired"; // Removed: profile pages are read-only, no wallet needed
 import type { Metadata } from "next";
 import { fetchAgent } from "@/lib/data-fetch";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { TrustBadge } from "@/components/TrustBadge";
 import { VerificationBadge, VERIFICATION_PRIORITY } from "@/components/VerificationBadge";
 import { Github, Wallet, Globe, Shield, ExternalLink, Star } from "lucide-react";
@@ -75,6 +75,9 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   const { id } = await params;
   const agent = await fetchAgent(id, { live: true });
   if (!agent) return notFound();
+  if (agent.id && agent.id !== id) {
+    redirect(`/profile/${agent.id}`);
+  }
 
   const v = agent.verifications;
   const statusColor = agent.unclaimed ? "#F59E0B" : agent.status === "online" ? "#10B981" : agent.status === "busy" ? "#F59E0B" : "#64748B";

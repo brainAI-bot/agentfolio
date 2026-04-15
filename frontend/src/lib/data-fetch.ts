@@ -2,22 +2,51 @@ import type { Agent } from "./types";
 
 const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || "http://127.0.0.1:3333";
 
+function buildProfileLookupCandidates(id: string): string[] {
+  const raw = String(id || "").trim();
+  if (!raw) return [];
+
+  const candidates: string[] = [];
+  const push = (value: string | null | undefined) => {
+    const normalized = String(value || "").trim();
+    if (normalized && !candidates.includes(normalized)) candidates.push(normalized);
+  };
+
+  push(raw);
+  if (/^agent_/i.test(raw)) push(raw.replace(/^agent_/i, ""));
+  if (/^agent_/i.test(raw)) push(raw.replace(/^agent_/i, "").replace(/^sm/i, ""));
+  if (/^sm/i.test(raw)) push(`agent_${raw}`);
+  if (/^sm/i.test(raw)) push(raw.replace(/^sm/i, ""));
+  if (/^\d+$/.test(raw)) {
+    push(`sm${raw}`);
+    push(`agent_sm${raw}`);
+  }
+
+  return candidates;
+}
+
 /**
  * Fetch agent data via HTTP API instead of filesystem.
  * This allows Next.js ISR to work properly since no fs imports are used.
  */
 export async function fetchAgent(id: string, opts: { live?: boolean } = {}): Promise<Agent | null> {
   try {
-    const url = `${API_BASE}/api/profile/${encodeURIComponent(id)}`;
-    const res = await fetch(url, opts.live ? { cache: "no-store" } : { next: { revalidate: 30 } });
-    if (!res.ok) return null;
-    const raw = await res.json();
+    let raw: any = null;
+    for (const candidateId of buildProfileLookupCandidates(id)) {
+      const url = `${API_BASE}/api/profile/${encodeURIComponent(candidateId)}`;
+      const res = await fetch(url, opts.live ? { cache: "no-store" } : { next: { revalidate: 30 } });
+      if (!res.ok) continue;
+      raw = await res.json();
+      if (raw?.id) break;
+    }
+    if (!raw?.id) return null;
+    const canonicalId = raw.id || id;
     const parsedNftAvatar = raw.nftAvatar || raw.nft_avatar || null;
     
     // Fetch trust credential breakdown (normalized)
     let trustBreakdown = null;
     try {
-      const tcRes = await globalThis.fetch(`${API_BASE}/api/trust-credential/${encodeURIComponent(id)}?format=json`, { next: { revalidate: 30 } });
+      const tcRes = await globalThis.fetch(`${API_BASE}/api/trust-credential/${encodeURIComponent(canonicalId)}?format=json`, { next: { revalidate: 30 } });
       if (tcRes.ok) {
         const tcData = await tcRes.json();
         trustBreakdown = tcData?.credential?.credentialSubject?.breakdown || null;
@@ -61,7 +90,7 @@ export async function fetchAgent(id: string, opts: { live?: boolean } = {}): Pro
     }
 
     return {
-      id: raw.id,
+      id: canonicalId,
       name: raw.name,
       handle: raw.handle || "",
       bio: raw.bio || "",
