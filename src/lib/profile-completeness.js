@@ -15,6 +15,35 @@ function getBio(profile = {}) {
   return String(profile.bio || profile.description || '').trim();
 }
 
+function parseObjectish(value) {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch (_) {
+      return null;
+    }
+  }
+  return null;
+}
+
+function hasAvatarSet(profile = {}) {
+  const directAvatar = String(profile.avatar || profile.avatar_url || '').trim();
+  if (directAvatar) return true;
+
+  const nftAvatar = parseObjectish(profile.nft_avatar || profile.nftAvatar);
+  return Boolean(
+    nftAvatar?.image ||
+    nftAvatar?.identifier ||
+    nftAvatar?.mint ||
+    nftAvatar?.mintAddress ||
+    nftAvatar?.verifiedOnChain ||
+    nftAvatar?.permanent
+  );
+}
+
 function countPortfolioItems(profile = {}) {
   const direct = profile.portfolioItemsCount ?? profile.portfolio_count ?? profile.projectCount ?? profile.projectsCount;
   if (Number.isFinite(Number(direct))) return Math.max(0, Number(direct));
@@ -35,7 +64,6 @@ function countPortfolioItems(profile = {}) {
 
 function summarizeProfileCompleteness(profile = {}) {
   const bio = getBio(profile);
-  const avatar = String(profile.avatar || profile.avatar_url || '').trim();
   const skills = parseArrayish(profile.skills);
   const handle = String(profile.handle || '').trim();
   const portfolioCount = countPortfolioItems(profile);
@@ -43,8 +71,9 @@ function summarizeProfileCompleteness(profile = {}) {
   return {
     bio,
     bioLength: bio.length,
+    hasBio: bio.length > 0,
     hasBio50: bio.length >= 50,
-    hasAvatar: Boolean(avatar),
+    hasAvatar: hasAvatarSet(profile),
     skills,
     skillCount: skills.length,
     hasThreeSkills: skills.length >= 3,
@@ -55,7 +84,7 @@ function summarizeProfileCompleteness(profile = {}) {
 
 function isProfileCompleteForLevel(profile = {}) {
   const summary = summarizeProfileCompleteness(profile);
-  return summary.hasBio50 && summary.hasAvatar && summary.hasThreeSkills;
+  return summary.hasBio && summary.hasAvatar && summary.hasThreeSkills;
 }
 
 function computeProfileCompleteness(profile = {}) {
