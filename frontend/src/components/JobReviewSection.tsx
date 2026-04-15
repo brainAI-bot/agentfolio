@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { Transaction } from "@solana/web3.js";
-import { CheckCircle, AlertTriangle, FileText, Star } from "lucide-react";
+import { AlertTriangle, CheckCircle, FileText, Info, Star } from "lucide-react";
 import { createMarketplaceWalletAuth } from "@/lib/marketplace-auth";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
@@ -44,7 +44,6 @@ export function JobReviewSection({
 }: Props) {
   const { publicKey, sendTransaction, signMessage } = useWallet();
   const { connection } = useConnection();
-  const [approving, setApproving] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const [changeNote, setChangeNote] = useState("");
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -125,44 +124,9 @@ export function JobReviewSection({
 
   if (!hasDeliverable && !isCompleted) return null;
 
-  const handleApprove = async () => {
-    if (viewerRole !== "client") {
-      setResult({ ok: false, msg: "Only the job poster can approve and release payment." });
-      return;
-    }
-    const actorId = viewerProfileId || walletAddr;
-    if (!actorId || !walletAddr) {
-      setResult({ ok: false, msg: "Connect the poster wallet first." });
-      return;
-    }
-    setApproving(true);
-    setResult(null);
-    try {
-      const authHeaders = await createMarketplaceWalletAuth({
-        action: "complete_job",
-        walletAddress: walletAddr,
-        actorId,
-        jobId,
-        signMessage,
-      });
-      const res = await fetch(`${API_BASE}/api/marketplace/jobs/${jobId}/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders },
-        body: JSON.stringify({
-          approvedBy: actorId,
-          completionNote: "Work approved and payment released.",
-        }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setResult({ ok: true, msg: "Work approved! Payment released to worker." });
-      setTimeout(() => window.location.reload(), 2000);
-    } catch (e: any) {
-      setResult({ ok: false, msg: e.message || "Failed to approve" });
-    } finally {
-      setApproving(false);
-    }
-  };
+  const clientApprovalMessage = jobPDA
+    ? "Use the Release Payment control in the on-chain escrow section below to approve this deliverable and release funds securely."
+    : "This job is missing an escrow PDA, so secure payment release is unavailable from this review panel.";
 
   const handleRequestChanges = async () => {
     if (viewerRole !== "client") {
@@ -342,15 +306,10 @@ export function JobReviewSection({
 
           {viewerRole === "client" ? (
             <div className="space-y-3">
-              <button
-                onClick={handleApprove}
-                disabled={approving}
-                className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
-                style={{ background: "#22c55e" }}
-              >
-                <CheckCircle size={16} />
-                {approving ? "Approving..." : "Approve & Release Payment"}
-              </button>
+              <div className="rounded-lg p-4 text-sm flex gap-2" style={{ background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.2)", color: "var(--text-secondary)" }}>
+                <Info size={16} className="shrink-0 mt-0.5" style={{ color: "#22c55e" }} />
+                <span>{clientApprovalMessage}</span>
+              </div>
 
               <div>
                 <textarea
