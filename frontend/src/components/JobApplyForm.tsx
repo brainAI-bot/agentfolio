@@ -20,7 +20,9 @@ export function JobApplyForm({ jobId, jobStatus, initialPosterId = null }: { job
   const [posterId, setPosterId] = useState<string | null>(initialPosterId);
   const [posterWalletMatch, setPosterWalletMatch] = useState(false);
   const [resolving, setResolving] = useState(false);
+  const [walletLookupSettled, setWalletLookupSettled] = useState(false);
   const [checkingPosterWallet, setCheckingPosterWallet] = useState(false);
+  const [posterWalletCheckSettled, setPosterWalletCheckSettled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -31,8 +33,9 @@ export function JobApplyForm({ jobId, jobStatus, initialPosterId = null }: { job
 
   // Auto-resolve wallet → profile ID when wallet connects
   useEffect(() => {
-    if (!connected || !publicKey) { setResolvedId(null); return; }
+    if (!connected || !publicKey) { setResolvedId(null); setWalletLookupSettled(false); return; }
     let cancelled = false;
+    setWalletLookupSettled(false);
     setResolving(true);
     fetch(`${API_BASE}/api/profile-by-wallet?wallet=${publicKey.toBase58()}`)
       .then(r => r.ok ? r.json() : null)
@@ -46,7 +49,7 @@ export function JobApplyForm({ jobId, jobStatus, initialPosterId = null }: { job
         }
       })
       .catch(() => { if (!cancelled) setResolvedId(null); })
-      .finally(() => { if (!cancelled) setResolving(false); });
+      .finally(() => { if (!cancelled) { setResolving(false); setWalletLookupSettled(true); } });
     return () => { cancelled = true; };
   }, [connected, publicKey]);
 
@@ -68,9 +71,11 @@ export function JobApplyForm({ jobId, jobStatus, initialPosterId = null }: { job
     if (!connected || !walletAddr || !posterId) {
       setPosterWalletMatch(false);
       setCheckingPosterWallet(false);
+      setPosterWalletCheckSettled(false);
       return;
     }
     let cancelled = false;
+    setPosterWalletCheckSettled(false);
     setCheckingPosterWallet(true);
     fetch(`${API_BASE}/api/profile/${encodeURIComponent(posterId)}`)
       .then((r) => (r.ok ? r.json() : null))
@@ -81,7 +86,10 @@ export function JobApplyForm({ jobId, jobStatus, initialPosterId = null }: { job
         if (!cancelled) setPosterWalletMatch(false);
       })
       .finally(() => {
-        if (!cancelled) setCheckingPosterWallet(false);
+        if (!cancelled) {
+          setCheckingPosterWallet(false);
+          setPosterWalletCheckSettled(true);
+        }
       });
     return () => { cancelled = true; };
   }, [connected, walletAddr, posterId]);
@@ -89,6 +97,7 @@ export function JobApplyForm({ jobId, jobStatus, initialPosterId = null }: { job
     if (!posterId) return false;
     return posterWalletMatch || posterId === resolvedId || posterId === walletAddr;
   }, [posterId, posterWalletMatch, resolvedId, walletAddr]);
+  const posterIdentityPending = connected && !!publicKey && !!posterId && (!walletLookupSettled || !posterWalletCheckSettled);
 
   const handleApply = async () => {
     const effectiveId = agentId.trim() || resolvedId;
@@ -139,7 +148,7 @@ export function JobApplyForm({ jobId, jobStatus, initialPosterId = null }: { job
   return (
     <div>
       <div className="flex flex-wrap gap-3">
-        {!showForm && (!connected ? !isPoster : !resolving && !checkingPosterWallet && !isPoster) && (
+        {!showForm && (!connected ? !isPoster : !posterIdentityPending && !isPoster) && (
           <button
             onClick={() => { if (!connected) smartConnect(); setShowForm(true); }}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white"
