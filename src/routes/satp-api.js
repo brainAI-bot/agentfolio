@@ -40,7 +40,12 @@ function registerSATPRoutes(app) {
       const path = require('path');
       const db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
       let profile = null;
-      if (profileId) profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
+      const rawProfileId = String(profileId || '').trim();
+      const loweredProfileId = rawProfileId.toLowerCase();
+      if (rawProfileId) profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(rawProfileId);
+      if (!profile && rawProfileId && !loweredProfileId.startsWith('agent_')) profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + loweredProfileId);
+      if (!profile && rawProfileId) profile = db.prepare('SELECT * FROM profiles WHERE LOWER(handle) = ?').get(rawProfileId.startsWith('@') ? loweredProfileId : '@' + loweredProfileId);
+      if (!profile && rawProfileId) profile = db.prepare('SELECT * FROM profiles WHERE LOWER(name) = ?').get(loweredProfileId);
       if (!profile && wallet) profile = db.prepare('SELECT * FROM profiles WHERE wallet = ?').get(wallet);
       if (!profile && wallet) profile = db.prepare('SELECT * FROM profiles WHERE id IN (SELECT profile_id FROM verifications WHERE identifier = ?)').get(wallet);
       try { db.close(); } catch {}
@@ -875,18 +880,20 @@ function registerSATPRoutes(app) {
     try {
       const chainCache = require('../lib/chain-cache');
       const { agentId } = req.params;
+      const resolvedProfile = await loadProfileByWalletOrId({ profileId: agentId });
+      const lookupAgentId = resolvedProfile?.id || agentId;
 
       if (satpV3Client) {
         let record = null;
         try {
-          record = await satpV3Client.getGenesisRecord(agentId);
+          record = await satpV3Client.getGenesisRecord(lookupAgentId);
         } catch (_) {}
 
         if (!record || record.error) {
           return res.json({
             ok: true,
             data: {
-              agentId,
+              agentId: lookupAgentId,
               count: 0,
               platforms: [],
               attestations: [],
@@ -896,14 +903,14 @@ function registerSATPRoutes(app) {
       }
 
       const includeSatp = req.query.includeSatp === '1' || req.query.include_satp === '1';
-      const result = await loadPublicAttestations({ profileId: agentId, includeSatp });
+      const result = await loadPublicAttestations({ profileId: lookupAgentId, includeSatp });
       const enriched = result.attestations || [];
       const platforms = result.types || enriched.map(a => normalizeAttestationPlatform(a.platform) || a.platform).filter(isPublicAttestationPlatform);
       
       res.json({
         ok: true,
         data: {
-          agentId,
+          agentId: lookupAgentId,
           count: enriched.length,
           platforms,
           attestations: enriched,
