@@ -132,6 +132,23 @@ function registerTrustCredentialRoutes(app) {
   });
 
   /**
+   * GET /api/trust-credential?id=<agentId>
+   *
+   * Query-param alias for the advertised service endpoint.
+   */
+  app.get('/api/trust-credential', (req, res) => {
+    const agentId = String(req.query.id || req.query.agentId || '').trim();
+    if (!agentId) {
+      return res.status(400).json({ error: 'id or agentId query parameter required' });
+    }
+    const query = new URLSearchParams(req.query);
+    query.delete('id');
+    query.delete('agentId');
+    const suffix = query.toString();
+    return res.redirect(307, `/api/trust-credential/${encodeURIComponent(agentId)}${suffix ? `?${suffix}` : ''}`);
+  });
+
+  /**
    * GET /api/trust-credential/:agentId
    * 
    * Issues a signed JWT Verifiable Credential containing the agent's trust score.
@@ -279,7 +296,7 @@ function registerTrustCredentialRoutes(app) {
     }
   });
 
-  console.log('[TrustCredential] Routes registered: GET /api/trust-credential/verify, GET /api/trust-credential/:agentId');
+  console.log('[TrustCredential] Routes registered: GET /api/trust-credential, GET /api/trust-credential/verify, GET /api/trust-credential/:agentId');
 }
 
 module.exports = { registerTrustCredentialRoutes };
