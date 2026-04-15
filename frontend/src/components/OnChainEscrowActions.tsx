@@ -6,6 +6,7 @@ import { Transaction, VersionedTransaction } from "@solana/web3.js";
 import { Shield, Wallet, ArrowRight, CheckCircle, AlertTriangle, Loader2 } from "lucide-react";
 import { createMarketplaceWalletAuth } from "@/lib/marketplace-auth";
 import { resolveAgentWallet } from "@/lib/v3-escrow";
+import { profileHasWallet } from "@/lib/profile-wallets";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
@@ -62,6 +63,8 @@ export function OnChainEscrowActions({
   const [action, setAction] = useState<EscrowAction | null>(null);
   const [resolvedId, setResolvedId] = useState<string | null>(null);
   const [resolvingActor, setResolvingActor] = useState(false);
+  const [posterWalletMatch, setPosterWalletMatch] = useState(false);
+  const [checkingPosterWallet, setCheckingPosterWallet] = useState(false);
 
   const walletAddr = publicKey?.toBase58() || "";
   const budgetLabel = formatBudgetLabel(budget);
@@ -90,11 +93,35 @@ export function OnChainEscrowActions({
     };
   }, [connected, walletAddr]);
 
+  useEffect(() => {
+    if (!connected || !walletAddr || !clientId) {
+      setPosterWalletMatch(false);
+      setCheckingPosterWallet(false);
+      return;
+    }
+    let cancelled = false;
+    setCheckingPosterWallet(true);
+    fetch(`${API_BASE}/api/profile/${encodeURIComponent(clientId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((profile) => {
+        if (!cancelled) setPosterWalletMatch(profileHasWallet(profile, walletAddr));
+      })
+      .catch(() => {
+        if (!cancelled) setPosterWalletMatch(false);
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingPosterWallet(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId, connected, walletAddr]);
+
   const actorId = resolvedId || clientId || walletAddr;
   const isPoster = useMemo(() => {
     if (!clientId) return !!walletAddr;
-    return clientId === resolvedId || clientId === walletAddr;
-  }, [clientId, resolvedId, walletAddr]);
+    return posterWalletMatch || clientId === resolvedId || clientId === walletAddr;
+  }, [clientId, posterWalletMatch, resolvedId, walletAddr]);
 
   const executeAction = useCallback(async (actionType: EscrowAction) => {
     if (!publicKey || !signMessage || (!sendTransaction && !signTransaction)) {
@@ -226,7 +253,7 @@ export function OnChainEscrowActions({
     }
   }, [publicKey, sendTransaction, signTransaction, signMessage, actorId, isPoster, jobId, escrowId, onchainEscrowPDA, walletAddr, budget, assigneeId, connection]);
 
-  const posterGate = !publicKey || isPoster || resolvingActor;
+  const posterGate = !publicKey || isPoster || resolvingActor || checkingPosterWallet;
   const canFund = posterGate && ["open", "in_progress"].includes(jobStatus) && !onchainEscrowPDA && escrowStatus !== "released";
   const canRelease = !resolvingActor && posterGate && !!onchainEscrowPDA && !!escrowId && jobStatus !== "completed" && escrowStatus !== "released";
   const canRefund = !resolvingActor && posterGate && !!onchainEscrowPDA && !!escrowId && jobStatus !== "completed" && escrowStatus !== "released";
@@ -286,7 +313,7 @@ export function OnChainEscrowActions({
             title={!publicKey ? "Connect your Solana wallet to fund escrow" : resolvingActor ? "Resolving poster profile for this wallet" : undefined}
           >
             {isProcessing && action === "fund" ? <Loader2 size={14} className="animate-spin" /> : resolvingActor ? <Loader2 size={14} className="animate-spin" /> : <Wallet size={14} />}
-            {publicKey ? (resolvingActor ? "Resolving poster wallet..." : `Fund Escrow (${budgetLabel})`) : `Connect Wallet to Fund Escrow (${budgetLabel})`}
+            {publicKey ? ((resolvingActor || checkingPosterWallet) ? "Resolving poster wallet..." : `Fund Escrow (${budgetLabel})`) : `Connect Wallet to Fund Escrow (${budgetLabel})`}
           </button>
         )}
 
