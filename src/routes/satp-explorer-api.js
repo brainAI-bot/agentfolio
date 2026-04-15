@@ -366,10 +366,11 @@ for (const agent of filteredAgents) {
     seenAttestationPlatforms.add(platform);
     const hinted = txHints.get(platform) || null;
     const txSignature = att?.txSignature || att?.tx_signature || hinted?.txSignature || null;
+    const rawMemo = typeof att?.memo === 'string' ? att.memo.trim() : null;
     explorerAttestations.push({
       ...att,
       platform,
-      memo: att?.memo || null,
+      memo: rawMemo && !/^ATTESTATION\|/i.test(rawMemo) ? rawMemo : null,
       txSignature,
       timestamp: att?.timestamp || hinted?.timestamp || null,
       solscanUrl: att?.solscanUrl || hinted?.solscanUrl || (txSignature ? `https://solana.fm/tx/${txSignature}` : null),
