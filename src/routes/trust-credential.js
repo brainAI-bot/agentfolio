@@ -212,8 +212,25 @@ function registerTrustCredentialRoutes(app) {
       };
 
       // 5. Return based on format
+      const normalizedResponse = {
+        id: agentId,
+        agentId,
+        score: normalizedTrustScore,
+        trustScore: normalizedTrustScore,
+        level: normalizedVerificationLevel,
+        verificationLevel: normalizedVerificationLevel,
+        levelName: unified.levelName || 'Unverified',
+        verificationLevelName: unified.levelName || 'Unverified',
+        tier: normalizedTier,
+        trustBreakdown: credentialSubject.breakdown,
+        verificationCount: Number(unified.verificationCount || 0),
+        source: unified.source || 'unified-satp-cache',
+        onChainRegistered,
+      };
+
       if (format === 'json') {
         return res.json({
+          ...normalizedResponse,
           credential: vcPayload,
           decoded: vcPayload,
           format: 'json',
@@ -247,6 +264,7 @@ function registerTrustCredentialRoutes(app) {
       });
 
       return res.json({
+        ...normalizedResponse,
         credential: token,
         format: 'jwt',
         issuer: ISSUER_DID,
