@@ -10,7 +10,7 @@
  * All functions return unsigned transactions for wallet signing.
  */
 
-import { Transaction, Connection, PublicKey } from '@solana/web3.js';
+import { Transaction, Connection, PublicKey, VersionedTransaction } from '@solana/web3.js';
 
 const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || '';
 
@@ -35,11 +35,20 @@ interface V3EscrowResult {
   message: string;
 }
 
+export type WalletTransaction = Transaction | VersionedTransaction;
+
+function deserializeWalletTransaction(base64Tx: string): WalletTransaction {
+  const txBytes = Uint8Array.from(Buffer.from(base64Tx, 'base64'));
+  return (txBytes[0] & 0x80) !== 0
+    ? VersionedTransaction.deserialize(txBytes)
+    : Transaction.from(Buffer.from(txBytes));
+}
+
 /**
  * Build an unsigned create-escrow transaction via V3 API.
  * Returns a Transaction object ready for wallet signing.
  */
-export async function buildV3EscrowCreate(params: V3EscrowCreateParams): Promise<{ tx: Transaction; escrowPDA: string }> {
+export async function buildV3EscrowCreate(params: V3EscrowCreateParams): Promise<{ tx: WalletTransaction; escrowPDA: string }> {
   const res = await fetch(`${API_BASE}/api/v3/escrow/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -49,7 +58,7 @@ export async function buildV3EscrowCreate(params: V3EscrowCreateParams): Promise
   if ((data as any).error) throw new Error((data as any).error);
   if (!data.transaction) throw new Error('V3 API did not return a transaction');
 
-  const tx = Transaction.from(Buffer.from(data.transaction, 'base64'));
+  const tx = deserializeWalletTransaction(data.transaction);
   return { tx, escrowPDA: data.escrowPDA };
 }
 
@@ -60,7 +69,7 @@ export async function buildV3SubmitWork(params: {
   escrowPDA: string;
   agentWallet: string;
   workProof: string;
-}): Promise<Transaction> {
+}): Promise<WalletTransaction> {
   const res = await fetch(`${API_BASE}/api/v3/escrow/submit-work`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -68,7 +77,7 @@ export async function buildV3SubmitWork(params: {
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error);
-  return Transaction.from(Buffer.from(data.transaction, 'base64'));
+  return deserializeWalletTransaction(data.transaction);
 }
 
 /**
@@ -78,7 +87,7 @@ export async function buildV3Release(params: {
   escrowPDA: string;
   clientWallet: string;
   agentWallet: string;
-}): Promise<Transaction> {
+}): Promise<WalletTransaction> {
   const res = await fetch(`${API_BASE}/api/v3/escrow/release`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -86,7 +95,7 @@ export async function buildV3Release(params: {
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error);
-  return Transaction.from(Buffer.from(data.transaction, 'base64'));
+  return deserializeWalletTransaction(data.transaction);
 }
 
 /**
@@ -97,7 +106,7 @@ export async function buildV3PartialRelease(params: {
   clientWallet: string;
   agentWallet: string;
   amountLamports: number;
-}): Promise<Transaction> {
+}): Promise<WalletTransaction> {
   const res = await fetch(`${API_BASE}/api/v3/escrow/partial-release`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -105,7 +114,7 @@ export async function buildV3PartialRelease(params: {
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error);
-  return Transaction.from(Buffer.from(data.transaction, 'base64'));
+  return deserializeWalletTransaction(data.transaction);
 }
 
 /**
@@ -115,7 +124,7 @@ export async function buildV3Dispute(params: {
   escrowPDA: string;
   signerWallet: string;
   reason: string;
-}): Promise<Transaction> {
+}): Promise<WalletTransaction> {
   const res = await fetch(`${API_BASE}/api/v3/escrow/dispute`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -123,7 +132,7 @@ export async function buildV3Dispute(params: {
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error);
-  return Transaction.from(Buffer.from(data.transaction, 'base64'));
+  return deserializeWalletTransaction(data.transaction);
 }
 
 /**
@@ -167,16 +176,31 @@ export async function resolveAgentWallet(agentId: string): Promise<string | null
  * Sign and send a V3 transaction using wallet adapter.
  */
 export async function signAndSendV3Tx(
-  tx: Transaction,
+  tx: WalletTransaction,
   connection: Connection,
   publicKey: PublicKey,
-  sendTransaction: (tx: Transaction, connection: Connection) => Promise<string>,
+  sendTransaction: ((tx: Transaction, connection: Connection) => Promise<string>) | undefined,
+  signTransaction?: ((tx: WalletTransaction) => Promise<WalletTransaction>) | null,
 ): Promise<string> {
-  // Refresh blockhash
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+
+  if (tx instanceof VersionedTransaction) {
+    if (!signTransaction) {
+      throw new Error('Connected wallet does not support versioned transaction signing');
+    }
+    tx.message.recentBlockhash = blockhash;
+    const signedTx = await signTransaction(tx);
+    const raw = signedTx.serialize();
+    const sig = await connection.sendRawTransaction(raw);
+    await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+    return sig;
+  }
+
   tx.recentBlockhash = blockhash;
   tx.feePayer = publicKey;
-
+  if (!sendTransaction) {
+    throw new Error('Connected wallet does not support legacy transaction sending');
+  }
   const sig = await sendTransaction(tx, connection);
   await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
   return sig;

@@ -282,7 +282,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
       });
 
       // User signs and sends via Phantom
-      const sig = await signAndSendV3Tx(tx, connection, publicKey, sendTransaction);
+      const sig = await signAndSendV3Tx(tx, connection, publicKey, sendTransaction, signTransaction);
 
       const actorId = resolvedProfileId || publicKey.toBase58();
       const authHeaders = await createMarketplaceWalletAuth({
@@ -345,7 +345,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
         });
 
         // User signs on-chain release
-        const sig = await signAndSendV3Tx(tx, connection, publicKey, sendTransaction);
+        const sig = await signAndSendV3Tx(tx, connection, publicKey, sendTransaction, signTransaction);
 
         const actorId = resolvedProfileId || publicKey.toBase58();
         const authHeaders = await createMarketplaceWalletAuth({
