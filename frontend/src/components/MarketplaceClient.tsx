@@ -183,8 +183,9 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                 ? "locked"
                 : "ready",
           escrowTx: j.v3EscrowTx || j.escrowTx || j.escrow_tx || null,
-          v3EscrowPDA: j.v3EscrowPDA || j.onchainEscrowPDA || null,
-          onchainEscrowPDA: j.onchainEscrowPDA || j.v3EscrowPDA || null,
+          escrowId: j.escrowId || null,
+          v3EscrowPDA: j.v3EscrowPDA || null,
+          onchainEscrowPDA: j.onchainEscrowPDA || null,
           proposals: j.applicationCount || 0,
           deadline: (j.timeline || "").replace("_", " "),
           assignee: j.selectedAgentId || j.acceptedApplicant || undefined,
@@ -392,36 +393,32 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     setLoading(true);
     try {
       const agentId = selectedJob.assignee || selectedJob.assigneeId;
+      const walletAddress = publicKey.toBase58();
+      const actorId = resolvedProfileId || myProfileId || walletAddress;
 
-      // Check if this job has a V3 escrow PDA — if so, do on-chain release
       if (selectedJob.v3EscrowPDA) {
         const escrowPDA = selectedJob.v3EscrowPDA;
 
-        // Resolve agent wallet
         if (!agentId) throw new Error("No agent assigned to this job");
         const agentWallet = await resolveAgentWallet(agentId);
         if (!agentWallet) throw new Error(`Could not resolve wallet for agent "${agentId}"`);
 
-        // Build unsigned V3 release TX
         const tx = await buildV3Release({
           escrowPDA,
-          clientWallet: publicKey.toBase58(),
+          clientWallet: walletAddress,
           agentWallet,
         });
 
-        // User signs on-chain release
         const sig = await signAndSendV3Tx(tx, connection, publicKey, sendTransaction, signTransaction);
 
-        const actorId = resolvedProfileId || publicKey.toBase58();
         const authHeaders = await createMarketplaceWalletAuth({
           action: "complete_job",
-          walletAddress: publicKey.toBase58(),
+          walletAddress,
           actorId,
           jobId: selectedJob.id,
           signMessage,
         });
 
-        // Notify backend
         const releaseRes = await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/complete`, {
           method: "POST",
           headers: { "Content-Type": "application/json", ...authHeaders },
@@ -438,11 +435,62 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
         }
 
         showMessage("success", `Funds released on-chain! TX: ${sig.slice(0, 16)}...`);
+      } else if (selectedJob.onchainEscrowPDA && selectedJob.escrowId) {
+        if (!agentId) throw new Error("No agent assigned to this job");
+        const agentWallet = await resolveAgentWallet(agentId);
+        if (!agentWallet) throw new Error(`Could not resolve wallet for agent "${agentId}"`);
+
+        const buildRes = await fetch(`${API_BASE}/api/marketplace/escrow/${selectedJob.escrowId}/release/onchain`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clientWallet: walletAddress,
+            agentWallet,
+          }),
+        });
+        const buildData = await buildRes.json();
+        if (!buildRes.ok || buildData.error) {
+          throw new Error(buildData.error || "Failed to build on-chain release transaction");
+        }
+
+        const tx = deserializeMarketplaceTransaction(buildData.transaction);
+        let sig = "";
+        if (tx instanceof VersionedTransaction) {
+          if (!signTransaction) throw new Error("Connected wallet does not support versioned transaction signing");
+          const signedTx = await signTransaction(tx as any);
+          sig = await connection.sendRawTransaction(signedTx.serialize());
+        } else {
+          sig = await sendTransaction(tx as any, connection);
+        }
+        await connection.confirmTransaction(sig, "confirmed");
+
+        const authHeaders = await createMarketplaceWalletAuth({
+          action: "confirm_onchain_release",
+          walletAddress,
+          actorId,
+          jobId: selectedJob.id,
+          escrowId: selectedJob.escrowId,
+          signMessage,
+        });
+
+        const confirmRes = await fetch(`${API_BASE}/api/marketplace/escrow/${selectedJob.escrowId}/release/confirm`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify({
+            txSignature: sig,
+            clientWallet: walletAddress,
+          }),
+        });
+        const confirmData = await confirmRes.json();
+        if (!confirmRes.ok || confirmData.error) {
+          throw new Error(confirmData.error || "Failed to confirm on-chain release");
+        }
+
+        showMessage("success", `On-chain payment released! TX: ${sig.slice(0, 16)}...`);
       } else {
-        const actorId = resolvedProfileId || publicKey.toBase58();
         const authHeaders = await createMarketplaceWalletAuth({
           action: "complete_job",
-          walletAddress: publicKey.toBase58(),
+          walletAddress,
           actorId,
           jobId: selectedJob.id,
           signMessage,
