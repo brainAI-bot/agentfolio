@@ -126,6 +126,10 @@ export function JobReviewSection({
   if (!hasDeliverable && !isCompleted) return null;
 
   const handleApprove = async () => {
+    if (viewerRole !== "client") {
+      setResult({ ok: false, msg: "Only the job poster can approve and release payment." });
+      return;
+    }
     const actorId = viewerProfileId || walletAddr;
     if (!actorId || !walletAddr) {
       setResult({ ok: false, msg: "Connect the poster wallet first." });
@@ -161,6 +165,10 @@ export function JobReviewSection({
   };
 
   const handleRequestChanges = async () => {
+    if (viewerRole !== "client") {
+      setResult({ ok: false, msg: "Only the job poster can request changes." });
+      return;
+    }
     if (!changeNote.trim()) {
       setResult({ ok: false, msg: "Please describe what changes are needed." });
       return;
@@ -332,37 +340,43 @@ export function JobReviewSection({
             </div>
           </div>
 
-          <div className="space-y-3">
-            <button
-              onClick={handleApprove}
-              disabled={approving}
-              className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
-              style={{ background: "#22c55e" }}
-            >
-              <CheckCircle size={16} />
-              {approving ? "Approving..." : "Approve & Release Payment"}
-            </button>
-
-            <div>
-              <textarea
-                value={changeNote}
-                onChange={(e) => setChangeNote(e.target.value)}
-                placeholder="Describe what changes are needed..."
-                rows={2}
-                className="w-full px-3 py-2 rounded-lg text-sm resize-none mb-2"
-                style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}
-              />
+          {viewerRole === "client" ? (
+            <div className="space-y-3">
               <button
-                onClick={handleRequestChanges}
-                disabled={requesting}
-                className="w-full flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50"
-                style={{ background: "transparent", border: "1px solid var(--warning, #f59e0b)", color: "var(--warning, #f59e0b)" }}
+                onClick={handleApprove}
+                disabled={approving}
+                className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+                style={{ background: "#22c55e" }}
               >
-                <AlertTriangle size={14} />
-                {requesting ? "Sending..." : "Request Changes"}
+                <CheckCircle size={16} />
+                {approving ? "Approving..." : "Approve & Release Payment"}
               </button>
+
+              <div>
+                <textarea
+                  value={changeNote}
+                  onChange={(e) => setChangeNote(e.target.value)}
+                  placeholder="Describe what changes are needed..."
+                  rows={2}
+                  className="w-full px-3 py-2 rounded-lg text-sm resize-none mb-2"
+                  style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}
+                />
+                <button
+                  onClick={handleRequestChanges}
+                  disabled={requesting}
+                  className="w-full flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50"
+                  style={{ background: "transparent", border: "1px solid var(--warning, #f59e0b)", color: "var(--warning, #f59e0b)" }}
+                >
+                  <AlertTriangle size={14} />
+                  {requesting ? "Sending..." : "Request Changes"}
+                </button>
+              </div>
             </div>
-          </div>
+          ) : viewerRole === "agent" ? (
+            <div className="rounded-lg p-4 text-sm" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-tertiary)" }}>
+              Waiting for the job poster to approve the submitted work or request changes.
+            </div>
+          ) : null}
         </>
       )}
 
