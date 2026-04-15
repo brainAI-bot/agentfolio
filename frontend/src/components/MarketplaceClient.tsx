@@ -285,10 +285,11 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      showMessage("success", `Job "${postForm.title}" posted! ID: ${data.id}`);
-      setModal(null);
+      showMessage("success", `Job "${postForm.title}" posted. Next step: fund on-chain escrow.`);
       setPostForm({ title: "", description: "", category: "development", skills: "", budgetAmount: "", timeline: "1_week", requirements: "" });
       await refreshJobs();
+      window.location.href = `/marketplace/job/${data.id}`;
+      return;
     } catch (e: any) {
       showMessage("error", e.message || "Failed to post job");
     } finally { setLoading(false); }

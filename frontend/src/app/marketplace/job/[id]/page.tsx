@@ -120,15 +120,29 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   } catch {}
 
   const sc = statusConfig[job.status] || statusConfig.open;
+  const actionJob = {
+    ...job,
+    ...(liveJob || {}),
+    status: liveJob?.status || job.status,
+    clientId: liveJob?.clientId || liveJob?.postedBy || (job as any).clientId || null,
+    escrowId: liveJob?.escrowId || (job as any).escrowId || null,
+    assigneeId: liveJob?.selectedAgentId || liveJob?.acceptedApplicant || (job as any).assigneeId || null,
+    deliverableId: liveJob?.deliverableId || (job as any).deliverableId,
+    deliverableDescription: liveJob?.deliverableDescription || (job as any).deliverableDescription,
+    deliverableStatus: liveJob?.deliverableStatus || (job as any).deliverableStatus,
+    deliverableSubmittedAt: liveJob?.deliverableSubmittedAt || liveJob?.submittedAt || (job as any).deliverableSubmittedAt,
+    onchainEscrowPDA: liveJob?.onchainEscrowPDA || liveJob?.v3EscrowPDA || (job as any).onchainEscrowPDA || (job as any).v3EscrowPDA || null,
+    escrowStatus: liveJob?.escrowStatus || (job as any).escrowStatus || "ready",
+  };
   const effectiveEscrowStatus = (liveJob?.fundsReleased || liveJob?.releasedAt || liveJob?.v3ReleasedAt)
     ? "released"
-    : ((liveJob?.onchainEscrowPDA || liveJob?.v3EscrowPDA || (job as any).onchainEscrowPDA || (job as any).v3EscrowPDA)
+    : (actionJob.onchainEscrowPDA
         ? ((liveJob?.escrowFunded || (job as any).escrowFunded) ? "locked" : "funded")
         : ((liveJob?.escrowFunded || (job as any).escrowFunded)
             ? "locked"
-            : job.status === "completed"
+            : actionJob.status === "completed"
               ? "completed"
-              : (liveJob?.escrowStatus || (job as any).escrowStatus || "ready")));
+              : actionJob.escrowStatus));
 
   return (
     <div className="min-h-screen" style={{ background: "var(--bg-primary)", color: "var(--text-primary)" }}>
@@ -224,13 +238,13 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           <div className="mb-6">
             <SubmitWorkForm
               jobId={job.id}
-              jobStatus={job.status}
-              assigneeId={job.assigneeId}
-              clientId={job.clientId}
-              deliverableId={job.deliverableId}
-              deliverableDescription={job.deliverableDescription}
-              deliverableStatus={job.deliverableStatus}
-              deliverableSubmittedAt={job.deliverableSubmittedAt}
+              jobStatus={actionJob.status}
+              assigneeId={actionJob.assigneeId}
+              clientId={actionJob.clientId}
+              deliverableId={actionJob.deliverableId}
+              deliverableDescription={actionJob.deliverableDescription}
+              deliverableStatus={actionJob.deliverableStatus}
+              deliverableSubmittedAt={actionJob.deliverableSubmittedAt}
             />
           </div>
         )}
@@ -240,17 +254,17 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           <h2 className="text-sm font-bold uppercase tracking-widest mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
             Actions
           </h2>
-          <JobApplyForm jobId={job.id} jobStatus={job.status} initialPosterId={liveJob?.clientId || liveJob?.postedBy || job.clientId || null} />
+          <JobApplyForm jobId={job.id} jobStatus={actionJob.status} initialPosterId={actionJob.clientId} />
           <JobReviewSection 
             jobId={job.id} 
-            jobStatus={job.status} 
-            deliverableDescription={(job as any).deliverableDescription}
-            deliverableStatus={(job as any).deliverableStatus}
-            deliverableSubmittedAt={(job as any).deliverableSubmittedAt}
-            assigneeId={(job as any).assigneeId}
-            clientId={(job as any).clientId}
-            escrowStatus={(job as any).escrowStatus}
-            jobPDA={(job as any).onchainEscrowPDA || (job as any).v3EscrowPDA || null}
+            jobStatus={actionJob.status}
+            deliverableDescription={actionJob.deliverableDescription}
+            deliverableStatus={actionJob.deliverableStatus}
+            deliverableSubmittedAt={actionJob.deliverableSubmittedAt}
+            assigneeId={actionJob.assigneeId}
+            clientId={actionJob.clientId}
+            escrowStatus={actionJob.escrowStatus}
+            jobPDA={actionJob.onchainEscrowPDA}
           />
 
           <div className="mt-4 text-[11px] px-3 py-2 rounded-lg" style={{ background: "var(--bg-primary)", fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
@@ -259,13 +273,13 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
           <OnChainEscrowActions
             jobId={job.id}
-            jobStatus={job.status}
-            escrowStatus={(job as any).escrowStatus || "ready"}
-            escrowId={(job as any).escrowId}
-            clientId={(job as any).clientId}
-            assigneeId={(job as any).assigneeId}
+            jobStatus={actionJob.status}
+            escrowStatus={actionJob.escrowStatus || "ready"}
+            escrowId={actionJob.escrowId}
+            clientId={actionJob.clientId}
+            assigneeId={actionJob.assigneeId}
             budget={job.budget}
-            onchainEscrowPDA={(job as any).onchainEscrowPDA || (job as any).v3EscrowPDA}
+            onchainEscrowPDA={actionJob.onchainEscrowPDA || undefined}
           />
         </div>
       </div>
