@@ -84,6 +84,9 @@ const SATP_NETWORK = process.env.SATP_NETWORK || 'mainnet';
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'agentfolio.db');
 
+const isLikelySolanaTxSignature = (value) => /^[1-9A-HJ-NP-Za-km-z]{60,120}$/.test(String(value || '').trim());
+const buildSolanaTxUrl = (value) => isLikelySolanaTxSignature(value) ? ('https://solana.fm/tx/' + String(value).trim()) : null;
+
 let db;
 
 function getDb() {
@@ -647,7 +650,7 @@ function enrichProfile(row) {
           hints.set(platform, {
             txSignature,
             verifiedAt: att.timestamp || att.verifiedAt || null,
-            url: att.solscanUrl || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null),
+            url: att.solscanUrl || buildSolanaTxUrl(txSignature),
           });
         }
         const rows = getDb().prepare('SELECT platform, identifier, proof, verified_at FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
@@ -661,7 +664,7 @@ function enrichProfile(row) {
           const hint = hints.get(platform) || {};
           const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || hint.txSignature || null;
           if (platform === 'solana' && !txSignature) continue;
-          const proofUrl = hint.url || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null);
+          const proofUrl = hint.url || buildSolanaTxUrl(txSignature);
           vMap[platform] = {
             verified: true,
             address: proof.address || displayId,
@@ -678,7 +681,7 @@ function enrichProfile(row) {
             verified: true,
             address: row.wallet,
             identifier: row.wallet,
-            proof: { txSignature, timestamp: hint.verifiedAt || null, url: hint.url || (txSignature ? ('https://solana.fm/tx/' + txSignature) : null) },
+            proof: { txSignature, timestamp: hint.verifiedAt || null, url: hint.url || buildSolanaTxUrl(txSignature) },
             verified_at: hint.verifiedAt || null,
             source: 'active-verification',
           };
@@ -692,7 +695,7 @@ function enrichProfile(row) {
             verified: true,
             address: fallbackId,
             identifier: fallbackId,
-            proof: { txSignature: att.tx_signature, timestamp: att.created_at || null, url: 'https://solana.fm/tx/' + att.tx_signature },
+            proof: { txSignature: att.tx_signature, timestamp: att.created_at || null, url: buildSolanaTxUrl(att.tx_signature) },
             verified_at: att.created_at || null,
             source: 'on-chain-attestation',
           };
