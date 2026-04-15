@@ -22,11 +22,16 @@ const CACHE_TTL = 5 * 60 * 1000;
 
 function hasIncompleteExplorerCache(data) {
   const agents = Array.isArray(data?.agents) ? data.agents : [];
-  return agents.some((agent) => (Array.isArray(agent?.attestationMemos) ? agent.attestationMemos : []).some((att) => {
-    const tx = String(att?.txSignature || '').trim();
-    const url = String(att?.solscanUrl || '').trim();
-    return tx.startsWith('0x') || url.includes('/account/');
-  }));
+  return agents.some((agent) => {
+    const platforms = Array.isArray(agent?.platforms) ? agent.platforms : [];
+    if (platforms.some((platform) => String(platform || '').trim().toLowerCase() === 'evm')) return true;
+    return (Array.isArray(agent?.attestationMemos) ? agent.attestationMemos : []).some((att) => {
+      const tx = String(att?.txSignature || '').trim();
+      const url = String(att?.solscanUrl || '').trim();
+      const platform = String(att?.platform || '').trim().toLowerCase();
+      return tx.startsWith('0x') || url.includes('/account/') || platform === 'evm';
+    });
+  });
 }
 
 function clearSatpExplorerCache() {
@@ -431,7 +436,29 @@ for (const agent of filteredAgents) {
       dedupedAgents.push(agent);
     }
 
-    const result = { agents: dedupedAgents, count: dedupedAgents.length, source: "solana-mainnet-v3" };
+    const sanitizedAgents = dedupedAgents.map((agent) => {
+      const attestationMemos = [];
+      const seenAttestationKeys = new Set();
+      for (const att of Array.isArray(agent.attestationMemos) ? agent.attestationMemos : []) {
+        const platform = normalizePlatform(att?.platform || att?.type || att?.attestationType);
+        if (!platform) continue;
+        const key = `${platform}|${String(att?.txSignature || '').trim()}|${String(att?.pda || '').trim()}`;
+        if (seenAttestationKeys.has(key)) continue;
+        seenAttestationKeys.add(key);
+        attestationMemos.push({ ...att, platform });
+      }
+      const platforms = [...new Set([
+        ...(Array.isArray(agent.platforms) ? agent.platforms : []),
+        ...attestationMemos.map((att) => att.platform),
+      ].map((value) => normalizePlatform(value)).filter(Boolean))];
+      return {
+        ...agent,
+        attestationMemos,
+        platforms,
+        onChainAttestations: attestationMemos.length || agent.onChainAttestations || platforms.length || 0,
+      };
+    });
+    const result = { agents: sanitizedAgents, count: sanitizedAgents.length, source: "solana-mainnet-v3" };
     if (!hasIncompleteExplorerCache(result)) {
       agentCache = { data: result, timestamp: Date.now() };
     } else {
