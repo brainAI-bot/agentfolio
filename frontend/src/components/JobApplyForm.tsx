@@ -114,7 +114,7 @@ export function JobApplyForm({ jobId, jobStatus, initialPosterId = null }: { job
   return (
     <div>
       <div className="flex flex-wrap gap-3">
-        {!showForm && !isPoster && (
+        {!showForm && (!connected ? !isPoster : !resolving && !isPoster) && (
           <button
             onClick={() => { if (!connected) smartConnect(); setShowForm(true); }}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white"
