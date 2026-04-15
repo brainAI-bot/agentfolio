@@ -112,12 +112,26 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   // Auto-resolve wallet → profile for My Jobs filter
   useEffect(() => {
     if (connected && publicKey) {
+      let cancelled = false;
+      setResolvingProfile(true);
       fetch(`${API_BASE}/api/profile-by-wallet?wallet=${publicKey.toBase58()}`)
         .then(r => r.ok ? r.json() : null)
-        .then(d => { if (d?.id) setMyProfileId(d.id); })
-        .catch(() => {});
+        .then(d => {
+          if (cancelled) return;
+          setMyProfileId(d?.id || null);
+        })
+        .catch(() => {
+          if (!cancelled) setMyProfileId(null);
+        })
+        .finally(() => {
+          if (!cancelled) setResolvingProfile(false);
+        });
+      return () => {
+        cancelled = true;
+      };
     } else {
       setMyProfileId(null);
+      setResolvingProfile(false);
     }
   }, [connected, publicKey]);
 
