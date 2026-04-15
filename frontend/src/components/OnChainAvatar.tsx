@@ -28,31 +28,37 @@ interface Props {
     attestationTx?: string;
     permanent?: boolean;
     arweaveUrl?: string;
+    identifier?: string;
+    verifiedOnChain?: boolean;
   } | null;
 }
 
 export function OnChainAvatar({ walletAddress, fallbackImage, agentName, size = 80, className = "", nftAvatar }: Props) {
   const [avatarData, setAvatarData] = useState<OnChainAvatarData | null>(null);
-  const [loading, setLoading] = useState(!!walletAddress && !nftAvatar);
+  const [loading, setLoading] = useState(!!walletAddress && !(nftAvatar?.image || nftAvatar?.arweaveUrl));
   const [imageSrc, setImageSrc] = useState(nftAvatar?.image || nftAvatar?.arweaveUrl || fallbackImage);
 
   // Use nftAvatar data directly if available (no fetch needed)
   useEffect(() => {
-    if (nftAvatar?.permanent) {
+    if (nftAvatar?.image || nftAvatar?.arweaveUrl) {
       setAvatarData({
         image: nftAvatar.image || nftAvatar.arweaveUrl || null,
-        mint: nftAvatar.soulboundMint || "",
+        mint: nftAvatar.soulboundMint || nftAvatar.identifier || "",
         name: agentName,
-        permanent: true,
+        permanent: !!(nftAvatar.permanent || nftAvatar.soulboundMint),
         burnTx: nftAvatar.burnTx || null,
-        source: "on-chain",
+        source: nftAvatar.verifiedOnChain ? "verified-profile" : "profile",
       });
       setImageSrc(nftAvatar.image || nftAvatar.arweaveUrl || fallbackImage);
       setLoading(false);
       return;
     }
 
-    if (!walletAddress) { setLoading(false); return; }
+    if (!walletAddress) {
+      setImageSrc(fallbackImage);
+      setLoading(false);
+      return;
+    }
     
     fetch(`/api/avatar/onchain?wallet=${walletAddress}`)
       .then(r => r.json())
@@ -66,7 +72,7 @@ export function OnChainAvatar({ walletAddress, fallbackImage, agentName, size = 
       .catch(() => setLoading(false));
   }, [walletAddress, nftAvatar]);
 
-  const isPermanent = avatarData?.permanent || nftAvatar?.permanent;
+  const isPermanent = avatarData?.permanent || nftAvatar?.permanent || !!nftAvatar?.soulboundMint;
   const borderColor = isPermanent ? "#9945FF" : avatarData ? "var(--accent)" : "var(--border-bright)";
   
   const solscanUrl = nftAvatar?.soulboundMint 

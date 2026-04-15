@@ -606,6 +606,8 @@ app.get('/api/explorer/:agentId', async (req, res) => {
 
     const v3Score = await getV3Score(profile.id).catch(() => null);
     const unified = computeUnifiedTrustScore(db, profile, { v3Score });
+    const parsedNftAvatar = parseJsonFieldSafe(profile.nft_avatar, null);
+    const resolvedAvatar = profile.avatar || parsedNftAvatar?.image || parsedNftAvatar?.arweaveUrl || null;
 
     const attestationHints = new Map();
     try {
@@ -670,6 +672,10 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       verificationBadge: unified.badge,
       scoreVersion: unified.source,
       verifications: publicVerifications,
+      avatar: resolvedAvatar,
+      nftAvatar: parsedNftAvatar,
+      nft_avatar: parsedNftAvatar,
+      nftImage: parsedNftAvatar?.image || parsedNftAvatar?.arweaveUrl || resolvedAvatar,
       wallets: parseJsonFieldSafe(profile.wallets, {}),
       tags: parseJsonFieldSafe(profile.tags, []),
       skills: parseJsonFieldSafe(profile.skills, []),

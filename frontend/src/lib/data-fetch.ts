@@ -12,6 +12,7 @@ export async function fetchAgent(id: string, opts: { live?: boolean } = {}): Pro
     const res = await fetch(url, opts.live ? { cache: "no-store" } : { next: { revalidate: 30 } });
     if (!res.ok) return null;
     const raw = await res.json();
+    const parsedNftAvatar = raw.nftAvatar || raw.nft_avatar || null;
     
     // Fetch trust credential breakdown (normalized)
     let trustBreakdown = null;
@@ -64,8 +65,8 @@ export async function fetchAgent(id: string, opts: { live?: boolean } = {}): Pro
       name: raw.name,
       handle: raw.handle || "",
       bio: raw.bio || "",
-      avatar: raw.avatar || "",
-      nftAvatar: raw.nftAvatar || null,
+      avatar: raw.avatar || parsedNftAvatar?.image || parsedNftAvatar?.arweaveUrl || "",
+      nftAvatar: parsedNftAvatar,
       trustScore: repScore,
       tier: vLevel,
       verificationLevel: vLevel,

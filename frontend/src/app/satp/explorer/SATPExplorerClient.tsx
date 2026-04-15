@@ -180,7 +180,7 @@ export default function SATPExplorerPage() {
             const profile = profilesByWallet[wallet] || null;
             
             // NFT avatar from profile cross-reference
-            const nftAvatar = profile?.nftAvatar;
+            const nftAvatar = profile?.nftAvatar || profile?.nft_avatar || null;
             
             // Platforms: use on-chain agent.platforms as primary, merge with profile verifications
             const onChainPlatforms: string[] = Array.isArray(agent.platforms)
