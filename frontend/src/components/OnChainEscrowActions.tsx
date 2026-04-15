@@ -40,7 +40,7 @@ function parseBudgetAmount(budget: string | number | null | undefined): number {
 export function OnChainEscrowActions({
   jobId, jobStatus, escrowStatus, escrowId, clientId, assigneeId, budget, onchainEscrowPDA
 }: Props) {
-  const { publicKey, connected, signMessage, sendTransaction } = useWallet();
+  const { publicKey, connected, signMessage, sendTransaction, signTransaction } = useWallet();
   const { connection } = useConnection();
   const [step, setStep] = useState<Step>("idle");
   const [msg, setMsg] = useState("");
@@ -76,7 +76,7 @@ export function OnChainEscrowActions({
   }, [clientId, resolvedId, walletAddr]);
 
   const executeAction = useCallback(async (actionType: EscrowAction) => {
-    if (!publicKey || !sendTransaction || !signMessage) {
+    if (!publicKey || !signMessage || (!sendTransaction && !signTransaction)) {
       setMsg("Connect a wallet that supports signing first");
       setStep("error");
       return;
@@ -148,7 +148,20 @@ export function OnChainEscrowActions({
       const tx = isVersioned
         ? VersionedTransaction.deserialize(txBytes)
         : Transaction.from(Buffer.from(txBytes));
-      const txSignature = await sendTransaction(tx as any, connection);
+
+      let txSignature = "";
+      if (isVersioned) {
+        if (!signTransaction) {
+          throw new Error("Connected wallet does not support versioned transaction signing");
+        }
+        const signedTx = await signTransaction(tx as any);
+        txSignature = await connection.sendRawTransaction(signedTx.serialize());
+      } else {
+        if (!sendTransaction) {
+          throw new Error("Connected wallet does not support legacy transaction sending");
+        }
+        txSignature = await sendTransaction(tx as any, connection);
+      }
       await connection.confirmTransaction(txSignature, "confirmed");
 
       setStep("confirming");
@@ -194,7 +207,7 @@ export function OnChainEscrowActions({
       setStep("error");
       setMsg(e.message || "Transaction failed");
     }
-  }, [publicKey, sendTransaction, signMessage, actorId, isPoster, jobId, escrowId, onchainEscrowPDA, walletAddr, budget, assigneeId, connection]);
+  }, [publicKey, sendTransaction, signTransaction, signMessage, actorId, isPoster, jobId, escrowId, onchainEscrowPDA, walletAddr, budget, assigneeId, connection]);
 
   const posterGate = !publicKey || isPoster;
   const canFund = posterGate && jobStatus === "in_progress" && !onchainEscrowPDA && escrowStatus !== "released" && !!assigneeId;
