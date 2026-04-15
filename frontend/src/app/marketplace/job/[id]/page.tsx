@@ -228,9 +228,9 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         {/* Apply / Actions */}
         <div className="rounded-xl p-6" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
           <h2 className="text-sm font-bold uppercase tracking-widest mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
-            {job.status === "open" ? "Apply" : "Actions"}
+            Actions
           </h2>
-          <JobApplyForm jobId={job.id} jobStatus={job.status} />
+          <JobApplyForm jobId={job.id} jobStatus={job.status} initialPosterId={liveJob?.clientId || liveJob?.postedBy || job.clientId || null} />
           <JobReviewSection 
             jobId={job.id} 
             jobStatus={job.status} 

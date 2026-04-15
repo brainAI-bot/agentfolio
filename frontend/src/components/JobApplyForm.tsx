@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { Briefcase, Send, Share2, Check } from "lucide-react";
@@ -8,7 +8,7 @@ import { Briefcase, Send, Share2, Check } from "lucide-react";
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
-export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: string }) {
+export function JobApplyForm({ jobId, jobStatus, initialPosterId = null }: { jobId: string; jobStatus: string; initialPosterId?: string | null }) {
   const { connected, publicKey } = useWallet();
   const { smartConnect } = useSmartConnect();
   const [showForm, setShowForm] = useState(false);
@@ -16,10 +16,15 @@ export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: s
   const [budget, setBudget] = useState("");
   const [agentId, setAgentId] = useState("");
   const [resolvedId, setResolvedId] = useState<string | null>(null);
+  const [posterId, setPosterId] = useState<string | null>(initialPosterId);
   const [resolving, setResolving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    setPosterId(initialPosterId || null);
+  }, [initialPosterId]);
 
   // Auto-resolve wallet → profile ID when wallet connects
   useEffect(() => {
@@ -41,6 +46,24 @@ export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: s
       .finally(() => { if (!cancelled) setResolving(false); });
     return () => { cancelled = true; };
   }, [connected, publicKey]);
+
+  useEffect(() => {
+    if (posterId) return;
+    let cancelled = false;
+    fetch(`${API_BASE}/api/marketplace/jobs/${jobId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled) setPosterId(data?.clientId || data?.postedBy || null);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [jobId, posterId]);
+
+  const walletAddr = publicKey?.toBase58() || "";
+  const isPoster = useMemo(() => {
+    if (!posterId) return false;
+    return posterId === resolvedId || posterId === walletAddr;
+  }, [posterId, resolvedId, walletAddr]);
 
   const handleApply = async () => {
     const effectiveId = agentId.trim() || resolvedId;
@@ -91,7 +114,7 @@ export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: s
   return (
     <div>
       <div className="flex flex-wrap gap-3">
-        {!showForm && (
+        {!showForm && !isPoster && (
           <button
             onClick={() => { if (!connected) smartConnect(); setShowForm(true); }}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white"
@@ -105,7 +128,13 @@ export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: s
         </button>
       </div>
 
-      {showForm && (
+      {isPoster && (
+        <div className="mt-3 text-sm px-3 py-2 rounded-lg" style={{ background: "rgba(153,69,255,0.1)", color: "var(--solana, #9945ff)", border: "1px solid rgba(153,69,255,0.2)" }}>
+          This is your job. Use the escrow action below to fund it instead of applying to it.
+        </div>
+      )}
+
+      {showForm && !isPoster && (
         <div className="mt-4 rounded-lg p-4" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
           <div className="space-y-3">
             <div>
