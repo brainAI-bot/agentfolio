@@ -349,11 +349,13 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
 
         const tx = deserializeMarketplaceTransaction(buildData.transaction);
         let sig = "";
-        if (tx instanceof VersionedTransaction) {
-          if (!signTransaction) throw new Error("Connected wallet does not support versioned transaction signing");
+        if (signTransaction) {
           const signedTx = await signTransaction(tx as any);
           sig = await connection.sendRawTransaction(signedTx.serialize());
         } else {
+          if (tx instanceof VersionedTransaction || !sendTransaction) {
+            throw new Error("Connected wallet does not support signing this escrow transaction");
+          }
           sig = await sendTransaction(tx as any, connection);
         }
         await connection.confirmTransaction(sig, "confirmed");
@@ -506,11 +508,13 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
 
         const tx = deserializeMarketplaceTransaction(buildData.transaction);
         let sig = "";
-        if (tx instanceof VersionedTransaction) {
-          if (!signTransaction) throw new Error("Connected wallet does not support versioned transaction signing");
+        if (signTransaction) {
           const signedTx = await signTransaction(tx as any);
           sig = await connection.sendRawTransaction(signedTx.serialize());
         } else {
+          if (tx instanceof VersionedTransaction || !sendTransaction) {
+            throw new Error("Connected wallet does not support signing this escrow transaction");
+          }
           sig = await sendTransaction(tx as any, connection);
         }
         await connection.confirmTransaction(sig, "confirmed");
