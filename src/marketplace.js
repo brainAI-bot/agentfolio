@@ -281,8 +281,7 @@ async function getVerifiedFundingState(job, escrow = null) {
 
   if (localEscrow) {
     result.hasEscrow = true;
-    result.funded = localEscrow.status === 'funded' && !!(localEscrow.txHash || localEscrow.depositConfirmed);
-    if (!result.funded) result.reason = 'Escrow is not verified as funded';
+    result.reason = 'Escrow funding is not verified on-chain';
     return result;
   }
 
@@ -965,7 +964,7 @@ function registerRoutes(app) {
   });
 
   // POST /api/marketplace/jobs/:id/confirm-deposit — Confirm on-chain escrow deposit
-  app.post('/api/marketplace/jobs/:id/confirm-deposit', (req, res) => {
+  app.post('/api/marketplace/jobs/:id/confirm-deposit', async (req, res) => {
     const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
     const job = readJSON(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -991,14 +990,50 @@ function registerRoutes(app) {
     if (!matchesActor(actorId, escrow.fundedBy)) {
       return res.status(403).json({ error: 'Only the job poster can confirm escrow funding' });
     }
+    if (!escrowOnchainLib?.confirmTransaction || !escrowOnchainLib?.readEscrowAccount) {
+      return res.status(500).json({ error: 'On-chain escrow verifier unavailable' });
+    }
+
+    try {
+      await escrowOnchainLib.confirmTransaction(txHash);
+    } catch (e) {
+      return res.status(400).json({ error: `Deposit transaction not confirmed on-chain: ${e.message}` });
+    }
+
+    let onchainState;
+    try {
+      onchainState = await escrowOnchainLib.readEscrowAccount(job.id);
+    } catch (e) {
+      return res.status(400).json({ error: `Failed to read on-chain escrow: ${e.message}` });
+    }
+    if (!onchainState?.exists) {
+      return res.status(400).json({ error: 'Escrow PDA not found on-chain' });
+    }
+    if (!['created', 'agent_accepted', 'work_submitted', 'released', 'auto_released'].includes(onchainState.status)) {
+      return res.status(400).json({ error: `Escrow is ${onchainState.status || 'not funded'} on-chain` });
+    }
+    if (onchainState.client !== auth.walletAddress) {
+      return res.status(403).json({ error: 'Signed wallet does not match the on-chain escrow client' });
+    }
 
     escrow.txHash = txHash;
+    escrow.escrowPDA = onchainState.escrowPDA;
+    escrow.onchain = true;
     escrow.depositConfirmed = true;
     escrow.depositConfirmedAt = new Date().toISOString();
     escrow.depositConfirmedBy = normalizeActorId(actorId) || actorId;
     writeJSON(escrowPath, escrow);
+    try { syncMarketplaceEscrowToDb(escrow, job); } catch (e) { console.warn('[Marketplace] escrow DB sync failed after deposit confirm:', e.message); }
 
-    res.json({ message: 'Deposit confirmed', escrow });
+    job.onchainEscrowPDA = onchainState.escrowPDA;
+    job.depositConfirmedAt = escrow.depositConfirmedAt;
+    job.escrowFunded = true;
+    job.fundsLocked = true;
+    job.updatedAt = new Date().toISOString();
+    writeJSON(jobPath, job);
+    try { syncMarketplaceJobToDb(job); } catch (e) { console.warn('[Marketplace] job DB sync failed after deposit confirm:', e.message); }
+
+    res.json({ message: 'Deposit confirmed', escrow, onchain: onchainState });
   });
 
   // POST /api/marketplace/jobs/:id/v3-escrow-funded — Record V3 on-chain escrow creation
