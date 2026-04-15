@@ -175,9 +175,16 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           budget: `${j.budgetAmount || 0} ${j.budgetCurrency || "USDC"}`,
           skills: j.skills || [],
           status: j.status === "in_progress" ? "in_progress" : j.status || "open",
-          escrowStatus: j.fundsReleased ? "released" : j.v3EscrowPDA ? "funded" : j.escrowFunded ? "locked" : "ready",
+          escrowStatus: j.fundsReleased
+            ? "released"
+            : (j.onchainEscrowPDA || j.v3EscrowPDA)
+              ? "funded"
+              : j.escrowFunded
+                ? "locked"
+                : "ready",
           escrowTx: j.v3EscrowTx || j.escrowTx || j.escrow_tx || null,
-          v3EscrowPDA: j.v3EscrowPDA || null,
+          v3EscrowPDA: j.v3EscrowPDA || j.onchainEscrowPDA || null,
+          onchainEscrowPDA: j.onchainEscrowPDA || j.v3EscrowPDA || null,
           proposals: j.applicationCount || 0,
           deadline: (j.timeline || "").replace("_", " "),
           assignee: j.selectedAgentId || j.acceptedApplicant || undefined,
