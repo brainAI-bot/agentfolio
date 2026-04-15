@@ -19,6 +19,7 @@ import {
   getV3EscrowState,
 } from "@/lib/v3-escrow";
 import { createMarketplaceWalletAuth } from "@/lib/marketplace-auth";
+import { profileHasWallet } from "@/lib/profile-wallets";
 
 const SITE_URL = (typeof window !== "undefined" ? window.location.origin : "") || process.env.NEXT_PUBLIC_SITE_URL || "";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -106,6 +107,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   const [resolvedProfileId, setResolvedProfileId] = useState<string | null>(null);
   const [resolvingProfile, setResolvingProfile] = useState(false);
   const [myProfileId, setMyProfileId] = useState<string | null>(null);
+  const [posterWalletMatches, setPosterWalletMatches] = useState<Record<string, boolean>>({});
 
   // Auto-resolve wallet → profile for My Jobs filter
   useEffect(() => {
@@ -136,12 +138,49 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   const activeProfileId = resolvedProfileId || myProfileId;
   const isResolvingConnectedProfile = connected && !!publicKey && resolvingProfile && !activeProfileId;
 
+  useEffect(() => {
+    if (!connected || !publicKey || jobs.length === 0) {
+      setPosterWalletMatches({});
+      return;
+    }
+
+    const walletAddr = publicKey.toBase58();
+    const clientIds = [...new Set(jobs.map((job) => job.clientId).filter(Boolean))] as string[];
+    if (!clientIds.length) {
+      setPosterWalletMatches({});
+      return;
+    }
+
+    let cancelled = false;
+    Promise.all(clientIds.map(async (clientId) => {
+      if (clientId === walletAddr || clientId === activeProfileId) return [clientId, true] as const;
+      try {
+        const res = await fetch(`${API_BASE}/api/profile/${encodeURIComponent(clientId)}`);
+        const profile = res.ok ? await res.json() : null;
+        return [clientId, profileHasWallet(profile, walletAddr)] as const;
+      } catch {
+        return [clientId, false] as const;
+      }
+    }))
+      .then((entries) => {
+        if (!cancelled) setPosterWalletMatches(Object.fromEntries(entries));
+      })
+      .catch(() => {
+        if (!cancelled) setPosterWalletMatches({});
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProfileId, connected, jobs, publicKey]);
+
   const statusFiltered = filter === "all"
     ? jobs
     : filter === "my_jobs"
       ? jobs.filter((j) =>
           (connected && publicKey && j.poster === publicKey.toBase58()) ||
-          (activeProfileId && (j.assigneeId === activeProfileId || j.clientId === activeProfileId))
+          (activeProfileId && (j.assigneeId === activeProfileId || j.clientId === activeProfileId)) ||
+          (!!j.clientId && !!posterWalletMatches[j.clientId])
         )
       : jobs.filter((j) => j.status === filter);
   const filtered = skillFilter
@@ -656,7 +695,8 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           const EscrowIcon = ec.icon;
           const isMyJob = Boolean(
             (connected && publicKey && job.clientId === publicKey.toBase58()) ||
-            (activeProfileId && job.clientId === activeProfileId)
+            (activeProfileId && job.clientId === activeProfileId) ||
+            (!!job.clientId && !!posterWalletMatches[job.clientId])
           );
           const isMyAssignment = myProfileId && (job.assigneeId === myProfileId);
           const hasV3Escrow = !!job.v3EscrowPDA;
@@ -999,3 +1039,4 @@ function Select({ label, value, onChange, options }: {
     </div>
   );
 }
+
