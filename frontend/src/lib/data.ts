@@ -330,8 +330,9 @@ function loadAllJobs(): Job[] {
           assignee: assigneeName,
           assigneeId: raw.selectedAgentId || raw.acceptedApplicant || undefined,
           clientId: raw.clientId,
-          onchainEscrowPDA: raw.onchainEscrowPDA || raw.v3EscrowPDA || null,
-          v3EscrowPDA: raw.v3EscrowPDA || raw.onchainEscrowPDA || null,
+          escrowId: raw.escrowId || null,
+          onchainEscrowPDA: raw.onchainEscrowPDA || null,
+          v3EscrowPDA: raw.v3EscrowPDA || null,
           ...(() => {
             if (raw.deliverableId) {
               try {
@@ -459,8 +460,9 @@ function mapMarketplaceApiJob(raw: any): Job | null {
     status,
     escrowStatus,
     escrowTx: raw.v3EscrowTx || raw.escrowTx || raw.escrow_tx || raw.releaseTxHash || null,
+    escrowId: raw.escrowId || null,
     v3EscrowPDA: raw.v3EscrowPDA || null,
-    onchainEscrowPDA: raw.onchainEscrowPDA || raw.v3EscrowPDA || null,
+    onchainEscrowPDA: raw.onchainEscrowPDA || null,
     proposals: raw.applicationCount || applications.length,
     deadline: typeof raw.timeline === "string" && raw.timeline ? raw.timeline.replaceAll("_", " ") : "Flexible",
     assignee: raw.selectedAgentId || raw.acceptedApplicant || undefined,
