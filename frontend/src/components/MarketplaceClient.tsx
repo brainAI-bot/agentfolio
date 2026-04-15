@@ -295,7 +295,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
       });
 
       // Notify backend — store V3 escrow PDA on the job
-      await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/v3-escrow-funded`, {
+      const recordRes = await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/v3-escrow-funded`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({
@@ -307,6 +307,10 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           agentId,
         }),
       });
+      const recordData = await recordRes.json();
+      if (!recordRes.ok || recordData.error) {
+        throw new Error(recordData.error || "Failed to record V3 escrow on the job");
+      }
 
       showMessage("success", `V3 Escrow funded on-chain! TX: ${sig.slice(0, 16)}... | PDA: ${escrowPDA.slice(0, 12)}...`);
       setModal(null);
@@ -353,7 +357,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
         });
 
         // Notify backend
-        await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/complete`, {
+        const releaseRes = await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/complete`, {
           method: "POST",
           headers: { "Content-Type": "application/json", ...authHeaders },
           body: JSON.stringify({
@@ -363,6 +367,10 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
             v3Release: true,
           }),
         });
+        const releaseData = await releaseRes.json();
+        if (!releaseRes.ok || releaseData.error) {
+          throw new Error(releaseData.error || "Failed to record V3 release on the job");
+        }
 
         showMessage("success", `Funds released on-chain! TX: ${sig.slice(0, 16)}...`);
       } else {
