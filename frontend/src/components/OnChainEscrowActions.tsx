@@ -200,15 +200,12 @@ export function OnChainEscrowActions({
       const { tx, isVersioned } = deserializeEscrowTransaction(buildData.transaction);
 
       let txSignature = "";
-      if (isVersioned) {
-        if (!signTransaction) {
-          throw new Error("Connected wallet does not support versioned transaction signing");
-        }
+      if (signTransaction) {
         const signedTx = await signTransaction(tx as any);
         txSignature = await connection.sendRawTransaction(signedTx.serialize());
       } else {
-        if (!sendTransaction) {
-          throw new Error("Connected wallet does not support legacy transaction sending");
+        if (isVersioned || !sendTransaction) {
+          throw new Error("Connected wallet does not support signing this escrow transaction");
         }
         txSignature = await sendTransaction(tx as any, connection);
       }
