@@ -16,6 +16,21 @@ try { addActivity = require('./profile-store').addActivity; } catch { addActivit
 const { syncMarketplaceJobToDb, syncMarketplaceApplicationToDb, syncMarketplaceEscrowToDb } = require('./lib/marketplace-db-sync');
 let escrowOnchainLib;
 try { escrowOnchainLib = require('./lib/escrow-onchain'); } catch { escrowOnchainLib = null; }
+let SATPV3SDK = null;
+let satpV3Sdk = null;
+const SATP_NETWORK = process.env.SATP_NETWORK || process.env.SOLANA_NETWORK || 'mainnet';
+const SATP_RPC_URL = process.env.SOLANA_RPC_URL || process.env.SOLANA_RPC || null;
+try {
+  const mod = require('../satp-client/src/index');
+  SATPV3SDK = mod.SATPV3SDK;
+} catch {
+  try {
+    const mod = require('satp-client');
+    SATPV3SDK = mod.SATPV3SDK;
+  } catch {
+    SATPV3SDK = null;
+  }
+}
 
 const DATA_DIR = path.join(__dirname, '..', 'data', 'marketplace');
 const MARKETPLACE_AUTH_WINDOW_MS = 5 * 60 * 1000;
@@ -192,12 +207,51 @@ function getJobDeliverable(job) {
   return readJSON(path.join(DATA_DIR, 'deliverables', `${job.deliverableId}.json`));
 }
 
+function getSatpV3Sdk() {
+  if (!satpV3Sdk && SATPV3SDK) {
+    satpV3Sdk = new SATPV3SDK({
+      network: SATP_NETWORK,
+      ...(SATP_RPC_URL ? { rpcUrl: SATP_RPC_URL } : {}),
+    });
+  }
+  return satpV3Sdk;
+}
+
+async function readV3EscrowState(escrowPDA) {
+  const sdk = getSatpV3Sdk();
+  if (!sdk) throw new Error('SATP V3 escrow verifier unavailable');
+  const escrow = await sdk.getEscrow(escrowPDA);
+  if (!escrow || escrow.error) {
+    throw new Error(escrow?.error || 'Escrow account not found on-chain');
+  }
+  return escrow;
+}
+
 async function getVerifiedFundingState(job, escrow = null) {
   const result = { hasEscrow: false, funded: false, onchain: false, escrow: escrow || null, onchainState: null, reason: null };
   const localEscrow = escrow || getJobEscrow(job);
   result.escrow = localEscrow;
 
-  const expectedPDA = job?.onchainEscrowPDA || job?.v3EscrowPDA || localEscrow?.escrowPDA || null;
+  if (job?.v3EscrowPDA) {
+    result.hasEscrow = true;
+    result.onchain = true;
+    try {
+      const onchainState = await readV3EscrowState(job.v3EscrowPDA);
+      result.onchainState = onchainState;
+      if (onchainState.pda !== job.v3EscrowPDA) {
+        result.reason = 'Escrow PDA mismatch';
+        return result;
+      }
+      result.funded = ['Active', 'WorkSubmitted', 'Released', 'Disputed', 'Resolved'].includes(onchainState.status);
+      if (!result.funded) result.reason = `V3 escrow is ${onchainState.status || 'not funded'} on-chain`;
+      return result;
+    } catch (e) {
+      result.reason = `Failed to read V3 escrow: ${e.message}`;
+      return result;
+    }
+  }
+
+  const expectedPDA = job?.onchainEscrowPDA || localEscrow?.escrowPDA || null;
   if (expectedPDA || localEscrow?.onchain) {
     result.hasEscrow = true;
     result.onchain = true;
@@ -245,7 +299,7 @@ async function getVerifiedFundingState(job, escrow = null) {
 function hasSubmittedWork(job, fundingState = null) {
   const deliverable = getJobDeliverable(job);
   if (deliverable && (deliverable.status === 'submitted' || deliverable.status === 'approved')) return true;
-  return ['work_submitted', 'released', 'auto_released'].includes(fundingState?.onchainState?.status);
+  return ['work_submitted', 'released', 'auto_released', 'WorkSubmitted', 'Released', 'Resolved'].includes(fundingState?.onchainState?.status);
 }
 
 // Enrich application with profile trust/verification data
@@ -948,7 +1002,7 @@ function registerRoutes(app) {
   });
 
   // POST /api/marketplace/jobs/:id/v3-escrow-funded — Record V3 on-chain escrow creation
-  app.post("/api/marketplace/jobs/:id/v3-escrow-funded", (req, res) => {
+  app.post("/api/marketplace/jobs/:id/v3-escrow-funded", async (req, res) => {
     const jobPath = path.join(DATA_DIR, "jobs", `${req.params.id}.json`);
     const job = readJSON(jobPath);
     if (!job) return res.status(404).json({ error: "Job not found" });
@@ -969,14 +1023,53 @@ function registerRoutes(app) {
     if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
     const actorId = auth.actorId;
 
+    if (!escrowOnchainLib?.confirmTransaction) {
+      return res.status(500).json({ error: 'On-chain transaction verifier unavailable' });
+    }
+    try {
+      await escrowOnchainLib.confirmTransaction(txSignature);
+    } catch (e) {
+      return res.status(400).json({ error: `Escrow funding transaction not confirmed on-chain: ${e.message}` });
+    }
+
+    let v3EscrowState;
+    try {
+      v3EscrowState = await readV3EscrowState(escrowPDA);
+    } catch (e) {
+      return res.status(400).json({ error: `V3 escrow PDA could not be verified on-chain: ${e.message}` });
+    }
+
+    if (v3EscrowState.pda !== escrowPDA) {
+      return res.status(400).json({ error: 'V3 escrow PDA mismatch' });
+    }
+    if (!['Active', 'WorkSubmitted', 'Released', 'Disputed', 'Resolved'].includes(v3EscrowState.status)) {
+      return res.status(400).json({ error: `V3 escrow is ${v3EscrowState.status || 'not funded'} on-chain` });
+    }
+    if (v3EscrowState.client !== auth.walletAddress) {
+      return res.status(403).json({ error: 'Signed wallet does not match the on-chain escrow client' });
+    }
+    if (agentWallet && v3EscrowState.agent !== agentWallet) {
+      return res.status(400).json({ error: 'On-chain V3 escrow agent wallet mismatch' });
+    }
+    if (job.selectedAgentId && agentId && !isAcceptedWorker(agentId, job)) {
+      return res.status(400).json({ error: 'V3 escrow agent does not match the accepted worker' });
+    }
+    if (job.selectedAgentId && agentWallet && !isAcceptedWorker(agentWallet, job)) {
+      return res.status(400).json({ error: 'V3 escrow agent wallet does not match the accepted worker' });
+    }
+
     job.v3EscrowPDA = escrowPDA;
     job.v3EscrowTx = txSignature;
     job.v3EscrowAmount = amount || null;
     job.v3EscrowAgentWallet = agentWallet || null;
     job.v3EscrowAgentId = agentId || null;
+    job.v3EscrowStatus = v3EscrowState.status;
+    job.v3EscrowClientWallet = v3EscrowState.client;
     job.v3EscrowFundedAt = new Date().toISOString();
     job.v3EscrowFundedBy = normalizeActorId(actorId) || actorId;
+    job.v3EscrowVerifiedAt = new Date().toISOString();
     job.escrowFunded = true;
+    job.fundsLocked = true;
     job.updatedAt = new Date().toISOString();
 
     writeJSON(jobPath, job);
@@ -988,6 +1081,7 @@ function registerRoutes(app) {
       jobId: job.id,
       escrowPDA,
       txSignature,
+      onchainStatus: v3EscrowState.status,
     });
   });
 
