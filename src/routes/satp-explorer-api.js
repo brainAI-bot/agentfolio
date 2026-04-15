@@ -124,7 +124,6 @@ async function getSatpAgents() {
   try {
     const Database = require('better-sqlite3');
     const path = require('path');
-    const { computeScore } = require('../lib/compute-score');
     const _db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
     const profileRows = _db.prepare('SELECT * FROM profiles').all();
     const reviewStatsRows = _db.prepare(`
@@ -161,142 +160,265 @@ async function getSatpAgents() {
     }));
     const profileIndex = new Map(profiles.map((profile) => [profile.id, profile]));
 
-    const levelLabels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
-    const levelBadges = ['⚪','🟡','🔵','🟢','🟠','🟣'];
-    const normalizePlatform = (value) => {
-      const raw = String(value || '').trim().toLowerCase();
-      if (!raw) return '';
-      if (raw === 'twitter') return 'x';
-      if (raw === 'solana_wallet' || raw === 'solana wallet') return 'solana';
-      if (raw === 'eth_wallet' || raw === 'eth wallet' || raw === 'ethereum' || raw === 'ethereum wallet') return 'eth';
-      const normalized = raw
-        .replace(/^verification_/, '')
-        .replace(/_wallet_verification$/, '')
-        .replace(/_verification$/, '')
-        .replace(/_/g, ' ')
-        .trim()
-        .toLowerCase();
-      if (!normalized || normalized === 'review' || normalized.includes('satp')) return '';
-      return normalized;
-    };
 
-    const profileIds = profiles.map((profile) => profile.id).filter(Boolean);
-    const v3Scores = await v3ScoreService.getV3Scores(profileIds);
-    const filteredAgents = profileIds.map((profileId) => {
-      const profile = profileIndex.get(profileId);
-      const v3 = v3Scores.get(profileId);
-      if (!profile || !v3 || !v3.agentName) return null;
-      const authority = String(v3.authority || profile.wallet || profile.claimed_by || profile.wallets?.solana || '');
-      return {
-        pda: v3ScoreService.getGenesisPDA(profileId).toBase58(),
-        authority,
-        agentId: profileId,
-        profileId,
-        name: v3.agentName || profile.name || profileId,
-        description: v3.description || '',
-        category: v3.category || '',
-        capabilities: Array.isArray(v3.capabilities) ? v3.capabilities : [],
-        metadataUri: v3.metadataUri || '',
-        reputationScore: v3.reputationScore > 10000 ? Math.round(v3.reputationScore / 1000) : v3.reputationScore,
-        rawReputationScore: v3.reputationScore || 0,
-        verificationLevel: Number(v3.verificationLevel || 0),
-        verificationLabel: v3.verificationLabel || levelLabels[Number(v3.verificationLevel || 0)] || 'Unknown',
-        isBorn: !!v3.isBorn,
-        faceImage: v3.faceImage || '',
-        faceMint: v3.faceMint || '',
-        createdAt: v3.createdAt || null,
-        updatedAt: v3.updatedAt || null,
-        programId: V3_PROGRAM.toBase58(),
-      };
-    }).filter(Boolean);
+const levelLabels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
+const levelBadges = ['⚪','🟡','🔵','🟢','🟠','🟣'];
+const chainCache = require('../lib/chain-cache');
+const attestationRowsStmt = _db.prepare('SELECT platform, tx_signature, created_at FROM attestations WHERE profile_id = ? AND tx_signature IS NOT NULL ORDER BY created_at DESC');
+const verificationRowsStmt = _db.prepare('SELECT platform, proof, verified_at FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC');
+const normalizePlatform = (value) => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (raw === 'twitter') return 'x';
+  if (raw === 'solana_wallet' || raw === 'solana wallet') return 'solana';
+  if (raw === 'eth_wallet' || raw === 'eth wallet' || raw === 'ethereum' || raw === 'ethereum wallet' || raw === 'evm') return 'eth';
+  const normalized = raw
+    .replace(/^verification_/, '')
+    .replace(/_wallet_verification$/, '')
+    .replace(/_verification$/, '')
+    .replace(/_/g, ' ')
+    .trim()
+    .toLowerCase();
+  if (!normalized || normalized === 'review' || normalized.includes('satp')) return '';
+  return normalized;
+};
+const isPublicPlatform = (value) => !!normalizePlatform(value);
+const isLikelySolanaTxSignature = (value) => /^[1-9A-HJ-NP-Za-km-z]{60,120}$/.test(String(value || '').trim());
 
-    const nftResults = await Promise.all(
-      filteredAgents.map(agent => agent.authority ? lookupNFT(conn, agent.authority) : Promise.resolve(null))
-    );
-    for (let i = 0; i < filteredAgents.length; i++) {
-      if (nftResults[i]) {
-        filteredAgents[i].nftMint = nftResults[i].nftMint;
-        filteredAgents[i].nftImage = nftResults[i].nftImage;
-        filteredAgents[i].soulbound = nftResults[i].soulbound;
-        filteredAgents[i].nftName = nftResults[i].nftName || null;
-      } else {
-        filteredAgents[i].nftMint = null;
-        filteredAgents[i].nftImage = null;
-        filteredAgents[i].soulbound = false;
-      }
-    }
+const profileIds = profiles.map((profile) => profile.id).filter(Boolean);
+const normalizeProfileKey = (value) => String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+const deriveProfileIdFromName = (name) => {
+  const normalized = normalizeProfileKey(name);
+  return normalized ? `agent_${normalized}` : '';
+};
+const genesisByProfileId = new Map();
+const genesisByAuthority = new Map();
+const genesisByName = new Map();
+for (const parsedAgent of agents) {
+  const derivedProfileId = deriveProfileIdFromName(parsedAgent.name);
+  const authorityKey = String(parsedAgent.authority || '').trim().toLowerCase();
+  const nameKey = normalizeProfileKey(parsedAgent.name);
+  if (derivedProfileId && !genesisByProfileId.has(derivedProfileId)) genesisByProfileId.set(derivedProfileId, parsedAgent);
+  if (authorityKey && !genesisByAuthority.has(authorityKey)) genesisByAuthority.set(authorityKey, parsedAgent);
+  if (nameKey && !genesisByName.has(nameKey)) genesisByName.set(nameKey, parsedAgent);
+}
+const filteredAgents = profileIds.map((profileId) => {
+  const profile = profileIndex.get(profileId);
+  if (!profile) return null;
+  const authorityCandidates = [profile.wallet, profile.claimed_by, profile.wallets?.solana]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+  let v3 = authorityCandidates.map((value) => genesisByAuthority.get(value)).find(Boolean) || null;
+  if (!v3) v3 = genesisByProfileId.get(String(profileId || '').toLowerCase()) || null;
+  if (!v3) v3 = genesisByName.get(normalizeProfileKey(profile.name || profile.handle || '')) || null;
+  if (!v3 || !v3.name) return null;
+  const authority = String(v3.authority || profile.wallet || profile.claimed_by || profile.wallets?.solana || '');
+  return {
+    pda: v3.pda,
+    authority,
+    agentId: profileId,
+    profileId,
+    name: v3.name || profile.name || profileId,
+    description: v3.description || '',
+    category: v3.category || '',
+    capabilities: Array.isArray(v3.capabilities) ? v3.capabilities : [],
+    metadataUri: v3.metadataUri || '',
+    reputationScore: v3.reputationScore > 10000 ? Math.round(v3.reputationScore / 1000) : v3.reputationScore,
+    rawReputationScore: v3.rawReputationScore || v3.reputationScore || 0,
+    verificationLevel: Number(v3.verificationLevel || 0),
+    verificationLabel: v3.verificationLabel || levelLabels[Number(v3.verificationLevel || 0)] || 'Unknown',
+    isBorn: !!v3.isBorn,
+    faceImage: v3.faceImage || '',
+    faceMint: v3.faceMint || '',
+    createdAt: v3.createdAt || null,
+    updatedAt: v3.updatedAt || null,
+    programId: V3_PROGRAM.toBase58(),
+  };
+}).filter(Boolean);
 
-    const explorerBase = process.env.INTERNAL_API_URL || 'http://127.0.0.1:3333';
-    const enrichedAgents = await Promise.all(filteredAgents.map(async (agent) => {
-      const profile = profileIndex.get(agent.profileId);
-      if (!profile) return agent;
 
-      const explorerData = await fetchJsonWithRetries(`${explorerBase}/api/explorer/${encodeURIComponent(profile.id)}`, 3, 300);
-      const byAgentData = await fetchJsonWithRetries(`${explorerBase}/api/satp/attestations/by-agent/${encodeURIComponent(profile.id)}`, 5, 500);
+for (const agent of filteredAgents) {
+  const profile = profileIndex.get(agent.profileId);
+  const profileNFTAvatar = profile?.nft_avatar || null;
+  const profileAvatar = profileNFTAvatar?.image || profileNFTAvatar?.arweaveUrl || profile?.avatar || null;
 
-      let profileNFTAvatar = null;
+  if (profileAvatar) {
+    agent.nftMint = profileNFTAvatar?.soulboundMint || profileNFTAvatar?.identifier || agent.faceMint || null;
+    agent.nftImage = profileAvatar;
+    agent.soulbound = !!(profileNFTAvatar?.soulboundMint || profileNFTAvatar?.permanent || agent.isBorn);
+    agent.nftName = profileNFTAvatar?.name || agent.name || null;
+    continue;
+  }
+
+  if (agent.faceImage) {
+    agent.nftMint = agent.faceMint || null;
+    agent.nftImage = agent.faceImage;
+    agent.soulbound = !!agent.isBorn;
+    agent.nftName = agent.name || null;
+    continue;
+  }
+
+  if (!agent.authority) {
+    agent.nftMint = null;
+    agent.nftImage = null;
+    agent.soulbound = false;
+    agent.nftName = null;
+    continue;
+  }
+
+  const nft = await lookupNFT(conn, agent.authority);
+  if (nft) {
+    agent.nftMint = nft.nftMint;
+    agent.nftImage = nft.nftImage;
+    agent.soulbound = nft.soulbound;
+    agent.nftName = nft.nftName || null;
+  } else {
+    agent.nftMint = null;
+    agent.nftImage = null;
+    agent.soulbound = false;
+    agent.nftName = null;
+  }
+}
+
+const enrichedAgents = [];
+for (const agent of filteredAgents) {
+  const profile = profileIndex.get(agent.profileId);
+  if (!profile) {
+    enrichedAgents.push(agent);
+    continue;
+  }
+
+  const profileNFTAvatar = profile.nft_avatar || null;
+  const profileAvatar = profileNFTAvatar?.image || profileNFTAvatar?.arweaveUrl || profile.avatar || null;
+  const reviewStats = reviewStatsByProfileId.get(profile.id) || { total: 0, avg_rating: 0 };
+  const unified = computeUnifiedTrustScore(_db, profile, {
+    v3Score: {
+      reputationScore: agent.rawReputationScore || agent.reputationScore || 0,
+      verificationLevel: agent.verificationLevel || 0,
+      verificationLabel: agent.verificationLabel || levelLabels[agent.verificationLevel || 0] || 'Unknown',
+      createdAt: agent.createdAt || null,
+    },
+  });
+
+  const txHints = new Map();
+  const addTxHint = (platform, txSignature, timestamp = null, solscanUrl = null) => {
+    const normalized = normalizePlatform(platform);
+    if (!normalized || !isLikelySolanaTxSignature(txSignature) || txHints.has(normalized)) return;
+    txHints.set(normalized, {
+      platform: normalized,
+      txSignature,
+      timestamp,
+      solscanUrl: solscanUrl || `https://solana.fm/tx/${txSignature}`,
+    });
+  };
+
+  for (const row of attestationRowsStmt.all(profile.id)) {
+    addTxHint(row.platform, row.tx_signature, row.created_at || null);
+  }
+  for (const row of verificationRowsStmt.all(profile.id)) {
+    let proof = {};
+    try { proof = typeof row.proof === 'string' ? JSON.parse(row.proof) : (row.proof || {}); } catch (_) {}
+    addTxHint(row.platform, proof.txSignature || proof.signature || proof.transactionSignature || null, row.verified_at || null);
+  }
+  for (const [platform, value] of Object.entries(profile.verification_data || {})) {
+    const txSignature = value && typeof value === 'object' ? (value.txSignature || value.signature || value.transactionSignature || null) : null;
+    const timestamp = value && typeof value === 'object' ? (value.verifiedAt || value.timestamp || null) : null;
+    addTxHint(platform, txSignature, timestamp);
+  }
+
+  const chainAttestations = (chainCache.getVerifications(profile.id, profile.created_at) || []).map((att) => ({ ...att }));
+  if (typeof chainCache.resolveAttestationTxHintByPda === 'function') {
+    for (const att of chainAttestations) {
+      const currentTx = att?.txSignature || att?.tx_signature || null;
+      if (!att?.pda || isLikelySolanaTxSignature(currentTx)) continue;
       try {
-        profileNFTAvatar = typeof profile.nft_avatar === 'string' ? JSON.parse(profile.nft_avatar || '{}') : (profile.nft_avatar || null);
+        const createdAtUnix = att?.timestamp ? Math.floor(new Date(att.timestamp).getTime() / 1000) : null;
+        const hint = await chainCache.resolveAttestationTxHintByPda(att.pda, createdAtUnix);
+        if (hint?.txSignature) {
+          att.txSignature = hint.txSignature;
+          att.solscanUrl = hint.solscanUrl || att.solscanUrl || (`https://solana.fm/tx/${hint.txSignature}`);
+          addTxHint(att.platform || att.attestationType, hint.txSignature, att.timestamp || null, att.solscanUrl || null);
+        }
       } catch (_) {}
-      const profileAvatar = profileNFTAvatar?.image || profileNFTAvatar?.arweaveUrl || profile.avatar || null;
+    }
+  }
 
-      const reviewStats = reviewStatsByProfileId.get(profile.id) || { total: 0, avg_rating: 0 };
-      const unified = computeUnifiedTrustScore(_db, profile, {
-        v3Score: {
-          reputationScore: agent.rawReputationScore || agent.reputationScore || 0,
-          verificationLevel: agent.verificationLevel || 0,
-          verificationLabel: agent.verificationLabel || levelLabels[agent.verificationLevel || 0] || 'Unknown',
-          createdAt: agent.createdAt || null,
-        },
-      });
-      const explorerVerifications = Array.isArray(explorerData?.verifications) ? explorerData.verifications : unified.verifications;
-      const rawExplorerAttestations = Array.isArray(byAgentData?.data?.attestations)
-        ? byAgentData.data.attestations
-        : (Array.isArray(explorerData?.attestationMemos) ? explorerData.attestationMemos : unified.verifications);
-      const explorerAttestations = rawExplorerAttestations
-        .filter((att) => !!normalizePlatform(att?.platform || att?.type || att?.attestationType))
-        .map((att) => ({
-          ...att,
-          platform: normalizePlatform(att?.platform || att?.type || att?.attestationType),
-          memo: att?.memo || null,
-        }))
-        .filter((att, index, list) => list.findIndex((candidate) =>
-          candidate.platform === att.platform
-          && String(candidate.txSignature || '') === String(att.txSignature || '')
-          && String(candidate.solscanUrl || '') === String(att.solscanUrl || '')
-        ) === index);
-      const platforms = [...new Set([
-        ...(Array.isArray(agent.platforms) ? agent.platforms : []),
-        ...explorerVerifications.map(v => normalizePlatform(v.platform || v.type || v.label)),
-        ...explorerAttestations.map(a => normalizePlatform(a.platform || a.type || a.attestationType)),
-      ].filter(Boolean))];
-
+  const explorerVerifications = (Array.isArray(unified.verifications) ? unified.verifications : [])
+    .filter((verification) => isPublicPlatform(verification?.platform || verification?.type || verification?.label))
+    .map((verification) => {
+      const platform = normalizePlatform(verification?.platform || verification?.type || verification?.label);
+      const hinted = txHints.get(platform) || null;
+      const txSignature = hinted?.txSignature || verification?.txSignature || null;
       return {
-        ...agent,
-        profileId: profile.id,
-        agentId: profile.id,
-        score: unified.score,
-        reputationScore: unified.score,
-        trustScore: unified.score,
-        level: unified.level,
-        tier: unified.levelName,
-        levelName: unified.levelName,
-        verificationLevel: unified.level,
-        verificationLabel: unified.levelName,
-        verificationLevelName: unified.levelName || levelLabels[unified.level] || 'Unverified',
-        verificationBadge: levelBadges[unified.level] || '⚪',
-        trustCredentialUrl: `/trust/${encodeURIComponent(profile.id)}`,
-        avatar: profileAvatar || agent.nftImage || null,
-        nftImage: profileAvatar || agent.nftImage || null,
-        nftAvatar: profileNFTAvatar,
-        verifications: explorerVerifications,
-        attestationMemos: explorerAttestations,
-        platforms,
-        reviewCount: Number(reviewStats.total || 0),
-        reviewAvg: Number(reviewStats.avg_rating || 0),
-        onChainAttestations: explorerAttestations.length || explorerVerifications.length || platforms.length || 0,
+        ...verification,
+        platform,
+        txSignature,
+        solscanUrl: hinted?.solscanUrl || verification?.solscanUrl || (txSignature ? `https://solana.fm/tx/${txSignature}` : null),
+        timestamp: verification?.timestamp || hinted?.timestamp || null,
       };
-    }));
+    });
+
+  const explorerAttestations = [];
+  const seenAttestationPlatforms = new Set();
+  for (const att of chainAttestations) {
+    const platform = normalizePlatform(att?.platform || att?.type || att?.attestationType);
+    if (!platform || seenAttestationPlatforms.has(platform)) continue;
+    seenAttestationPlatforms.add(platform);
+    const hinted = txHints.get(platform) || null;
+    const txSignature = att?.txSignature || att?.tx_signature || hinted?.txSignature || null;
+    explorerAttestations.push({
+      ...att,
+      platform,
+      memo: att?.memo || null,
+      txSignature,
+      timestamp: att?.timestamp || hinted?.timestamp || null,
+      solscanUrl: att?.solscanUrl || hinted?.solscanUrl || (txSignature ? `https://solana.fm/tx/${txSignature}` : null),
+    });
+  }
+  for (const [platform, hinted] of txHints.entries()) {
+    if (seenAttestationPlatforms.has(platform)) continue;
+    seenAttestationPlatforms.add(platform);
+    explorerAttestations.push({
+      platform,
+      memo: null,
+      txSignature: hinted.txSignature,
+      timestamp: hinted.timestamp || null,
+      solscanUrl: hinted.solscanUrl,
+    });
+  }
+
+  const platforms = [...new Set([
+    ...(Array.isArray(agent.platforms) ? agent.platforms : []),
+    ...explorerVerifications.map((v) => normalizePlatform(v.platform || v.type || v.label)),
+    ...explorerAttestations.map((a) => normalizePlatform(a.platform || a.type || a.attestationType)),
+  ].filter(Boolean))];
+
+  enrichedAgents.push({
+    ...agent,
+    profileId: profile.id,
+    agentId: profile.id,
+    score: unified.score,
+    reputationScore: unified.score,
+    trustScore: unified.score,
+    level: unified.level,
+    tier: unified.levelName,
+    levelName: unified.levelName,
+    verificationLevel: unified.level,
+    verificationLabel: unified.levelName,
+    verificationLevelName: unified.levelName || levelLabels[unified.level] || 'Unverified',
+    verificationBadge: levelBadges[unified.level] || '⚪',
+    trustCredentialUrl: `/trust/${encodeURIComponent(profile.id)}`,
+    avatar: profileAvatar || agent.nftImage || null,
+    nftImage: profileAvatar || agent.nftImage || null,
+    nftAvatar: profileNFTAvatar,
+    verifications: explorerVerifications,
+    attestationMemos: explorerAttestations,
+    platforms,
+    reviewCount: Number(reviewStats.total || 0),
+    reviewAvg: Number(reviewStats.avg_rating || 0),
+    onChainAttestations: explorerAttestations.length || explorerVerifications.length || platforms.length || 0,
+  });
+}
     _db.close();
 
     const dedupedAgents = [];
@@ -325,3 +447,5 @@ async function getSatpAgents() {
 }
 
 module.exports = { getSatpAgents, clearSatpExplorerCache };
+
+
