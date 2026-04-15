@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { Briefcase, Send, Share2, Check } from "lucide-react";
+import { profileHasWallet } from "@/lib/profile-wallets";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -17,7 +18,9 @@ export function JobApplyForm({ jobId, jobStatus, initialPosterId = null }: { job
   const [agentId, setAgentId] = useState("");
   const [resolvedId, setResolvedId] = useState<string | null>(null);
   const [posterId, setPosterId] = useState<string | null>(initialPosterId);
+  const [posterWalletMatch, setPosterWalletMatch] = useState(false);
   const [resolving, setResolving] = useState(false);
+  const [checkingPosterWallet, setCheckingPosterWallet] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -60,10 +63,32 @@ export function JobApplyForm({ jobId, jobStatus, initialPosterId = null }: { job
   }, [jobId, posterId]);
 
   const walletAddr = publicKey?.toBase58() || "";
+
+  useEffect(() => {
+    if (!connected || !walletAddr || !posterId) {
+      setPosterWalletMatch(false);
+      setCheckingPosterWallet(false);
+      return;
+    }
+    let cancelled = false;
+    setCheckingPosterWallet(true);
+    fetch(`${API_BASE}/api/profile/${encodeURIComponent(posterId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((profile) => {
+        if (!cancelled) setPosterWalletMatch(profileHasWallet(profile, walletAddr));
+      })
+      .catch(() => {
+        if (!cancelled) setPosterWalletMatch(false);
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingPosterWallet(false);
+      });
+    return () => { cancelled = true; };
+  }, [connected, walletAddr, posterId]);
   const isPoster = useMemo(() => {
     if (!posterId) return false;
-    return posterId === resolvedId || posterId === walletAddr;
-  }, [posterId, resolvedId, walletAddr]);
+    return posterWalletMatch || posterId === resolvedId || posterId === walletAddr;
+  }, [posterId, posterWalletMatch, resolvedId, walletAddr]);
 
   const handleApply = async () => {
     const effectiveId = agentId.trim() || resolvedId;
@@ -114,7 +139,7 @@ export function JobApplyForm({ jobId, jobStatus, initialPosterId = null }: { job
   return (
     <div>
       <div className="flex flex-wrap gap-3">
-        {!showForm && (!connected ? !isPoster : !resolving && !isPoster) && (
+        {!showForm && (!connected ? !isPoster : !resolving && !checkingPosterWallet && !isPoster) && (
           <button
             onClick={() => { if (!connected) smartConnect(); setShowForm(true); }}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white"
