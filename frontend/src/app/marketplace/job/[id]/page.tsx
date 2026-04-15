@@ -98,7 +98,7 @@ const statusConfig: Record<string, { label: string; color: string }> = {
 };
 
 const escrowLabels: Record<string, string> = {
-  ready: "Escrow Ready",
+  ready: "Escrow Pending",
   locked: "Escrow Locked 🔒",
   released: "Escrow Released ✅",
   disputed: "Escrow Disputed ⚠️",
