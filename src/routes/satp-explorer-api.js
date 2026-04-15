@@ -190,40 +190,76 @@ const normalizePlatform = (value) => {
 const isPublicPlatform = (value) => !!normalizePlatform(value);
 const isLikelySolanaTxSignature = (value) => /^[1-9A-HJ-NP-Za-km-z]{60,120}$/.test(String(value || '').trim());
 
-const profileIds = profiles.map((profile) => profile.id).filter(Boolean);
 const normalizeProfileKey = (value) => String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 const deriveProfileIdFromName = (name) => {
   const normalized = normalizeProfileKey(name);
   return normalized ? `agent_${normalized}` : '';
 };
-const genesisByProfileId = new Map();
-const genesisByAuthority = new Map();
-const genesisByName = new Map();
-for (const parsedAgent of agents) {
-  const derivedProfileId = deriveProfileIdFromName(parsedAgent.name);
-  const authorityKey = String(parsedAgent.authority || '').trim().toLowerCase();
-  const nameKey = normalizeProfileKey(parsedAgent.name);
-  if (derivedProfileId && !genesisByProfileId.has(derivedProfileId)) genesisByProfileId.set(derivedProfileId, parsedAgent);
-  if (authorityKey && !genesisByAuthority.has(authorityKey)) genesisByAuthority.set(authorityKey, parsedAgent);
-  if (nameKey && !genesisByName.has(nameKey)) genesisByName.set(nameKey, parsedAgent);
+const getProfileAuthorityCandidates = (profile) => [profile?.wallet, profile?.claimed_by, profile?.wallets?.solana]
+  .map((value) => String(value || '').trim().toLowerCase())
+  .filter(Boolean);
+const addProfileCandidate = (map, key, profile) => {
+  if (!key || !profile?.id) return;
+  if (!map.has(key)) map.set(key, []);
+  map.get(key).push(profile);
+};
+const profilesByAuthority = new Map();
+const profilesByName = new Map();
+for (const profile of profiles) {
+  for (const authorityKey of getProfileAuthorityCandidates(profile)) {
+    addProfileCandidate(profilesByAuthority, authorityKey, profile);
+  }
+  const nameKey = normalizeProfileKey(profile.name || profile.handle || profile.id || '');
+  if (nameKey) addProfileCandidate(profilesByName, nameKey, profile);
 }
-const filteredAgents = profileIds.map((profileId) => {
-  const profile = profileIndex.get(profileId);
-  if (!profile) return null;
-  const authorityCandidates = [profile.wallet, profile.claimed_by, profile.wallets?.solana]
-    .map((value) => String(value || '').trim().toLowerCase())
-    .filter(Boolean);
-  let v3 = authorityCandidates.map((value) => genesisByAuthority.get(value)).find(Boolean) || null;
-  if (!v3) v3 = genesisByProfileId.get(String(profileId || '').toLowerCase()) || null;
-  if (!v3) v3 = genesisByName.get(normalizeProfileKey(profile.name || profile.handle || '')) || null;
+const pickBestProfileForAgent = (parsedAgent) => {
+  if (!parsedAgent) return null;
+  const derivedProfileId = String(deriveProfileIdFromName(parsedAgent.name || '') || '').trim().toLowerCase();
+  const authorityKey = String(parsedAgent.authority || '').trim().toLowerCase();
+  const nameKey = normalizeProfileKey(parsedAgent.name || '');
+  const candidates = new Map();
+  const registerCandidate = (profile) => {
+    if (!profile?.id) return;
+    candidates.set(profile.id, profile);
+  };
+  if (derivedProfileId && profileIndex.has(derivedProfileId)) registerCandidate(profileIndex.get(derivedProfileId));
+  for (const profile of profilesByAuthority.get(authorityKey) || []) registerCandidate(profile);
+  for (const profile of profilesByName.get(nameKey) || []) registerCandidate(profile);
+  if (!candidates.size) return null;
+
+  const rankProfile = (profile) => {
+    let score = 0;
+    const profileId = String(profile.id || '').trim().toLowerCase();
+    const profileNameKey = normalizeProfileKey(profile.name || profile.handle || '');
+    const authorityCandidates = getProfileAuthorityCandidates(profile);
+    const verificationCount = Object.keys(profile.verification_data || {}).length;
+    if (derivedProfileId && profileId === derivedProfileId) score += 1000;
+    if (authorityKey && authorityCandidates.includes(authorityKey)) score += 500;
+    if (nameKey && profileNameKey === nameKey) score += 100;
+    if (profileId.startsWith('agent_')) score += 25;
+    if (profile.nft_avatar?.image || profile.nft_avatar?.arweaveUrl || profile.avatar) score += 10;
+    score += Math.min(verificationCount, 25);
+    score += Math.min(Array.isArray(profile.skills) ? profile.skills.length : 0, 10);
+    const updatedTs = Date.parse(profile.updated_at || profile.created_at || 0) || 0;
+    return { profile, score, updatedTs };
+  };
+
+  const ranked = Array.from(candidates.values())
+    .map(rankProfile)
+    .sort((a, b) => b.score - a.score || b.updatedTs - a.updatedTs || String(a.profile.id).localeCompare(String(b.profile.id)));
+  return ranked[0]?.profile || null;
+};
+const filteredAgents = agents.map((v3) => {
   if (!v3 || !v3.name) return null;
-  const authority = String(v3.authority || profile.wallet || profile.claimed_by || profile.wallets?.solana || '');
+  const profile = pickBestProfileForAgent(v3);
+  const fallbackProfileId = deriveProfileIdFromName(v3.name) || v3.agentId || v3.pda;
+  const authority = String(v3.authority || profile?.wallet || profile?.claimed_by || profile?.wallets?.solana || '');
   return {
     pda: v3.pda,
     authority,
-    agentId: profileId,
-    profileId,
-    name: v3.name || profile.name || profileId,
+    agentId: profile?.id || fallbackProfileId,
+    profileId: profile?.id || null,
+    name: v3.name || profile?.name || fallbackProfileId,
     description: v3.description || '',
     category: v3.category || '',
     capabilities: Array.isArray(v3.capabilities) ? v3.capabilities : [],
@@ -430,7 +466,7 @@ for (const agent of filteredAgents) {
     const dedupedAgents = [];
     const seenKeys = new Set();
     for (const agent of enrichedAgents) {
-      const key = agent.profileId || (agent.name ? `name:${String(agent.name).toLowerCase()}` : `agent:${agent.agentId}`);
+      const key = agent.pda || agent.authority || agent.profileId || (agent.name ? `name:${String(agent.name).toLowerCase()}` : `agent:${agent.agentId}`);
       if (seenKeys.has(key)) continue;
       seenKeys.add(key);
       dedupedAgents.push(agent);
