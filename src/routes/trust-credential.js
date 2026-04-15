@@ -154,24 +154,27 @@ function registerTrustCredentialRoutes(app) {
    * Issues a signed JWT Verifiable Credential containing the agent's trust score.
    */
   app.get('/api/trust-credential/:agentId', async (req, res) => {
-    const { agentId } = req.params;
+    const requestedAgentId = String(req.params.agentId || '').trim();
     const format = req.query.format || 'jwt';
 
     try {
-      // 1. Fetch profile from DB
+      // 1. Fetch profile from DB using the same friendly-ID resolution as profile APIs
       const db = profileStore.getDb();
-      let profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId);
-      // Bug 3 fix: handle fallback
-      if (!profile) {
-        profile = db.prepare('SELECT * FROM profiles WHERE handle = ?').get(agentId);
+      let profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(requestedAgentId);
+      if (!profile) profile = db.prepare('SELECT * FROM profiles WHERE handle = ?').get(requestedAgentId);
+      if (!profile) profile = db.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(requestedAgentId);
+      if (!profile && requestedAgentId) {
+        profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + requestedAgentId.toLowerCase());
       }
       if (!profile) {
         return res.status(404).json({
           error: 'Agent not found',
-          agentId,
+          agentId: requestedAgentId,
           hint: 'Register at ' + SITE_URL + ' first',
         });
       }
+
+      const agentId = profile.id;
 
       // 2. Parse non-score profile fields only
       const parsed = {
