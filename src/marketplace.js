@@ -55,20 +55,72 @@ function resolveApplicantId(applicantId) {
   return applicantId;
 }
 
-function resolveExistingApplicantProfileId(applicantId) {
+function buildApplicantProfileLookupCandidates(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return [];
+
+  const candidates = [];
+  const push = (next) => {
+    const normalized = String(next || '').trim();
+    if (normalized && !candidates.includes(normalized)) candidates.push(normalized);
+  };
+
+  push(raw);
+  push(raw.toLowerCase());
+
+  const withoutAt = raw.replace(/^@/, '');
+  push(withoutAt);
+  push(withoutAt.toLowerCase());
+  push(`@${withoutAt}`);
+  push(`@${withoutAt.toLowerCase()}`);
+
+  if (/^agent_/i.test(raw)) {
+    const stripped = raw.replace(/^agent_/i, '');
+    push(stripped);
+    push(stripped.toLowerCase());
+    if (/^sm/i.test(stripped)) {
+      push(stripped.replace(/^sm/i, ''));
+    }
+  }
+
+  if (/^sm/i.test(raw)) {
+    push(`agent_${raw}`);
+    push(`agent_${raw.toLowerCase()}`);
+    push(raw.replace(/^sm/i, ''));
+  }
+
+  if (/^\d+$/.test(raw)) {
+    push(`sm${raw}`);
+    push(`agent_sm${raw}`);
+  }
+
+  return candidates;
+}
+
+function findProfileRowByApplicantToken(db, applicantId, fields = 'id') {
   const resolvedApplicantId = resolveApplicantId(applicantId);
+  const candidates = buildApplicantProfileLookupCandidates(resolvedApplicantId);
+  for (const candidate of candidates) {
+    let row = db.prepare(`SELECT ${fields} FROM profiles WHERE id = ?`).get(candidate);
+    if (row) return row;
+    row = db.prepare(`SELECT ${fields} FROM profiles WHERE LOWER(id) = ?`).get(String(candidate).toLowerCase());
+    if (row) return row;
+    row = db.prepare(`SELECT ${fields} FROM profiles WHERE handle = ?`).get(candidate);
+    if (row) return row;
+    row = db.prepare(`SELECT ${fields} FROM profiles WHERE LOWER(handle) = ?`).get(String(candidate).toLowerCase());
+    if (row) return row;
+  }
+
+  const raw = String(resolvedApplicantId || '').trim();
+  if (!raw) return null;
+  return db.prepare(`SELECT ${fields} FROM profiles WHERE LOWER(name) = ?`).get(raw.toLowerCase()) || null;
+}
+
+function resolveExistingApplicantProfileId(applicantId) {
   try {
     const profileStore = require('./profile-store');
     const db = profileStore.getDb();
-
-    let row = db.prepare('SELECT id FROM profiles WHERE id = ?').get(resolvedApplicantId);
-    if (!row && typeof resolvedApplicantId === 'string' && !resolvedApplicantId.startsWith('agent_')) {
-      row = db.prepare('SELECT id FROM profiles WHERE id = ?').get('agent_' + resolvedApplicantId.toLowerCase());
-    }
-    if (!row && typeof resolvedApplicantId === 'string') {
-      row = db.prepare('SELECT id FROM profiles WHERE LOWER(name) = ?').get(resolvedApplicantId.toLowerCase());
-    }
-
+    const row = findProfileRowByApplicantToken(db, applicantId, 'id');
     return row ? row.id : null;
   } catch (_) {
     return null;
@@ -310,14 +362,7 @@ function enrichApplication(app) {
     const { computeUnifiedTrustScore } = require('./lib/unified-trust-score');
     const v3ScoreService = require('./v3-score-service');
 
-    // Try exact match, then lowercase with agent_ prefix, then case-insensitive name
-    let row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(app.applicantId);
-    if (!row) {
-      row = db.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + app.applicantId.toLowerCase());
-    }
-    if (!row) {
-      row = db.prepare('SELECT * FROM profiles WHERE LOWER(name) = ?').get(app.applicantId.toLowerCase());
-    }
+    const row = findProfileRowByApplicantToken(db, app.applicantId, '*');
 
     if (row) {
       const vd = JSON.parse(row.verification_data || '{}');
