@@ -126,7 +126,7 @@ async function getSatpAgents() {
     const path = require('path');
     const { computeScore } = require('../lib/compute-score');
     const _db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
-    const profiles = _db.prepare('SELECT * FROM profiles').all();
+    const profileRows = _db.prepare('SELECT * FROM profiles').all();
     const reviewStatsRows = _db.prepare(`
       SELECT
         reviewee_id AS profile_id,
@@ -137,18 +137,29 @@ async function getSatpAgents() {
     `).all();
     const reviewStatsByProfileId = new Map(reviewStatsRows.map((row) => [row.profile_id, row]));
 
-    const matchesProfile = (agent) => profiles.find((profile) => {
-      let wallets = {};
-      try { wallets = JSON.parse(profile.wallets || '{}'); } catch (_) {}
-      const agentName = String(agent.name || '').toLowerCase();
-      const authority = String(agent.authority || '');
-      return (
-        String(profile.name || '').toLowerCase() == agentName ||
-        String(profile.wallet || '') == authority ||
-        String(profile.claimed_by || '') == authority ||
-        String(wallets.solana || '') == authority
-      );
-    });
+    const parseJsonField = (value, fallback) => {
+      if (value == null || value === '') return fallback;
+      if (typeof value !== 'string') return value;
+      try {
+        const parsed = JSON.parse(value);
+        return parsed == null ? fallback : parsed;
+      } catch (_) {
+        return fallback;
+      }
+    };
+
+    const profiles = profileRows.map((profile) => ({
+      ...profile,
+      wallets: parseJsonField(profile.wallets, {}),
+      tags: Array.isArray(parseJsonField(profile.tags, [])) ? parseJsonField(profile.tags, []) : [],
+      skills: Array.isArray(parseJsonField(profile.skills, [])) ? parseJsonField(profile.skills, []) : [],
+      portfolio: Array.isArray(parseJsonField(profile.portfolio, [])) ? parseJsonField(profile.portfolio, []) : [],
+      links: parseJsonField(profile.links, {}),
+      metadata: parseJsonField(profile.metadata, {}),
+      verification_data: parseJsonField(profile.verification_data, {}),
+      nft_avatar: parseJsonField(profile.nft_avatar, null),
+    }));
+    const profileIndex = new Map(profiles.map((profile) => [profile.id, profile]));
 
     const levelLabels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
     const levelBadges = ['⚪','🟡','🔵','🟢','🟠','🟣'];
@@ -169,17 +180,35 @@ async function getSatpAgents() {
       return normalized;
     };
 
-    const filteredAgents = [];
-    const seenProfileIds = new Set();
-    for (const agent of agents) {
-      const profile = matchesProfile(agent);
-      if (!profile) continue;
-      if (seenProfileIds.has(profile.id)) continue;
-      seenProfileIds.add(profile.id);
-      agent.profileId = profile.id;
-      agent.agentId = profile.id;
-      filteredAgents.push(agent);
-    }
+    const profileIds = profiles.map((profile) => profile.id).filter(Boolean);
+    const v3Scores = await v3ScoreService.getV3Scores(profileIds);
+    const filteredAgents = profileIds.map((profileId) => {
+      const profile = profileIndex.get(profileId);
+      const v3 = v3Scores.get(profileId);
+      if (!profile || !v3 || !v3.agentName) return null;
+      const authority = String(v3.authority || profile.wallet || profile.claimed_by || profile.wallets?.solana || '');
+      return {
+        pda: v3ScoreService.getGenesisPDA(profileId).toBase58(),
+        authority,
+        agentId: profileId,
+        profileId,
+        name: v3.agentName || profile.name || profileId,
+        description: v3.description || '',
+        category: v3.category || '',
+        capabilities: Array.isArray(v3.capabilities) ? v3.capabilities : [],
+        metadataUri: v3.metadataUri || '',
+        reputationScore: v3.reputationScore > 10000 ? Math.round(v3.reputationScore / 1000) : v3.reputationScore,
+        rawReputationScore: v3.reputationScore || 0,
+        verificationLevel: Number(v3.verificationLevel || 0),
+        verificationLabel: v3.verificationLabel || levelLabels[Number(v3.verificationLevel || 0)] || 'Unknown',
+        isBorn: !!v3.isBorn,
+        faceImage: v3.faceImage || '',
+        faceMint: v3.faceMint || '',
+        createdAt: v3.createdAt || null,
+        updatedAt: v3.updatedAt || null,
+        programId: V3_PROGRAM.toBase58(),
+      };
+    }).filter(Boolean);
 
     const nftResults = await Promise.all(
       filteredAgents.map(agent => agent.authority ? lookupNFT(conn, agent.authority) : Promise.resolve(null))
@@ -199,7 +228,7 @@ async function getSatpAgents() {
 
     const explorerBase = process.env.INTERNAL_API_URL || 'http://127.0.0.1:3333';
     const enrichedAgents = await Promise.all(filteredAgents.map(async (agent) => {
-      const profile = profiles.find((p) => p.id === agent.profileId);
+      const profile = profileIndex.get(agent.profileId);
       if (!profile) return agent;
 
       const explorerData = await fetchJsonWithRetries(`${explorerBase}/api/explorer/${encodeURIComponent(profile.id)}`, 3, 300);
@@ -214,7 +243,7 @@ async function getSatpAgents() {
       const reviewStats = reviewStatsByProfileId.get(profile.id) || { total: 0, avg_rating: 0 };
       const unified = computeUnifiedTrustScore(_db, profile, {
         v3Score: {
-          reputationScore: agent.reputationScore || 0,
+          reputationScore: agent.rawReputationScore || agent.reputationScore || 0,
           verificationLevel: agent.verificationLevel || 0,
           verificationLabel: agent.verificationLabel || levelLabels[agent.verificationLevel || 0] || 'Unknown',
           createdAt: agent.createdAt || null,
