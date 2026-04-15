@@ -213,7 +213,7 @@ for (const profile of profiles) {
   if (nameKey) addProfileCandidate(profilesByName, nameKey, profile);
 }
 const pickBestProfileForAgent = (parsedAgent) => {
-  if (!parsedAgent) return null;
+  if (!parsedAgent) return { profile: null, score: 0 };
   const derivedProfileId = String(deriveProfileIdFromName(parsedAgent.name || '') || '').trim().toLowerCase();
   const authorityKey = String(parsedAgent.authority || '').trim().toLowerCase();
   const nameKey = normalizeProfileKey(parsedAgent.name || '');
@@ -225,7 +225,7 @@ const pickBestProfileForAgent = (parsedAgent) => {
   if (derivedProfileId && profileIndex.has(derivedProfileId)) registerCandidate(profileIndex.get(derivedProfileId));
   for (const profile of profilesByAuthority.get(authorityKey) || []) registerCandidate(profile);
   for (const profile of profilesByName.get(nameKey) || []) registerCandidate(profile);
-  if (!candidates.size) return null;
+  if (!candidates.size) return { profile: null, score: 0 };
 
   const rankProfile = (profile) => {
     let score = 0;
@@ -247,11 +247,12 @@ const pickBestProfileForAgent = (parsedAgent) => {
   const ranked = Array.from(candidates.values())
     .map(rankProfile)
     .sort((a, b) => b.score - a.score || b.updatedTs - a.updatedTs || String(a.profile.id).localeCompare(String(b.profile.id)));
-  return ranked[0]?.profile || null;
+  return ranked[0] || { profile: null, score: 0 };
 };
 const filteredAgents = agents.map((v3) => {
   if (!v3 || !v3.name) return null;
-  const profile = pickBestProfileForAgent(v3);
+  const matched = pickBestProfileForAgent(v3);
+  const profile = matched.profile;
   const fallbackProfileId = deriveProfileIdFromName(v3.name) || v3.agentId || v3.pda;
   const authority = String(v3.authority || profile?.wallet || profile?.claimed_by || profile?.wallets?.solana || '');
   return {
@@ -259,6 +260,7 @@ const filteredAgents = agents.map((v3) => {
     authority,
     agentId: profile?.id || fallbackProfileId,
     profileId: profile?.id || null,
+    profileMatchScore: Number(matched.score || 0),
     name: v3.name || profile?.name || fallbackProfileId,
     description: v3.description || '',
     category: v3.category || '',
@@ -465,8 +467,18 @@ for (const agent of filteredAgents) {
 
     const dedupedAgents = [];
     const seenKeys = new Set();
-    for (const agent of enrichedAgents) {
-      const key = agent.pda || agent.authority || agent.profileId || (agent.name ? `name:${String(agent.name).toLowerCase()}` : `agent:${agent.agentId}`);
+    const rankedAgents = [...enrichedAgents].sort((a, b) => {
+      const aHasProfile = !!a?.profileId;
+      const bHasProfile = !!b?.profileId;
+      if (aHasProfile !== bHasProfile) return aHasProfile ? -1 : 1;
+      const scoreDelta = Number(b?.profileMatchScore || 0) - Number(a?.profileMatchScore || 0);
+      if (scoreDelta !== 0) return scoreDelta;
+      const updatedDelta = (Date.parse(b?.updatedAt || 0) || 0) - (Date.parse(a?.updatedAt || 0) || 0);
+      if (updatedDelta !== 0) return updatedDelta;
+      return String(a?.pda || '').localeCompare(String(b?.pda || ''));
+    });
+    for (const agent of rankedAgents) {
+      const key = agent.profileId ? `profile:${agent.profileId}` : (agent.pda || agent.authority || (agent.name ? `name:${String(agent.name).toLowerCase()}` : `agent:${agent.agentId}`));
       if (seenKeys.has(key)) continue;
       seenKeys.add(key);
       dedupedAgents.push(agent);
