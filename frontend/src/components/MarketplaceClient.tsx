@@ -323,7 +323,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
 
   // ─── FUND ESCROW (V3 On-chain Identity-Verified Escrow) ───
   const handleFundEscrow = async () => {
-    if (!connected || !publicKey || !sendTransaction || !selectedJob) return;
+    if (!connected || !publicKey || (!sendTransaction && !signTransaction) || !selectedJob) return;
     setLoading(true);
     try {
       const budgetStr = selectedJob.budget.split(" ")[0];
@@ -451,7 +451,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
 
   // ─── RELEASE FUNDS (V3 On-chain Release) ───
   const handleRelease = async () => {
-    if (!connected || !publicKey || !sendTransaction || !selectedJob) return;
+    if (!connected || !publicKey || (!sendTransaction && !signTransaction) || !selectedJob) return;
     setLoading(true);
     try {
       const agentId = selectedJob.assignee || selectedJob.assigneeId;
