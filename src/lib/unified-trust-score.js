@@ -102,15 +102,6 @@ function hasPersistedBoaAvatar(profile) {
 function computeUnifiedTrustScore(db, profile, options = {}) {
   const profileId = profile?.id || profile?.profileId || profile;
   const v3Score = options.v3Score || null;
-  const hasSatpIdentity = Boolean(v3Score && Number(v3Score.verificationLevel || 0) >= 1);
-  const hasBoaAvatar = Boolean(
-    options.hasBoaAvatar ||
-    profile?.hasBoaAvatar ||
-    profile?.isBorn ||
-    hasPersistedBoaAvatar(profile) ||
-    v3Score?.isBorn ||
-    v3Score?.onChain?.isBorn
-  );
 
   const normalizedProfile = {
     ...(typeof profile === 'object' ? profile : {}),
@@ -121,6 +112,25 @@ function computeUnifiedTrustScore(db, profile, options = {}) {
   }
 
   const verifications = buildVerificationList(db, profileId);
+  const hasSatpVerification = verifications.some((verification) => {
+    const platform = normalizeVerificationPlatform(verification?.platform);
+    return platform === 'satp' || platform === 'satp_v3';
+  });
+  const hasSatpIdentity = Boolean(
+    options.hasSatpIdentity ??
+    profile?.hasSatpIdentity ??
+    (v3Score ? Number(v3Score.verificationLevel || 0) >= 1 : null) ??
+    hasSatpVerification
+  ) || hasSatpVerification;
+  const hasBoaAvatar = Boolean(
+    options.hasBoaAvatar ||
+    profile?.hasBoaAvatar ||
+    profile?.isBorn ||
+    hasPersistedBoaAvatar(profile) ||
+    v3Score?.isBorn ||
+    v3Score?.onChain?.isBorn
+  );
+
   const stats = getStats(db, profileId);
 
   const level = computeVerificationLevel({
