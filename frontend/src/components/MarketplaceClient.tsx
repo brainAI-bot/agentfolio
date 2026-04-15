@@ -6,7 +6,7 @@ import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { useDemoMode } from "@/lib/demo-mode";
-import { Connection as SolConnection, PublicKey, Transaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { Connection as SolConnection, PublicKey, Transaction, VersionedTransaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
 const Connection = SolConnection;
 import type { Job } from "@/lib/types";
 import { Briefcase, Lock, Unlock, CheckCircle, AlertTriangle, Clock, X, Send, DollarSign, UserCheck, Link2, Shield } from "lucide-react";
@@ -66,6 +66,15 @@ function timeAgo(dateStr: string): string {
   if (days < 30) return days + "d ago";
   const months = Math.floor(days / 30);
   return months + "mo ago";
+}
+
+function deserializeMarketplaceTransaction(base64Tx: string): Transaction | VersionedTransaction {
+  const raw = Buffer.from(base64Tx, "base64");
+  try {
+    return VersionedTransaction.deserialize(raw);
+  } catch {
+    return Transaction.from(raw);
+  }
 }
 
 export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
@@ -249,22 +258,10 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     if (!connected || !publicKey || !sendTransaction || !selectedJob) return;
     setLoading(true);
     try {
-      // Parse budget amount — V3 escrow uses USDC
       const budgetStr = selectedJob.budget.split(" ")[0];
       const amount = parseFloat(budgetStr);
       if (!amount || amount <= 0) throw new Error("Invalid budget amount");
 
-      // V3 escrow uses USDC (amount in lamports for on-chain)
-      const amountLamports = Math.round(amount * LAMPORTS_PER_SOL);
-
-      // Resolve agent's wallet from their profile ID
-      const agentId = selectedJob.assignee || selectedJob.assigneeId;
-      if (!agentId) throw new Error("No agent assigned to this job yet. Accept an application first.");
-
-      const agentWallet = await resolveAgentWallet(agentId);
-      if (!agentWallet) throw new Error(`Could not resolve wallet for agent "${agentId}". Agent must have a verified Solana wallet.`);
-
-      // Calculate deadline (job timeline → unix timestamp)
       const timelineMap: Record<string, number> = {
         "1 day": 1, "1_day": 1, "3 days": 3, "3_days": 3,
         "1 week": 7, "1_week": 7, "2 weeks": 14, "2_weeks": 14,
@@ -272,32 +269,90 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
       };
       const daysFromNow = timelineMap[selectedJob.deadline] || 7;
       const deadlineUnix = Math.floor(Date.now() / 1000) + (daysFromNow * 86400);
+      const walletAddress = publicKey.toBase58();
+      const actorId = resolvedProfileId || myProfileId || walletAddress;
 
-      // Build unsigned V3 escrow creation TX
+      const agentId = selectedJob.assignee || selectedJob.assigneeId;
+      if (!agentId) {
+        const buildRes = await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/escrow/onchain`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clientWallet: walletAddress,
+            amount,
+            deadlineUnix,
+          }),
+        });
+        const buildData = await buildRes.json();
+        if (!buildRes.ok || buildData.error) {
+          throw new Error(buildData.error || "Failed to build on-chain escrow transaction");
+        }
+
+        const tx = deserializeMarketplaceTransaction(buildData.transaction);
+        let sig = "";
+        if (tx instanceof VersionedTransaction) {
+          if (!signTransaction) throw new Error("Connected wallet does not support versioned transaction signing");
+          const signedTx = await signTransaction(tx as any);
+          sig = await connection.sendRawTransaction(signedTx.serialize());
+        } else {
+          sig = await sendTransaction(tx as any, connection);
+        }
+        await connection.confirmTransaction(sig, "confirmed");
+
+        const authHeaders = await createMarketplaceWalletAuth({
+          action: "confirm_onchain_escrow",
+          walletAddress,
+          actorId,
+          jobId: selectedJob.id,
+          escrowId: buildData.escrowPDA,
+          signMessage,
+        });
+
+        const confirmRes = await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/escrow/confirm`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify({
+            txSignature: sig,
+            escrowPDA: buildData.escrowPDA,
+            clientWallet: walletAddress,
+          }),
+        });
+        const confirmData = await confirmRes.json();
+        if (!confirmRes.ok || confirmData.error) {
+          throw new Error(confirmData.error || "Failed to confirm on-chain escrow funding");
+        }
+
+        showMessage("success", `On-chain escrow funded! TX: ${sig.slice(0, 16)}... | PDA: ${buildData.escrowPDA.slice(0, 12)}...`);
+        setModal(null);
+        await refreshJobs();
+        return;
+      }
+
+      const amountLamports = Math.round(amount * LAMPORTS_PER_SOL);
+      const agentWallet = await resolveAgentWallet(agentId);
+      if (!agentWallet) throw new Error(`Could not resolve wallet for agent "${agentId}". Agent must have a verified Solana wallet.`);
+
       const { tx, escrowPDA } = await buildV3EscrowCreate({
-        clientWallet: publicKey.toBase58(),
+        clientWallet: walletAddress,
         agentWallet,
         agentId,
         amountLamports,
         description: selectedJob.title,
         deadlineUnix,
-        minVerificationLevel: 2, // Require at least "Verified" level
+        minVerificationLevel: 2,
       });
 
-      // User signs and sends via Phantom
       const sig = await signAndSendV3Tx(tx, connection, publicKey, sendTransaction, signTransaction);
 
-      const actorId = resolvedProfileId || publicKey.toBase58();
       const authHeaders = await createMarketplaceWalletAuth({
         action: "record_v3_escrow",
-        walletAddress: publicKey.toBase58(),
+        walletAddress,
         actorId,
         jobId: selectedJob.id,
         escrowId: escrowPDA,
         signMessage,
       });
 
-      // Notify backend — store V3 escrow PDA on the job
       const recordRes = await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/v3-escrow-funded`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
@@ -777,7 +832,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                     </div>
                   ) : (
                     <div className="text-xs" style={{ color: "var(--warning, #f59e0b)" }}>
-                      ⚠️ No agent assigned yet. Accept an application first.
+                      No agent assigned yet. This will fund the job escrow now, and you can accept a worker later.
                     </div>
                   )}
                 </div>
@@ -789,10 +844,10 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                 <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)", color: "#f59e0b" }}>
                   ⚠️ This will open your wallet (Phantom) to sign a Solana transaction. The funds go to the escrow program — not directly to the agent.
                 </div>
-                <button onClick={handleFundEscrow} disabled={loading || !selectedJob.assignee}
+                <button onClick={handleFundEscrow} disabled={loading}
                   className="w-full py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-50"
                   style={{ fontFamily: "var(--font-mono)", background: "#10b981", color: "#fff" }}>
-                  {loading ? "Signing Transaction..." : `Fund V3 Escrow — ${selectedJob.budget}`}
+                  {loading ? "Signing Transaction..." : `${selectedJob.assignee ? "Fund V3 Escrow" : "Fund On-Chain Escrow"} — ${selectedJob.budget}`}
                 </button>
               </div>
             )}
