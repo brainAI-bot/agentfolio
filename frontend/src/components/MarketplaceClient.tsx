@@ -39,6 +39,7 @@ const escrowConfig: Record<string, { label: string; icon: React.ElementType }> =
   locked: { label: "V3 Escrow Locked 🔒", icon: Lock },
   funded: { label: "V3 Escrow Funded 🔒", icon: Shield },
   released: { label: "Escrow Released", icon: CheckCircle },
+  completed: { label: "Completed", icon: CheckCircle },
   disputed: { label: "Escrow Disputed", icon: AlertTriangle },
 };
 
@@ -217,34 +218,41 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
       if (res.ok) {
         const data = await res.json();
         const jobList = data.jobs || data || [];
-        setJobs(jobList.map((j: any) => ({
-          id: j.id,
-          title: j.title,
-          description: j.description,
-          poster: j.clientId || j.poster || "Unknown",
-          posterAvatar: "",
-          budget: `${j.budgetAmount || 0} ${j.budgetCurrency || "USDC"}`,
-          skills: j.skills || [],
-          status: j.status === "in_progress" ? "in_progress" : j.status || "open",
-          escrowStatus: j.fundsReleased
+        setJobs(jobList.map((j: any) => {
+          const normalizedStatus = j.status === "in_progress" ? "in_progress" : j.status || "open";
+          const escrowStatus = (j.fundsReleased || j.releasedAt || j.v3ReleasedAt)
             ? "released"
             : (j.onchainEscrowPDA || j.v3EscrowPDA)
               ? "funded"
               : j.escrowFunded
                 ? "locked"
-                : "ready",
-          escrowTx: j.v3EscrowTx || j.escrowTx || j.escrow_tx || null,
-          escrowId: j.escrowId || null,
-          v3EscrowPDA: j.v3EscrowPDA || null,
-          onchainEscrowPDA: j.onchainEscrowPDA || null,
-          proposals: j.applicationCount || 0,
-          deadline: (j.timeline || "").replace("_", " "),
-          assignee: j.selectedAgentId || j.acceptedApplicant || undefined,
-          assigneeId: j.selectedAgentId || j.acceptedApplicant || undefined,
-          clientId: j.clientId || j.postedBy || undefined,
-          createdAt: j.createdAt || new Date().toISOString(),
-          deliverableStatus: j.deliverableStatus || undefined,
-        })));
+                : normalizedStatus === "completed"
+                  ? "completed"
+                  : "ready";
+
+          return {
+            id: j.id,
+            title: j.title,
+            description: j.description,
+            poster: j.clientId || j.poster || "Unknown",
+            posterAvatar: "",
+            budget: `${j.budgetAmount || 0} ${j.budgetCurrency || "USDC"}`,
+            skills: j.skills || [],
+            status: normalizedStatus,
+            escrowStatus,
+            escrowTx: j.v3EscrowTx || j.escrowTx || j.escrow_tx || null,
+            escrowId: j.escrowId || null,
+            v3EscrowPDA: j.v3EscrowPDA || null,
+            onchainEscrowPDA: j.onchainEscrowPDA || null,
+            proposals: j.applicationCount || 0,
+            deadline: (j.timeline || "").replace("_", " "),
+            assignee: j.selectedAgentId || j.acceptedApplicant || undefined,
+            assigneeId: j.selectedAgentId || j.acceptedApplicant || undefined,
+            clientId: j.clientId || j.postedBy || undefined,
+            createdAt: j.createdAt || new Date().toISOString(),
+            deliverableStatus: j.deliverableStatus || undefined,
+          };
+        }));
       }
     } catch (e) { console.error("Failed to refresh jobs:", e); }
   }, []);

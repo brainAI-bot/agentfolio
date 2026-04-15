@@ -101,6 +101,7 @@ const escrowLabels: Record<string, string> = {
   ready: "Escrow Pending",
   locked: "Escrow Locked 🔒",
   released: "Escrow Released ✅",
+  completed: "Completed",
   disputed: "Escrow Disputed ⚠️",
 };
 
@@ -119,6 +120,15 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   } catch {}
 
   const sc = statusConfig[job.status] || statusConfig.open;
+  const effectiveEscrowStatus = (liveJob?.fundsReleased || liveJob?.releasedAt || liveJob?.v3ReleasedAt)
+    ? "released"
+    : ((liveJob?.onchainEscrowPDA || liveJob?.v3EscrowPDA || (job as any).onchainEscrowPDA || (job as any).v3EscrowPDA)
+        ? ((liveJob?.escrowFunded || (job as any).escrowFunded) ? "locked" : "funded")
+        : ((liveJob?.escrowFunded || (job as any).escrowFunded)
+            ? "locked"
+            : job.status === "completed"
+              ? "completed"
+              : (liveJob?.escrowStatus || (job as any).escrowStatus || "ready")));
 
   return (
     <div className="min-h-screen" style={{ background: "var(--bg-primary)", color: "var(--text-primary)" }}>
@@ -168,7 +178,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             <span className="text-lg font-bold" style={{ color: "var(--solana, #9945ff)" }}>{job.budget}</span>
             <span title="A 5% platform fee applies on successful completion" style={{ color: "var(--text-tertiary)", fontSize: "11px", cursor: "help" }}>(5% fee)</span>
             <span style={{ color: "var(--text-tertiary)" }}>·</span>
-            <span style={{ color: "var(--text-secondary)" }}>{escrowLabels[job.escrowStatus] || job.escrowStatus}</span>
+            <span style={{ color: "var(--text-secondary)" }}>{escrowLabels[effectiveEscrowStatus] || effectiveEscrowStatus}</span>
             <span style={{ color: "var(--text-tertiary)" }}>·</span>
             <span style={{ color: "var(--text-secondary)" }}>{job.proposals} proposals</span>
           </div>
