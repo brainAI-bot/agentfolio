@@ -31,6 +31,14 @@ interface Props {
   onAvatarSet?: (avatar: NFTAvatar) => void;
 }
 
+function normalizeWalletChain(chain: string | null | undefined) {
+  const normalized = String(chain || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (["sol", "solana", "solana_wallet", "solana-wallet"].includes(normalized)) return "solana";
+  if (["eth", "ethereum", "eth_wallet", "eth-wallet"].includes(normalized)) return "ethereum";
+  return normalized;
+}
+
 function bytesToBase64(bytes: Uint8Array) {
   let binary = "";
   bytes.forEach((byte) => {
@@ -47,16 +55,23 @@ export function NFTAvatarPicker({ profileId, currentAvatar, nftAvatar, wallets, 
   const [setting, setSetting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const verifiedWallets = wallets.filter(w => w.verified);
+  const verifiedWallets = wallets
+    .filter((wallet) => wallet?.verified && wallet?.address)
+    .map((wallet) => ({
+      ...wallet,
+      chain: normalizeWalletChain(wallet.chain),
+      address: String(wallet.address).trim(),
+    }))
+    .filter((wallet) => Boolean(wallet.chain && wallet.address));
 
   async function loadNFTs(chain: string, address: string) {
+    const normalizedChain = normalizeWalletChain(chain);
+    const normalizedAddress = String(address || "").trim();
     setLoading(true);
     setError(null);
-    setSelectedWallet({ chain, address });
+    setSelectedWallet({ chain: normalizedChain, address: normalizedAddress });
     try {
-      const res = await fetch(`/api/avatar/nfts/${chain}/${address}`, {
-        headers: apiKey ? { "Authorization": `Bearer ${apiKey}` } : {}
-      });
+      const res = await fetch(`/api/avatar/nfts/${normalizedChain}/${normalizedAddress}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setNfts(data.nfts || []);
@@ -78,18 +93,19 @@ export function NFTAvatarPicker({ profileId, currentAvatar, nftAvatar, wallets, 
         "Content-Type": "application/json",
       };
 
+      const normalizedConnectedWalletAddress = String(connectedWalletAddress || "").trim();
       const canUseWalletAuth = Boolean(
         signMessage &&
-        connectedWalletAddress &&
-        selectedWallet.chain === "solana" &&
-        selectedWallet.address === connectedWalletAddress &&
-        verifiedWallets.some((wallet) => wallet.verified && wallet.chain === "solana" && wallet.address === connectedWalletAddress)
+        normalizedConnectedWalletAddress &&
+        normalizeWalletChain(selectedWallet.chain) === "solana" &&
+        selectedWallet.address === normalizedConnectedWalletAddress &&
+        verifiedWallets.some((wallet) => wallet.chain === "solana" && wallet.address === normalizedConnectedWalletAddress)
       );
 
       if (canUseWalletAuth) {
         const msg = new TextEncoder().encode(`agentfolio-edit:${profileId}`);
         const sig = await signMessage!(msg);
-        headers["x-wallet-address"] = connectedWalletAddress!;
+        headers["x-wallet-address"] = normalizedConnectedWalletAddress;
         headers["x-wallet-signature"] = bytesToBase64(sig);
         headers["x-profile-id"] = profileId;
       } else if (apiKey) {
@@ -200,7 +216,7 @@ export function NFTAvatarPicker({ profileId, currentAvatar, nftAvatar, wallets, 
                 }}
               >
                 <LinkIcon className="w-3 h-3" />
-                {w.chain} · {w.address.slice(0, 6)}...{w.address.slice(-4)}
+                {normalizeWalletChain(w.chain)} · {w.address.slice(0, 6)}...{w.address.slice(-4)}
               </button>
             ))}
           </div>
