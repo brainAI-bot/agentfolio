@@ -34,6 +34,16 @@ interface NFTItem {
   isGenesis: boolean;
 }
 
+async function deserializeMintTransaction(base64Tx: string) {
+  const { Transaction, VersionedTransaction } = await import("@solana/web3.js");
+  const raw = Buffer.from(base64Tx, "base64");
+  try {
+    return VersionedTransaction.deserialize(raw);
+  } catch {
+    return Transaction.from(raw);
+  }
+}
+
 export default function MintPage() {
   const wallet = useWallet();
   const { smartConnect } = useSmartConnect();
@@ -116,10 +126,8 @@ export default function MintPage() {
       });
       if (!prepRes.ok) { const err = await prepRes.json(); throw new Error(err.error || "Failed to prepare mint"); }
       const prepData = await prepRes.json();
-      const { Transaction } = await import("@solana/web3.js");
-      const txBuf = Buffer.from(prepData.transaction, "base64");
-      const tx = Transaction.from(txBuf);
-      const signed = await wallet.signTransaction(tx);
+      const tx = await deserializeMintTransaction(prepData.transaction);
+      const signed = await wallet.signTransaction(tx as any);
       const submitRes = await fetch(API + "/api/burn-to-become/submit-mint", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -155,8 +163,8 @@ export default function MintPage() {
         // If server returns a burnToBecome TX (genesis record update), have user sign it
         if (confirmData.burnToBecomeTx && wallet.signTransaction) {
           try {
-            const btbTx = Transaction.from(Buffer.from(confirmData.burnToBecomeTx, "base64"));
-            const signedBtb = await wallet.signTransaction(btbTx);
+            const btbTx = await deserializeMintTransaction(confirmData.burnToBecomeTx);
+            const signedBtb = await wallet.signTransaction(btbTx as any);
             const btbRes = await fetch(`${API}/api/burn-to-become/submit-genesis`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -318,9 +326,8 @@ export default function MintPage() {
       });
       if (!prepRes.ok) { const err = await prepRes.json(); throw new Error(err.error || "Failed to prepare burn"); }
       const { transaction: serializedTx } = await prepRes.json();
-      const { Transaction } = await import("@solana/web3.js");
-      const tx = Transaction.from(Buffer.from(serializedTx, "base64"));
-      const signed = await wallet.signTransaction(tx);
+      const tx = await deserializeMintTransaction(serializedTx);
+      const signed = await wallet.signTransaction(tx as any);
       const submitRes = await fetch(`${API}/api/burn-to-become/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -338,9 +345,8 @@ export default function MintPage() {
       // If server returns a burnToBecome TX (genesis record update), have user sign it
       if (result.burnToBecomeTx && wallet.signTransaction) {
         try {
-          const { Transaction } = await import("@solana/web3.js");
-          const btbTx = Transaction.from(Buffer.from(result.burnToBecomeTx, "base64"));
-          const signedBtb = await wallet.signTransaction(btbTx);
+          const btbTx = await deserializeMintTransaction(result.burnToBecomeTx);
+          const signedBtb = await wallet.signTransaction(btbTx as any);
           // Submit the signed burnToBecome TX
           const btbRes = await fetch(`${API}/api/burn-to-become/submit-genesis`, {
             method: "POST",
