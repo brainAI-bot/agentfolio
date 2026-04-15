@@ -144,12 +144,34 @@ export default function SATPExplorerPage() {
   const [agents, setAgents] = useState<AgentCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [searchInitialized, setSearchInitialized] = useState(false);
   const [sort, setSort] = useState<SortKey>("score");
   const [sortAsc, setSortAsc] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [detailData, setDetailData] = useState<Record<string, any>>({});
   const [detailLoading, setDetailLoading] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const query = (params.get("query") || params.get("q") || "").trim();
+      if (query) setSearch(query);
+      setSearchInitialized(true);
+    } else {
+      setSearchInitialized(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!searchInitialized || typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    const trimmed = search.trim();
+    if (trimmed) url.searchParams.set("query", trimmed);
+    else url.searchParams.delete("query");
+    const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+    window.history.replaceState({}, "", nextUrl);
+  }, [search, searchInitialized]);
 
   useEffect(() => {
     async function fetchAll() {
@@ -290,7 +312,8 @@ export default function SATPExplorerPage() {
         a.wallet.toLowerCase().includes(q) ||
         a.handle.toLowerCase().includes(q) ||
         a.description.toLowerCase().includes(q) ||
-        a.pda.toLowerCase().includes(q)
+        a.pda.toLowerCase().includes(q) ||
+        (a.profileId || "").toLowerCase().includes(q)
       );
     }
     result.sort((a, b) => {
@@ -342,7 +365,7 @@ export default function SATPExplorerPage() {
           </span>
         </div>
         <p className="text-sm" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-          All data sourced directly from Solana mainnet · SATP Program: <a href="https://explorer.solana.com/address/97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: "var(--accent)" }}>97yL33...eSq</a>
+          All data sourced directly from Solana mainnet · SATP Program: <a href="https://explorer.solana.com/address/GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: "var(--accent)" }}>GTppU4...ZfG</a>
         </p>
         <div className="flex flex-wrap gap-3 mt-2 text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
           <span>{agents.length} on-chain agents</span>
