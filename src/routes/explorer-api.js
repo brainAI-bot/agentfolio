@@ -166,11 +166,11 @@ router.get('/agents', async (req, res) => {
     }
     
     // Enrich with chain-cache attestation data
-    const enriched = agents.map(a => {
+    const enriched = await Promise.all(agents.map(async (a) => {
       const profileRow = resolveProfileRow(a) || {};
       const profileId = profileRow.id || ('agent_' + String(a.agentName || '').trim().toLowerCase().replace(/\s+/g, '_'));
       const verificationData = parseJson(profileRow.verification_data, {});
-      const attestations = chainCache.getVerifications(profileId, profileRow.created_at) || [];
+      const attestations = (chainCache.getVerifications(profileId, profileRow.created_at) || []).map(att => ({ ...att }));
       const txHints = new Map();
       const addTxHint = (platform, txSignature, timestamp = null) => {
         const normalized = normalizePlatform(platform);
@@ -187,6 +187,20 @@ router.get('/agents', async (req, res) => {
 
       for (const row of db.prepare('SELECT platform, tx_signature, created_at FROM attestations WHERE profile_id = ? AND tx_signature IS NOT NULL ORDER BY created_at DESC').all(profileId)) {
         addTxHint(row.platform, row.tx_signature, row.created_at || null);
+      }
+      if (typeof chainCache.resolveAttestationTxHintByPda === 'function') {
+        for (const att of attestations) {
+          if (!att?.pda || att?.txSignature) continue;
+          try {
+            const createdAtUnix = att?.timestamp ? Math.floor(new Date(att.timestamp).getTime() / 1000) : null;
+            const hint = await chainCache.resolveAttestationTxHintByPda(att.pda, createdAtUnix);
+            if (hint?.txSignature) {
+              att.txSignature = hint.txSignature;
+              att.solscanUrl = hint.solscanUrl || att.solscanUrl || ('https://solana.fm/tx/' + hint.txSignature);
+              addTxHint(att.platform, hint.txSignature, att.timestamp || null);
+            }
+          } catch (_) {}
+        }
       }
       for (const row of db.prepare('SELECT platform, proof, verified_at FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(profileId)) {
         let proof = {};
@@ -308,7 +322,7 @@ router.get('/agents', async (req, res) => {
         programId: 'GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG',
         source: 'v3',
       };
-    });
+    }));
     
     // Apply limit
     const maxResults = limit ? parseInt(limit, 10) : enriched.length;
