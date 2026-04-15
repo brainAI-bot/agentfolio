@@ -1928,6 +1928,26 @@ try {
     return true;
   }
 
+  // POST /api/burn-to-become/submit-mint — submit signed client mint TX via server RPC
+  if (url.pathname === '/api/burn-to-become/submit-mint' && req.method === 'POST') {
+    (async () => {
+      try {
+        const { signedTransaction } = req.body || {};
+        if (!signedTransaction) return sendJson(400, { error: 'signedTransaction required' });
+
+        const txBuffer = Buffer.from(signedTransaction, 'base64');
+        const sig = await connection.sendRawTransaction(txBuffer, { skipPreflight: false });
+        await connection.confirmTransaction(sig, 'confirmed');
+        console.log('[SubmitMint] client mint TX confirmed:', sig);
+        sendJson(200, { success: true, signature: sig });
+      } catch (e) {
+        console.error('[SubmitMint] error:', e.message);
+        sendJson(500, { error: e.message });
+      }
+    })();
+    return true;
+  }
+
   // POST /api/burn-to-become/mint-boa/submit — DEPRECATED (Metaplex pipeline is server-side)
   if (url.pathname === '/api/burn-to-become/mint-boa/submit' && req.method === 'POST') {
     sendJson(410, { error: 'This endpoint is deprecated. Minting is now handled server-side via /api/burn-to-become/mint-boa' });
