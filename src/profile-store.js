@@ -1397,7 +1397,15 @@ function registerRoutes(app) {
         break;
     }
 
-    const paginatedProfiles = profiles.slice(offset, offset + limit);
+    const paginatedProfiles = profiles.slice(offset, offset + limit).map((profile) => {
+      const enriched = enrichProfile(profile) || {};
+      return {
+        ...profile,
+        verification_data: enriched.verification_data || profile.verification_data || {},
+        verificationData: enriched.verification_data || profile.verificationData || {},
+        verifications: enriched.verifications || profile.verifications || {},
+      };
+    });
     res.json({ profiles: paginatedProfiles, total, page, limit, pages: Math.ceil(total / limit), sort: sortParam });
   });
 

@@ -148,7 +148,14 @@ function mapProfile(p: RawProfile): Agent {
     ? trustScoreObj
     : (trustScoreObj && typeof trustScoreObj === 'object' ? trustScoreObj.overall_score || 0 : 0);
   const trustScore = p.score || rawTrustScore || (v3 ? v3.reputationScore : 0) || 0;
-  const vd = p.verifications || p.verificationData || {};
+  const vd: Record<string, any> = {
+    ...((p as any).verification_data || {}),
+    ...(p.verificationData || {}),
+    ...(p.verifications || {}),
+  };
+  if (vd.eth && !vd.ethereum) vd.ethereum = vd.eth;
+  if (vd.solana_wallet && !vd.solana) vd.solana = vd.solana_wallet;
+  if (vd.twitter && !vd.x) vd.x = vd.twitter;
   const tier: number = p.verificationLevel || p.level || (v3 ? v3.verificationLevel : 0) || 0;
 
   return {
@@ -372,6 +379,20 @@ export async function getAllAgents(): Promise<Agent[]> {
           ? p.trust_score
           : (p.trust_score && typeof p.trust_score === 'object' ? p.trust_score.overall_score || 0 : 0);
         const trustScore = p.score || rawTrustScore || 0;
+        const verificationEntries = Array.isArray(p.metadata?.verifications) ? p.metadata.verifications : [];
+        const metadataVerifications = Object.fromEntries(verificationEntries
+          .filter((entry: any) => entry && typeof entry.platform === "string")
+          .map((entry: any) => [entry.platform, { ...(entry.proof || {}), ...entry, verified: entry.status === "verified" }])
+        );
+        const vd: Record<string, any> = {
+          ...metadataVerifications,
+          ...(p.verification_data || {}),
+          ...(p.verificationData || {}),
+          ...(p.verifications || {}),
+        };
+        if (vd.eth && !vd.ethereum) vd.ethereum = vd.eth;
+        if (vd.solana_wallet && !vd.solana) vd.solana = vd.solana_wallet;
+        if (vd.twitter && !vd.x) vd.x = vd.twitter;
         return {
           id: p.id, name: p.name || "", handle: p.handle || "", bio: p.bio || p.description || "",
           avatar: p.avatar || "", nftAvatar: null, trustScore,
@@ -379,7 +400,22 @@ export async function getAllAgents(): Promise<Agent[]> {
           verificationLevelName: p.verificationLevelName || p.tier || p.levelName || "Unclaimed",
           verificationBadge: ["⚪","🟡","🔵","🟢","🟠","🟣"][p.verificationLevel || p.level || 0] || "⚪",
           reputationScore: trustScore, reputationRank: "Newcomer",
-          skills: [], verifications: p.verifications || {}, unclaimed: p.unclaimed || false,
+          skills: [], verifications: {
+            github: vd.github?.verified ? { verified: true } : undefined,
+            solana: vd.solana?.verified ? { verified: true } : undefined,
+            hyperliquid: vd.hyperliquid?.verified ? { verified: true } : undefined,
+            x: (vd.x?.verified || vd.twitter?.verified) ? { verified: true } : undefined,
+            satp: vd.satp?.verified ? { verified: true } : undefined,
+            ethereum: (vd.ethereum?.verified || vd.eth?.verified) ? { verified: true } : undefined,
+            agentmail: vd.agentmail?.verified ? { verified: true } : undefined,
+            moltbook: vd.moltbook?.verified ? { verified: true } : undefined,
+            polymarket: vd.polymarket?.verified ? { verified: true } : undefined,
+            discord: vd.discord?.verified ? { verified: true } : undefined,
+            website: vd.website?.verified ? { verified: true } : undefined,
+            domain: vd.domain?.verified ? { verified: true } : undefined,
+            telegram: vd.telegram?.verified ? { verified: true } : undefined,
+            twitter: vd.twitter?.verified ? { verified: true } : undefined,
+          }, unclaimed: p.unclaimed || false,
           status: p.unclaimed ? "unclaimed" : "online", jobsCompleted: 0, rating: 0,
           registeredAt: p.created_at || "", createdAt: p.created_at || "", activity: [],
           walletAddress: p.wallet || undefined, profileCompleteness: 0,
