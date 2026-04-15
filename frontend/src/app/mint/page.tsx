@@ -10,8 +10,6 @@ const MINTING_PAUSED = false;
 
 const API = process.env.NEXT_PUBLIC_API_URL || "";
 const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
-const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || (SOLANA_CLUSTER === "devnet" ? "https://api.devnet.solana.com" : SOLANA_CLUSTER === "testnet" ? "https://api.testnet.solana.com" : "https://api.mainnet-beta.solana.com");
-const MINT_TREASURY = process.env.NEXT_PUBLIC_MINT_TREASURY || "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be";
 const EXPLORER_CLUSTER_QUERY = SOLANA_CLUSTER === "mainnet-beta" ? "" : `?cluster=${encodeURIComponent(SOLANA_CLUSTER)}`;
 const solanaExplorerUrl = (path: string) => `https://explorer.solana.com/${path}${EXPLORER_CLUSTER_QUERY}`;
 
@@ -191,86 +189,11 @@ export default function MintPage() {
     }
   };
 
-  const handleMintBOA = async () => {
-    if (!wallet.publicKey) return;
-    setStep("minting");
-    setError("");
-    try {
-      const walletAddr = wallet.publicKey.toBase58();
-      const isFreeMint = eligibility?.eligible === true;
-
-      if (isFreeMint) {
-        // Free mint (Level 3+, first mint) — server handles everything via Metaplex
-        const res = await fetch(`${API}/api/burn-to-become/mint-boa`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wallet: walletAddr, profileId: profileId || undefined }),
-        });
-        if (!res.ok) { const err = await res.json(); throw new Error(err.error || err.message || "Mint failed"); }
-        const data = await res.json();
-        const mintSig = data.signature || data.tx || "";
-        // Confirm TX on-chain before showing success
-        if (mintSig) {
-          try {
-            const { Connection } = await import("@solana/web3.js");
-            const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-            await connection.confirmTransaction(mintSig, "confirmed");
-          } catch (confirmErr) {
-            console.warn("TX confirm check failed (may already be confirmed):", confirmErr);
-          }
-        }
-        // Don't set soulboundMint — this is a regular Core NFT mint, not soulbound
-        setBurnTx(mintSig);
-        setMintedNft({ image: data.imageUri || data.image_uri || "", name: data.boaName || data.name || `BOA #${data.boaId || data.nft_number || 1}`, number: data.boaId || data.nft_number || 1, mint: data.mintAddress || data.mint || "" });
-        await loadWalletData(walletAddr);
-        setStep("complete");
-      } else {
-        // Paid mint (1 SOL) — user sends payment, then server mints via Metaplex
-        if (!wallet.sendTransaction) return;
-        const { Connection, Transaction, SystemProgram, PublicKey } = await import("@solana/web3.js");
-        const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-        const treasury = new PublicKey(MINT_TREASURY);
-        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
-        const tx = new Transaction({ blockhash, lastValidBlockHeight, feePayer: wallet.publicKey }).add(
-          SystemProgram.transfer({ fromPubkey: wallet.publicKey, toPubkey: treasury, lamports: 1_000_000_000 })
-        );
-        const paymentSig = await wallet.sendTransaction(tx, connection);
-        await connection.confirmTransaction({ signature: paymentSig, blockhash, lastValidBlockHeight }, "confirmed");
-        setBurnTx(paymentSig);
-
-        // Now call Metaplex mint with payment proof
-        const mintRes = await fetch(`${API}/api/burn-to-become/mint-boa`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wallet: walletAddr, profileId: profileId || undefined, paymentTx: paymentSig }),
-        });
-        if (!mintRes.ok) { const err = await mintRes.json(); throw new Error(err.error || err.message || "Mint failed after payment"); }
-        const mintData = await mintRes.json();
-        const mintSig = mintData.signature || mintData.tx || paymentSig;
-        setBurnTx(mintSig);
-        // Don't set soulboundMint — this is a regular Core NFT mint, not soulbound
-        setMintedNft({ image: mintData.imageUri || mintData.image_uri || "", name: mintData.boaName || mintData.name || `BOA #${mintData.boaId || mintData.nft_number || 1}`, number: mintData.boaId || mintData.nft_number || 1, mint: mintData.mintAddress || mintData.mint || "" });
-        await loadWalletData(walletAddr);
-        setStep("complete");
-      }
-    } catch (e: any) {
-      const msg = e?.code === 4001 ? "Transaction rejected in wallet" 
-        : e?.message?.includes("insufficient") ? "Insufficient SOL balance for this transaction"
-        : e?.message?.includes("timeout") ? "Transaction timed out — network may be congested"
-        : e?.message?.includes("blockhash") ? "Transaction expired — please try again"
-        : e?.message || "Unknown error — check your wallet and try again";
-      setError(msg);
-      setStep("error");
-    }
-  };
-
   const retryMintComplete = async () => {
     if (!wallet.publicKey || !burnTx) return;
     setStep("minting");
     setError("");
     try {
-      const { Connection } = await import("@solana/web3.js");
-      const connection = new Connection(SOLANA_RPC_URL, "confirmed");
       let mintCompleted = false;
       for (let attempt = 0; attempt < 10 && !mintCompleted; attempt++) {
         if (attempt > 0) await new Promise(r => setTimeout(r, Math.min(4000 * attempt, 20000)));
