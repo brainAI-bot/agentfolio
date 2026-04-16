@@ -227,7 +227,7 @@ export function OnChainEscrowActions({
       const authHeaders = await createMarketplaceWalletAuth({
         action: authAction,
         walletAddress: walletAddr,
-        actorId: walletAddr,
+        actorId,
         jobId,
         escrowId: authEscrowId,
         signMessage,
