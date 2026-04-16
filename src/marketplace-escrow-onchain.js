@@ -138,6 +138,13 @@ function isAcceptedWorker(actorId, job) {
   return !!job && (matchesActor(actorId, job.acceptedApplicant) || matchesActor(actorId, job.selectedAgentId));
 }
 
+function walletMatchesAcceptedWorker(walletAddress, job) {
+  return !!job && !!walletAddress && (
+    walletMatchesClaimedActor(job.acceptedApplicant, walletAddress) ||
+    walletMatchesClaimedActor(job.selectedAgentId, walletAddress)
+  );
+}
+
 function buildMarketplaceAuthMessage({ action, jobId = '-', escrowId = '-', actorId = '-', walletAddress = '-', timestamp = '-' }) {
   return [
     'agentfolio-marketplace',
@@ -402,10 +409,14 @@ function registerMarketplaceEscrowOnchain(app) {
       if (!isJobPoster(clientWallet, job) || !matchesActor(clientWallet, escrow.fundedBy)) {
         return res.status(403).json({ error: 'Only the job poster can release payment' });
       }
-      if (!isAcceptedWorker(agentWallet, job)) {
+      const workerMatchesJob = isAcceptedWorker(agentWallet, job) || walletMatchesAcceptedWorker(agentWallet, job);
+      if (!workerMatchesJob) {
         return res.status(403).json({ error: 'Only the accepted worker can be paid for this job' });
       }
       const onchainState = await escrowOnchain.readEscrowAccount(escrow.jobId);
+      if (onchainState?.agent && String(onchainState.agent).trim().toLowerCase() !== String(agentWallet).trim().toLowerCase()) {
+        return res.status(400).json({ error: 'On-chain worker wallet mismatch' });
+      }
       if (!onchainState?.exists) return res.status(400).json({ error: 'Escrow PDA not found on-chain' });
       if (!['work_submitted', 'agent_accepted'].includes(onchainState.status)) {
         return res.status(400).json({ error: `Escrow is ${onchainState.status || 'not releasable'} on-chain` });
