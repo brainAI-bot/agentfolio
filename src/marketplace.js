@@ -34,25 +34,48 @@ try {
 
 const DATA_DIR = path.join(__dirname, '..', 'data', 'marketplace');
 const MARKETPLACE_AUTH_WINDOW_MS = 5 * 60 * 1000;
+const WALLET_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+function resolveProfileIdForWalletAddress(walletAddress) {
+  const wallet = String(walletAddress || '').trim();
+  if (!WALLET_ADDRESS_RE.test(wallet)) return null;
+
+  try {
+    const profileStore = require('./profile-store');
+    const db = profileStore.getDb();
+    const row = db.prepare(`
+      SELECT id FROM profiles
+      WHERE LOWER(wallet) = LOWER(?)
+         OR LOWER(claimed_by) = LOWER(?)
+         OR LOWER(json_extract(wallets, '$.solana')) = LOWER(?)
+         OR LOWER(json_extract(wallets, '$.solana_wallet')) = LOWER(?)
+         OR LOWER(json_extract(wallets, '$.wallet')) = LOWER(?)
+         OR LOWER(json_extract(verification_data, '$.solana.address')) = LOWER(?)
+         OR LOWER(json_extract(verification_data, '$.solana.identifier')) = LOWER(?)
+         OR LOWER(json_extract(verification_data, '$.eth.address')) = LOWER(?)
+         OR LOWER(json_extract(verification_data, '$.eth.identifier')) = LOWER(?)
+         OR LOWER(json_extract(verification_data, '$.ethereum.address')) = LOWER(?)
+         OR LOWER(json_extract(verification_data, '$.ethereum.identifier')) = LOWER(?)
+      ORDER BY COALESCE(
+        julianday(REPLACE(SUBSTR(updated_at, 1, 19), 'T', ' ')),
+        julianday(REPLACE(SUBSTR(created_at, 1, 19), 'T', ' ')),
+        0
+      ) DESC, id DESC
+      LIMIT 1
+    `).get(wallet, wallet, wallet, wallet, wallet, wallet, wallet, wallet, wallet, wallet, wallet);
+    return row ? row.id : null;
+  } catch (_) {
+    return null;
+  }
+}
 
 // Helper: resolve wallet address to profile ID
 function resolveApplicantId(applicantId) {
-  if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(applicantId)) {
-    try {
-      const profileStore = require('./profile-store');
-      const db = profileStore.getDb();
-      const profiles = db.prepare('SELECT id, name, verification_data, wallets FROM profiles').all();
-      for (const p of profiles) {
-        try {
-          const vd = JSON.parse(p.verification_data || '{}');
-          if (vd.solana && vd.solana.address === applicantId && vd.solana.verified) return p.id;
-          const w = JSON.parse(p.wallets || '{}');
-          if (w.solana === applicantId) return p.id;
-        } catch (_) {}
-      }
-    } catch (_) {}
+  const rawApplicantId = String(applicantId || '').trim();
+  if (WALLET_ADDRESS_RE.test(rawApplicantId)) {
+    return resolveProfileIdForWalletAddress(rawApplicantId) || rawApplicantId;
   }
-  return applicantId;
+  return rawApplicantId;
 }
 
 function buildApplicantProfileLookupCandidates(value) {
@@ -184,8 +207,22 @@ function isJobPoster(actorId, job) {
   return !!job && (matchesActor(actorId, job.postedBy) || matchesActor(actorId, job.clientId));
 }
 
+function walletMatchesJobPoster(walletAddress, job) {
+  return !!job && !!walletAddress && (
+    walletMatchesClaimedActor(job.postedBy, walletAddress) ||
+    walletMatchesClaimedActor(job.clientId, walletAddress)
+  );
+}
+
 function isAcceptedWorker(actorId, job) {
   return !!job && (matchesActor(actorId, job.acceptedApplicant) || matchesActor(actorId, job.selectedAgentId));
+}
+
+function walletMatchesAcceptedWorker(walletAddress, job) {
+  return !!job && !!walletAddress && (
+    walletMatchesClaimedActor(job.acceptedApplicant, walletAddress) ||
+    walletMatchesClaimedActor(job.selectedAgentId, walletAddress)
+  );
 }
 
 function buildMarketplaceAuthMessage({ action, jobId = '-', applicationId = '-', escrowId = '-', deliverableId = '-', actorId = '-', walletAddress = '-', timestamp = '-' }) {
@@ -253,10 +290,10 @@ function verifyMarketplaceAction(req, { action, job = null, actorId = null, appl
   }
 
   const effectiveActorId = normalizeActorId(claimedActorId || walletActorId) || claimedActorId || walletActorId;
-  if (requirePoster && job && !isJobPoster(effectiveActorId, job) && !isJobPoster(walletAddress, job)) {
+  if (requirePoster && job && !isJobPoster(effectiveActorId, job) && !isJobPoster(walletAddress, job) && !walletMatchesJobPoster(walletAddress, job)) {
     return { ok: false, status: 403, error: 'Only the job poster can perform this action' };
   }
-  if (requireWorker && job && !isAcceptedWorker(effectiveActorId, job) && !isAcceptedWorker(walletAddress, job)) {
+  if (requireWorker && job && !isAcceptedWorker(effectiveActorId, job) && !isAcceptedWorker(walletAddress, job) && !walletMatchesAcceptedWorker(walletAddress, job)) {
     return { ok: false, status: 403, error: 'Only the accepted worker can perform this action' };
   }
 
