@@ -123,7 +123,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     ...job,
     ...(liveJob || {}),
     status: liveJob?.status || job.status,
-    clientId: liveJob?.clientId || liveJob?.postedBy || (job as any).clientId || null,
+    clientId: liveJob?.clientId || liveJob?.postedBy || liveJob?.poster || (job as any).clientId || (job as any).postedBy || (job as any).poster || null,
     escrowId: liveJob?.escrowId || (job as any).escrowId || null,
     assigneeId: liveJob?.selectedAgentId || liveJob?.acceptedApplicant || (job as any).assigneeId || null,
     deliverableId: liveJob?.deliverableId || (job as any).deliverableId,
@@ -229,7 +229,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           <ApplicationsList
             jobId={job.id}
             initialApplications={(liveJob?.applications || []).filter((a: any) => a && !a.error)}
-            initialPosterId={liveJob?.clientId || liveJob?.postedBy || null}
+            initialPosterId={actionJob.clientId}
             initialJobStatus={liveJob?.status || job.status}
           />
         </div>
@@ -269,10 +269,6 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             escrowStatus={effectiveEscrowStatus}
             jobPDA={actionJob.onchainEscrowPDA}
           />
-
-          <div className="mt-4 text-[11px] px-3 py-2 rounded-lg" style={{ background: "var(--bg-primary)", fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-            API: POST /api/marketplace/jobs/{job.id}/apply
-          </div>
 
           <OnChainEscrowActions
             jobId={job.id}
