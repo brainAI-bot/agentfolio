@@ -654,6 +654,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
           timestamp: timestamp || hinted?.timestamp || null,
         };
       });
+    const publicPlatforms = [...new Set(publicVerifications.map((entry) => entry.platform).filter(Boolean))];
 
     res.json({
       agentId: profile.id,
@@ -672,6 +673,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       verificationBadge: unified.badge,
       scoreVersion: unified.source,
       verifications: publicVerifications,
+      platforms: publicPlatforms,
       avatar: resolvedAvatar,
       nftAvatar: parsedNftAvatar,
       nft_avatar: parsedNftAvatar,
