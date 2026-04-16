@@ -328,7 +328,7 @@ async function getWalletNFTs(walletAddress) {
           .replace('arweave.net', 'gateway.irys.xyz');
       }
 
-      nfts.push({ mint, name, image, uri, isGenesis, isToken2022: false, isCoreAsset: iface === 'MplCoreAsset' });
+      nfts.push({ mint, name, image, uri, isGenesis, isToken2022, isCoreAsset: iface === 'MplCoreAsset' });
     }
 
     console.log('[BurnPublic] DAS returned', items.length, 'assets,', nfts.length, 'NFTs (soulbound filtered) for', walletAddress);
@@ -445,34 +445,37 @@ async function buildBurnTransaction(walletAddress, nftMint) {
     });
   }
   
-  // ═══ SPL TOKEN NFT: Original burn flow ═══
-  if (!accountInfo.owner.equals(TOKEN_PROGRAM_ID)) {
+  // ═══ SPL / Token-2022 NFT burn flow ═══
+  const isLegacyToken = accountInfo.owner.equals(TOKEN_PROGRAM_ID);
+  const isToken2022 = accountInfo.owner.equals(TOKEN_2022_PROGRAM_ID);
+  if (!isLegacyToken && !isToken2022) {
     throw new Error('Unsupported NFT program for burn: ' + accountInfo.owner.toBase58());
   }
-  console.log('[BurnPublic] Detected SPL Token NFT, using SPL Token burn');
-  const ata = await getAssociatedTokenAddress(mint, wallet, false, TOKEN_PROGRAM_ID);
+  const tokenProgramId = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+  console.log('[BurnPublic] Detected ' + (isToken2022 ? 'Token-2022' : 'SPL Token') + ' NFT, using token burn');
+  const ata = await getAssociatedTokenAddress(mint, wallet, false, tokenProgramId);
   const { getAccount, getMint } = require('@solana/spl-token');
   let tokenAccount;
   try {
-    tokenAccount = await getAccount(connection, ata, 'confirmed', TOKEN_PROGRAM_ID);
+    tokenAccount = await getAccount(connection, ata, 'confirmed', tokenProgramId);
   } catch {
-    throw new Error('Wallet does not own this SPL NFT');
+    throw new Error(isToken2022 ? 'Wallet does not own this Token-2022 NFT' : 'Wallet does not own this SPL NFT');
   }
   if (!tokenAccount.owner.equals(wallet)) {
-    throw new Error('Wallet does not own this SPL NFT');
+    throw new Error(isToken2022 ? 'Wallet does not own this Token-2022 NFT' : 'Wallet does not own this SPL NFT');
   }
   if (tokenAccount.amount !== 1n) {
     throw new Error('Burn to Become requires exactly 1 token in the wallet account');
   }
-  const mintInfo = await getMint(connection, mint, 'confirmed', TOKEN_PROGRAM_ID);
+  const mintInfo = await getMint(connection, mint, 'confirmed', tokenProgramId);
   if (mintInfo.decimals !== 0 || mintInfo.supply !== 1n) {
     throw new Error('Burn to Become only supports non-fungible SPL NFTs');
   }
   
   const tx = new Transaction();
   tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 }));
-  tx.add(createBurnInstruction(ata, mint, wallet, 1, [], TOKEN_PROGRAM_ID));
-  tx.add(createCloseAccountInstruction(ata, wallet, wallet, [], TOKEN_PROGRAM_ID));
+  tx.add(createBurnInstruction(ata, mint, wallet, 1, [], tokenProgramId));
+  tx.add(createCloseAccountInstruction(ata, wallet, wallet, [], tokenProgramId));
   
   tx.feePayer = wallet;
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
@@ -1205,6 +1208,7 @@ function handleBurnToBecome(req, res, url) {
         const allowedPrograms = new Set([
           ComputeBudgetProgram.programId.toBase58(),
           TOKEN_PROGRAM_ID.toBase58(),
+          TOKEN_2022_PROGRAM_ID.toBase58(),
           'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d',
         ]);
         if (submittedPrograms.some(pid => !allowedPrograms.has(pid))) {
@@ -1226,11 +1230,12 @@ function handleBurnToBecome(req, res, url) {
           if (!coreIx.keys.some(k => k.pubkey.equals(walletPubkey) && k.isSigner)) {
             return sendJson(400, { error: 'Signed transaction signer does not match wallet' });
           }
-        } else if (submittedMintAccount.owner.equals(TOKEN_PROGRAM_ID)) {
-          const expectedAta = await getAssociatedTokenAddress(mintPubkey, walletPubkey, false, TOKEN_PROGRAM_ID);
+        } else if (submittedMintAccount.owner.equals(TOKEN_PROGRAM_ID) || submittedMintAccount.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+          const tokenProgramId = submittedMintAccount.owner.equals(TOKEN_2022_PROGRAM_ID) ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+          const expectedAta = await getAssociatedTokenAddress(mintPubkey, walletPubkey, false, tokenProgramId);
           let sawBurn = false;
           let sawClose = false;
-          for (const ix of submittedTx.instructions.filter(ix => ix.programId.equals(TOKEN_PROGRAM_ID))) {
+          for (const ix of submittedTx.instructions.filter(ix => ix.programId.equals(tokenProgramId))) {
             const opcode = ix.data && ix.data.length ? ix.data[0] : null;
             if (opcode === 8 && ix.keys[0] && ix.keys[1] && ix.keys[2] && ix.keys[0].pubkey.equals(expectedAta) && ix.keys[1].pubkey.equals(mintPubkey) && ix.keys[2].pubkey.equals(walletPubkey) && ix.keys[2].isSigner) {
               sawBurn = true;
@@ -1240,7 +1245,7 @@ function handleBurnToBecome(req, res, url) {
             }
           }
           if (!sawBurn || !sawClose) {
-            return sendJson(400, { error: 'Signed transaction does not match the expected SPL burn flow' });
+            return sendJson(400, { error: 'Signed transaction does not match the expected ' + (tokenProgramId.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'SPL') + ' burn flow' });
           }
         } else {
           return sendJson(400, { error: 'Unsupported NFT program for burn: ' + submittedMintAccount.owner.toBase58() });
