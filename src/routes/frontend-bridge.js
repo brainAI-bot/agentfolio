@@ -7,6 +7,8 @@
  */
 
 'use strict';
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const { loadProfile, saveProfile } = require('../lib/database');
 const { initiateHLVerification, completeHLVerification } = require('../lib/hyperliquid-verify-hardened');
@@ -457,6 +459,7 @@ function registerFrontendBridge(app, profileStore) {
       const { wallet, preferredProfileId } = req.query;
       if (!wallet) return res.status(400).json({ error: 'wallet parameter required' });
       const normalizedWallet = String(wallet).trim();
+      const normalizedWalletLower = normalizedWallet.toLowerCase();
       const preferredId = String(preferredProfileId || '').trim();
       const walletParams = [
         normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet
@@ -471,27 +474,90 @@ function registerFrontendBridge(app, profileStore) {
            OR LOWER(json_extract(verification_data, '$.solana.identifier')) = LOWER(?)
       `;
 
+      const summarizeJsonProfile = (profile) => {
+        const avatar = profile.avatar || profile.avatarUrl || profile.image || null;
+        return {
+          id: profile.id,
+          name: profile.name || profile.handle || profile.id,
+          avatar,
+          api_key: profile.apiKey || null,
+          claimed: !!(profile.claimed || profile.wallet || profile.claimed_by),
+          source: 'json',
+        };
+      };
+
+      const jsonProfileMatchesWallet = (profile) => {
+        if (!profile || typeof profile !== 'object') return false;
+        const candidates = [
+          profile.wallet,
+          profile.claimed_by,
+          profile.claimedBy,
+          profile.walletAddress,
+          profile.wallets?.solana,
+          profile.wallets?.solana_wallet,
+          profile.wallets?.wallet,
+          profile.verification_data?.solana?.address,
+          profile.verification_data?.solana?.identifier,
+          profile.verifications?.solana?.address,
+          profile.verifications?.solana?.identifier,
+        ].filter(Boolean).map((value) => String(value).trim().toLowerCase());
+        return candidates.includes(normalizedWalletLower);
+      };
+
+      const mergeMatches = (matches) => {
+        const byId = new Map();
+        for (const item of matches) {
+          if (!item?.id) continue;
+          const existing = byId.get(item.id) || {};
+          byId.set(item.id, {
+            ...item,
+            ...existing,
+            avatar: existing.avatar || item.avatar || null,
+            api_key: existing.api_key || item.api_key || null,
+            claimed: typeof existing.claimed === 'boolean' ? existing.claimed : !!item.claimed,
+          });
+        }
+        return Array.from(byId.values());
+      };
+
+      const dbMatches = db.prepare(`
+        SELECT id, name, avatar, api_key, claimed FROM profiles
+        WHERE ${whereClause}
+        ORDER BY COALESCE(
+          julianday(REPLACE(SUBSTR(updated_at, 1, 19), 'T', ' ')),
+          julianday(REPLACE(SUBSTR(created_at, 1, 19), 'T', ' ')),
+          0
+        ) DESC, id DESC
+        LIMIT 20
+      `).all(...walletParams);
+
+      const jsonMatches = [];
+      try {
+        const profilesDir = path.join(__dirname, '../../data/profiles');
+        for (const file of fs.readdirSync(profilesDir)) {
+          if (!file.endsWith('.json')) continue;
+          const filePath = path.join(profilesDir, file);
+          let profile;
+          try {
+            profile = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+          } catch {
+            continue;
+          }
+          if (jsonProfileMatchesWallet(profile)) {
+            jsonMatches.push(summarizeJsonProfile(profile));
+          }
+        }
+      } catch (_) {}
+
+      const matches = mergeMatches([...dbMatches, ...jsonMatches]);
+      if (!matches.length) return res.status(404).json({ found: false, error: 'No profile found for this wallet' });
+
       let profile = null;
       if (preferredId) {
-        profile = db.prepare(`
-          SELECT id, name, avatar, api_key, claimed FROM profiles
-          WHERE id = ? AND (${whereClause})
-          LIMIT 1
-        `).get(preferredId, ...walletParams);
+        profile = matches.find((item) => item.id === preferredId) || null;
       }
 
       if (!profile) {
-        const matches = db.prepare(`
-          SELECT id, name, avatar, api_key, claimed FROM profiles
-          WHERE ${whereClause}
-          ORDER BY COALESCE(
-            julianday(REPLACE(SUBSTR(updated_at, 1, 19), 'T', ' ')),
-            julianday(REPLACE(SUBSTR(created_at, 1, 19), 'T', ' ')),
-            0
-          ) DESC, id DESC
-          LIMIT 3
-        `).all(...walletParams);
-        if (!matches.length) return res.status(404).json({ found: false, error: 'No profile found for this wallet' });
         if (matches.length > 1) {
           return res.status(409).json({
             found: false,
@@ -503,7 +569,7 @@ function registerFrontendBridge(app, profileStore) {
         }
         profile = matches[0];
       }
-      if (!profile) return res.status(404).json({ found: false, error: 'No profile found for this wallet' });
+
       res.json({
         found: true,
         id: profile.id,
