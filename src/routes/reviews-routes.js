@@ -337,6 +337,37 @@ router.post('/submit', async (req, res, next) => {
 });
 
 /**
+ * POST /api/reviews/submit-signed
+ * Submit a wallet-signed review transaction via server-side RPC.
+ */
+router.post('/submit-signed', async (req, res) => {
+  try {
+    const { signedTransaction } = req.body || {};
+    if (!signedTransaction) {
+      return res.status(400).json({ error: 'signedTransaction required' });
+    }
+
+    const raw = Buffer.from(signedTransaction, 'base64');
+    const signature = await sdk.connection.sendRawTransaction(raw, {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed',
+      maxRetries: 3,
+    });
+    const latest = await sdk.connection.getLatestBlockhash('confirmed');
+    await sdk.connection.confirmTransaction({
+      signature,
+      blockhash: latest.blockhash,
+      lastValidBlockHeight: latest.lastValidBlockHeight,
+    }, 'confirmed');
+
+    res.json({ ok: true, signature });
+  } catch (e) {
+    console.error('POST /api/reviews/submit-signed error:', e.message);
+    res.status(500).json({ error: e.message || 'Failed to submit signed review transaction' });
+  }
+});
+
+/**
  * POST /api/reviews/respond
  * Build an unsigned respondToReview transaction.
  * 
