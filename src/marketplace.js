@@ -127,6 +127,40 @@ function resolveExistingApplicantProfileId(applicantId) {
   }
 }
 
+function walletMatchesClaimedActor(claimedActorId, walletAddress) {
+  if (claimedActorId == null || walletAddress == null) return false;
+  const claimed = String(claimedActorId).trim();
+  const wallet = String(walletAddress).trim();
+  if (!claimed || !wallet) return false;
+  try {
+    const profileStore = require('./profile-store');
+    const db = profileStore.getDb();
+    let row = db.prepare('SELECT id, wallet, wallets, verification_data FROM profiles WHERE id = ?').get(claimed);
+    if (!row && !claimed.startsWith('agent_')) {
+      row = db.prepare('SELECT id, wallet, wallets, verification_data FROM profiles WHERE id = ?').get('agent_' + claimed.toLowerCase());
+    }
+    if (!row) {
+      row = db.prepare('SELECT id, wallet, wallets, verification_data FROM profiles WHERE LOWER(name) = ?').get(claimed.toLowerCase());
+    }
+    if (!row) return false;
+    const wallets = typeof row.wallets === 'string' ? JSON.parse(row.wallets || '{}') : (row.wallets || {});
+    const verificationData = typeof row.verification_data === 'string' ? JSON.parse(row.verification_data || '{}') : (row.verification_data || {});
+    const candidates = [
+      row.wallet,
+      wallets?.solana,
+      wallets?.solana_wallet,
+      wallets?.wallet,
+      verificationData?.solana?.address,
+      verificationData?.solana?.identifier,
+      verificationData?.eth?.address,
+      verificationData?.ethereum?.address,
+    ].filter(Boolean).map((value) => String(value).trim().toLowerCase());
+    return candidates.includes(wallet.toLowerCase());
+  } catch (_) {
+    return false;
+  }
+}
+
 function normalizeActorId(actorId) {
   if (actorId == null) return null;
   const raw = String(actorId).trim();
@@ -214,7 +248,7 @@ function verifyMarketplaceAction(req, { action, job = null, actorId = null, appl
   }
 
   const walletActorId = normalizeActorId(walletAddress) || walletAddress;
-  if (claimedActorId && !matchesActor(claimedActorId, walletActorId)) {
+  if (claimedActorId && !matchesActor(claimedActorId, walletActorId) && !walletMatchesClaimedActor(claimedActorId, walletAddress)) {
     return { ok: false, status: 403, error: 'Signed wallet does not control the claimed marketplace actor' };
   }
 

@@ -246,6 +246,8 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
               deliverableDescription={actionJob.deliverableDescription}
               deliverableStatus={actionJob.deliverableStatus}
               deliverableSubmittedAt={actionJob.deliverableSubmittedAt}
+              escrowId={actionJob.escrowId}
+              onchainEscrowPDA={actionJob.onchainEscrowPDA || undefined}
             />
           </div>
         )}
