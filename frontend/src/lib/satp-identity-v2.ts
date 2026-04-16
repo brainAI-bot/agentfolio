@@ -7,12 +7,15 @@ import {
   Connection,
   PublicKey,
   Transaction,
+  VersionedTransaction,
 } from "@solana/web3.js";
 
 // SATP v2 Identity Registry — Mainnet
 export const SATP_V2_IDENTITY_PROGRAM = new PublicKey(
   "97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq"
 );
+
+export type SatpWalletTransaction = Transaction | VersionedTransaction;
 
 /**
  * Derive SATP Identity PDA: ["identity", wallet_pubkey]
@@ -37,6 +40,15 @@ export async function hasSatpIdentity(
     return info !== null && info.data.length > 0;
   } catch {
     return false;
+  }
+}
+
+function deserializeSatpIdentityTransaction(base64Tx: string): SatpWalletTransaction {
+  const raw = Buffer.from(base64Tx, "base64");
+  try {
+    return VersionedTransaction.deserialize(raw);
+  } catch {
+    return Transaction.from(raw);
   }
 }
 
@@ -65,6 +77,24 @@ export async function requestSatpIdentityTx(
 }
 
 /**
+ * Submit a wallet-signed SATP identity transaction via backend RPC.
+ */
+export async function submitSatpIdentityTx(
+  signedTransaction: string,
+): Promise<string> {
+  const res = await fetch("/api/satp-auto/identity/submit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ signedTransaction }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.ok) {
+    throw new Error(json.error || json.detail || "Failed to submit SATP identity TX");
+  }
+  return json.data?.signature;
+}
+
+/**
  * Confirm SATP identity creation (after TX is signed and sent)
  */
 export async function confirmSatpIdentity(
@@ -84,64 +114,37 @@ export async function confirmSatpIdentity(
 }
 
 /**
- * Full auto-create flow: build TX → sign → send → confirm
+ * Full auto-create flow: build TX → sign → backend submit → confirm
  * Returns the TX signature or null if already exists
  */
 export async function autoCreateSatpIdentity(
-  connection: Connection,
   walletAddress: string,
   profileId: string,
-  sendTransaction: (tx: Transaction, conn: Connection) => Promise<string>,
+  signTransaction: (tx: SatpWalletTransaction) => Promise<SatpWalletTransaction>,
 ): Promise<{ txSignature: string | null; identityPDA: string; alreadyExists: boolean }> {
   const wallet = new PublicKey(walletAddress);
   const [pda] = getSatpIdentityPDA(wallet);
 
-  // Pre-check: if PDA already exists on-chain, skip TX entirely (race condition fix)
-  const existsOnChain = await hasSatpIdentity(connection, wallet);
-  if (existsOnChain) {
-    console.log("[SATP] Identity already exists on-chain, skipping TX");
-    // Still notify backend so it records the identity
-    try {
-      await confirmSatpIdentity(walletAddress, profileId, "existing");
-    } catch {}
-    return { txSignature: null, identityPDA: pda.toBase58(), alreadyExists: true };
-  }
-
-  // 1. Request unsigned TX from backend
   const result = await requestSatpIdentityTx(walletAddress, profileId);
 
   if (result.alreadyExists || !result.transaction) {
+    try {
+      await confirmSatpIdentity(walletAddress, profileId, "existing");
+    } catch {}
     return {
       txSignature: null,
-      identityPDA: result.identityPDA,
+      identityPDA: result.identityPDA || pda.toBase58(),
       alreadyExists: true,
     };
   }
 
-  // 2. Deserialize and send via wallet adapter
   try {
-    const tx = Transaction.from(Buffer.from(result.transaction, "base64"));
-    const sig = await sendTransaction(tx, connection);
-    
-    // Use blockhash-based confirmation with 60s timeout
-    try {
-      const latestBlockhash = await connection.getLatestBlockhash("confirmed");
-      await connection.confirmTransaction({
-        signature: sig,
-        blockhash: latestBlockhash.blockhash,
-        lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-      }, "confirmed");
-    } catch (confirmErr: any) {
-      console.warn("[SATP] Confirmation slow, checking TX status...", confirmErr.message);
-      const status = await connection.getSignatureStatus(sig);
-      if (status?.value?.confirmationStatus === "confirmed" || status?.value?.confirmationStatus === "finalized") {
-        console.log("[SATP] TX confirmed despite timeout");
-      } else {
-        throw new Error("Transaction sent but not confirmed. Signature: " + sig + ". Check Solscan and retry if needed.");
-      }
-    }
+    const tx = deserializeSatpIdentityTransaction(result.transaction);
+    const signed = await signTransaction(tx as SatpWalletTransaction);
+    const sig = await submitSatpIdentityTx(
+      Buffer.from(signed.serialize()).toString("base64")
+    );
 
-    // 3. Confirm to backend
     await confirmSatpIdentity(walletAddress, profileId, sig);
 
     return {
@@ -150,19 +153,21 @@ export async function autoCreateSatpIdentity(
       alreadyExists: false,
     };
   } catch (txErr: any) {
-    // Race condition catch: if TX fails because PDA was created between our check and TX send
     const errMsg = (txErr.message || "").toLowerCase();
-    if (errMsg.includes("already in use") || errMsg.includes("already initialized") || 
-        errMsg.includes("account already exists") || errMsg.includes("0x0") ||
-        errMsg.includes("custom program error") || errMsg.includes("simulation failed")) {
-      // Re-check if identity exists now
-      const nowExists = await hasSatpIdentity(connection, wallet);
-      if (nowExists) {
-        console.log("[SATP] Identity created by concurrent process, treating as success");
-        try { await confirmSatpIdentity(walletAddress, profileId, "race-resolved"); } catch {}
-        return { txSignature: null, identityPDA: pda.toBase58(), alreadyExists: true };
+    if (
+      errMsg.includes("already in use") ||
+      errMsg.includes("already initialized") ||
+      errMsg.includes("account already exists") ||
+      errMsg.includes("custom program error") ||
+      errMsg.includes("simulation failed")
+    ) {
+      try {
+        await confirmSatpIdentity(walletAddress, profileId, "race-resolved");
+        return { txSignature: null, identityPDA: result.identityPDA || pda.toBase58(), alreadyExists: true };
+      } catch {
+        // fall through to surface original error
       }
     }
-    throw txErr; // Re-throw if genuinely a different error
+    throw txErr;
   }
 }

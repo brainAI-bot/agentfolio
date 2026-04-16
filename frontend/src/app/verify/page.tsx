@@ -16,8 +16,6 @@ import {
 } from "@/lib/identity-registry";
 import {
   autoCreateSatpIdentity,
-  hasSatpIdentity,
-  getSatpIdentityPDA,
 } from "@/lib/satp-identity-v2";
 
 interface VerificationState {
@@ -43,7 +41,7 @@ function getVerificationRecord(verifications: Record<string, any>, type: string)
 }
 
 export default function VerifyPage() {
-  const { publicKey, connected, sendTransaction, signMessage } = useWallet();
+  const { publicKey, connected, sendTransaction, signTransaction, signMessage } = useWallet();
   const { setVisible } = useWalletModal();
   const { smartConnect } = useSmartConnect();
 
@@ -539,39 +537,18 @@ export default function VerifyPage() {
    * Uses ["identity", wallet_pubkey] PDA on program 97yL33...
    */
   const autoTriggerSatpIdentity = async () => {
-    if (!connected || !publicKey || !sendTransaction || !profileId) return;
+    if (!connected || !publicKey || !signTransaction || !profileId) return;
     // Don't auto-trigger if SATP is already registered
     if (satpState.success) return;
 
-    setSatpAutoStatus("Checking SATP identity...");
+    setSatpAutoStatus("Creating SATP identity on-chain...");
+    setSatpState({ loading: true, success: false, error: "", result: null });
+
     try {
-      const connection = new Connection(SOLANA_RPC, "confirmed");
-      
-      // Check if already has SATP V3 identity
-      const exists = await hasSatpIdentity(connection, publicKey);
-      if (exists) {
-        const [pda] = getSatpIdentityPDA(publicKey);
-        setSatpState({ loading: false, success: true, error: "", result: { identityPDA: pda.toBase58(), alreadyExists: true } });
-        setSatpAutoStatus("SATP identity already exists ✅");
-        // Still notify backend
-        try {
-          await fetch("/api/satp-auto/identity/confirm", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ walletAddress: publicKey.toBase58(), profileId }),
-          });
-        } catch {}
-        return;
-      }
-
-      setSatpAutoStatus("Creating SATP identity on-chain...");
-      setSatpState({ loading: true, success: false, error: "", result: null });
-
       const result = await autoCreateSatpIdentity(
-        connection,
         publicKey.toBase58(),
         profileId,
-        sendTransaction,
+        signTransaction,
       );
 
       if (result.alreadyExists) {
@@ -585,9 +562,8 @@ export default function VerifyPage() {
     } catch (err: any) {
       console.warn("SATP auto-identity failed (non-blocking):", err);
       setSatpAutoStatus("");
-      // Don't set error state — this is a bonus feature, wallet verification succeeded
-      const friendlyErr = (err.message || "").includes("not confirmed") 
-        ? "Transaction submitted but confirmation timed out. It may still succeed — check back in a minute."
+      const friendlyErr = (err.message || "").includes("not confirmed")
+        ? "Transaction submitted but confirmation timed out. It may still succeed, check back in a minute."
         : (err.message || "").includes("blockhash")
         ? "Network congestion detected. Please try again in a moment."
         : "SATP identity creation failed. You can try again later from your profile.";
@@ -657,17 +633,13 @@ export default function VerifyPage() {
 
   // Register SATP on-chain identity (manual button — now uses SATP V3)
   const registerSATP = async () => {
-    if (!connected || !publicKey || !sendTransaction || !profileId) return;
+    if (!connected || !publicKey || !signTransaction || !profileId) return;
     setSatpState({ loading: true, success: false, error: "", result: null });
     try {
-      const connection = new Connection(SOLANA_RPC, "confirmed");
-      
-      // Use SATP V3 auto-create flow
       const result = await autoCreateSatpIdentity(
-        connection,
         publicKey.toBase58(),
         profileId,
-        sendTransaction,
+        signTransaction,
       );
 
       if (result.alreadyExists) {
