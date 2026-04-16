@@ -1159,7 +1159,6 @@ function registerRoutes(app) {
     if (job.status !== 'in_progress') return res.status(400).json({ error: 'Job must be in_progress' });
 
     const { submittedBy, deliverableUrl, description, files } = req.body;
-    if (!submittedBy || !description) return res.status(400).json({ error: 'submittedBy and description required' });
 
     const auth = verifyMarketplaceAction(req, {
       action: 'submit_deliverable',
@@ -1168,6 +1167,7 @@ function registerRoutes(app) {
       requireWorker: true,
     });
     if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!submittedBy || !description) return res.status(400).json({ error: 'submittedBy and description required' });
     const actorId = auth.actorId;
 
     const deliverable = {
