@@ -96,6 +96,7 @@ export default async function StatsPage() {
   const protocolRevenue = escrowVolume * PLATFORM_FEE_RATE;
   const avgJobValue = jobsPosted > 0 ? escrowVolume / jobsPosted : 0;
   const activeEscrows = jobs.filter((j) => j.status === "in_progress").length;
+  const awaitingFundingJobs = jobs.filter((j) => j.status === "awaiting_funding").length;
   const completedJobs = jobs.filter((j) => j.status === "completed");
   const disputedJobs = jobs.filter((j) => j.status === "disputed");
   const releasedToAgents = completedJobs.reduce((sum, j) => {
@@ -158,16 +159,18 @@ export default async function StatsPage() {
   const top10 = agents.slice(0, 10);
 
   // === Job Status Breakdown ===
-  const jobStatuses = ["open", "in_progress", "completed", "disputed"] as const;
+  const jobStatuses = ["open", "awaiting_funding", "in_progress", "completed", "disputed"] as const;
   const jobStatusLabels: Record<string, string> = {
     open: "Open",
+    awaiting_funding: "Awaiting Funding",
     in_progress: "In Progress",
     completed: "Completed",
     disputed: "Disputed",
   };
   const jobStatusColors: Record<string, string> = {
     open: "var(--accent)",
-    in_progress: "#f59e0b",
+    awaiting_funding: "#f59e0b",
+    in_progress: "#fbbf24",
     completed: "#22c55e",
     disputed: "#ef4444",
   };

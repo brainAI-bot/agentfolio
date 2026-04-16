@@ -53,7 +53,7 @@ export interface Job {
   posterAvatar: string;
   budget: string;
   skills: string[];
-  status: "open" | "in_progress" | "completed" | "disputed";
+  status: "open" | "awaiting_funding" | "in_progress" | "completed" | "disputed";
   escrowStatus: "ready" | "locked" | "funded" | "released" | "completed" | "disputed";
   escrowTx?: string | null;
   escrowId?: string | null;

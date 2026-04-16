@@ -306,6 +306,9 @@ function registerMarketplaceEscrowOnchain(app) {
       job.escrowFunded = true;
       job.depositConfirmedAt = escrow.fundedAt;
       job.fundsLocked = true;
+      if (job.selectedAgentId || job.acceptedApplicant) {
+        job.status = 'in_progress';
+      }
       job.updatedAt = new Date().toISOString();
       writeJSON(jobPath, job);
       try { syncMarketplaceJobToDb(job); } catch (e) { console.warn('[Marketplace Escrow] job DB sync failed after funding:', e.message); }

@@ -301,7 +301,8 @@ function loadAllJobs(): Job[] {
         const statusMap: Record<string, Job["status"]> = {
           open: "open",
           draft: "open",
-          agent_accepted: "in_progress",
+          awaiting_funding: "awaiting_funding",
+          agent_accepted: "awaiting_funding",
           work_submitted: "in_progress",
           in_progress: "in_progress",
           completed: "completed",
@@ -470,13 +471,15 @@ export async function getTopVerifiedAgents(limit = 6): Promise<Agent[]> {
 function mapMarketplaceApiJob(raw: any): Job | null {
   if (!raw || !raw.id) return null;
   const applications = Array.isArray(raw.applications) ? raw.applications.filter(Boolean) : [];
-  const status = raw.status === "in_progress"
-    ? "in_progress"
-    : raw.status === "completed"
-      ? "completed"
-      : raw.status === "disputed"
-        ? "disputed"
-        : "open";
+  const status = raw.status === "awaiting_funding"
+    ? "awaiting_funding"
+    : raw.status === "in_progress"
+      ? "in_progress"
+      : raw.status === "completed"
+        ? "completed"
+        : raw.status === "disputed"
+          ? "disputed"
+          : "open";
   const escrowStatus: Job["escrowStatus"] = (raw.fundsReleased || raw.releasedAt || raw.v3ReleasedAt)
     ? "released"
     : (raw.v3EscrowPDA || raw.onchainEscrowPDA)

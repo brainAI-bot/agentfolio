@@ -9,12 +9,13 @@ interface Job {
   poster: string;
   assignee?: string;
   budget: string;
-  status: "open" | "in_progress" | "completed" | "disputed";
+  status: "open" | "awaiting_funding" | "in_progress" | "completed" | "disputed";
   createdAt: string;
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
   open: { label: "OPEN", color: "#a78bfa", bg: "rgba(167,139,250,0.15)" },
+  awaiting_funding: { label: "AWAITING FUNDING", color: "#f59e0b", bg: "rgba(245,158,11,0.15)" },
   in_progress: { label: "IN PROGRESS", color: "#fbbf24", bg: "rgba(251,191,36,0.15)" },
   completed: { label: "COMPLETED", color: "#34d399", bg: "rgba(52,211,153,0.15)" },
   disputed: { label: "DISPUTED", color: "#f87171", bg: "rgba(248,113,113,0.15)" },
@@ -41,7 +42,7 @@ function parseBudget(budget: string): number {
 }
 
 type SortKey = "newest" | "oldest" | "highest";
-type FilterKey = "all" | "open" | "in_progress" | "completed";
+type FilterKey = "all" | "open" | "awaiting_funding" | "in_progress" | "completed";
 
 export default function ProtocolActivity({ jobs }: { jobs: Job[] }) {
   const [search, setSearch] = useState("");
@@ -51,6 +52,7 @@ export default function ProtocolActivity({ jobs }: { jobs: Job[] }) {
   const counts = useMemo(() => ({
     total: jobs.length,
     open: jobs.filter(j => j.status === "open").length,
+    awaitingFunding: jobs.filter(j => j.status === "awaiting_funding").length,
     active: jobs.filter(j => j.status === "in_progress").length,
     completed: jobs.filter(j => j.status === "completed").length,
   }), [jobs]);
@@ -73,6 +75,7 @@ export default function ProtocolActivity({ jobs }: { jobs: Job[] }) {
   const filterTabs: { key: FilterKey; label: string; count: number }[] = [
     { key: "all", label: "All", count: counts.total },
     { key: "open", label: "Open", count: counts.open },
+    { key: "awaiting_funding", label: "Awaiting Funding", count: counts.awaitingFunding },
     { key: "in_progress", label: "Active", count: counts.active },
     { key: "completed", label: "Completed", count: counts.completed },
   ];
@@ -91,7 +94,7 @@ export default function ProtocolActivity({ jobs }: { jobs: Job[] }) {
           Protocol Activity
         </h2>
         <div className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
-          {counts.total} total · {counts.active} active · {counts.completed} completed
+          {counts.total} total · {counts.awaitingFunding} awaiting funding · {counts.active} active · {counts.completed} completed
         </div>
       </div>
 
