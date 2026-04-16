@@ -236,7 +236,7 @@ function verifyMarketplaceAction(req, { action, job = null, actorId = null, appl
 }
 
 // Ensure data dirs exist
-['jobs', 'applications', 'escrow', 'deliverables'].forEach(dir => {
+['jobs', 'job-drafts', 'applications', 'escrow', 'deliverables'].forEach(dir => {
   const p = path.join(DATA_DIR, dir);
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
 });
@@ -486,6 +486,63 @@ function getAllFiles(dir) {
   } catch { return []; }
 }
 
+function buildMarketplaceJobRecord({
+  id = genId('job'),
+  title,
+  description,
+  budget,
+  budgetAmount,
+  currency,
+  postedBy,
+  clientId,
+  skills,
+  skills_required,
+  deadline,
+  category,
+  budgetType,
+  budgetCurrency,
+  timeline,
+  requirements,
+  escrowRequired,
+  budgetMax,
+  attachments,
+  expiresAt,
+  status = 'open',
+  createdAt = new Date().toISOString(),
+}) {
+  const resolvedBudget = budget || budgetAmount;
+  const resolvedPostedBy = postedBy || clientId;
+  return {
+    id,
+    title,
+    description,
+    budget: parseFloat(resolvedBudget),
+    currency: currency || budgetCurrency || 'USDC',
+    postedBy: resolvedPostedBy,
+    clientId: resolvedPostedBy,
+    category: category || 'other',
+    skills: skills || skills_required || [],
+    skills_required: skills_required || skills || [],
+    budgetType: budgetType || 'fixed',
+    budgetAmount: parseFloat(resolvedBudget),
+    budgetCurrency: currency || budgetCurrency || 'USDC',
+    budgetMax: budgetMax || null,
+    timeline: timeline || deadline || null,
+    deadline: deadline || null,
+    requirements: requirements || '',
+    escrowRequired: escrowRequired !== false,
+    attachments: attachments || [],
+    expiresAt: expiresAt || null,
+    status,
+    applications: [],
+    acceptedApplicant: null,
+    selectedAgentId: null,
+    escrowId: null,
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
 // ===== ROUTES =====
 
 function registerRoutes(app) {
@@ -498,38 +555,212 @@ function registerRoutes(app) {
     if (!title || !description || !resolvedBudget || !resolvedPostedBy) {
       return res.status(400).json({ error: 'title, description, budget, and postedBy (or clientId) are required' });
     }
-    const job = {
-      id: genId('job'),
+    if (escrowRequired !== false) {
+      return res.status(400).json({
+        error: 'Escrow-backed jobs must be created via /api/marketplace/jobs/create-onchain so funding happens before posting.'
+      });
+    }
+    const job = buildMarketplaceJobRecord({
       title,
       description,
-      budget: parseFloat(resolvedBudget),
-      currency: currency || budgetCurrency || 'USDC',
-      postedBy: resolvedPostedBy,
-      clientId: resolvedPostedBy,
-      category: category || 'other',
-      skills: skills || skills_required || [],
-      skills_required: skills_required || skills || [],
-      budgetType: budgetType || 'fixed',
-      budgetAmount: parseFloat(resolvedBudget),
-      budgetCurrency: currency || budgetCurrency || 'USDC',
-      budgetMax: budgetMax || null,
-      timeline: timeline || deadline || null,
-      deadline: deadline || null,
-      requirements: requirements || '',
-      escrowRequired: escrowRequired !== false,
-      attachments: attachments || [],
-      expiresAt: expiresAt || null,
+      budget,
+      budgetAmount,
+      currency,
+      postedBy,
+      clientId,
+      skills,
+      skills_required,
+      deadline,
+      category,
+      budgetType,
+      budgetCurrency,
+      timeline,
+      requirements,
+      escrowRequired,
+      budgetMax,
+      attachments,
+      expiresAt,
       status: 'open',
-      applications: [],
-      acceptedApplicant: null,
-      selectedAgentId: null,
-      escrowId: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
+    });
     writeJSON(path.join(DATA_DIR, 'jobs', `${job.id}.json`), job);
     try { addActivity(resolvedPostedBy, 'job_posted', { jobId: job.id, title }); } catch {}
     res.status(201).json(job);
+  });
+
+  // 1b. POST /api/marketplace/jobs/create-onchain — Prepare atomic job posting + escrow funding
+  app.post('/api/marketplace/jobs/create-onchain', async (req, res) => {
+    try {
+      if (!escrowOnchainLib?.buildCreateEscrowTx) {
+        return res.status(500).json({ error: 'On-chain escrow builder unavailable' });
+      }
+
+      const { title, description, budget, budgetAmount, currency, postedBy, clientId, clientWallet, skills, skills_required, deadline, category, budgetType, budgetCurrency, timeline, requirements, budgetMax, attachments, expiresAt, deadlineUnix } = req.body || {};
+      const resolvedBudget = budget || budgetAmount;
+      const resolvedPostedBy = postedBy || clientId;
+      if (!title || !description || !resolvedBudget || !resolvedPostedBy || !clientWallet) {
+        return res.status(400).json({ error: 'title, description, budget, clientId, and clientWallet are required' });
+      }
+
+      const auth = verifyMarketplaceAction(req, {
+        action: 'create_job_onchain_prepare',
+        actorId: resolvedPostedBy,
+      });
+      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+      if (!matchesActor(auth.actorId, resolvedPostedBy) || !matchesActor(auth.walletAddress, clientWallet)) {
+        return res.status(403).json({ error: 'Signed wallet does not control the claimed job poster' });
+      }
+
+      const draft = buildMarketplaceJobRecord({
+        title,
+        description,
+        budget,
+        budgetAmount,
+        currency,
+        postedBy,
+        clientId,
+        skills,
+        skills_required,
+        deadline,
+        category,
+        budgetType,
+        budgetCurrency,
+        timeline,
+        requirements,
+        escrowRequired: true,
+        budgetMax,
+        attachments,
+        expiresAt,
+        status: 'draft',
+      });
+      draft.clientWallet = clientWallet;
+      draft.atomicFundingPending = true;
+      draft.deadlineUnix = deadlineUnix || Math.floor(Date.now() / 1000) + 30 * 24 * 3600;
+      draft.preparedAt = new Date().toISOString();
+
+      const txResult = await escrowOnchainLib.buildCreateEscrowTx(clientWallet, draft.id, parseFloat(resolvedBudget), draft.deadlineUnix);
+      if (!txResult?.success || !txResult.transaction || !txResult.escrowPDA) {
+        return res.status(500).json({ error: 'Failed to build escrow TX', details: txResult || null });
+      }
+
+      draft.pendingEscrowPDA = txResult.escrowPDA;
+      draft.pendingVaultPDA = txResult.vaultPDA || null;
+      writeJSON(path.join(DATA_DIR, 'job-drafts', `${draft.id}.json`), draft);
+
+      return res.status(201).json({
+        jobId: draft.id,
+        transaction: txResult.transaction,
+        escrowPDA: txResult.escrowPDA,
+        vaultPDA: txResult.vaultPDA,
+        amount: parseFloat(resolvedBudget),
+        deadlineUnix: draft.deadlineUnix,
+        message: 'Sign this transaction to fund escrow. The job will only be posted after on-chain confirmation.',
+      });
+    } catch (e) {
+      console.error('[Marketplace] create-onchain prepare error:', e.message);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // 1c. POST /api/marketplace/jobs/create-onchain/confirm — Finalize job after funded escrow tx confirms
+  app.post('/api/marketplace/jobs/create-onchain/confirm', async (req, res) => {
+    try {
+      if (!escrowOnchainLib?.confirmTransaction || !escrowOnchainLib?.readEscrowAccount) {
+        return res.status(500).json({ error: 'On-chain escrow verifier unavailable' });
+      }
+
+      const { jobId, txSignature, escrowPDA, clientWallet } = req.body || {};
+      if (!jobId || !txSignature || !escrowPDA || !clientWallet) {
+        return res.status(400).json({ error: 'jobId, txSignature, escrowPDA, and clientWallet required' });
+      }
+
+      const draftPath = path.join(DATA_DIR, 'job-drafts', `${jobId}.json`);
+      const draft = readJSON(draftPath);
+      const existingJobPath = path.join(DATA_DIR, 'jobs', `${jobId}.json`);
+      const existingJob = readJob(existingJobPath);
+      if (!draft) {
+        if (existingJob?.onchainEscrowPDA === escrowPDA) {
+          return res.status(200).json({
+            message: 'Job already finalized from funded escrow',
+            job: existingJob,
+            escrow: existingJob.escrowId ? readJSON(path.join(DATA_DIR, 'escrow', `${existingJob.escrowId}.json`)) : null,
+          });
+        }
+        return res.status(404).json({ error: 'Pending job draft not found' });
+      }
+
+      const auth = verifyMarketplaceAction(req, {
+        action: 'create_job_onchain_confirm',
+        job: draft,
+        actorId: draft.clientId,
+        escrowId: escrowPDA,
+        requirePoster: true,
+      });
+      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+      if (!matchesActor(auth.walletAddress, clientWallet) || !matchesActor(auth.actorId, draft.clientId)) {
+        return res.status(403).json({ error: 'Only the job poster can confirm atomic job funding' });
+      }
+
+      await escrowOnchainLib.confirmTransaction(txSignature);
+      const onchainState = await escrowOnchainLib.readEscrowAccount(jobId);
+      if (!onchainState?.exists) return res.status(400).json({ error: 'Escrow PDA not found on-chain' });
+      if (onchainState.escrowPDA !== escrowPDA) return res.status(400).json({ error: 'Escrow PDA mismatch' });
+      if (onchainState.status !== 'created') return res.status(400).json({ error: `Escrow is ${onchainState.status || 'not funded'} on-chain` });
+      if (onchainState.client !== clientWallet) return res.status(400).json({ error: 'On-chain client wallet mismatch' });
+
+      const fundedAt = new Date().toISOString();
+      const job = {
+        ...draft,
+        status: 'open',
+        escrowId: genId('esc'),
+        onchainEscrowPDA: escrowPDA,
+        escrowFunded: true,
+        depositConfirmedAt: fundedAt,
+        fundsLocked: true,
+        clientWallet,
+        updatedAt: fundedAt,
+      };
+      delete job.atomicFundingPending;
+      delete job.pendingEscrowPDA;
+      delete job.pendingVaultPDA;
+      delete job.preparedAt;
+      delete job.deadlineUnix;
+
+      const amount = Number(onchainState.amountUSDC || job.budgetAmount || job.budget || 0);
+      const escrow = {
+        id: job.escrowId,
+        jobId: job.id,
+        fundedBy: draft.clientId,
+        worker: null,
+        amount,
+        currency: job.budgetCurrency || job.currency || 'USDC',
+        platformFee: amount * 0.05,
+        workerPayout: amount * 0.95,
+        txHash: txSignature,
+        escrowPDA,
+        onchain: true,
+        status: 'funded',
+        fundedAt,
+        releasedAt: null,
+        refundedAt: null,
+      };
+
+      writeJSON(path.join(DATA_DIR, 'jobs', `${job.id}.json`), job);
+      writeJSON(path.join(DATA_DIR, 'escrow', `${escrow.id}.json`), escrow);
+      try { fs.unlinkSync(draftPath); } catch (_) {}
+      try { syncMarketplaceJobToDb(job); } catch (e) { console.warn('[Marketplace] atomic job DB sync failed:', e.message); }
+      try { syncMarketplaceEscrowToDb(escrow, job); } catch (e) { console.warn('[Marketplace] atomic escrow DB sync failed:', e.message); }
+      try { addActivity(draft.clientId, 'job_posted', { jobId: job.id, title: job.title, escrowPDA }); } catch (_) {}
+
+      return res.status(201).json({
+        message: 'Job posted after funded on-chain escrow confirmation',
+        job,
+        escrow,
+        onchainState,
+      });
+    } catch (e) {
+      console.error('[Marketplace] create-onchain confirm error:', e.message);
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   // GET /api/marketplace/jobs — List all jobs (with hydrated applications)
