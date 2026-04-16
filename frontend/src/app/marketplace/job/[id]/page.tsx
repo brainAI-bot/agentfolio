@@ -25,9 +25,10 @@ function matchesLegacyJobId(id: string, job: { id: string; clientId?: string; po
 
 const legacyStatusPriority: Record<string, number> = {
   in_progress: 0,
-  open: 1,
-  completed: 2,
-  disputed: 3,
+  awaiting_funding: 1,
+  open: 2,
+  completed: 3,
+  disputed: 4,
 };
 
 async function resolveJobLookup(id: string) {
@@ -92,6 +93,7 @@ export const dynamic = "force-dynamic";
 
 const statusConfig: Record<string, { label: string; color: string }> = {
   open: { label: "OPEN", color: "#22c55e" },
+  awaiting_funding: { label: "AWAITING FUNDING", color: "#f59e0b" },
   in_progress: { label: "IN PROGRESS", color: "#eab308" },
   completed: { label: "COMPLETED", color: "#06b6d4" },
   disputed: { label: "DISPUTED", color: "#ef4444" },

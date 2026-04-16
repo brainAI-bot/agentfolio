@@ -31,7 +31,7 @@ export interface APIJob {
   poster_name: string;
   budget: string;
   skills: string[];
-  status: 'open' | 'in_progress' | 'completed' | 'disputed';
+  status: 'open' | 'awaiting_funding' | 'in_progress' | 'completed' | 'disputed';
   escrow_status: 'ready' | 'locked' | 'released' | 'disputed';
   proposals: number;
   deadline: string;

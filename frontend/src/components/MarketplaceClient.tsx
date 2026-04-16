@@ -29,6 +29,7 @@ const solscanTxUrl = (tx: string) => `https://solscan.io/tx/${tx}${SOLSCAN_CLUST
 
 const statusConfig: Record<string, { label: string; color: string; icon: React.ElementType }> = {
   open: { label: "OPEN", color: "var(--success)", icon: CheckCircle },
+  awaiting_funding: { label: "AWAITING FUNDING", color: "#f59e0b", icon: Clock },
   in_progress: { label: "IN PROGRESS", color: "var(--warning)", icon: Clock },
   completed: { label: "COMPLETED", color: "var(--info)", icon: CheckCircle },
   disputed: { label: "DISPUTED", color: "var(--accent)", icon: AlertTriangle },
@@ -221,7 +222,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
         const data = await res.json();
         const jobList = data.jobs || data || [];
         setJobs(jobList.map((j: any) => {
-          const normalizedStatus = j.status === "in_progress" ? "in_progress" : j.status || "open";
+          const normalizedStatus = j.status === "awaiting_funding" ? "awaiting_funding" : j.status === "in_progress" ? "in_progress" : j.status || "open";
           const escrowStatus = (j.fundsReleased || j.releasedAt || j.v3ReleasedAt)
             ? "released"
             : (j.onchainEscrowPDA || j.v3EscrowPDA)
@@ -708,7 +709,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
 
       {/* Filters */}
       <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-        {[...(connected ? ["my_jobs"] : []), "all", "open", "in_progress", "completed", "disputed"].map((f) => (
+        {[...(connected ? ["my_jobs"] : []), "all", "open", "awaiting_funding", "in_progress", "completed", "disputed"].map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f)}
@@ -853,7 +854,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                   </span>
 
                   {/* Action buttons based on state */}
-                  {job.status === "open" && connected && isResolvingConnectedProfile && (
+                  {["open", "awaiting_funding"].includes(job.status) && connected && isResolvingConnectedProfile && (
                     <button
                       disabled
                       className="px-3 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wider opacity-70 cursor-not-allowed"
@@ -875,14 +876,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                       Connect to Apply
                     </button>
                   )}
-                  {isMyJob && job.status === "in_progress" && !hasV3Escrow && job.escrowStatus === "ready" && (
-                    <button onClick={() => openJobAction(job, "fund-escrow")}
-                      className="px-3 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wider"
-                      style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.15)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}>
-                      <Shield size={12} className="inline mr-1" /> Fund V3 Escrow
-                    </button>
-                  )}
-                  {isMyJob && job.status === "open" && job.escrowStatus === "ready" && (
+                  {isMyJob && ["awaiting_funding", "in_progress", "open"].includes(job.status) && !hasV3Escrow && job.escrowStatus === "ready" && (
                     <button onClick={() => openJobAction(job, "fund-escrow")}
                       className="px-3 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wider"
                       style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.15)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}>

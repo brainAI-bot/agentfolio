@@ -550,6 +550,19 @@ function hydrateJobEscrowState(job) {
     if (!job.assignee) job.assignee = acceptedWorkerId;
   }
 
+  const awaitingFunding = !!acceptedWorkerId
+    && !job.onchainEscrowPDA
+    && !job.v3EscrowPDA
+    && !job.escrowId
+    && !job.escrowFunded
+    && !job.fundsLocked
+    && !job.fundsReleased;
+  if (awaitingFunding && ['open', 'in_progress', 'awaiting_funding'].includes(String(job.status || 'open'))) {
+    job.status = 'awaiting_funding';
+  } else if (!awaitingFunding && job.status === 'awaiting_funding' && (job.onchainEscrowPDA || job.v3EscrowPDA || job.escrowId || job.escrowFunded || job.fundsLocked)) {
+    job.status = 'in_progress';
+  }
+
   if (job.escrowId && !job.fundsReleased) {
     const escrow = readJSON(path.join(DATA_DIR, 'escrow', `${job.escrowId}.json`));
     if (escrow && (escrow.status === 'released' || escrow.status === 'auto_released')) {
@@ -995,7 +1008,7 @@ function registerRoutes(app) {
       }
     });
 
-    job.status = 'in_progress';
+    job.status = job.escrowRequired === false ? 'in_progress' : 'awaiting_funding';
     job.acceptedApplicationId = application.id;
     job.acceptedApplicant = application.applicantId;
     job.selectedAgentId = application.applicantId;
@@ -1070,6 +1083,9 @@ function registerRoutes(app) {
     try { syncMarketplaceEscrowToDb(escrow, job); } catch (e) { console.warn('[Marketplace] escrow DB sync failed after funding:', e.message); }
 
     job.escrowId = escrow.id;
+    if (job.selectedAgentId || job.acceptedApplicant) {
+      job.status = 'in_progress';
+    }
     job.updatedAt = new Date().toISOString();
     writeJSON(jobPath, job);
 
@@ -1450,6 +1466,9 @@ function registerRoutes(app) {
     job.depositConfirmedAt = escrow.depositConfirmedAt;
     job.escrowFunded = true;
     job.fundsLocked = true;
+    if (job.selectedAgentId || job.acceptedApplicant) {
+      job.status = 'in_progress';
+    }
     job.updatedAt = new Date().toISOString();
     writeJSON(jobPath, job);
     try { syncMarketplaceJobToDb(job); } catch (e) { console.warn('[Marketplace] job DB sync failed after deposit confirm:', e.message); }
@@ -1526,6 +1545,9 @@ function registerRoutes(app) {
     job.v3EscrowVerifiedAt = new Date().toISOString();
     job.escrowFunded = true;
     job.fundsLocked = true;
+    if (job.selectedAgentId || job.acceptedApplicant) {
+      job.status = 'in_progress';
+    }
     job.updatedAt = new Date().toISOString();
 
     writeJSON(jobPath, job);
