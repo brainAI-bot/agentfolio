@@ -260,38 +260,105 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   // ─── POST JOB ───
   const handlePostJob = async () => {
     if (!connected || !publicKey) { smartConnect(); return; }
+    if (!signMessage || (!signTransaction && !sendTransaction)) {
+      showMessage("error", "Connect a wallet that supports message and transaction signing.");
+      return;
+    }
     if (!postForm.title || !postForm.description || !postForm.budgetAmount) {
       showMessage("error", "Fill in title, description, and budget");
       return;
     }
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/marketplace/jobs`, {
+      const walletAddress = publicKey.toBase58();
+      const actorId = resolvedProfileId || walletAddress;
+      const amount = parseFloat(postForm.budgetAmount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Invalid budget amount");
+
+      const timelineMap: Record<string, number> = {
+        "1_day": 1,
+        "3_days": 3,
+        "1_week": 7,
+        "2_weeks": 14,
+        "1_month": 30,
+      };
+      const deadlineUnix = Math.floor(Date.now() / 1000) + ((timelineMap[postForm.timeline] || 7) * 86400);
+
+      const prepareAuth = await createMarketplaceWalletAuth({
+        action: "create_job_onchain_prepare",
+        walletAddress,
+        actorId,
+        signMessage,
+      });
+
+      const prepareRes = await fetch(`${API_BASE}/api/marketplace/jobs/create-onchain`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...prepareAuth },
         body: JSON.stringify({
-          clientId: resolvedProfileId || publicKey.toBase58(),
+          clientId: actorId,
+          clientWallet: walletAddress,
           title: postForm.title,
           description: postForm.description,
           category: postForm.category,
-          skills: postForm.skills.split(",").map(s => s.trim()).filter(Boolean),
+          skills: postForm.skills.split(",").map((s) => s.trim()).filter(Boolean),
           budgetType: "fixed",
-          budgetAmount: parseFloat(postForm.budgetAmount),
+          budgetAmount: amount,
           budgetCurrency: "USDC",
           timeline: postForm.timeline,
           requirements: postForm.requirements,
           escrowRequired: true,
+          deadlineUnix,
         }),
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      showMessage("success", `Job "${postForm.title}" posted. Next step: fund on-chain escrow.`);
+      const prepareData = await prepareRes.json();
+      if (!prepareRes.ok || prepareData.error) throw new Error(prepareData.error || "Failed to prepare job escrow");
+
+      const tx = deserializeMarketplaceTransaction(prepareData.transaction);
+      let sig = "";
+      if (tx instanceof VersionedTransaction) {
+        if (!signTransaction) throw new Error("Connected wallet must support signTransaction() for versioned escrow transactions");
+        const signedTx = await signTransaction(tx as any);
+        sig = await connection.sendRawTransaction(signedTx.serialize());
+      } else if (signTransaction) {
+        const signedTx = await signTransaction(tx as any);
+        sig = await connection.sendRawTransaction(signedTx.serialize());
+      } else if (sendTransaction) {
+        sig = await sendTransaction(tx as any, connection);
+      } else {
+        throw new Error("Connected wallet does not support signing this escrow transaction");
+      }
+      await connection.confirmTransaction(sig, "confirmed");
+
+      const confirmAuth = await createMarketplaceWalletAuth({
+        action: "create_job_onchain_confirm",
+        walletAddress,
+        actorId,
+        jobId: prepareData.jobId,
+        escrowId: prepareData.escrowPDA,
+        signMessage,
+      });
+
+      const confirmRes = await fetch(`${API_BASE}/api/marketplace/jobs/create-onchain/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...confirmAuth },
+        body: JSON.stringify({
+          jobId: prepareData.jobId,
+          txSignature: sig,
+          escrowPDA: prepareData.escrowPDA,
+          clientWallet: walletAddress,
+        }),
+      });
+      const confirmData = await confirmRes.json();
+      if (!confirmRes.ok || confirmData.error) throw new Error(confirmData.error || "Failed to finalize funded job posting");
+
+      showMessage("success", `Job "${postForm.title}" posted with on-chain escrow locked.`);
       setPostForm({ title: "", description: "", category: "development", skills: "", budgetAmount: "", timeline: "1_week", requirements: "" });
+      setModal(null);
       await refreshJobs();
-      window.location.href = `/marketplace/job/${data.id}`;
+      window.location.href = `/marketplace/job/${confirmData.job.id}`;
       return;
     } catch (e: any) {
-      showMessage("error", e.message || "Failed to post job");
+      showMessage("error", e?.code === 4001 ? "Transaction rejected in wallet" : e.message || "Failed to post job");
     } finally { setLoading(false); }
   };
 
@@ -910,12 +977,12 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                 <Input label="Skills (comma separated)" value={postForm.skills} onChange={(v) => setPostForm(p => ({ ...p, skills: v }))} placeholder="Solana, Rust, TypeScript" />
                 <Textarea label="Requirements (optional)" value={postForm.requirements} onChange={(v) => setPostForm(p => ({ ...p, requirements: v }))} placeholder="Must have experience with..." />
                 <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", color: "#10b981" }}>
-                  <Shield size={12} className="inline mr-1" /> Jobs use V3 identity-verified escrow. Agent must have SATP Genesis Record. Funds are held on-chain until you approve.
+                  <Shield size={12} className="inline mr-1" /> Posting is atomic now. Clicking below opens your wallet, locks the USDC escrow on-chain, and only then publishes the job.
                 </div>
                 <button onClick={handlePostJob} disabled={loading}
                   className="w-full py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-50"
                   style={{ fontFamily: "var(--font-mono)", background: "var(--accent)", color: "#fff" }}>
-                  {loading ? "Posting..." : "Post Job"}
+                  {loading ? "Opening Wallet..." : `Post Job + Lock ${postForm.budgetAmount || "0"} USDC`}
                 </button>
               </div>
             )}
