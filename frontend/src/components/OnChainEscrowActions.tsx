@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { Transaction, VersionedTransaction } from "@solana/web3.js";
 import { Shield, Wallet, ArrowRight, CheckCircle, AlertTriangle, Loader2 } from "lucide-react";
 import { createMarketplaceWalletAuth } from "@/lib/marketplace-auth";
-import { resolveAgentWallet, signAndSendV3Tx } from "@/lib/v3-escrow";
+import { resolveAgentWallet } from "@/lib/v3-escrow";
 import { profileHasWallet } from "@/lib/profile-wallets";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -61,11 +61,21 @@ function deserializeEscrowTransaction(base64Tx: string): { tx: Transaction | Ver
     : { tx: Transaction.from(Buffer.from(raw)), isVersioned: false };
 }
 
+async function signEscrowTransaction(
+  tx: Transaction | VersionedTransaction,
+  signTransaction?: ((tx: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>) | null,
+): Promise<string> {
+  if (!signTransaction) {
+    throw new Error("Connected wallet must support signTransaction() for on-chain escrow actions");
+  }
+  const signedTx = await signTransaction(tx);
+  return Buffer.from(signedTx.serialize()).toString("base64");
+}
+
 export function OnChainEscrowActions({
   jobId, jobStatus, escrowStatus, escrowId, clientId, assigneeId, budget, onchainEscrowPDA
 }: Props) {
-  const { publicKey, connected, signMessage, sendTransaction, signTransaction } = useWallet();
-  const { connection } = useConnection();
+  const { publicKey, connected, signMessage, signTransaction } = useWallet();
   const [step, setStep] = useState<Step>("idle");
   const [msg, setMsg] = useState("");
   const [action, setAction] = useState<EscrowAction | null>(null);
@@ -152,8 +162,8 @@ export function OnChainEscrowActions({
   const posterIdentityPending = !!publicKey && !!clientId && (!walletLookupSettled || !posterWalletCheckSettled);
 
   const executeAction = useCallback(async (actionType: EscrowAction) => {
-    if (!publicKey || !signMessage || (!sendTransaction && !signTransaction)) {
-      setMsg("Connect a wallet that supports signing first");
+    if (!publicKey || !signMessage || !signTransaction) {
+      setMsg("Connect a wallet that supports message and transaction signing first");
       setStep("error");
       return;
     }
@@ -224,16 +234,13 @@ export function OnChainEscrowActions({
       if (!buildRes.ok || buildData.error) throw new Error(buildData.error || `Failed to build ${actionType} transaction`);
 
       setStep("signing");
-      const { tx, isVersioned } = deserializeEscrowTransaction(buildData.transaction);
-      if (isVersioned && !signTransaction) {
-        throw new Error("Connected wallet must support signTransaction() for versioned escrow transactions");
-      }
-      const txSignature = await signAndSendV3Tx(tx as any, connection, publicKey, sendTransaction, signTransaction);
+      const { tx } = deserializeEscrowTransaction(buildData.transaction);
+      const signedTransaction = await signEscrowTransaction(tx as any, signTransaction);
 
       setStep("confirming");
       if (actionType === "fund") {
         confirmBody = {
-          txSignature,
+          signedTransaction,
           escrowPDA: buildData.escrowPDA,
           clientWallet: walletAddr,
         };
@@ -241,7 +248,7 @@ export function OnChainEscrowActions({
       } else {
         confirmBody = {
           ...confirmBody,
-          txSignature,
+          signedTransaction,
         };
       }
 
@@ -273,7 +280,7 @@ export function OnChainEscrowActions({
       setStep("error");
       setMsg(e.message || "Transaction failed");
     }
-  }, [publicKey, sendTransaction, signTransaction, signMessage, actorId, isPoster, jobId, escrowId, onchainEscrowPDA, walletAddr, budget, assigneeId, connection]);
+  }, [publicKey, signTransaction, signMessage, actorId, isPoster, jobId, escrowId, onchainEscrowPDA, walletAddr, budget, assigneeId]);
 
   const posterGate = isPoster || posterIdentityPending;
   const canFund = (!publicKey || posterGate) && ["open", "awaiting_funding", "in_progress"].includes(jobStatus) && !onchainEscrowPDA && escrowStatus !== "released";
