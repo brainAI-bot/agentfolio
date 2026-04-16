@@ -119,7 +119,6 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     if (res.ok) liveJob = await res.json();
   } catch {}
 
-  const sc = statusConfig[job.status] || statusConfig.open;
   const actionJob = {
     ...job,
     ...(liveJob || {}),
@@ -143,6 +142,8 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             : actionJob.status === "completed"
               ? "completed"
               : actionJob.escrowStatus));
+  const statusForUi = actionJob.status || job.status;
+  const sc = statusConfig[statusForUi] || statusConfig.open;
 
   return (
     <div className="min-h-screen" style={{ background: "var(--bg-primary)", color: "var(--text-primary)" }}>
@@ -197,9 +198,9 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             <span style={{ color: "var(--text-secondary)" }}>{job.proposals} proposals</span>
           </div>
 
-          {job.assignee && (
+          {actionJob.assigneeId && (
             <div className="text-xs mb-4 px-3 py-2 rounded-lg" style={{ background: "rgba(153,69,255,0.08)", border: "1px solid rgba(153,69,255,0.2)", fontFamily: "var(--font-mono)" }}>
-              Assigned to: <span style={{ color: "var(--text-primary)" }}>{job.assignee}</span>
+              Assigned to: <span style={{ color: "var(--text-primary)" }}>{actionJob.assigneeId}</span>
             </div>
           )}
 
@@ -234,7 +235,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         </div>
 
         {/* Submit Work / Review Deliverables (in_progress only) */}
-        {job.status === "in_progress" && (
+        {statusForUi === "in_progress" && (
           <div className="mb-6">
             <SubmitWorkForm
               jobId={job.id}
@@ -263,7 +264,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             deliverableSubmittedAt={actionJob.deliverableSubmittedAt}
             assigneeId={actionJob.assigneeId}
             clientId={actionJob.clientId}
-            escrowStatus={actionJob.escrowStatus}
+            escrowStatus={effectiveEscrowStatus}
             jobPDA={actionJob.onchainEscrowPDA}
           />
 
@@ -274,7 +275,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           <OnChainEscrowActions
             jobId={job.id}
             jobStatus={actionJob.status}
-            escrowStatus={actionJob.escrowStatus || "ready"}
+            escrowStatus={effectiveEscrowStatus || "ready"}
             escrowId={actionJob.escrowId}
             clientId={actionJob.clientId}
             assigneeId={actionJob.assigneeId}
