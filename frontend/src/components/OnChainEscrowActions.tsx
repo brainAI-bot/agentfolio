@@ -40,11 +40,10 @@ function parseBudgetAmount(budget: string | number | null | undefined): number {
 
 function deserializeEscrowTransaction(base64Tx: string): { tx: Transaction | VersionedTransaction; isVersioned: boolean } {
   const raw = Buffer.from(base64Tx, "base64");
-  try {
-    return { tx: VersionedTransaction.deserialize(raw), isVersioned: true };
-  } catch {
-    return { tx: Transaction.from(raw), isVersioned: false };
-  }
+  const isVersioned = raw.length > 0 && raw[0] >= 128;
+  return isVersioned
+    ? { tx: VersionedTransaction.deserialize(raw), isVersioned: true }
+    : { tx: Transaction.from(raw), isVersioned: false };
 }
 
 export function OnChainEscrowActions({

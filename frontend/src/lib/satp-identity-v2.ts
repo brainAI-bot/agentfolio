@@ -45,11 +45,7 @@ export async function hasSatpIdentity(
 
 function deserializeSatpIdentityTransaction(base64Tx: string): SatpWalletTransaction {
   const raw = Buffer.from(base64Tx, "base64");
-  try {
-    return VersionedTransaction.deserialize(raw);
-  } catch {
-    return Transaction.from(raw);
-  }
+  return raw.length > 0 && raw[0] >= 128 ? VersionedTransaction.deserialize(raw) : Transaction.from(raw);
 }
 
 /**

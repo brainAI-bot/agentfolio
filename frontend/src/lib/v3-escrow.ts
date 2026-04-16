@@ -39,11 +39,7 @@ export type WalletTransaction = Transaction | VersionedTransaction;
 
 function deserializeWalletTransaction(base64Tx: string): WalletTransaction {
   const raw = Buffer.from(base64Tx, 'base64');
-  try {
-    return VersionedTransaction.deserialize(raw);
-  } catch {
-    return Transaction.from(raw);
-  }
+  return raw.length > 0 && raw[0] >= 128 ? VersionedTransaction.deserialize(raw) : Transaction.from(raw);
 }
 
 /**

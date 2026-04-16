@@ -73,11 +73,7 @@ function timeAgo(dateStr: string): string {
 
 function deserializeMarketplaceTransaction(base64Tx: string): Transaction | VersionedTransaction {
   const raw = Buffer.from(base64Tx, "base64");
-  try {
-    return VersionedTransaction.deserialize(raw);
-  } catch {
-    return Transaction.from(raw);
-  }
+  return raw.length > 0 && raw[0] >= 128 ? VersionedTransaction.deserialize(raw) : Transaction.from(raw);
 }
 
 export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
