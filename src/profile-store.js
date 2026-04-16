@@ -1874,14 +1874,18 @@ function registerRoutes(app) {
 
   // GET /api/profile-by-wallet?wallet=<address> -- find profile by Solana wallet
   app.get('/api/profile-by-wallet', (req, res) => {
-    const { wallet } = req.query;
+    const { wallet, preferredProfileId } = req.query;
     if (!wallet) return res.status(400).json({ error: 'wallet required' });
     try {
       const db = getDb();
       const normalizedWallet = String(wallet).trim();
-      const row = db.prepare(`
-        SELECT id, name FROM profiles
-        WHERE LOWER(wallet) = LOWER(?)
+      const preferredId = String(preferredProfileId || '').trim();
+      const walletParams = [
+        normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet,
+        normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet,
+      ];
+      const whereClause = `
+        LOWER(wallet) = LOWER(?)
            OR LOWER(claimed_by) = LOWER(?)
            OR LOWER(json_extract(wallets, '$.solana')) = LOWER(?)
            OR LOWER(json_extract(wallets, '$.solana_wallet')) = LOWER(?)
@@ -1893,16 +1897,30 @@ function registerRoutes(app) {
            OR LOWER(json_extract(verification_data, '$.eth.identifier')) = LOWER(?)
            OR LOWER(json_extract(verification_data, '$.ethereum.address')) = LOWER(?)
            OR LOWER(json_extract(verification_data, '$.ethereum.identifier')) = LOWER(?)
-        ORDER BY COALESCE(
-          julianday(REPLACE(SUBSTR(updated_at, 1, 19), 'T', ' ')),
-          julianday(REPLACE(SUBSTR(created_at, 1, 19), 'T', ' ')),
-          0
-        ) DESC, id DESC
-        LIMIT 1
-      `).get(
-        normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet,
-        normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet
-      );
+      `;
+
+      let row = null;
+      if (preferredId) {
+        row = db.prepare(`
+          SELECT id, name FROM profiles
+          WHERE id = ? AND (${whereClause})
+          LIMIT 1
+        `).get(preferredId, ...walletParams);
+      }
+
+      if (!row) {
+        row = db.prepare(`
+          SELECT id, name FROM profiles
+          WHERE ${whereClause}
+          ORDER BY COALESCE(
+            julianday(REPLACE(SUBSTR(updated_at, 1, 19), 'T', ' ')),
+            julianday(REPLACE(SUBSTR(created_at, 1, 19), 'T', ' ')),
+            0
+          ) DESC, id DESC
+          LIMIT 1
+        `).get(...walletParams);
+      }
+
       if (row) {
         return res.json({
           found: true,
@@ -1910,6 +1928,7 @@ function registerRoutes(app) {
           profileId: row.id,
           name: row.name,
           profile: { id: row.id, name: row.name },
+          preferredMatched: !!(preferredId && row.id === preferredId),
         });
       }
       return res.status(404).json({ found: false, error: 'No profile found for this wallet' });
