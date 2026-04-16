@@ -668,9 +668,9 @@ function registerRoutes(app) {
         return res.status(500).json({ error: 'On-chain escrow verifier unavailable' });
       }
 
-      const { jobId, txSignature, escrowPDA, clientWallet } = req.body || {};
-      if (!jobId || !txSignature || !escrowPDA || !clientWallet) {
-        return res.status(400).json({ error: 'jobId, txSignature, escrowPDA, and clientWallet required' });
+      const { jobId, txSignature, signedTransaction, escrowPDA, clientWallet } = req.body || {};
+      if (!jobId || (!txSignature && !signedTransaction) || !escrowPDA || !clientWallet) {
+        return res.status(400).json({ error: 'jobId, escrowPDA, clientWallet, and either txSignature or signedTransaction required' });
       }
 
       const draftPath = path.join(DATA_DIR, 'job-drafts', `${jobId}.json`);
@@ -700,7 +700,8 @@ function registerRoutes(app) {
         return res.status(403).json({ error: 'Only the job poster can confirm atomic job funding' });
       }
 
-      await escrowOnchainLib.confirmTransaction(txSignature);
+      const confirmResult = await escrowOnchainLib.confirmTransaction(signedTransaction || txSignature);
+      const finalTxSignature = confirmResult?.signature || txSignature;
       const onchainState = await escrowOnchainLib.readEscrowAccount(jobId);
       if (!onchainState?.exists) return res.status(400).json({ error: 'Escrow PDA not found on-chain' });
       if (onchainState.escrowPDA !== escrowPDA) return res.status(400).json({ error: 'Escrow PDA mismatch' });
@@ -735,7 +736,7 @@ function registerRoutes(app) {
         currency: job.budgetCurrency || job.currency || 'USDC',
         platformFee: amount * 0.05,
         workerPayout: amount * 0.95,
-        txHash: txSignature,
+        txHash: finalTxSignature,
         escrowPDA,
         onchain: true,
         status: 'funded',

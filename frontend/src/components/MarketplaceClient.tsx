@@ -316,10 +316,11 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
       if (!prepareRes.ok || prepareData.error) throw new Error(prepareData.error || "Failed to prepare job escrow");
 
       const tx = deserializeMarketplaceTransaction(prepareData.transaction);
-      if (tx instanceof VersionedTransaction && !signTransaction) {
-        throw new Error("Connected wallet must support signTransaction() for versioned escrow transactions");
+      if (!signTransaction) {
+        throw new Error("Connected wallet must support signTransaction() for atomic job posting");
       }
-      const sig = await signAndSendV3Tx(tx as any, connection, publicKey!, sendTransaction, signTransaction);
+      const signedTx = await signTransaction(tx as any);
+      const signedTxBase64 = Buffer.from(signedTx.serialize()).toString("base64");
 
       const confirmAuth = await createMarketplaceWalletAuth({
         action: "create_job_onchain_confirm",
@@ -335,7 +336,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
         headers: { "Content-Type": "application/json", ...confirmAuth },
         body: JSON.stringify({
           jobId: prepareData.jobId,
-          txSignature: sig,
+          signedTransaction: signedTxBase64,
           escrowPDA: prepareData.escrowPDA,
           clientWallet: walletAddress,
         }),
