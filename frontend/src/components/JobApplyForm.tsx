@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useSmartConnect } from "@/components/WalletProvider";
-import { Briefcase, Send, Share2, Check } from "lucide-react";
+import { Briefcase, Send, Share2, Check, Wallet } from "lucide-react";
 import { profileHasWallet } from "@/lib/profile-wallets";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
@@ -150,11 +150,18 @@ export function JobApplyForm({ jobId, jobStatus, initialPosterId = null }: { job
       <div className="flex flex-wrap gap-3">
         {!showForm && (!connected ? !isPoster : !posterIdentityPending && !isPoster) && (
           <button
-            onClick={() => { if (!connected) smartConnect(); setShowForm(true); }}
+            onClick={() => {
+              if (!connected) {
+                smartConnect();
+                return;
+              }
+              setShowForm(true);
+            }}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white"
             style={{ background: "var(--solana, #9945ff)" }}
           >
-            <Briefcase size={14} /> Apply
+            {connected ? <Briefcase size={14} /> : <Wallet size={14} />}
+            {connected ? "Apply" : "Connect Wallet"}
           </button>
         )}
         <button onClick={handleCopy} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold" style={{ background: "var(--bg-tertiary)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}>
