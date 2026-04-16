@@ -6,6 +6,7 @@ import { Shield } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createMarketplaceWalletAuth } from "@/lib/marketplace-auth";
+import { profileHasWallet } from "@/lib/profile-wallets";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -73,6 +74,8 @@ export function ApplicationsList({
   const [jobStatus, setJobStatus] = useState<string>(initialJobStatus || "open");
   const [actingId, setActingId] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [posterWalletMatch, setPosterWalletMatch] = useState(false);
+  const [posterWalletCheckSettled, setPosterWalletCheckSettled] = useState(false);
 
   const walletAddr = publicKey?.toBase58() || "";
 
@@ -97,6 +100,8 @@ export function ApplicationsList({
   useEffect(() => {
     if (!connected || !publicKey) {
       setResolvedId(null);
+      setPosterWalletMatch(false);
+      setPosterWalletCheckSettled(false);
       return;
     }
     let cancelled = false;
@@ -113,13 +118,38 @@ export function ApplicationsList({
     };
   }, [connected, publicKey]);
 
+  useEffect(() => {
+    if (!connected || !walletAddr || !posterId) {
+      setPosterWalletMatch(false);
+      setPosterWalletCheckSettled(false);
+      return;
+    }
+    let cancelled = false;
+    setPosterWalletCheckSettled(false);
+    fetch(`${API_BASE}/api/profile/${encodeURIComponent(posterId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((profile) => {
+        if (!cancelled) setPosterWalletMatch(profileHasWallet(profile, walletAddr));
+      })
+      .catch(() => {
+        if (!cancelled) setPosterWalletMatch(false);
+      })
+      .finally(() => {
+        if (!cancelled) setPosterWalletCheckSettled(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connected, walletAddr, posterId]);
+
   const isPoster = useMemo(() => {
     if (!posterId) return false;
-    return posterId === resolvedId || posterId === walletAddr;
-  }, [posterId, resolvedId, walletAddr]);
+    return posterWalletMatch || posterId === resolvedId || posterId === walletAddr;
+  }, [posterId, posterWalletMatch, resolvedId, walletAddr]);
+  const posterIdentityPending = connected && !!walletAddr && !!posterId && !posterWalletCheckSettled;
 
   const handleAccept = async (applicationId: string) => {
-    const acceptedBy = resolvedId || walletAddr;
+    const acceptedBy = posterId || resolvedId || walletAddr;
     if (!acceptedBy || !walletAddr) {
       setActionMsg({ ok: false, msg: "Connect the poster wallet to accept an application." });
       return;
@@ -173,7 +203,7 @@ export function ApplicationsList({
         const lvlColor = levelColors[app.verificationLevel ?? 0] || "#6b7280";
         const profileId = app.applicantProfileId || null;
         const profileUrl = profileId ? `/profile/${profileId}` : null;
-        const canAccept = isPoster && jobStatus === "open" && app.status === "pending";
+        const canAccept = !posterIdentityPending && isPoster && jobStatus === "open" && app.status === "pending";
 
         return (
           <div
@@ -288,6 +318,20 @@ export function ApplicationsList({
           </div>
         );
       })}
+
+      {posterIdentityPending && (
+        <div
+          className="text-xs px-3 py-2 rounded-lg"
+          style={{
+            background: "rgba(153,69,255,0.1)",
+            color: "var(--solana, #9945ff)",
+            border: "1px solid rgba(153,69,255,0.2)",
+            fontFamily: "var(--font-mono)",
+          }}
+        >
+          Resolving the connected wallet against the poster profile before marketplace actions are enabled.
+        </div>
+      )}
 
       {actionMsg && (
         <div
