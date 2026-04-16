@@ -481,7 +481,7 @@ function registerFrontendBridge(app, profileStore) {
       }
 
       if (!profile) {
-        profile = db.prepare(`
+        const matches = db.prepare(`
           SELECT id, name, avatar, api_key, claimed FROM profiles
           WHERE ${whereClause}
           ORDER BY COALESCE(
@@ -489,8 +489,19 @@ function registerFrontendBridge(app, profileStore) {
             julianday(REPLACE(SUBSTR(created_at, 1, 19), 'T', ' ')),
             0
           ) DESC, id DESC
-          LIMIT 1
-        `).get(...walletParams);
+          LIMIT 3
+        `).all(...walletParams);
+        if (!matches.length) return res.status(404).json({ found: false, error: 'No profile found for this wallet' });
+        if (matches.length > 1) {
+          return res.status(409).json({
+            found: false,
+            ambiguous: true,
+            error: 'Multiple profiles found for this wallet. Provide preferredProfileId.',
+            profileIds: matches.map((item) => item.id),
+            profiles: matches.map((item) => ({ id: item.id, name: item.name, avatar: item.avatar, claimed: !!item.claimed })),
+          });
+        }
+        profile = matches[0];
       }
       if (!profile) return res.status(404).json({ found: false, error: 'No profile found for this wallet' });
       res.json({
