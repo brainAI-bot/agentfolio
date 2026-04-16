@@ -1861,21 +1861,21 @@ function registerRoutes(app) {
     if (!wallet) return res.status(400).json({ error: 'wallet required' });
     try {
       const db = getDb();
-      // Direct wallet column lookup (fast path)
-      const directMatch = db.prepare('SELECT id, name FROM profiles WHERE wallet = ?').get(wallet);
-      if (directMatch) return res.json({ id: directMatch.id, name: directMatch.name });
-      const claimedMatch = db.prepare('SELECT id, name FROM profiles WHERE claimed_by = ?').get(wallet);
-      if (claimedMatch) return res.json({ id: claimedMatch.id, name: claimedMatch.name });
-      const profiles = db.prepare('SELECT id, name, wallets FROM profiles').all();
-      for (const p of profiles) {
-        try {
-          // [P0 FIX] Check wallets column only -- no DB verification_data
-          const w = JSON.parse(p.wallets || '{}');
-          if (w.solana === wallet) {
-            return res.json({ id: p.id, name: p.name });
-          }
-        } catch (e2) {}
-      }
+      const row = db.prepare(`
+        SELECT id, name FROM profiles
+        WHERE LOWER(wallet) = LOWER(?)
+           OR LOWER(claimed_by) = LOWER(?)
+           OR LOWER(json_extract(wallets, '$.solana')) = LOWER(?)
+           OR LOWER(json_extract(wallets, '$.ethereum')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.solana.address')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.solana.identifier')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.eth.address')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.eth.identifier')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.ethereum.address')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.ethereum.identifier')) = LOWER(?)
+        LIMIT 1
+      `).get(wallet, wallet, wallet, wallet, wallet, wallet, wallet, wallet, wallet, wallet);
+      if (row) return res.json({ id: row.id, name: row.name });
       return res.status(404).json({ error: 'No profile found for this wallet' });
     } catch (e) {
       return res.status(500).json({ error: e.message });
