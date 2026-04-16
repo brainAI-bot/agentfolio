@@ -262,8 +262,8 @@ function registerMarketplaceEscrowOnchain(app) {
       const job = readJSON(jobPath);
       if (!job) return res.status(404).json({ error: 'Job not found' });
 
-      const { txSignature, escrowPDA, clientWallet } = req.body;
-      if (!txSignature || !escrowPDA) return res.status(400).json({ error: 'txSignature and escrowPDA required' });
+      const { txSignature, signedTransaction, escrowPDA, clientWallet } = req.body;
+      if ((!txSignature && !signedTransaction) || !escrowPDA) return res.status(400).json({ error: 'signedTransaction or txSignature, plus escrowPDA, required' });
       if (!clientWallet) return res.status(400).json({ error: 'clientWallet required' });
 
       const auth = verifyMarketplaceOnchainAction(req, {
@@ -277,8 +277,9 @@ function registerMarketplaceEscrowOnchain(app) {
         return res.status(403).json({ error: 'Only the job poster can confirm escrow funding' });
       }
 
-      const confirmed = await escrowOnchain.confirmTransaction(txSignature);
+      const confirmed = await escrowOnchain.confirmTransaction(signedTransaction || txSignature);
       if (!confirmed) return res.status(400).json({ error: 'Transaction not confirmed on-chain' });
+      const finalTxSignature = confirmed.signature || txSignature;
 
       let onchainState;
       try { onchainState = await escrowOnchain.readEscrowAccount(job.id); } catch { onchainState = null; }
@@ -297,7 +298,7 @@ function registerMarketplaceEscrowOnchain(app) {
         currency: 'USDC',
         platformFee: amt * 0.05,
         workerPayout: amt * 0.95,
-        txHash: txSignature,
+        txHash: finalTxSignature,
         escrowPDA,
         onchain: true,
         status: 'funded',
@@ -324,7 +325,7 @@ function registerMarketplaceEscrowOnchain(app) {
         message: 'On-chain escrow confirmed and linked to job',
         escrow,
         onchainState,
-        explorerUrl: `https://explorer.solana.com/tx/${txSignature}`
+        explorerUrl: `https://explorer.solana.com/tx/${finalTxSignature}`
       });
     } catch (e) {
       console.error('[Marketplace Escrow] Confirm error:', e.message);
@@ -444,8 +445,8 @@ function registerMarketplaceEscrowOnchain(app) {
       const escrow = readJSON(escrowPath);
       if (!escrow) return res.status(404).json({ error: 'Escrow not found' });
 
-      const { txSignature, clientWallet } = req.body;
-      if (!txSignature) return res.status(400).json({ error: 'txSignature required' });
+      const { txSignature, signedTransaction, clientWallet } = req.body;
+      if (!txSignature && !signedTransaction) return res.status(400).json({ error: 'signedTransaction or txSignature required' });
       if (!clientWallet) return res.status(400).json({ error: 'clientWallet required' });
 
       const jobPath = path.join(DATA_DIR, 'jobs', `${escrow.jobId}.json`);
@@ -463,8 +464,9 @@ function registerMarketplaceEscrowOnchain(app) {
         return res.status(403).json({ error: 'Only the job poster can confirm release' });
       }
 
-      const confirmed = await escrowOnchain.confirmTransaction(txSignature);
+      const confirmed = await escrowOnchain.confirmTransaction(signedTransaction || txSignature);
       if (!confirmed) return res.status(400).json({ error: 'Transaction not confirmed on-chain' });
+      const finalTxSignature = confirmed.signature || txSignature;
 
       const onchainState = await escrowOnchain.readEscrowAccount(escrow.jobId);
       if (!onchainState?.exists) return res.status(400).json({ error: 'Escrow PDA not found on-chain' });
@@ -473,7 +475,7 @@ function registerMarketplaceEscrowOnchain(app) {
       }
 
       escrow.status = 'released';
-      escrow.releaseTxHash = txSignature;
+      escrow.releaseTxHash = finalTxSignature;
       escrow.releasedAt = new Date().toISOString();
       writeJSON(escrowPath, escrow);
       try { syncMarketplaceEscrowToDb(escrow); } catch (e) { console.warn('[Marketplace Escrow] escrow DB sync failed after release:', e.message); }
@@ -485,7 +487,7 @@ function registerMarketplaceEscrowOnchain(app) {
         job.fundsReleased = true;
         job.fundsLocked = false;
         job.escrowFunded = true;
-        job.releaseTxHash = txSignature;
+        job.releaseTxHash = finalTxSignature;
         job.releasedAt = escrow.releasedAt || new Date().toISOString();
         writeJSON(jobPath, job);
         try { syncMarketplaceJobToDb(job); } catch (e) { console.warn('[Marketplace Escrow] job DB sync failed after release:', e.message); }
@@ -499,7 +501,7 @@ function registerMarketplaceEscrowOnchain(app) {
       res.json({
         message: 'Payment released on-chain',
         escrow,
-        explorerUrl: `https://explorer.solana.com/tx/${txSignature}`
+        explorerUrl: `https://explorer.solana.com/tx/${finalTxSignature}`
       });
     } catch (e) {
       console.error('[Marketplace Escrow] Release confirm error:', e.message);
@@ -547,8 +549,8 @@ function registerMarketplaceEscrowOnchain(app) {
       const escrow = readJSON(escrowPath);
       if (!escrow) return res.status(404).json({ error: 'Escrow not found' });
 
-      const { txSignature, clientWallet } = req.body;
-      if (!txSignature) return res.status(400).json({ error: 'txSignature required' });
+      const { txSignature, signedTransaction, clientWallet } = req.body;
+      if (!txSignature && !signedTransaction) return res.status(400).json({ error: 'signedTransaction or txSignature required' });
       if (!clientWallet) return res.status(400).json({ error: 'clientWallet required' });
 
       const jobPath = path.join(DATA_DIR, 'jobs', `${escrow.jobId}.json`);
@@ -566,15 +568,16 @@ function registerMarketplaceEscrowOnchain(app) {
         return res.status(403).json({ error: 'Only the job poster can confirm refund' });
       }
 
-      const confirmed = await escrowOnchain.confirmTransaction(txSignature);
+      const confirmed = await escrowOnchain.confirmTransaction(signedTransaction || txSignature);
       if (!confirmed) return res.status(400).json({ error: 'Transaction not confirmed on-chain' });
+      const finalTxSignature = confirmed.signature || txSignature;
 
       const onchainState = await escrowOnchain.readEscrowAccount(escrow.jobId);
       if (!onchainState?.exists) return res.status(400).json({ error: 'Escrow PDA not found on-chain' });
       if (onchainState.status !== 'refunded') return res.status(400).json({ error: 'Escrow PDA is not refunded on-chain' });
 
       escrow.status = 'refunded';
-      escrow.refundTxHash = txSignature;
+      escrow.refundTxHash = finalTxSignature;
       escrow.refundedAt = new Date().toISOString();
       writeJSON(escrowPath, escrow);
       try { syncMarketplaceEscrowToDb(escrow); } catch (e) { console.warn('[Marketplace Escrow] escrow DB sync failed after refund:', e.message); }
@@ -588,7 +591,7 @@ function registerMarketplaceEscrowOnchain(app) {
       res.json({
         message: 'Escrow refunded on-chain',
         escrow,
-        explorerUrl: `https://explorer.solana.com/tx/${txSignature}`
+        explorerUrl: `https://explorer.solana.com/tx/${finalTxSignature}`
       });
     } catch (e) {
       console.error('[Marketplace Escrow] Refund confirm error:', e.message);
