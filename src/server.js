@@ -2596,6 +2596,39 @@ try {
   console.warn('[V3 API] Failed to mount:', e.message);
 }
 
+// Legacy compatibility aliases for shipped frontend bundles
+app.get('/api/satp/v3/reputation/:agentId', (req, res) => {
+  const agentId = encodeURIComponent(req.params.agentId || '');
+  return res.redirect(307, `/api/v3/reputation/${agentId}`);
+});
+
+app.get('/api/profile/:id/heatmap', (req, res) => {
+  try {
+    const { getHeatmapDetailed } = require('./lib/activity');
+    const profileId = req.params.id;
+    const data = getHeatmapDetailed(profileId, 365);
+    return res.json({
+      profileId,
+      heatmap: data.heatmap || {},
+      totalEvents: data.totalEvents || 0,
+      activeDays: data.activeDays || 0,
+      streak: data.streak || 0,
+      details: data.details || {},
+      period: '365d'
+    });
+  } catch (e) {
+    return res.json({
+      profileId: req.params.id,
+      heatmap: {},
+      totalEvents: 0,
+      activeDays: 0,
+      streak: 0,
+      details: {},
+      period: '365d'
+    });
+  }
+});
+
 // Explorer API routes (agents list, stats, leaderboard, search)
 try {
   const explorerRouter = require('./routes/explorer-api');
