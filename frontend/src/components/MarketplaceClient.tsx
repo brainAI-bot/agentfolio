@@ -399,7 +399,9 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
       const daysFromNow = timelineMap[selectedJob.deadline] || 7;
       const deadlineUnix = Math.floor(Date.now() / 1000) + (daysFromNow * 86400);
       const walletAddress = publicKey.toBase58();
-      const actorId = resolvedProfileId || myProfileId || walletAddress;
+      const actorId = (selectedJob.clientId && posterWalletMatches[selectedJob.clientId])
+        ? selectedJob.clientId
+        : (resolvedProfileId || myProfileId || walletAddress);
 
       const agentId = selectedJob.assignee || selectedJob.assigneeId;
       if (!agentId) {
@@ -510,7 +512,9 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     try {
       const agentId = selectedJob.assignee || selectedJob.assigneeId;
       const walletAddress = publicKey.toBase58();
-      const actorId = resolvedProfileId || myProfileId || walletAddress;
+      const actorId = (selectedJob.clientId && posterWalletMatches[selectedJob.clientId])
+        ? selectedJob.clientId
+        : (resolvedProfileId || myProfileId || walletAddress);
 
       if (selectedJob.v3EscrowPDA) {
         const escrowPDA = selectedJob.v3EscrowPDA;

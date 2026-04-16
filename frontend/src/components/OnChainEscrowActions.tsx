@@ -123,7 +123,12 @@ export function OnChainEscrowActions({
     };
   }, [clientId, connected, walletAddr]);
 
-  const actorId = resolvedId || clientId || walletAddr;
+  const actorId = useMemo(() => {
+    if (clientId && (posterWalletMatch || clientId === resolvedId || clientId === walletAddr)) {
+      return clientId;
+    }
+    return resolvedId || clientId || walletAddr;
+  }, [clientId, posterWalletMatch, resolvedId, walletAddr]);
   const isPoster = useMemo(() => {
     if (!clientId) return !!walletAddr;
     return posterWalletMatch || clientId === resolvedId || clientId === walletAddr;
