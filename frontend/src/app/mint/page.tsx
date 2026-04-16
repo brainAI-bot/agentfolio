@@ -815,9 +815,9 @@ export default function MintPage() {
                       <ImageIcon size={10} className="inline mr-1" /> {soulboundMint ? "Soulbound Token" : "Your BOA NFT"}
                     </p>
                     <div className="rounded-xl overflow-hidden border-2 accent-glow" style={{ borderColor: "var(--accent)" }}>
-                      <img loading="lazy" src={fixImageUrl(selectedNft?.image || mintedNft?.image || "")} alt={selectedNft?.name || mintedNft?.name || "BOA"} className="w-full aspect-square object-cover" />
+                      <img loading="lazy" src={fixImageUrl(completionTxType === "mint" ? (mintedNft?.image || selectedNft?.image || "") : (selectedNft?.image || mintedNft?.image || ""))} alt={completionTxType === "mint" ? (mintedNft?.name || selectedNft?.name || "BOA") : (selectedNft?.name || mintedNft?.name || "BOA")} className="w-full aspect-square object-cover" />
                     </div>
-                    <p className="text-center mt-2 font-bold text-sm" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{selectedNft?.name || mintedNft?.name || ""}</p>
+                    <p className="text-center mt-2 font-bold text-sm" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{completionTxType === "mint" ? (mintedNft?.name || selectedNft?.name || "") : (selectedNft?.name || mintedNft?.name || "")}</p>
                     <p className="mt-1 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>{soulboundMint ? "NON-TRANSFERABLE • PERMANENT" : "MINTED SUCCESSFULLY"}</p>
                     {!soulboundMint && mintedNft?.mint && (
                       <button onClick={handleStartBurnFromMint}
