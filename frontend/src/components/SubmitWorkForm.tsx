@@ -48,6 +48,8 @@ export function SubmitWorkForm({
   const { connected, publicKey, signMessage, sendTransaction, signTransaction } = useWallet();
   const { connection } = useConnection();
   const [resolvedId, setResolvedId] = useState<string | null>(null);
+  const [resolvedWorkerId, setResolvedWorkerId] = useState<string | null>(null);
+  const [resolvedClientId, setResolvedClientId] = useState<string | null>(null);
   const [assigneeWalletMatch, setAssigneeWalletMatch] = useState(false);
   const [clientWalletMatch, setClientWalletMatch] = useState(false);
   const [description, setDescription] = useState("");
@@ -61,21 +63,42 @@ export function SubmitWorkForm({
   useEffect(() => {
     if (!connected || !publicKey) {
       setResolvedId(null);
+      setResolvedWorkerId(null);
+      setResolvedClientId(null);
       return;
     }
     let cancelled = false;
-    fetch(`${API_BASE}/api/profile-by-wallet?wallet=${publicKey.toBase58()}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!cancelled) setResolvedId(data?.id || null);
+    const wallet = publicKey.toBase58();
+    const fetchResolvedId = async (preferredProfileId?: string) => {
+      const params = new URLSearchParams({ wallet });
+      if (preferredProfileId) params.set("preferredProfileId", preferredProfileId);
+      const res = await fetch(`${API_BASE}/api/profile-by-wallet?${params.toString()}`);
+      if (!res.ok) return null;
+      const data = await res.json().catch(() => null);
+      return data?.id || null;
+    };
+
+    Promise.all([
+      fetchResolvedId(),
+      assigneeId ? fetchResolvedId(assigneeId) : Promise.resolve(null),
+      clientId ? fetchResolvedId(clientId) : Promise.resolve(null),
+    ])
+      .then(([genericId, workerId, clientResolvedId]) => {
+        if (cancelled) return;
+        setResolvedId(genericId);
+        setResolvedWorkerId(workerId);
+        setResolvedClientId(clientResolvedId);
       })
       .catch(() => {
-        if (!cancelled) setResolvedId(null);
+        if (cancelled) return;
+        setResolvedId(null);
+        setResolvedWorkerId(null);
+        setResolvedClientId(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [connected, publicKey]);
+  }, [assigneeId, clientId, connected, publicKey]);
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -109,10 +132,10 @@ export function SubmitWorkForm({
     };
   }, [assigneeId, clientId, connected, publicKey]);
 
-  const workerActorId = assigneeWalletMatch ? assigneeId : resolvedId;
-  const clientActorId = clientWalletMatch ? clientId : resolvedId;
-  const isWorker = !!assigneeId && (assigneeWalletMatch || resolvedId === assigneeId);
-  const isClient = !!clientId && (clientWalletMatch || resolvedId === clientId);
+  const workerActorId = assigneeWalletMatch ? assigneeId : (resolvedWorkerId || resolvedId);
+  const clientActorId = clientWalletMatch ? clientId : (resolvedClientId || resolvedId);
+  const isWorker = !!assigneeId && (assigneeWalletMatch || resolvedWorkerId === assigneeId || resolvedId === assigneeId);
+  const isClient = !!clientId && (clientWalletMatch || resolvedClientId === clientId || resolvedId === clientId);
   const hasDeliverable = !!deliverableId;
 
   const handleSubmitWork = async () => {

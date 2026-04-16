@@ -136,7 +136,31 @@ function findProfileRowByApplicantToken(db, applicantId, fields = 'id') {
 
   const raw = String(resolvedApplicantId || '').trim();
   if (!raw) return null;
-  return db.prepare(`SELECT ${fields} FROM profiles WHERE LOWER(name) = ?`).get(raw.toLowerCase()) || null;
+
+  let row = db.prepare(`SELECT ${fields} FROM profiles WHERE LOWER(name) = ?`).get(raw.toLowerCase()) || null;
+  if (row) return row;
+
+  return db.prepare(`
+    SELECT ${fields} FROM profiles
+    WHERE LOWER(wallet) = LOWER(?)
+       OR LOWER(claimed_by) = LOWER(?)
+       OR LOWER(json_extract(wallets, '$.solana')) = LOWER(?)
+       OR LOWER(json_extract(wallets, '$.solana_wallet')) = LOWER(?)
+       OR LOWER(json_extract(wallets, '$.wallet')) = LOWER(?)
+       OR LOWER(json_extract(wallets, '$.ethereum')) = LOWER(?)
+       OR LOWER(json_extract(verification_data, '$.solana.address')) = LOWER(?)
+       OR LOWER(json_extract(verification_data, '$.solana.identifier')) = LOWER(?)
+       OR LOWER(json_extract(verification_data, '$.eth.address')) = LOWER(?)
+       OR LOWER(json_extract(verification_data, '$.eth.identifier')) = LOWER(?)
+       OR LOWER(json_extract(verification_data, '$.ethereum.address')) = LOWER(?)
+       OR LOWER(json_extract(verification_data, '$.ethereum.identifier')) = LOWER(?)
+    ORDER BY COALESCE(
+      julianday(REPLACE(SUBSTR(updated_at, 1, 19), 'T', ' ')),
+      julianday(REPLACE(SUBSTR(created_at, 1, 19), 'T', ' ')),
+      0
+    ) DESC, id DESC
+    LIMIT 1
+  `).get(raw, raw, raw, raw, raw, raw, raw, raw, raw, raw, raw, raw) || null;
 }
 
 function resolveExistingApplicantProfileId(applicantId) {

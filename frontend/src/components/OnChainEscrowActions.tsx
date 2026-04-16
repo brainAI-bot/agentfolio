@@ -75,7 +75,9 @@ export function OnChainEscrowActions({
     let cancelled = false;
     setWalletLookupSettled(false);
     setResolvingActor(true);
-    fetch(`${API_BASE}/api/profile-by-wallet?wallet=${walletAddr}`)
+    const params = new URLSearchParams({ wallet: walletAddr });
+    if (clientId) params.set('preferredProfileId', clientId);
+    fetch(`${API_BASE}/api/profile-by-wallet?${params.toString()}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!cancelled) setResolvedId(data?.id || null);

@@ -454,27 +454,44 @@ function registerFrontendBridge(app, profileStore) {
   // ─── 9. /api/profile-by-wallet ───
   app.get('/api/profile-by-wallet', (req, res) => {
     try {
-      const { wallet } = req.query;
+      const { wallet, preferredProfileId } = req.query;
       if (!wallet) return res.status(400).json({ error: 'wallet parameter required' });
       const normalizedWallet = String(wallet).trim();
-      const profile = db.prepare(`
-        SELECT id, name, avatar, api_key, claimed FROM profiles
-        WHERE LOWER(wallet) = LOWER(?)
+      const preferredId = String(preferredProfileId || '').trim();
+      const walletParams = [
+        normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet
+      ];
+      const whereClause = `
+        LOWER(wallet) = LOWER(?)
            OR LOWER(claimed_by) = LOWER(?)
            OR LOWER(json_extract(wallets, '$.solana')) = LOWER(?)
            OR LOWER(json_extract(wallets, '$.solana_wallet')) = LOWER(?)
            OR LOWER(json_extract(wallets, '$.wallet')) = LOWER(?)
            OR LOWER(json_extract(verification_data, '$.solana.address')) = LOWER(?)
            OR LOWER(json_extract(verification_data, '$.solana.identifier')) = LOWER(?)
-        ORDER BY COALESCE(
-          julianday(REPLACE(SUBSTR(updated_at, 1, 19), 'T', ' ')),
-          julianday(REPLACE(SUBSTR(created_at, 1, 19), 'T', ' ')),
-          0
-        ) DESC, id DESC
-        LIMIT 1
-      `).get(
-        normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet
-      );
+      `;
+
+      let profile = null;
+      if (preferredId) {
+        profile = db.prepare(`
+          SELECT id, name, avatar, api_key, claimed FROM profiles
+          WHERE id = ? AND (${whereClause})
+          LIMIT 1
+        `).get(preferredId, ...walletParams);
+      }
+
+      if (!profile) {
+        profile = db.prepare(`
+          SELECT id, name, avatar, api_key, claimed FROM profiles
+          WHERE ${whereClause}
+          ORDER BY COALESCE(
+            julianday(REPLACE(SUBSTR(updated_at, 1, 19), 'T', ' ')),
+            julianday(REPLACE(SUBSTR(created_at, 1, 19), 'T', ' ')),
+            0
+          ) DESC, id DESC
+          LIMIT 1
+        `).get(...walletParams);
+      }
       if (!profile) return res.status(404).json({ found: false, error: 'No profile found for this wallet' });
       res.json({
         found: true,
@@ -484,6 +501,7 @@ function registerFrontendBridge(app, profileStore) {
         avatar: profile.avatar,
         apiKey: profile.api_key,
         claimed: !!profile.claimed,
+        preferredMatched: !!(preferredId && profile.id === preferredId),
         profile: { id: profile.id, name: profile.name, avatar: profile.avatar },
       });
     } catch (e) {
