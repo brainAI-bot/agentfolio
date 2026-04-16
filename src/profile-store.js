@@ -1446,13 +1446,37 @@ function registerRoutes(app) {
   // ── GET /api/profile/:id ───────────────────────────────────────
   app.get('/api/profile/:id', async (req, res) => {
     const d = getDb();
-    let row = d.prepare('SELECT * FROM profiles WHERE id = ?').get(req.params.id);
-    // Fallback: try matching by name (case-insensitive) or agent_ prefix
-    if (!row) {
-      row = d.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(req.params.id);
+    const rawLookup = String(req.params.id || '').trim();
+    const loweredLookup = rawLookup.toLowerCase();
+    const lookupCandidates = [];
+    const pushCandidate = (value) => {
+      const normalized = String(value || '').trim();
+      if (normalized && !lookupCandidates.includes(normalized)) lookupCandidates.push(normalized);
+    };
+
+    pushCandidate(rawLookup);
+    if (rawLookup && !loweredLookup.startsWith('agent_')) pushCandidate('agent_' + loweredLookup);
+    if (/^agent_/i.test(rawLookup)) pushCandidate(rawLookup.replace(/^agent_/i, ''));
+    if (/^agent_/i.test(rawLookup)) pushCandidate(rawLookup.replace(/^agent_/i, '').replace(/^sm/i, ''));
+    if (/^sm/i.test(rawLookup)) pushCandidate('agent_' + rawLookup);
+    if (/^sm/i.test(rawLookup)) pushCandidate(rawLookup.replace(/^sm/i, ''));
+    if (/^\d+$/.test(rawLookup)) {
+      pushCandidate('sm' + rawLookup);
+      pushCandidate('agent_sm' + rawLookup);
     }
-    if (!row) {
-      row = d.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + req.params.id.toLowerCase());
+
+    let row = null;
+    for (const candidate of lookupCandidates) {
+      row = d.prepare('SELECT * FROM profiles WHERE id = ?').get(candidate);
+      if (row) break;
+      row = d.prepare('SELECT * FROM profiles WHERE LOWER(id) = ?').get(String(candidate).toLowerCase());
+      if (row) break;
+    }
+    if (!row && rawLookup) {
+      row = d.prepare('SELECT * FROM profiles WHERE LOWER(handle) = ?').get(rawLookup.startsWith('@') ? loweredLookup : '@' + loweredLookup);
+    }
+    if (!row && rawLookup) {
+      row = d.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(rawLookup);
     }
     if (!row) return res.status(404).json({ error: 'Profile not found' });
 
