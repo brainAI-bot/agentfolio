@@ -60,6 +60,25 @@ function getProfileAvatar(profileRow, fallback = null) {
   return nftAvatar?.image || nftAvatar?.arweaveUrl || profileRow?.avatar || fallback || null;
 }
 
+
+function normalizeExplorerPlatform(value) {
+  const platform = String(value || '').toLowerCase();
+  if (!platform) return null;
+  if (platform === 'twitter') return 'x';
+  if (platform === 'satp_v3') return null;
+  if (platform.startsWith('verification_')) return normalizeExplorerPlatform(platform.slice('verification_'.length));
+  if (platform.endsWith('_verification')) return normalizeExplorerPlatform(platform.slice(0, -'_verification'.length));
+  if (platform === 'solana_wallet') return 'solana';
+  if (platform === 'eth_wallet' || platform === 'ethereum_wallet' || platform === 'ethereum' || platform === 'evm') return 'eth';
+  if (platform === 'review' || platform.includes('satp')) return null;
+  return platform;
+}
+
+function normalizePublicPlatforms(values) {
+  const list = Array.isArray(values) ? values : [values];
+  return [...new Set(list.map(normalizeExplorerPlatform).filter(Boolean))];
+}
+
 // A1: Helper to compute score for any profile using the unified trust scorer
 function getComputedScore(profileId, explorerAgent = null) {
   let db;
@@ -131,18 +150,7 @@ router.get('/agents', async (req, res) => {
     const Database = require('better-sqlite3');
     const path = require('path');
     db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
-    const normalizePlatform = (value) => {
-      const platform = String(value || '').toLowerCase();
-      if (!platform) return null;
-      if (platform === 'twitter') return 'x';
-      if (platform === 'satp_v3') return null;
-      if (platform.startsWith('verification_')) return normalizePlatform(platform.slice('verification_'.length));
-      if (platform.endsWith('_verification')) return normalizePlatform(platform.slice(0, -'_verification'.length));
-      if (platform === 'solana_wallet') return 'solana';
-      if (platform === 'eth_wallet' || platform === 'ethereum_wallet' || platform === 'ethereum' || platform === 'evm') return 'eth';
-      if (platform === 'review' || platform.includes('satp')) return null;
-      return platform;
-    };
+    const normalizePlatform = normalizeExplorerPlatform;
     const isLikelySolanaTxSignature = (value) => /^[1-9A-HJ-NP-Za-km-z]{60,120}$/.test(String(value || "").trim());
     const parseJson = (val, fallback) => {
       if (val === null || val === undefined || val === '') return fallback;
@@ -481,7 +489,7 @@ router.get('/leaderboard', async (req, res) => {
     
     const leaderboard = top.map((a, i) => {
       const profileId = 'agent_' + a.agentName.toLowerCase();
-      const platforms = chainCache.getVerifiedPlatforms(profileId);
+      const platforms = normalizePublicPlatforms(chainCache.getVerifiedPlatforms(profileId));
       const cs = getComputedScore(profileId, a);
       
       return {
@@ -545,7 +553,7 @@ router.get('/search', async (req, res) => {
     const maxLimit = Math.min(parseInt(limit, 10) || 20, 50);
     const results = matches.slice(0, maxLimit).map(a => {
       const profileId = 'agent_' + a.agentName.toLowerCase();
-      const platforms = chainCache.getVerifiedPlatforms(profileId);
+      const platforms = normalizePublicPlatforms(chainCache.getVerifiedPlatforms(profileId));
       const cs = getComputedScore(profileId, a);
       
       return {
