@@ -18,6 +18,7 @@ export function JobApplyForm({ jobId, jobStatus, initialPosterId = null }: { job
   const [agentId, setAgentId] = useState("");
   const [resolvedId, setResolvedId] = useState<string | null>(null);
   const [posterId, setPosterId] = useState<string | null>(initialPosterId);
+  const [posterIdSettled, setPosterIdSettled] = useState(!!initialPosterId);
   const [posterWalletMatch, setPosterWalletMatch] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [walletLookupSettled, setWalletLookupSettled] = useState(false);
@@ -29,6 +30,7 @@ export function JobApplyForm({ jobId, jobStatus, initialPosterId = null }: { job
 
   useEffect(() => {
     setPosterId(initialPosterId || null);
+    setPosterIdSettled(!!initialPosterId);
   }, [initialPosterId]);
 
   // Auto-resolve wallet → profile ID when wallet connects
@@ -54,14 +56,21 @@ export function JobApplyForm({ jobId, jobStatus, initialPosterId = null }: { job
   }, [connected, publicKey]);
 
   useEffect(() => {
-    if (posterId) return;
+    if (posterId) {
+      setPosterIdSettled(true);
+      return;
+    }
     let cancelled = false;
+    setPosterIdSettled(false);
     fetch(`${API_BASE}/api/marketplace/jobs/${jobId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!cancelled) setPosterId(data?.clientId || data?.postedBy || null);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setPosterIdSettled(true);
+      });
     return () => { cancelled = true; };
   }, [jobId, posterId]);
 
@@ -97,7 +106,7 @@ export function JobApplyForm({ jobId, jobStatus, initialPosterId = null }: { job
     if (!posterId) return false;
     return posterWalletMatch || posterId === resolvedId || posterId === walletAddr;
   }, [posterId, posterWalletMatch, resolvedId, walletAddr]);
-  const posterIdentityPending = connected && !!publicKey && !!posterId && (!walletLookupSettled || !posterWalletCheckSettled);
+  const posterIdentityPending = connected && !!publicKey && (!posterIdSettled || !walletLookupSettled || (!!posterId && !posterWalletCheckSettled));
 
   const handleApply = async () => {
     const effectiveId = agentId.trim() || resolvedId;
