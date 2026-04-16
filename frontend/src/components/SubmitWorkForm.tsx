@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { Send, Package, CheckCircle, AlertCircle } from "lucide-react";
+import { Send, Package, AlertCircle } from "lucide-react";
 import { createMarketplaceWalletAuth } from "@/lib/marketplace-auth";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
@@ -102,47 +102,6 @@ export function SubmitWorkForm({
     }
   };
 
-  const handleApprove = async () => {
-    if (!resolvedId || !publicKey) {
-      setReviewResult({ ok: false, msg: "Connect the poster wallet first" });
-      return;
-    }
-
-    setReviewing(true);
-    setReviewResult(null);
-    try {
-      const jobRes = await fetch(`${API_BASE}/api/marketplace/jobs/${jobId}`);
-      const job = await jobRes.json();
-      if (!job.escrowId) {
-        setReviewResult({ ok: false, msg: "No escrow found for this job" });
-        return;
-      }
-      const authHeaders = await createMarketplaceWalletAuth({
-        action: "release_escrow",
-        walletAddress: publicKey.toBase58(),
-        actorId: resolvedId,
-        jobId,
-        escrowId: job.escrowId,
-        signMessage,
-      });
-      const res = await fetch(`${API_BASE}/api/marketplace/escrow/${job.escrowId}/release`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders },
-        body: JSON.stringify({ releasedBy: resolvedId }),
-      });
-      const data = await res.json();
-      if (data.error) {
-        setReviewResult({ ok: false, msg: data.error });
-      } else {
-        setReviewResult({ ok: true, msg: `Payment released! ${data.workerPayout} ${job.currency || "USDC"} sent to worker.` });
-      }
-    } catch (e: any) {
-      setReviewResult({ ok: false, msg: e.message });
-    } finally {
-      setReviewing(false);
-    }
-  };
-
   const handleRequestChanges = async () => {
     if (!resolvedId || !publicKey || !deliverableId) {
       setReviewResult({ ok: false, msg: "Connect the poster wallet first" });
@@ -212,15 +171,10 @@ export function SubmitWorkForm({
 
         {isClient && deliverableStatus === "submitted" && (
           <div>
+            <div className="mb-3 text-sm px-3 py-2 rounded-lg" style={{ background: "rgba(34,197,94,0.08)", color: "var(--text-secondary)", border: "1px solid rgba(34,197,94,0.2)" }}>
+              Use the on-chain escrow controls below to approve this work and release funds securely.
+            </div>
             <div className="flex gap-3">
-              <button
-                onClick={handleApprove}
-                disabled={reviewing}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
-                style={{ background: "#22c55e" }}
-              >
-                <CheckCircle size={14} /> {reviewing ? "Processing..." : "Approve & Release Payment"}
-              </button>
               <button
                 onClick={handleRequestChanges}
                 disabled={reviewing}
