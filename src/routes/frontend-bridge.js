@@ -456,14 +456,38 @@ function registerFrontendBridge(app, profileStore) {
     try {
       const { wallet } = req.query;
       if (!wallet) return res.status(400).json({ error: 'wallet parameter required' });
-      const like = `%${String(wallet || '').replace(/'/g, '')}%`;
-      const profile = db.prepare(
-        'SELECT * FROM profiles WHERE wallet = ? OR claimed_by = ? OR wallets LIKE ? ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1'
-      ).get(wallet, wallet, like);
-      if (!profile) return res.status(404).json({ found: false });
-      res.json({ found: true, profileId: profile.id, name: profile.name, avatar: profile.avatar, apiKey: profile.api_key, claimed: !!profile.claimed });
+      const normalizedWallet = String(wallet).trim();
+      const profile = db.prepare(`
+        SELECT id, name, avatar, api_key, claimed FROM profiles
+        WHERE LOWER(wallet) = LOWER(?)
+           OR LOWER(claimed_by) = LOWER(?)
+           OR LOWER(json_extract(wallets, '$.solana')) = LOWER(?)
+           OR LOWER(json_extract(wallets, '$.solana_wallet')) = LOWER(?)
+           OR LOWER(json_extract(wallets, '$.wallet')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.solana.address')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.solana.identifier')) = LOWER(?)
+        ORDER BY COALESCE(
+          julianday(REPLACE(SUBSTR(updated_at, 1, 19), 'T', ' ')),
+          julianday(REPLACE(SUBSTR(created_at, 1, 19), 'T', ' ')),
+          0
+        ) DESC, id DESC
+        LIMIT 1
+      `).get(
+        normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet
+      );
+      if (!profile) return res.status(404).json({ found: false, error: 'No profile found for this wallet' });
+      res.json({
+        found: true,
+        id: profile.id,
+        profileId: profile.id,
+        name: profile.name,
+        avatar: profile.avatar,
+        apiKey: profile.api_key,
+        claimed: !!profile.claimed,
+        profile: { id: profile.id, name: profile.name, avatar: profile.avatar },
+      });
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ found: false, error: e.message });
     }
   });
   console.log('[Bridge] Wired /api/profile-by-wallet');

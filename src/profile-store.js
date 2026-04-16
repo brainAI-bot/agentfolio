@@ -1878,11 +1878,14 @@ function registerRoutes(app) {
     if (!wallet) return res.status(400).json({ error: 'wallet required' });
     try {
       const db = getDb();
+      const normalizedWallet = String(wallet).trim();
       const row = db.prepare(`
         SELECT id, name FROM profiles
         WHERE LOWER(wallet) = LOWER(?)
            OR LOWER(claimed_by) = LOWER(?)
            OR LOWER(json_extract(wallets, '$.solana')) = LOWER(?)
+           OR LOWER(json_extract(wallets, '$.solana_wallet')) = LOWER(?)
+           OR LOWER(json_extract(wallets, '$.wallet')) = LOWER(?)
            OR LOWER(json_extract(wallets, '$.ethereum')) = LOWER(?)
            OR LOWER(json_extract(verification_data, '$.solana.address')) = LOWER(?)
            OR LOWER(json_extract(verification_data, '$.solana.identifier')) = LOWER(?)
@@ -1890,12 +1893,28 @@ function registerRoutes(app) {
            OR LOWER(json_extract(verification_data, '$.eth.identifier')) = LOWER(?)
            OR LOWER(json_extract(verification_data, '$.ethereum.address')) = LOWER(?)
            OR LOWER(json_extract(verification_data, '$.ethereum.identifier')) = LOWER(?)
+        ORDER BY COALESCE(
+          julianday(REPLACE(SUBSTR(updated_at, 1, 19), 'T', ' ')),
+          julianday(REPLACE(SUBSTR(created_at, 1, 19), 'T', ' ')),
+          0
+        ) DESC, id DESC
         LIMIT 1
-      `).get(wallet, wallet, wallet, wallet, wallet, wallet, wallet, wallet, wallet, wallet);
-      if (row) return res.json({ id: row.id, name: row.name });
-      return res.status(404).json({ error: 'No profile found for this wallet' });
+      `).get(
+        normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet,
+        normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet
+      );
+      if (row) {
+        return res.json({
+          found: true,
+          id: row.id,
+          profileId: row.id,
+          name: row.name,
+          profile: { id: row.id, name: row.name },
+        });
+      }
+      return res.status(404).json({ found: false, error: 'No profile found for this wallet' });
     } catch (e) {
-      return res.status(500).json({ error: e.message });
+      return res.status(500).json({ found: false, error: e.message });
     }
   });
 
