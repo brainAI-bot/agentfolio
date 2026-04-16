@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { Send, Package, AlertCircle } from "lucide-react";
 import { createMarketplaceWalletAuth } from "@/lib/marketplace-auth";
+import { profileHasWallet } from "@/lib/profile-wallets";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -31,6 +32,8 @@ export function SubmitWorkForm({
 }: SubmitWorkFormProps) {
   const { connected, publicKey, signMessage } = useWallet();
   const [resolvedId, setResolvedId] = useState<string | null>(null);
+  const [assigneeWalletMatch, setAssigneeWalletMatch] = useState(false);
+  const [clientWalletMatch, setClientWalletMatch] = useState(false);
   const [description, setDescription] = useState("");
   const [deliverableUrl, setDeliverableUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -48,16 +51,52 @@ export function SubmitWorkForm({
     fetch(`${API_BASE}/api/profile-by-wallet?wallet=${publicKey.toBase58()}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (!cancelled && data?.id) setResolvedId(data.id);
+        if (!cancelled) setResolvedId(data?.id || null);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setResolvedId(null);
+      });
     return () => {
       cancelled = true;
     };
   }, [connected, publicKey]);
 
-  const isWorker = resolvedId && assigneeId && resolvedId === assigneeId;
-  const isClient = resolvedId && clientId && resolvedId === clientId;
+  useEffect(() => {
+    if (!connected || !publicKey) {
+      setAssigneeWalletMatch(false);
+      setClientWalletMatch(false);
+      return;
+    }
+
+    const wallet = publicKey.toBase58();
+    let cancelled = false;
+
+    const checkProfileWallet = async (profileId: string | undefined, setter: (value: boolean) => void) => {
+      if (!profileId) {
+        setter(false);
+        return;
+      }
+      try {
+        const res = await fetch(`${API_BASE}/api/profile/${encodeURIComponent(profileId)}`);
+        const profile = res.ok ? await res.json() : null;
+        if (!cancelled) setter(profileHasWallet(profile, wallet));
+      } catch {
+        if (!cancelled) setter(false);
+      }
+    };
+
+    checkProfileWallet(assigneeId, setAssigneeWalletMatch);
+    checkProfileWallet(clientId, setClientWalletMatch);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [assigneeId, clientId, connected, publicKey]);
+
+  const workerActorId = assigneeWalletMatch ? assigneeId : resolvedId;
+  const clientActorId = clientWalletMatch ? clientId : resolvedId;
+  const isWorker = !!assigneeId && (assigneeWalletMatch || resolvedId === assigneeId);
+  const isClient = !!clientId && (clientWalletMatch || resolvedId === clientId);
   const hasDeliverable = !!deliverableId;
 
   const handleSubmitWork = async () => {
@@ -65,7 +104,7 @@ export function SubmitWorkForm({
       setResult({ ok: false, msg: "Please describe your deliverables" });
       return;
     }
-    if (!resolvedId || !publicKey) {
+    if (!workerActorId || !publicKey) {
       setResult({ ok: false, msg: "Connect the accepted worker wallet first" });
       return;
     }
@@ -76,7 +115,7 @@ export function SubmitWorkForm({
       const authHeaders = await createMarketplaceWalletAuth({
         action: "submit_deliverable",
         walletAddress: publicKey.toBase58(),
-        actorId: resolvedId,
+        actorId: workerActorId,
         jobId,
         signMessage,
       });
@@ -84,7 +123,7 @@ export function SubmitWorkForm({
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({
-          submittedBy: resolvedId,
+          submittedBy: workerActorId,
           description: description.trim(),
           deliverableUrl: deliverableUrl.trim() || undefined,
         }),
@@ -103,7 +142,7 @@ export function SubmitWorkForm({
   };
 
   const handleRequestChanges = async () => {
-    if (!resolvedId || !publicKey || !deliverableId) {
+    if (!clientActorId || !publicKey || !deliverableId) {
       setReviewResult({ ok: false, msg: "Connect the poster wallet first" });
       return;
     }
@@ -114,7 +153,7 @@ export function SubmitWorkForm({
       const authHeaders = await createMarketplaceWalletAuth({
         action: "request_revision",
         walletAddress: publicKey.toBase58(),
-        actorId: resolvedId,
+        actorId: clientActorId,
         jobId,
         deliverableId,
         signMessage,
@@ -122,7 +161,7 @@ export function SubmitWorkForm({
       const res = await fetch(`${API_BASE}/api/marketplace/deliverables/${deliverableId}/revision`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
-        body: JSON.stringify({ requestedBy: resolvedId }),
+        body: JSON.stringify({ requestedBy: clientActorId }),
       });
       const data = await res.json();
       if (data.error) {
