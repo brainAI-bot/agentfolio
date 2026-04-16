@@ -2597,9 +2597,33 @@ try {
 }
 
 // Legacy compatibility aliases for shipped frontend bundles
-app.get('/api/satp/v3/reputation/:agentId', (req, res) => {
-  const agentId = encodeURIComponent(req.params.agentId || '');
-  return res.redirect(307, `/api/v3/reputation/${agentId}`);
+app.get('/api/satp/v3/reputation/:agentId', async (req, res) => {
+  const rawId = String(req.params.agentId || '').trim();
+  if (!rawId) return res.status(400).json({ error: 'agentId is required' });
+
+  let targetId = rawId;
+  const looksLikeWallet = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(rawId) && !rawId.startsWith('agent_');
+
+  if (looksLikeWallet) {
+    try {
+      const referer = String(req.get('referer') || '');
+      const match = referer.match(/\/profile\/([^/?#]+)/i);
+      const preferredProfileId = match ? decodeURIComponent(match[1]) : '';
+      const qs = new URLSearchParams({ wallet: rawId });
+      if (preferredProfileId) qs.set('preferredProfileId', preferredProfileId);
+      const lookupRes = await fetch(`http://127.0.0.1:3333/api/profile-by-wallet?${qs.toString()}`);
+      const lookup = await lookupRes.json().catch(() => ({}));
+      if (lookup?.profileId) {
+        targetId = lookup.profileId;
+      } else if (lookup?.id) {
+        targetId = lookup.id;
+      } else if (lookup?.profiles?.length === 1 && lookup.profiles[0]?.id) {
+        targetId = lookup.profiles[0].id;
+      }
+    } catch (_) {}
+  }
+
+  return res.redirect(307, `/api/v3/reputation/${encodeURIComponent(targetId)}`);
 });
 
 app.get('/api/profile/:id/heatmap', (req, res) => {
