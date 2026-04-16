@@ -7,7 +7,6 @@ import BirthCertificate from "./BirthCertificate";
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 const API = process.env.NEXT_PUBLIC_API_URL || SITE_URL;
 const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
-const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || (SOLANA_CLUSTER === "devnet" ? "https://api.devnet.solana.com" : SOLANA_CLUSTER === "testnet" ? "https://api.testnet.solana.com" : "https://api.mainnet-beta.solana.com");
 const solanaExplorerUrl = (path: string) => SOLANA_CLUSTER === "mainnet-beta" ? `https://explorer.solana.com/${path}` : `https://explorer.solana.com/${path}?cluster=${SOLANA_CLUSTER}`;
 
 interface NFT {
@@ -39,11 +38,17 @@ interface Props {
 }
 
 const STEPS = [
-  { key: "arweave", label: "Uploading to Arweave", icon: "🌐" },
+  { key: "arweave", label: "Preparing burn", icon: "🌐" },
   { key: "burn", label: "Burning NFT on-chain", icon: "🔥" },
   { key: "soulbound", label: "Minting Soulbound Token", icon: "🛡️" },
   { key: "lock", label: "Locking Avatar Forever", icon: "🔒" },
 ] as const;
+
+async function deserializeBurnTransaction(base64Tx: string) {
+  const { Transaction, VersionedTransaction } = await import("@solana/web3.js");
+  const raw = Buffer.from(base64Tx, "base64");
+  return raw.length > 0 && raw[0] >= 128 ? VersionedTransaction.deserialize(raw) : Transaction.from(raw);
+}
 
 export default function BurnToBecome({ profileId, walletAddress, apiKey, currentAvatar, onComplete }: Props) {
   const [nfts, setNfts] = useState<NFT[]>([]);
@@ -80,16 +85,19 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
   useEffect(() => {
     if (!walletAddress) return;
     setLoading(true);
-    fetch(`${API}/api/avatar/nfts/solana/${walletAddress}`, {
-      headers: { "x-api-key": apiKey },
-    })
+    fetch(`${API}/api/burn-to-become/wallet-nfts?wallet=${encodeURIComponent(walletAddress)}`)
       .then((r) => r.json())
       .then((data) => {
-        setNfts(data.nfts || []);
+        const rawNfts = Array.isArray(data?.nfts) ? data.nfts : [];
+        const burnable = rawNfts.filter((nft: any) => {
+          const name = String(nft?.name || "").toLowerCase();
+          return !name.includes("soulbound") && !name.includes("soul bound") && !name.includes("soul-bound");
+        });
+        setNfts(burnable);
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [walletAddress, apiKey]);
+  }, [walletAddress]);
 
   const selectNFT = (nft: NFT) => {
     setState((s) => ({ ...s, step: "preview", selectedNFT: nft }));
@@ -113,111 +121,85 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
     }));
 
     try {
-      // Step 1: Prepare (server validates + uploads to Arweave)
-      const prepRes = await fetch(`${API}/api/avatar/burn-to-become/prepare`, {
+      const wallet = typeof window !== "undefined" ? (window as any).solana : null;
+      if (!wallet?.signTransaction) {
+        throw new Error("Solana wallet not connected. Please connect your wallet.");
+      }
+
+      const prepRes = await fetch(`${API}/api/burn-to-become/prepare`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          profileId,
-          walletAddress,
+          wallet: walletAddress,
           nftMint: state.selectedNFT.mint,
-          nftName: state.selectedNFT.name,
-          nftImage: state.selectedNFT.image,
         }),
       });
-      const prepData = await prepRes.json();
-      if (!prepData.success) throw new Error(prepData.error);
+      const prepData = await prepRes.json().catch(() => ({}));
+      if (!prepRes.ok) throw new Error(prepData.error || "Failed to prepare burn");
 
       setState((s) => ({
         ...s,
         burnProgress: { ...s.burnProgress, arweave: "complete", burn: "active" },
       }));
 
-      // Step 2: Client-side burn transaction
-      // In a real implementation, this would use @solana/web3.js to build and sign the transaction
-      // For now, we simulate the burn and proceed to server confirmation
-      let burnTxSignature = null;
-      let soulboundMint = null;
+      const tx = await deserializeBurnTransaction(prepData.transaction);
+      const signed = await wallet.signTransaction(tx as any);
 
-      // Check if wallet adapter is available
-      if (typeof window !== "undefined" && (window as any).solana) {
-        try {
-          const { Connection, PublicKey, Transaction, SystemProgram } = await import("@solana/web3.js");
-          const { createBurnInstruction, TOKEN_PROGRAM_ID, getAssociatedTokenAddress } = await import("@solana/spl-token");
-
-          const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-          const wallet = (window as any).solana;
-          const ownerPubkey = new PublicKey(walletAddress);
-          const mintPubkey = new PublicKey(state.selectedNFT.mint);
-
-          // Get the token account
-          const tokenAccount = await getAssociatedTokenAddress(mintPubkey, ownerPubkey);
-
-          // Create burn instruction (burn 1 NFT)
-          const burnIx = createBurnInstruction(
-            tokenAccount,
-            mintPubkey,
-            ownerPubkey,
-            1, // amount
-            [], // multiSigners
-            TOKEN_PROGRAM_ID
-          );
-
-          const tx = new Transaction().add(burnIx);
-          tx.feePayer = ownerPubkey;
-          tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-
-          const signed = await wallet.signTransaction(tx);
-          const sig = await connection.sendRawTransaction(signed.serialize());
-          await connection.confirmTransaction(sig, "confirmed");
-          burnTxSignature = sig;
-        } catch (e: any) {
-          console.warn("[BurnToBecome] On-chain burn failed:", e.message);
-          throw new Error(`Wallet transaction failed: ${e.message}`);
-        }
-      } else {
-        throw new Error("Solana wallet not connected. Please connect your wallet.");
-      }
+      const submitRes = await fetch(`${API}/api/burn-to-become/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          wallet: walletAddress,
+          nftMint: state.selectedNFT.mint,
+          signedTransaction: Buffer.from(signed.serialize()).toString("base64"),
+        }),
+      });
+      const submitData = await submitRes.json().catch(() => ({}));
+      if (!submitRes.ok) throw new Error(submitData.error || "Burn failed");
 
       setState((s) => ({
         ...s,
         burnProgress: { ...s.burnProgress, burn: "complete", soulbound: "active" },
       }));
 
-      // Step 3: Confirm with server (locks profile)
-      // Small delay for soulbound mint simulation
-      await new Promise((r) => setTimeout(r, 1500));
+      if (submitData.burnToBecomeTx && wallet.signTransaction) {
+        try {
+          const burnToBecomeTx = await deserializeBurnTransaction(submitData.burnToBecomeTx);
+          const signedGenesis = await wallet.signTransaction(burnToBecomeTx as any);
+          await fetch(`${API}/api/burn-to-become/submit-genesis`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              signedTransaction: Buffer.from(signedGenesis.serialize()).toString("base64"),
+            }),
+          });
+        } catch (genesisErr) {
+          console.warn("[BurnToBecome] submit-genesis failed (non-critical):", genesisErr);
+        }
+      }
 
       setState((s) => ({
         ...s,
         burnProgress: { ...s.burnProgress, soulbound: "complete", lock: "active" },
       }));
 
-      const confirmRes = await fetch(`${API}/api/avatar/burn-to-become`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey },
-        body: JSON.stringify({
-          profileId,
-          walletAddress,
-          nftMint: state.selectedNFT.mint,
-          nftName: state.selectedNFT.name,
-          nftImage: state.selectedNFT.image,
-          arweaveUrl: prepData.arweaveUrl,
-          burnTxSignature,
-          soulboundMint,
-        }),
-      });
-      const confirmData = await confirmRes.json();
-      if (!confirmData.success) throw new Error(confirmData.error);
+      const avatar = {
+        image: submitData.artworkUri || state.selectedNFT?.image || null,
+        arweaveUrl: submitData.artworkUri || null,
+        burnTxSignature: submitData.burnTx || null,
+        soulboundMint: submitData.soulboundMint || null,
+        permanent: true,
+        name: state.selectedNFT?.name || "Soulbound Avatar",
+      };
 
       setState((s) => ({
         ...s,
         step: "success",
         burnProgress: { arweave: "complete", burn: "complete", soulbound: "complete", lock: "complete" },
-        result: confirmData,
+        result: { ...submitData, avatar },
       }));
 
-      onComplete?.(confirmData.avatar);
+      onComplete?.(avatar);
     } catch (e: any) {
       setState((s) => ({
         ...s,
