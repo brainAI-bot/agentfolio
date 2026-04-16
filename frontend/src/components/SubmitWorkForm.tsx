@@ -258,7 +258,7 @@ export function SubmitWorkForm({
     );
   }
 
-  if (hasDeliverable) {
+  if (hasDeliverable && !(isWorker && deliverableStatus === "revision_requested")) {
     return (
       <div className="rounded-xl p-6" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
         <div className="flex items-center gap-2 mb-4">
@@ -321,11 +321,16 @@ export function SubmitWorkForm({
         <div className="flex items-center gap-2 mb-4">
           <Send size={16} style={{ color: "var(--solana, #9945ff)" }} />
           <h2 className="text-sm font-bold uppercase tracking-widest" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
-            Submit Work
+            {hasDeliverable && deliverableStatus === "revision_requested" ? "Resubmit Work" : "Submit Work"}
           </h2>
         </div>
 
         <div className="space-y-3">
+          {hasDeliverable && deliverableStatus === "revision_requested" && (
+            <div className="text-sm px-3 py-2 rounded-lg" style={{ background: "rgba(239,68,68,0.1)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.2)" }}>
+              ⚠️ Client requested changes. Update your work and resubmit here.
+            </div>
+          )}
           <div>
             <label className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>Deliverable Description *</label>
             <textarea
@@ -354,7 +359,7 @@ export function SubmitWorkForm({
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
             style={{ background: "var(--solana, #9945ff)" }}
           >
-            <Package size={14} /> {submitting ? "Submitting..." : "Submit Work"}
+            <Package size={14} /> {submitting ? "Submitting..." : hasDeliverable && deliverableStatus === "revision_requested" ? "Resubmit Work" : "Submit Work"}
           </button>
         </div>
 
