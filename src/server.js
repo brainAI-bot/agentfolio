@@ -2815,15 +2815,28 @@ if (X402_ENABLED) {
 // Free: SATP-integrated score (reads on-chain + off-chain)
 app.get('/api/satp/score/:id', async (req, res) => {
   try {
-    let profileId = req.params.id;
+    let profileId = String(req.params.id || '').trim();
+    const rawLookup = profileId;
+    const loweredLookup = rawLookup.toLowerCase();
     const db = profileStore.getDb();
-    let row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
-    if (!row) {
-      const byHandle = db.prepare('SELECT * FROM profiles WHERE handle = ?').get(profileId);
-      if (byHandle) { row = byHandle; profileId = byHandle.id; }
+    let row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(rawLookup);
+    if (!row && rawLookup) {
+      row = db.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(rawLookup);
+      if (row) profileId = row.id;
+    }
+    if (!row && rawLookup && !loweredLookup.startsWith('agent_')) {
+      row = db.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + loweredLookup);
+      if (row) profileId = row.id;
+    }
+    if (!row && rawLookup) {
+      const byHandle = db.prepare('SELECT * FROM profiles WHERE LOWER(handle) = ?').get(rawLookup.startsWith('@') ? loweredLookup : '@' + loweredLookup);
+      if (byHandle) {
+        row = byHandle;
+        profileId = byHandle.id;
+      }
     }
 
-    if (!row) return res.status(404).json({ error: 'Profile not found', id: profileId });
+    if (!row) return res.status(404).json({ error: 'Profile not found', id: profileId || rawLookup });
 
     const v3Score = await getV3Score(profileId).catch(() => null);
     const unified = computeUnifiedTrustScore(db, row, { v3Score });
