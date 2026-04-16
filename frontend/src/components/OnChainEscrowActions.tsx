@@ -38,12 +38,27 @@ function parseBudgetAmount(budget: string | number | null | undefined): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
+function isVersionedSerializedTransaction(raw: Uint8Array): boolean {
+  let offset = 0;
+  let sigCount = 0;
+  let shift = 0;
+  while (offset < raw.length) {
+    const byte = raw[offset];
+    sigCount |= (byte & 0x7f) << shift;
+    offset += 1;
+    if ((byte & 0x80) === 0) break;
+    shift += 7;
+  }
+  const messageOffset = offset + sigCount * 64;
+  return messageOffset < raw.length && (raw[messageOffset] & 0x80) !== 0;
+}
+
 function deserializeEscrowTransaction(base64Tx: string): { tx: Transaction | VersionedTransaction; isVersioned: boolean } {
-  const raw = Buffer.from(base64Tx, "base64");
-  const isVersioned = raw.length > 0 && raw[0] >= 128;
+  const raw = Uint8Array.from(Buffer.from(base64Tx, "base64"));
+  const isVersioned = isVersionedSerializedTransaction(raw);
   return isVersioned
     ? { tx: VersionedTransaction.deserialize(raw), isVersioned: true }
-    : { tx: Transaction.from(raw), isVersioned: false };
+    : { tx: Transaction.from(Buffer.from(raw)), isVersioned: false };
 }
 
 export function OnChainEscrowActions({
