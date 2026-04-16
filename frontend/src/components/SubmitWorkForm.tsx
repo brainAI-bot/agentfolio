@@ -11,9 +11,24 @@ import { signAndSendV3Tx } from "@/lib/v3-escrow";
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
+function isVersionedSerializedTransaction(raw: Uint8Array): boolean {
+  let offset = 0;
+  let sigCount = 0;
+  let shift = 0;
+  while (offset < raw.length) {
+    const byte = raw[offset];
+    sigCount |= (byte & 0x7f) << shift;
+    offset += 1;
+    if ((byte & 0x80) === 0) break;
+    shift += 7;
+  }
+  const messageOffset = offset + sigCount * 64;
+  return messageOffset < raw.length && (raw[messageOffset] & 0x80) !== 0;
+}
+
 function deserializeEscrowTransaction(base64Tx: string): Transaction | VersionedTransaction {
-  const raw = Buffer.from(base64Tx, "base64");
-  return raw.length > 0 && raw[0] >= 128 ? VersionedTransaction.deserialize(raw) : Transaction.from(raw);
+  const raw = Uint8Array.from(Buffer.from(base64Tx, "base64"));
+  return isVersionedSerializedTransaction(raw) ? VersionedTransaction.deserialize(raw) : Transaction.from(Buffer.from(raw));
 }
 
 interface SubmitWorkFormProps {

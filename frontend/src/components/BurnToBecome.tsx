@@ -44,10 +44,25 @@ const STEPS = [
   { key: "lock", label: "Locking Avatar Forever", icon: "🔒" },
 ] as const;
 
+function isVersionedSerializedTransaction(raw: Uint8Array): boolean {
+  let offset = 0;
+  let sigCount = 0;
+  let shift = 0;
+  while (offset < raw.length) {
+    const byte = raw[offset];
+    sigCount |= (byte & 0x7f) << shift;
+    offset += 1;
+    if ((byte & 0x80) === 0) break;
+    shift += 7;
+  }
+  const messageOffset = offset + sigCount * 64;
+  return messageOffset < raw.length && (raw[messageOffset] & 0x80) !== 0;
+}
+
 async function deserializeBurnTransaction(base64Tx: string) {
   const { Transaction, VersionedTransaction } = await import("@solana/web3.js");
-  const raw = Buffer.from(base64Tx, "base64");
-  return raw.length > 0 && raw[0] >= 128 ? VersionedTransaction.deserialize(raw) : Transaction.from(raw);
+  const raw = Uint8Array.from(Buffer.from(base64Tx, "base64"));
+  return isVersionedSerializedTransaction(raw) ? VersionedTransaction.deserialize(raw) : Transaction.from(Buffer.from(raw));
 }
 
 export default function BurnToBecome({ profileId, walletAddress, apiKey, currentAvatar, onComplete }: Props) {
