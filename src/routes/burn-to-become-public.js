@@ -1979,11 +1979,6 @@ try {
           : txInfo.transaction.message.accountKeys.map(k => k.toBase58());
         if (!signers.includes(wallet)) return sendJson(403, { error: 'Wallet was not a signer on this transaction' });
         
-        // Record the mint
-        const MINT_RECORDS_DIR = '/home/ubuntu/agentfolio/boa-pipeline/mint-records';
-        const effectiveBoaId = boaId || 'client-' + Date.now();
-        const recordPath = require('path').join(MINT_RECORDS_DIR, effectiveBoaId + '.json');
-        
         // Find agent ID from wallet
         const Database = require('better-sqlite3');
         const dbPath = require('path').join(__dirname, '../../data/agentfolio.db');
@@ -1994,46 +1989,24 @@ try {
           agentId = resolvedProfile?.profile?.id || null;
           db.close();
         } catch {}
-        
-        // Resolve actual BOA image from uploaded assets
-        let imageUri = '';
-        let boaName = '';
+
+        // Resolve fallback metadata from the uploaded asset map, then override it with the actual minted asset from DAS.
+        let uploadedImageUri = '';
+        let uploadedBoaName = '';
         if (boaId) {
           try {
             const uploadedPath = require('path').join('/home/ubuntu/agentfolio/boa-pipeline/candy-machine-data', 'uploaded-assets.json');
             const uploaded = JSON.parse(fs.readFileSync(uploadedPath, 'utf8'));
             const assetData = uploaded[boaId] || uploaded[String(boaId)] || {};
-            imageUri = assetData.imageUri || '';
-            boaName = assetData.name || ('Burned-Out Agent #' + boaId);
-          } catch (e) { console.warn('[ConfirmMint] Could not resolve BOA image:', e.message); }
+            uploadedImageUri = assetData.imageUri || '';
+            uploadedBoaName = assetData.name || ('Burned-Out Agent #' + boaId);
+          } catch (e) { console.warn('[ConfirmMint] Could not resolve uploaded BOA metadata:', e.message); }
         }
 
-        const record = {
-          cluster: 'mainnet',
-          nftNumber: boaId || null,
-          mint: asset || null,
-          collection: 'CCw8NjAS3QpfDU4fBYkJ2kD4znNy468e3wqAJQKoJCFk',
-          recipient: wallet,
-          agentId: agentId,
-          flow: flow || 'unknown',
-          signature,
-          clientSigned: true,
-          imageUri,
-          boaName,
-          timestamp: new Date().toISOString(),
-        };
-        
-        if (!fs.existsSync(MINT_RECORDS_DIR)) fs.mkdirSync(MINT_RECORDS_DIR, { recursive: true });
-        fs.writeFileSync(recordPath, JSON.stringify(record, null, 2));
-        console.log('[ConfirmMint] Recorded client-signed mint:', effectiveBoaId, 'agent:', agentId, 'sig:', signature.slice(0, 20));
-        
-        // STEP 1: Resolve artwork URI via DAS (same as Card 2 burn flow)
-        let artworkUri = bodyImageUri || imageUri || record.imageUri || '';
-        let metadataUri = bodyMetadataUri || '';
-        let nftName = bodyBoaName || boaName || 'Burned-Out Agent';
-        
-        if (!artworkUri && asset) {
-          // Try Helius DAS getAsset for the minted BOA
+        let actualImageUri = '';
+        let actualMetadataUri = '';
+        let actualBoaName = '';
+        if (asset) {
           try {
             const HELIUS_RPC = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
             const dasResp = await fetch(HELIUS_RPC, {
@@ -2043,14 +2016,51 @@ try {
             const dasData = await dasResp.json();
             const assetContent = dasData.result && dasData.result.content;
             if (assetContent) {
-              artworkUri = (assetContent.links && assetContent.links.image) || (assetContent.files && assetContent.files[0] && assetContent.files[0].uri) || '';
-              metadataUri = assetContent.json_uri || '';
-              nftName = (assetContent.metadata && assetContent.metadata.name || nftName);
-              console.log('[ConfirmMint] DAS resolved artwork:', artworkUri?.slice(0, 60));
+              actualImageUri = (assetContent.links && assetContent.links.image) || (assetContent.files && assetContent.files[0] && assetContent.files[0].uri) || '';
+              actualMetadataUri = assetContent.json_uri || '';
+              actualBoaName = (assetContent.metadata && assetContent.metadata.name) || '';
+              if (actualImageUri) {
+                actualImageUri = actualImageUri
+                  .replace('node1.irys.xyz', 'gateway.irys.xyz')
+                  .replace('arweave.net', 'gateway.irys.xyz');
+              }
+              console.log('[ConfirmMint] DAS resolved minted asset:', asset.slice(0, 16), actualBoaName || '(no name)');
             }
           } catch (dasErr) { console.warn('[ConfirmMint] DAS artwork resolution failed:', dasErr.message); }
         }
+
+        const derivedBoaMatch = (actualBoaName || '').match(/#\s*(\d+)/);
+        const effectiveBoaId = derivedBoaMatch ? Number(derivedBoaMatch[1]) : (boaId || null);
+        const recordKey = String(asset || signature || effectiveBoaId || ('client-' + Date.now())).replace(/[^A-Za-z0-9_-]/g, '_');
+        const MINT_RECORDS_DIR = '/home/ubuntu/agentfolio/boa-pipeline/mint-records';
+        const recordPath = require('path').join(MINT_RECORDS_DIR, recordKey + '.json');
+
+        // STEP 1: Prefer the actual minted asset metadata over prep-time placeholders.
+        let artworkUri = actualImageUri || bodyImageUri || uploadedImageUri || '';
+        let metadataUri = actualMetadataUri || bodyMetadataUri || '';
+        let nftName = actualBoaName || bodyBoaName || uploadedBoaName || 'Burned-Out Agent';
         if (!metadataUri) metadataUri = artworkUri;
+
+        const record = {
+          cluster: 'mainnet',
+          nftNumber: effectiveBoaId,
+          mint: asset || null,
+          collection: 'CCw8NjAS3QpfDU4fBYkJ2kD4znNy468e3wqAJQKoJCFk',
+          recipient: wallet,
+          agentId: agentId,
+          flow: flow || 'unknown',
+          signature,
+          clientSigned: true,
+          imageUri: artworkUri,
+          metadataUri,
+          boaName: nftName,
+          timestamp: new Date().toISOString(),
+        };
+
+        if (!fs.existsSync(MINT_RECORDS_DIR)) fs.mkdirSync(MINT_RECORDS_DIR, { recursive: true });
+        fs.writeFileSync(recordPath, JSON.stringify(record, null, 2));
+        console.log('[ConfirmMint] Recorded client-signed mint:', recordKey, 'agent:', agentId, 'sig:', signature.slice(0, 20));
+
         // Card 1/3: Regular tradable NFT — update visible avatar/boa refs only.
         const soulboundMintAddress = null;
         const faceMintAddress = asset || null;
