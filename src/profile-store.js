@@ -531,6 +531,7 @@ function enrichProfile(row) {
   }
 
   // V3 on-chain scores (cache populated by batch warm-up)
+  const parsedMetadata = parseJsonField(row.metadata, {});
   let v3 = null;
   if (v3ScoreService) {
     try {
@@ -630,7 +631,7 @@ function enrichProfile(row) {
     portfolio: parseJsonField(row.portfolio),
     endorsements_given: parseJsonField(row.endorsements_given),
     custom_badges: parseJsonField(row.custom_badges),
-    metadata: parseJsonField(row.metadata, {}),
+    metadata: parsedMetadata,
     nft_avatar: parseJsonField(row.nft_avatar, {}),
     endorsements: { items: endorsements, total: endorsements.length },
     verifications: (() => {
@@ -780,6 +781,16 @@ function enrichProfile(row) {
         levelName: unified.levelName,
         verificationBadge: unified.badge,
         verificationLevelName: unified.levelName,
+        metadata: {
+          ...parsedMetadata,
+          score: unified.score,
+          trustScore: unified.score,
+          level: unified.level,
+          verificationLevel: unified.level,
+          tier: String(unified.levelName || 'Unverified').toLowerCase(),
+          verificationLabel: unified.levelName,
+          verificationLevelName: unified.levelName,
+        },
       };
     })(),
     // Top-level unclaimed flag for frontend (from metadata)
@@ -1871,3 +1882,4 @@ function deleteProfile(profileId) {
   try { require('fs').unlinkSync(jsonPath); } catch {}
   return { deleted: true, id: profileId };
 }
+
