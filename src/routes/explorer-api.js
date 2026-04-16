@@ -44,7 +44,7 @@ function isNonPublicExplorerAgent(agent) {
   const lower = name.toLowerCase();
   if (lower.startsWith('ratecheck') || lower.startsWith('ratetest')) return true;
   if (lower === 'ratelimit-probe' || lower === '__rate_test__') return true;
-  if (lower === 'test' || lower.startsWith('braintest')) return true;
+  if (lower === 'test') return true;
   if (lower.startsWith('ceo selftest ')) return true;
   return false;
 }
@@ -146,7 +146,7 @@ router.get('/agents', async (req, res) => {
     ]);
     const isTest = (name) => {
       const ln = (name || '').toLowerCase();
-      return TEST_NAMES.has(ln) || (ln.startsWith('braintest') && ln !== 'braintest');
+      return TEST_NAMES.has(ln);
     };
     
     agents = agents.filter(a => !isTest(a.agentName));
