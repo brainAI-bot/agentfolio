@@ -1478,6 +1478,22 @@ function registerRoutes(app) {
     if (!row && rawLookup) {
       row = d.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(rawLookup);
     }
+    if (!row && rawLookup) {
+      row = d.prepare(`
+        SELECT * FROM profiles
+        WHERE LOWER(wallet) = LOWER(?)
+           OR LOWER(claimed_by) = LOWER(?)
+           OR LOWER(json_extract(wallets, '$.solana')) = LOWER(?)
+           OR LOWER(json_extract(wallets, '$.ethereum')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.solana.address')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.solana.identifier')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.eth.address')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.eth.identifier')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.ethereum.address')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.ethereum.identifier')) = LOWER(?)
+        LIMIT 1
+      `).get(rawLookup, rawLookup, rawLookup, rawLookup, rawLookup, rawLookup, rawLookup, rawLookup, rawLookup, rawLookup);
+    }
     if (!row) return res.status(404).json({ error: 'Profile not found' });
 
     const { api_key, ...safe } = row;
