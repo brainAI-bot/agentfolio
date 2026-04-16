@@ -5,7 +5,7 @@ import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { Transaction, VersionedTransaction } from "@solana/web3.js";
 import { Shield, Wallet, ArrowRight, CheckCircle, AlertTriangle, Loader2 } from "lucide-react";
 import { createMarketplaceWalletAuth } from "@/lib/marketplace-auth";
-import { resolveAgentWallet } from "@/lib/v3-escrow";
+import { resolveAgentWallet, signAndSendV3Tx } from "@/lib/v3-escrow";
 import { profileHasWallet } from "@/lib/profile-wallets";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -40,10 +40,11 @@ function parseBudgetAmount(budget: string | number | null | undefined): number {
 
 function deserializeEscrowTransaction(base64Tx: string): { tx: Transaction | VersionedTransaction; isVersioned: boolean } {
   const raw = Buffer.from(base64Tx, "base64");
-  const isVersioned = raw.length > 0 && raw[0] >= 128;
-  return isVersioned
-    ? { tx: VersionedTransaction.deserialize(raw), isVersioned: true }
-    : { tx: Transaction.from(raw), isVersioned: false };
+  try {
+    return { tx: VersionedTransaction.deserialize(raw), isVersioned: true };
+  } catch {
+    return { tx: Transaction.from(raw), isVersioned: false };
+  }
 }
 
 export function OnChainEscrowActions({
@@ -203,23 +204,10 @@ export function OnChainEscrowActions({
 
       setStep("signing");
       const { tx, isVersioned } = deserializeEscrowTransaction(buildData.transaction);
-
-      let txSignature = "";
-      if (isVersioned) {
-        if (!signTransaction) {
-          throw new Error("Connected wallet must support signTransaction() for versioned escrow transactions");
-        }
-        const signedTx = await signTransaction(tx as any);
-        txSignature = await connection.sendRawTransaction(signedTx.serialize());
-      } else if (sendTransaction) {
-        txSignature = await sendTransaction(tx as any, connection);
-      } else if (signTransaction) {
-        const signedTx = await signTransaction(tx as any);
-        txSignature = await connection.sendRawTransaction(signedTx.serialize());
-      } else {
-        throw new Error("Connected wallet does not support signing this escrow transaction");
+      if (isVersioned && !signTransaction) {
+        throw new Error("Connected wallet must support signTransaction() for versioned escrow transactions");
       }
-      await connection.confirmTransaction(txSignature, "confirmed");
+      const txSignature = await signAndSendV3Tx(tx as any, connection, publicKey, sendTransaction, signTransaction);
 
       setStep("confirming");
       if (actionType === "fund") {

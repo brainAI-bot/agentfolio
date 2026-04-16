@@ -72,9 +72,11 @@ function timeAgo(dateStr: string): string {
 
 function deserializeMarketplaceTransaction(base64Tx: string): Transaction | VersionedTransaction {
   const raw = Buffer.from(base64Tx, "base64");
-  return raw.length > 0 && raw[0] >= 128
-    ? VersionedTransaction.deserialize(raw)
-    : Transaction.from(raw);
+  try {
+    return VersionedTransaction.deserialize(raw);
+  } catch {
+    return Transaction.from(raw);
+  }
 }
 
 export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
@@ -314,20 +316,10 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
       if (!prepareRes.ok || prepareData.error) throw new Error(prepareData.error || "Failed to prepare job escrow");
 
       const tx = deserializeMarketplaceTransaction(prepareData.transaction);
-      let sig = "";
-      if (tx instanceof VersionedTransaction) {
-        if (!signTransaction) throw new Error("Connected wallet must support signTransaction() for versioned escrow transactions");
-        const signedTx = await signTransaction(tx as any);
-        sig = await connection.sendRawTransaction(signedTx.serialize());
-      } else if (signTransaction) {
-        const signedTx = await signTransaction(tx as any);
-        sig = await connection.sendRawTransaction(signedTx.serialize());
-      } else if (sendTransaction) {
-        sig = await sendTransaction(tx as any, connection);
-      } else {
-        throw new Error("Connected wallet does not support signing this escrow transaction");
+      if (tx instanceof VersionedTransaction && !signTransaction) {
+        throw new Error("Connected wallet must support signTransaction() for versioned escrow transactions");
       }
-      await connection.confirmTransaction(sig, "confirmed");
+      const sig = await signAndSendV3Tx(tx as any, connection, publicKey!, sendTransaction, signTransaction);
 
       const confirmAuth = await createMarketplaceWalletAuth({
         action: "create_job_onchain_confirm",
@@ -424,17 +416,10 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
         }
 
         const tx = deserializeMarketplaceTransaction(buildData.transaction);
-        let sig = "";
-        if (signTransaction) {
-          const signedTx = await signTransaction(tx as any);
-          sig = await connection.sendRawTransaction(signedTx.serialize());
-        } else {
-          if (tx instanceof VersionedTransaction || !sendTransaction) {
-            throw new Error("Connected wallet does not support signing this escrow transaction");
-          }
-          sig = await sendTransaction(tx as any, connection);
+        if (tx instanceof VersionedTransaction && !signTransaction) {
+          throw new Error("Connected wallet must support signTransaction() for versioned escrow transactions");
         }
-        await connection.confirmTransaction(sig, "confirmed");
+        const sig = await signAndSendV3Tx(tx as any, connection, publicKey!, sendTransaction, signTransaction);
 
         const authHeaders = await createMarketplaceWalletAuth({
           action: "confirm_onchain_escrow",
@@ -583,17 +568,10 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
         }
 
         const tx = deserializeMarketplaceTransaction(buildData.transaction);
-        let sig = "";
-        if (signTransaction) {
-          const signedTx = await signTransaction(tx as any);
-          sig = await connection.sendRawTransaction(signedTx.serialize());
-        } else {
-          if (tx instanceof VersionedTransaction || !sendTransaction) {
-            throw new Error("Connected wallet does not support signing this escrow transaction");
-          }
-          sig = await sendTransaction(tx as any, connection);
+        if (tx instanceof VersionedTransaction && !signTransaction) {
+          throw new Error("Connected wallet must support signTransaction() for versioned escrow transactions");
         }
-        await connection.confirmTransaction(sig, "confirmed");
+        const sig = await signAndSendV3Tx(tx as any, connection, publicKey!, sendTransaction, signTransaction);
 
         const authHeaders = await createMarketplaceWalletAuth({
           action: "confirm_onchain_release",

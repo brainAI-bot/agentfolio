@@ -200,6 +200,13 @@ export async function signAndSendV3Tx(
 
   tx.recentBlockhash = blockhash;
   tx.feePayer = publicKey;
+  if (signTransaction) {
+    const signedTx = await signTransaction(tx);
+    const raw = signedTx.serialize();
+    const sig = await connection.sendRawTransaction(raw);
+    await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+    return sig;
+  }
   if (!sendTransaction) {
     throw new Error('Connected wallet does not support legacy transaction sending');
   }
