@@ -105,6 +105,8 @@ function normalizePlatformKey(value: string | null | undefined): string {
     sol: "solana",
     solana_wallet: "solana",
     twitter: "x",
+    satp_v3: "satp",
+    satpv3: "satp",
   };
   return aliases[raw] || raw;
 }
