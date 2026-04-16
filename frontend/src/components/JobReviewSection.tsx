@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { useConnection } from "@solana/wallet-adapter-react";
-import { Transaction } from "@solana/web3.js";
+import { Transaction, VersionedTransaction } from "@solana/web3.js";
 import { AlertTriangle, CheckCircle, FileText, Info, Star } from "lucide-react";
 import { createMarketplaceWalletAuth } from "@/lib/marketplace-auth";
 import { profileHasWallet } from "@/lib/profile-wallets";
@@ -33,6 +32,15 @@ interface ReviewRecord {
   created_at: string;
 }
 
+function deserializeReviewTransaction(base64Tx: string): Transaction | VersionedTransaction {
+  const raw = Buffer.from(base64Tx, "base64");
+  try {
+    return VersionedTransaction.deserialize(raw);
+  } catch {
+    return Transaction.from(raw);
+  }
+}
+
 export function JobReviewSection({
   jobId,
   jobStatus,
@@ -43,8 +51,7 @@ export function JobReviewSection({
   escrowStatus,
   jobPDA,
 }: Props) {
-  const { publicKey, sendTransaction, signMessage } = useWallet();
-  const { connection } = useConnection();
+  const { publicKey, signTransaction, signMessage } = useWallet();
   const [requesting, setRequesting] = useState(false);
   const [changeNote, setChangeNote] = useState("");
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -220,7 +227,7 @@ export function JobReviewSection({
   };
 
   const handleSubmitReview = async () => {
-    if (!publicKey || !sendTransaction) {
+    if (!publicKey || !signTransaction) {
       setResult({ ok: false, msg: "Connect your Solana wallet to submit a review." });
       return;
     }
@@ -282,13 +289,20 @@ export function JobReviewSection({
         throw new Error("Review builder did not return a transaction.");
       }
 
-      const tx = Transaction.from(Buffer.from(txBuildData.transaction, "base64"));
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-      tx.recentBlockhash = blockhash;
-      tx.feePayer = publicKey;
-
-      const txSignature = await sendTransaction(tx, connection);
-      await connection.confirmTransaction({ signature: txSignature, blockhash, lastValidBlockHeight }, "confirmed");
+      const tx = deserializeReviewTransaction(txBuildData.transaction);
+      const signedTx = await signTransaction(tx as any);
+      const submitSignedRes = await fetch(`${API_BASE}/api/reviews/submit-signed`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          signedTransaction: Buffer.from(signedTx.serialize()).toString("base64"),
+        }),
+      });
+      const submitSignedData = await submitSignedRes.json();
+      if (!submitSignedRes.ok || submitSignedData?.error || !submitSignedData?.signature) {
+        throw new Error(submitSignedData?.error || "Failed to submit signed review transaction.");
+      }
+      const txSignature = submitSignedData.signature;
 
       const submitRes = await fetch(`${API_BASE}/api/marketplace/jobs/${jobId}/review`, {
         method: "POST",
