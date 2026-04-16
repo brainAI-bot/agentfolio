@@ -796,6 +796,7 @@ function enrichProfile(row) {
         verification_level: unified.level,
         reputation_score: unified.score,
         levelName: unified.levelName,
+        verificationLabel: unified.levelName,
         verificationBadge: unified.badge,
         verificationLevelName: unified.levelName,
         metadata: {
