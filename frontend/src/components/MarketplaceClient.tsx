@@ -762,6 +762,12 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
             (activeProfileId && job.clientId === activeProfileId) ||
             (!!job.clientId && !!posterWalletMatches[job.clientId])
           );
+          const jobPosterIdentityPending = Boolean(
+            connected && publicKey && job.clientId &&
+            job.clientId !== publicKey.toBase58() &&
+            job.clientId !== activeProfileId &&
+            typeof posterWalletMatches[job.clientId] === "undefined"
+          );
           const isMyAssignment = myProfileId && (job.assigneeId === myProfileId);
           const hasV3Escrow = !!job.v3EscrowPDA;
 
@@ -858,7 +864,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                   </span>
 
                   {/* Action buttons based on state */}
-                  {["open", "awaiting_funding"].includes(job.status) && connected && isResolvingConnectedProfile && (
+                  {["open", "awaiting_funding"].includes(job.status) && connected && (isResolvingConnectedProfile || jobPosterIdentityPending) && (
                     <button
                       disabled
                       className="px-3 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wider opacity-70 cursor-not-allowed"
@@ -866,7 +872,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                       <Clock size={12} className="inline mr-1" /> Resolving Wallet...
                     </button>
                   )}
-                  {job.status === "open" && !isMyJob && connected && !isResolvingConnectedProfile && (
+                  {job.status === "open" && !isMyJob && connected && !isResolvingConnectedProfile && !jobPosterIdentityPending && (
                     <button onClick={() => openJobAction(job, "apply")}
                       className="px-3 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wider transition-all hover:shadow-[0_0_15px_rgba(153,69,255,0.2)]"
                       style={{ fontFamily: "var(--font-mono)", background: "var(--accent)", color: "#fff" }}>
