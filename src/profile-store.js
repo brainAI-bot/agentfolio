@@ -228,11 +228,12 @@ function parseJsonField(val, defaultVal = []) {
 }
 
 function calculateProfileCompletenessPercent(raw = {}) {
-  const vd = raw.verification_data || raw.verificationData || {};
-  const links = raw.links || {};
-  const wallets = raw.wallets || {};
-  const skills = Array.isArray(raw.skills) ? raw.skills.filter(Boolean) : [];
-  const nftAvatar = raw.nftAvatar || raw.nft_avatar || null;
+  const vd = parseJsonField(raw.verification_data || raw.verificationData || {}, {});
+  const links = parseJsonField(raw.links || {}, {});
+  const wallets = parseJsonField(raw.wallets || {}, {});
+  const parsedSkills = parseJsonField(raw.skills, []);
+  const skills = Array.isArray(parsedSkills) ? parsedSkills.filter(Boolean) : [];
+  const nftAvatar = parseJsonField(raw.nftAvatar || raw.nft_avatar || null, null);
   const hasAvatar = (() => {
     if (String(raw.avatar || '').trim()) return true;
     if (!nftAvatar || typeof nftAvatar !== 'object') return false;
@@ -255,7 +256,7 @@ function calculateProfileCompletenessPercent(raw = {}) {
   if (vd.x?.verified || vd.twitter?.verified || String(links.x || links.twitter || '').trim()) filled++;
   if (vd.github?.verified || String(links.github || '').trim()) filled++;
   if (String(links.website || raw.website || '').trim()) filled++;
-  if (raw.walletAddress || raw.wallet || wallets.solana || vd.solana?.address || vd.solana?.identifier) filled++;
+  if (raw.walletAddress || raw.wallet || wallets.solana || wallets.solana_wallet || vd.solana?.address || vd.solana?.identifier) filled++;
 
   return Math.round((filled / total) * 100);
 }
