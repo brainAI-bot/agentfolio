@@ -297,6 +297,43 @@ function registerSATPAutoIdentityRoutes(app) {
   });
 
   /**
+   * POST /api/satp-auto/identity/submit
+   * Submit a wallet-signed SATP identity transaction via server-side RPC
+   */
+  app.post('/api/satp-auto/identity/submit', async (req, res) => {
+    try {
+      const { signedTransaction } = req.body || {};
+      if (!signedTransaction) {
+        return res.status(400).json({ error: 'signedTransaction required' });
+      }
+
+      const txBuffer = Buffer.from(signedTransaction, 'base64');
+      const signature = await connection.sendRawTransaction(txBuffer, {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+        maxRetries: 3,
+      });
+      const latest = await connection.getLatestBlockhash('confirmed');
+      await connection.confirmTransaction({
+        signature,
+        blockhash: latest.blockhash,
+        lastValidBlockHeight: latest.lastValidBlockHeight,
+      }, 'confirmed');
+
+      res.json({
+        ok: true,
+        data: {
+          signature,
+          network: NETWORK,
+        },
+      });
+    } catch (err) {
+      console.error('[SATP AutoID] submit error:', err.message);
+      res.status(500).json({ error: 'Failed to submit identity transaction', detail: err.message });
+    }
+  });
+
+  /**
    * POST /api/satp-auto/identity/confirm
    * Called after the user signs and submits the create_identity TX
    * Records the SATP identity in the DB for the profile
