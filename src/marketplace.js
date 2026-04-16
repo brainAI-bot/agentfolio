@@ -613,7 +613,14 @@ function registerRoutes(app) {
   app.get('/api/marketplace/jobs/:id/applications', (req, res) => {
     const job = readJob(path.join(DATA_DIR, 'jobs', `${req.params.id}.json`));
     if (!job) return res.status(404).json({ error: 'Job not found' });
-    const apps = job.applications.map(appId => readJSON(path.join(DATA_DIR, 'applications', `${appId}.json`))).filter(Boolean);
+    const apps = job.applications
+      .map(appId => {
+        const app = typeof appId === 'string'
+          ? readJSON(path.join(DATA_DIR, 'applications', `${appId}.json`))
+          : appId;
+        return enrichApplication(app);
+      })
+      .filter(Boolean);
     res.json({ applications: apps, total: apps.length });
   });
 
