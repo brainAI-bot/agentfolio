@@ -745,6 +745,29 @@ function enrichProfile(row) {
           score_breakdown: breakdown,
           source: unified.source,
         },
+        verification: (() => {
+          const existing = parseJsonField(row.verification, {});
+          const platforms = new Set(Array.isArray(existing.verifiedPlatforms) ? existing.verifiedPlatforms : []);
+          try {
+            const verRows = getDb().prepare('SELECT platform FROM verifications WHERE profile_id = ?').all(row.id);
+            for (const ver of verRows) {
+              const platform = ver.platform === 'twitter' ? 'x' : ver.platform;
+              if (platform) platforms.add(platform);
+            }
+          } catch (_) {}
+          if (row.wallet) {
+            platforms.add('satp');
+            platforms.add('satp_v3');
+          }
+          return JSON.stringify({
+            ...existing,
+            score: unified.score,
+            tier: String(unified.levelName || 'Unverified').toLowerCase(),
+            verificationLevel: unified.level,
+            verifiedPlatforms: Array.from(platforms),
+            source: unified.source,
+          });
+        })(),
         level: unified.level,
         tier: unified.levelName,
         score: unified.score,
