@@ -50,6 +50,7 @@ export default function MintPage() {
   const [nfts, setNfts] = useState<NFTItem[]>([]);
   const [selectedNft, setSelectedNft] = useState<NFTItem | null>(null);
   const [burnTx, setBurnTx] = useState("");
+  const [completionTxType, setCompletionTxType] = useState<"mint" | "burn" | null>(null);
   const [soulboundMint, setSoulboundMint] = useState("");
 
   // Fix Irys/Arweave URLs — some gateways are unreliable
@@ -180,6 +181,7 @@ export default function MintPage() {
         }
       } catch (e) { console.warn("confirm-mint failed (non-critical):", e); }
       setBurnTx(sig);
+      setCompletionTxType("mint");
       await loadWalletData(walletAddr);
       setStep("complete");
     } catch (e: any) {
@@ -263,6 +265,7 @@ export default function MintPage() {
       if (!submitRes.ok) { const err = await submitRes.json(); throw new Error(err.error || "Burn failed"); }
       const result = await submitRes.json();
       setBurnTx(result.burnTx);
+      setCompletionTxType("burn");
       setSoulboundMint(result.soulboundMint);
       
       // If server returns a burnToBecome TX (genesis record update), have user sign it
@@ -846,7 +849,7 @@ export default function MintPage() {
                 {burnTx && (
                   <a href={solanaExplorerUrl(`tx/${burnTx}`)} target="_blank" rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 text-sm hover:underline" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
-                    {soulboundMint ? "Burn TX" : "Mint TX"}: {burnTx.slice(0, 16)}... <ExternalLink size={12} />
+                    {(completionTxType === "burn" ? "Burn TX" : "Mint TX")}: {burnTx.slice(0, 16)}... <ExternalLink size={12} />
                   </a>
                 )}
                 {soulboundMint && (
