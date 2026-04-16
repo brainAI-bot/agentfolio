@@ -6,6 +6,7 @@ import { useConnection } from "@solana/wallet-adapter-react";
 import { Transaction } from "@solana/web3.js";
 import { AlertTriangle, CheckCircle, FileText, Info, Star } from "lucide-react";
 import { createMarketplaceWalletAuth } from "@/lib/marketplace-auth";
+import { profileHasWallet } from "@/lib/profile-wallets";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -51,6 +52,9 @@ export function JobReviewSection({
   const [viewerIdentityPDA, setViewerIdentityPDA] = useState("");
   const [reviews, setReviews] = useState<ReviewRecord[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [clientWalletMatch, setClientWalletMatch] = useState(false);
+  const [assigneeWalletMatch, setAssigneeWalletMatch] = useState(false);
+  const [participantChecksSettled, setParticipantChecksSettled] = useState(false);
   const [rating, setRating] = useState(5);
   const [hoverRating, setHoverRating] = useState(0);
   const [comment, setComment] = useState("");
@@ -79,6 +83,45 @@ export function JobReviewSection({
       .then((d) => setViewerIdentityPDA(d?.data?.pda || d?.identityPDA || ""))
       .catch(() => setViewerIdentityPDA(""));
   }, [publicKey]);
+
+
+  useEffect(() => {
+    if (!walletAddr || (!clientId && !assigneeId)) {
+      setClientWalletMatch(false);
+      setAssigneeWalletMatch(false);
+      setParticipantChecksSettled(false);
+      return;
+    }
+
+    let cancelled = false;
+    setParticipantChecksSettled(false);
+
+    Promise.all([
+      clientId
+        ? fetch(`${API_BASE}/api/profile/${encodeURIComponent(clientId)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+        : Promise.resolve(null),
+      assigneeId
+        ? fetch(`${API_BASE}/api/profile/${encodeURIComponent(assigneeId)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+        : Promise.resolve(null),
+    ])
+      .then(([clientProfile, assigneeProfile]) => {
+        if (cancelled) return;
+        setClientWalletMatch(!!clientProfile && profileHasWallet(clientProfile, walletAddr));
+        setAssigneeWalletMatch(!!assigneeProfile && profileHasWallet(assigneeProfile, walletAddr));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setClientWalletMatch(false);
+        setAssigneeWalletMatch(false);
+      })
+      .finally(() => {
+        if (!cancelled) setParticipantChecksSettled(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [assigneeId, clientId, walletAddr]);
 
   useEffect(() => {
     if (!isCompleted || !clientId || !assigneeId) {
@@ -111,15 +154,20 @@ export function JobReviewSection({
 
   const viewerRole = useMemo(() => {
     if (!viewerProfileId && !walletAddr) return null;
-    if (viewerProfileId === clientId || walletAddr === clientId) return "client";
-    if (viewerProfileId === assigneeId || walletAddr === assigneeId) return "agent";
+    if (clientWalletMatch || viewerProfileId === clientId || walletAddr === clientId) return "client";
+    if (assigneeWalletMatch || viewerProfileId === assigneeId || walletAddr === assigneeId) return "agent";
     return null;
-  }, [assigneeId, clientId, viewerProfileId, walletAddr]);
+  }, [assigneeId, assigneeWalletMatch, clientId, clientWalletMatch, viewerProfileId, walletAddr]);
 
+  const effectiveActorId = viewerRole === "client"
+    ? (clientId || viewerProfileId || walletAddr)
+    : viewerRole === "agent"
+      ? (assigneeId || viewerProfileId || walletAddr)
+      : (viewerProfileId || walletAddr);
   const reviewType = viewerRole === "client" ? "client_to_agent" : viewerRole === "agent" ? "agent_to_client" : null;
   const revieweeId = viewerRole === "client" ? assigneeId : viewerRole === "agent" ? clientId : null;
-  const existingReview = viewerProfileId
-    ? reviews.find((review) => review.job_id === jobId && review.reviewer_id === viewerProfileId)
+  const existingReview = effectiveActorId
+    ? reviews.find((review) => review.job_id === jobId && review.reviewer_id === effectiveActorId)
     : null;
 
   if (!hasDeliverable && !isCompleted) return null;
@@ -137,7 +185,7 @@ export function JobReviewSection({
       setResult({ ok: false, msg: "Please describe what changes are needed." });
       return;
     }
-    const actorId = viewerProfileId || walletAddr;
+    const actorId = effectiveActorId;
     if (!actorId || !walletAddr) {
       setResult({ ok: false, msg: "Connect the poster wallet first." });
       return;
@@ -196,7 +244,7 @@ export function JobReviewSection({
       let txBuildData: any;
 
       if (jobPDA) {
-        const commentUri = `${SITE_URL}/marketplace/job/${jobId}#review-${viewerProfileId}`.slice(0, 200);
+        const commentUri = `${SITE_URL}/marketplace/job/${jobId}#review-${effectiveActorId}`.slice(0, 200);
         const buildRes = await fetch(`${API_BASE}/api/reviews/submit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -209,7 +257,7 @@ export function JobReviewSection({
             reliability: rating,
             communication: rating,
             commentUri,
-            commentHash: comment.trim() || `${jobId}:${viewerProfileId}:${Date.now()}`,
+            commentHash: comment.trim() || `${jobId}:${effectiveActorId}:${Date.now()}`,
           }),
         });
         txBuildData = await buildRes.json();
@@ -246,7 +294,7 @@ export function JobReviewSection({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          reviewerId: viewerProfileId,
+          reviewerId: effectiveActorId,
           reviewType,
           rating,
           comment: comment.trim(),
@@ -436,7 +484,13 @@ export function JobReviewSection({
             </div>
           ) : null}
 
-          {!viewerRole ? (
+          {walletAddr && !participantChecksSettled ? (
+            <div className="rounded-lg p-4 mt-4 text-sm" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-tertiary)" }}>
+              Resolving the connected wallet against the job participants before review actions are enabled.
+            </div>
+          ) : null}
+
+          {!viewerRole && participantChecksSettled ? (
             <div className="rounded-lg p-4 mt-4 text-sm" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-tertiary)" }}>
               Connect the client or assigned agent wallet to submit a marketplace review.
             </div>
