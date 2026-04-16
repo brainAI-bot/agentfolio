@@ -607,7 +607,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     const v3Score = await getV3Score(profile.id).catch(() => null);
     const unified = computeUnifiedTrustScore(db, profile, { v3Score });
     const parsedNftAvatar = parseJsonFieldSafe(profile.nft_avatar, null);
-    const resolvedAvatar = profile.avatar || parsedNftAvatar?.image || parsedNftAvatar?.arweaveUrl || null;
+    const resolvedAvatar = parsedNftAvatar?.image || parsedNftAvatar?.arweaveUrl || profile.avatar || null;
 
     const attestationHints = new Map();
     try {
