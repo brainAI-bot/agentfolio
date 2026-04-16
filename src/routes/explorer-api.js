@@ -49,6 +49,17 @@ function isNonPublicExplorerAgent(agent) {
   return false;
 }
 
+function parseJsonField(value, fallback = null) {
+  if (value === null || value === undefined || value === '') return fallback;
+  if (typeof value === 'object') return value;
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+
+function getProfileAvatar(profileRow, fallback = null) {
+  const nftAvatar = parseJsonField(profileRow?.nft_avatar, null);
+  return nftAvatar?.image || nftAvatar?.arweaveUrl || profileRow?.avatar || fallback || null;
+}
+
 // A1: Helper to compute score for any profile using the unified trust scorer
 function getComputedScore(profileId, explorerAgent = null) {
   let db;
@@ -63,6 +74,7 @@ function getComputedScore(profileId, explorerAgent = null) {
         score: explorerAgent.reputationScore || 0,
         level: explorerAgent.verificationLevel || 0,
         levelName: explorerAgent.tierLabel || explorerAgent.tier || 'Unverified',
+        avatar: explorerAgent.faceImage || null,
       } : null;
     }
     let verificationData = {};
@@ -82,12 +94,14 @@ function getComputedScore(profileId, explorerAgent = null) {
       score: unified.score || 0,
       level: unified.level || 0,
       levelName: unified.levelName || 'Unverified',
+      avatar: getProfileAvatar(row, explorerAgent?.faceImage || null),
     };
   } catch (_) {
     return explorerAgent ? {
       score: explorerAgent.reputationScore || 0,
       level: explorerAgent.verificationLevel || 0,
       levelName: explorerAgent.tierLabel || explorerAgent.tier || 'Unverified',
+      avatar: explorerAgent.faceImage || null,
     } : null;
   } finally {
     try {
@@ -279,18 +293,13 @@ router.get('/agents', async (req, res) => {
       
       // Check DB for permanent face (overrides on-chain isBorn)
       let dbBorn = a.isBorn;
-      let dbFaceImage = a.faceImage || null;
+      let dbFaceImage = getProfileAvatar(profileRow, a.faceImage || null);
       let dbSoulboundMint = a.faceMint || null;
-      try {
-        if (profileRow && profileRow.nft_avatar) {
-          const nftData = JSON.parse(profileRow.nft_avatar);
-          if (nftData.permanent) {
-            dbBorn = true;
-            dbFaceImage = nftData.image || dbFaceImage;
-            dbSoulboundMint = nftData.soulboundMint || dbSoulboundMint;
-          }
-        }
-      } catch (e) { /* ignore DB errors */ }
+      const nftData = parseJsonField(profileRow?.nft_avatar, null);
+      if (nftData) {
+        if (nftData.permanent) dbBorn = true;
+        dbSoulboundMint = nftData.soulboundMint || nftData.identifier || dbSoulboundMint;
+      }
       
       return {
         pda: a.pda,
@@ -473,15 +482,16 @@ router.get('/leaderboard', async (req, res) => {
     const leaderboard = top.map((a, i) => {
       const profileId = 'agent_' + a.agentName.toLowerCase();
       const platforms = chainCache.getVerifiedPlatforms(profileId);
+      const cs = getComputedScore(profileId, a);
       
       return {
         rank: i + 1,
         name: a.agentName,
         profileId,
-        ...(() => { const cs = getComputedScore(profileId, a); return cs ? { reputationScore: cs.score, verificationLevel: cs.level, tier: cs.levelName, tierLabel: cs.levelName } : { reputationScore: a.reputationScore, verificationLevel: a.verificationLevel, tier: a.tier, tierLabel: a.tierLabel }; })(),
+        ...(cs ? { reputationScore: cs.score, verificationLevel: cs.level, tier: cs.levelName, tierLabel: cs.levelName } : { reputationScore: a.reputationScore, verificationLevel: a.verificationLevel, tier: a.tier, tierLabel: a.tierLabel }),
         platforms,
         platformCount: platforms.length,
-        nftImage: a.faceImage || null,
+        nftImage: (cs && cs.avatar) || a.faceImage || null,
         soulbound: a.soulbound || false,
         isBorn: a.isBorn,
         profileUrl: `${SITE_URL}/profile/${profileId}`,
@@ -547,7 +557,7 @@ router.get('/search', async (req, res) => {
         verificationLevel: cs ? cs.level : a.verificationLevel,
         tierLabel: cs ? cs.levelName : a.tierLabel,
         platforms,
-        nftImage: a.faceImage || null,
+        nftImage: (cs && cs.avatar) || a.faceImage || null,
         isBorn: a.isBorn,
         profileUrl: `${SITE_URL}/profile/${profileId}`,
       };
