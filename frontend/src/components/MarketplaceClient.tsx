@@ -120,8 +120,11 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   const [applyMessage, setApplyMessage] = useState("");
   const [applyBid, setApplyBid] = useState("");
   const [resolvedProfileId, setResolvedProfileId] = useState<string | null>(null);
+  const [resolvedProfileAmbiguous, setResolvedProfileAmbiguous] = useState(false);
+  const [resolvedProfileCandidates, setResolvedProfileCandidates] = useState<Array<{ id: string; name?: string }>>([]);
   const [resolvingProfile, setResolvingProfile] = useState(false);
   const [myProfileId, setMyProfileId] = useState<string | null>(null);
+  const [myProfileAmbiguous, setMyProfileAmbiguous] = useState(false);
   const [posterWalletMatches, setPosterWalletMatches] = useState<Record<string, boolean>>({});
 
   // Auto-resolve wallet → profile for My Jobs filter
@@ -129,14 +132,26 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     if (connected && publicKey) {
       let cancelled = false;
       setResolvingProfile(true);
+      setMyProfileAmbiguous(false);
       fetch(`${API_BASE}/api/profile-by-wallet?wallet=${publicKey.toBase58()}`)
-        .then(r => r.ok ? r.json() : null)
-        .then(d => {
+        .then(async (r) => {
+          if (r.status === 409) return { ambiguous: true, ...(await r.json()) };
+          return r.ok ? await r.json() : null;
+        })
+        .then((d) => {
           if (cancelled) return;
+          if (d?.ambiguous) {
+            setMyProfileId(null);
+            setMyProfileAmbiguous(true);
+            return;
+          }
           setMyProfileId(d?.id || null);
         })
         .catch(() => {
-          if (!cancelled) setMyProfileId(null);
+          if (!cancelled) {
+            setMyProfileId(null);
+            setMyProfileAmbiguous(false);
+          }
         })
         .finally(() => {
           if (!cancelled) setResolvingProfile(false);
@@ -146,6 +161,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
       };
     } else {
       setMyProfileId(null);
+      setMyProfileAmbiguous(false);
       setResolvingProfile(false);
     }
   }, [connected, publicKey]);
@@ -211,8 +227,17 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   // Resolve wallet → profile ID when apply modal opens
   const resolveWalletProfile = useCallback(async (walletAddr: string) => {
     setResolvingProfile(true);
+    setResolvedProfileAmbiguous(false);
+    setResolvedProfileCandidates([]);
     try {
       const res = await fetch(`${API_BASE}/api/profile-by-wallet?wallet=${walletAddr}`);
+      if (res.status === 409) {
+        const data = await res.json();
+        setResolvedProfileId(null);
+        setResolvedProfileAmbiguous(true);
+        setResolvedProfileCandidates(Array.isArray(data?.profiles) ? data.profiles : []);
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         setResolvedProfileId(data.id || null);
@@ -370,13 +395,23 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   // ─── APPLY TO JOB ───
   const handleApply = async () => {
     if (!connected || !publicKey || !selectedJob) return;
+    const applicantId = resolvedProfileId || myProfileId;
+    if (!applicantId) {
+      showMessage(
+        "error",
+        resolvedProfileAmbiguous || myProfileAmbiguous
+          ? "This wallet maps to multiple profiles. Open the job page and enter the correct profile ID manually."
+          : "Create a profile first before applying."
+      );
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          applicantId: resolvedProfileId || publicKey.toBase58(),
+          applicantId,
           proposal: applyMessage,
           bidAmount: applyBid ? parseFloat(applyBid) : undefined,
         }),
@@ -665,13 +700,14 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
       resolveWalletProfile(publicKey.toBase58());
     } else {
       setResolvedProfileId(null);
+      setResolvedProfileAmbiguous(false);
+      setResolvedProfileCandidates([]);
     }
   }, [connected, publicKey, resolveWalletProfile]);
 
   const openJobAction = (job: Job, action: ModalType) => {
     if ((action === "apply" || action === "post-job") && publicKey && !resolvedProfileId) {
       resolveWalletProfile(publicKey.toBase58());
-      if (action === "apply") return;
     }
     setSelectedJob(job);
     setModal(action);
@@ -989,7 +1025,15 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                 </div>
                 {resolvingProfile && <div className="text-[11px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>Resolving profile...</div>}
                 {resolvedProfileId && <div className="text-[11px]" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>Applying as: <strong>{resolvedProfileId}</strong></div>}
-                {!resolvingProfile && !resolvedProfileId && publicKey && <div className="text-[11px]" style={{ color: "var(--warning, #f59e0b)", fontFamily: "var(--font-mono)" }}>⚠️ No profile found for this wallet. Create a profile first.</div>}
+                {!resolvingProfile && !resolvedProfileId && resolvedProfileAmbiguous && publicKey && (
+                  <div className="text-[11px]" style={{ color: "var(--warning, #f59e0b)", fontFamily: "var(--font-mono)" }}>
+                    ⚠️ This wallet maps to multiple profiles. Open the job page and enter the correct profile ID manually.
+                    {resolvedProfileCandidates.length > 0 && (
+                      <div className="mt-1">Matches: {resolvedProfileCandidates.map((profile) => profile.id).join(", ")}</div>
+                    )}
+                  </div>
+                )}
+                {!resolvingProfile && !resolvedProfileId && !resolvedProfileAmbiguous && publicKey && <div className="text-[11px]" style={{ color: "var(--warning, #f59e0b)", fontFamily: "var(--font-mono)" }}>⚠️ No profile found for this wallet. Create a profile first.</div>}
                 <Textarea label="Your Proposal" value={applyMessage} onChange={setApplyMessage} placeholder="Why are you the best fit for this job?" />
                 <Input label="Your Bid (USDC, optional)" value={applyBid} onChange={setApplyBid} placeholder="Leave empty to match budget" type="number" />
                 <button onClick={handleApply} disabled={loading}
