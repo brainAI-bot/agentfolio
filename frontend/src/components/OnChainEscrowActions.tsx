@@ -136,11 +136,11 @@ export function OnChainEscrowActions({
       return;
     }
     if (!actorId) {
-      setMsg("Could not resolve the poster profile for this wallet");
+      setMsg("Could not resolve a funding actor for this wallet");
       setStep("error");
       return;
     }
-    if (!isPoster) {
+    if (actionType !== "fund" && !isPoster) {
       setMsg("Only the job poster can manage escrow");
       setStep("error");
       return;
@@ -200,14 +200,19 @@ export function OnChainEscrowActions({
       const { tx, isVersioned } = deserializeEscrowTransaction(buildData.transaction);
 
       let txSignature = "";
-      if (signTransaction) {
+      if (isVersioned) {
+        if (!signTransaction) {
+          throw new Error("Connected wallet must support signTransaction() for versioned escrow transactions");
+        }
+        const signedTx = await signTransaction(tx as any);
+        txSignature = await connection.sendRawTransaction(signedTx.serialize());
+      } else if (sendTransaction) {
+        txSignature = await sendTransaction(tx as any, connection);
+      } else if (signTransaction) {
         const signedTx = await signTransaction(tx as any);
         txSignature = await connection.sendRawTransaction(signedTx.serialize());
       } else {
-        if (isVersioned || !sendTransaction) {
-          throw new Error("Connected wallet does not support signing this escrow transaction");
-        }
-        txSignature = await sendTransaction(tx as any, connection);
+        throw new Error("Connected wallet does not support signing this escrow transaction");
       }
       await connection.confirmTransaction(txSignature, "confirmed");
 
@@ -257,7 +262,7 @@ export function OnChainEscrowActions({
   }, [publicKey, sendTransaction, signTransaction, signMessage, actorId, isPoster, jobId, escrowId, onchainEscrowPDA, walletAddr, budget, assigneeId, connection]);
 
   const posterGate = !publicKey || isPoster || posterIdentityPending;
-  const canFund = posterGate && ["open", "in_progress"].includes(jobStatus) && !onchainEscrowPDA && escrowStatus !== "released";
+  const canFund = ["open", "in_progress"].includes(jobStatus) && !onchainEscrowPDA && escrowStatus !== "released";
   const canRelease = !posterIdentityPending && posterGate && !!onchainEscrowPDA && !!escrowId && jobStatus !== "completed" && escrowStatus !== "released";
   const canRefund = !posterIdentityPending && posterGate && !!onchainEscrowPDA && !!escrowId && jobStatus !== "completed" && escrowStatus !== "released";
 
@@ -364,7 +369,7 @@ export function OnChainEscrowActions({
       {publicKey && !posterIdentityPending && !isPoster && (
         <div className="mt-3 flex items-center gap-2 text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
           <AlertTriangle size={12} />
-          Only the job poster wallet can fund, release, or refund escrow.
+          Only the job poster wallet can complete funding or payout actions. If this is your job, connect the poster wallet and try again.
         </div>
       )}
 
