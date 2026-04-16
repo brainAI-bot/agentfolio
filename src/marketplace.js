@@ -174,6 +174,20 @@ function resolveExistingApplicantProfileId(applicantId) {
   }
 }
 
+function resolveApplicantPrimaryWallet(applicantId) {
+  try {
+    const profileStore = require('./profile-store');
+    const db = profileStore.getDb();
+    const row = findProfileRowByApplicantToken(db, applicantId, 'wallet, wallets, verification_data');
+    if (!row) return null;
+    const wallets = typeof row.wallets === 'string' ? JSON.parse(row.wallets || '{}') : (row.wallets || {});
+    const verificationData = typeof row.verification_data === 'string' ? JSON.parse(row.verification_data || '{}') : (row.verification_data || {});
+    return row.wallet || wallets?.solana || wallets?.solana_wallet || wallets?.wallet || verificationData?.solana?.address || verificationData?.solana?.identifier || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function walletMatchesClaimedActor(claimedActorId, walletAddress) {
   if (claimedActorId == null || walletAddress == null) return false;
   const claimed = String(claimedActorId).trim();
@@ -1045,6 +1059,19 @@ function registerRoutes(app) {
     job.applicationCount = job.applications.length;
     job.updatedAt = new Date().toISOString();
     writeJSON(jobPath, job);
+
+    if (job.escrowId) {
+      const escrowPath = path.join(DATA_DIR, 'escrow', `${job.escrowId}.json`);
+      const escrow = readJSON(escrowPath);
+      if (escrow) {
+        escrow.worker = application.applicantId;
+        escrow.agentId = application.applicantId;
+        escrow.agentWallet = resolveApplicantPrimaryWallet(application.applicantId) || escrow.agentWallet || null;
+        escrow.updatedAt = new Date().toISOString();
+        writeJSON(escrowPath, escrow);
+        try { syncMarketplaceEscrowToDb(escrow, job); } catch (e) { console.warn('[Marketplace] accepted escrow DB sync failed:', e.message); }
+      }
+    }
 
     try { syncMarketplaceApplicationToDb(application); } catch (e) { console.warn('[Marketplace] accepted application DB sync failed:', e.message); }
     try { syncMarketplaceJobToDb(job); } catch (e) { console.warn('[Marketplace] accepted job DB sync failed:', e.message); }
