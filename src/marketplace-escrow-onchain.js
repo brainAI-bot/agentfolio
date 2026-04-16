@@ -219,7 +219,7 @@ function registerMarketplaceEscrowOnchain(app) {
       const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
       const job = readJSON(jobPath);
       if (!job) return res.status(404).json({ error: 'Job not found' });
-      if (!['open', 'in_progress'].includes(job.status)) return res.status(400).json({ error: 'Job must be open or in_progress to fund escrow' });
+      if (!['open', 'in_progress', 'awaiting_funding'].includes(job.status)) return res.status(400).json({ error: 'Job must be open, awaiting_funding, or in_progress to fund escrow' });
       if (job.onchainEscrowPDA) return res.status(400).json({ error: 'On-chain escrow already created for this job' });
 
       const { clientWallet, amount, deadlineUnix } = req.body;
