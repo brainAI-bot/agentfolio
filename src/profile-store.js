@@ -1465,11 +1465,20 @@ function registerRoutes(app) {
         const hasGenesis = v3Data && v3Data.agentName && !v3Data.error;
         if (hasGenesis) {
           const v3Score = v3Data.reputationScore > 10000 ? Math.round(v3Data.reputationScore / 1000) : (v3Data.reputationScore || 0);
-          enriched.onchain = v3Data;
+          const unifiedScore = Number(enriched.trustScore || enriched.score || 0);
+          const unifiedLevel = Number(enriched.verificationLevel || enriched.level || 0);
+          const unifiedLabel = enriched.verificationLevelName || enriched.levelName || enriched.tier || null;
+          enriched.onchain = {
+            ...v3Data,
+            rawReputationScore: v3Data.reputationScore || null,
+            reputationScore: unifiedScore > 0 ? unifiedScore : v3Score,
+            verificationLevel: unifiedLevel > 0 ? unifiedLevel : (v3Data.verificationLevel || 0),
+            verificationLabel: unifiedLabel || v3Data.verificationLabel || 'Unverified',
+          };
           enriched.isBorn = v3Data.isBorn;
           if (v3Data.faceImage) enriched.faceImage = v3Data.faceImage;
           if (v3Data.authority && !enriched.walletAddress) enriched.walletAddress = v3Data.authority;
-          if (v3Score > 0 && Number(enriched.trustScore || enriched.score || 0) <= 0 && Number(enriched.verificationLevel || 0) <= 0) {
+          if (v3Score > 0 && unifiedScore <= 0 && unifiedLevel <= 0) {
             enriched.trust_score = { overall_score: v3Score, level: v3Data.verificationLabel || 'Unverified', score_breakdown: {}, source: 'v3-genesis-fallback' };
             enriched.score = v3Score;
             enriched.trustScore = v3Score;
