@@ -140,7 +140,7 @@ function findProfileRowByApplicantToken(db, applicantId, fields = 'id') {
   let row = db.prepare(`SELECT ${fields} FROM profiles WHERE LOWER(name) = ?`).get(raw.toLowerCase()) || null;
   if (row) return row;
 
-  return db.prepare(`
+  const walletMatches = db.prepare(`
     SELECT ${fields} FROM profiles
     WHERE LOWER(wallet) = LOWER(?)
        OR LOWER(claimed_by) = LOWER(?)
@@ -159,8 +159,10 @@ function findProfileRowByApplicantToken(db, applicantId, fields = 'id') {
       julianday(REPLACE(SUBSTR(created_at, 1, 19), 'T', ' ')),
       0
     ) DESC, id DESC
-    LIMIT 1
-  `).get(raw, raw, raw, raw, raw, raw, raw, raw, raw, raw, raw, raw) || null;
+    LIMIT 2
+  `).all(raw, raw, raw, raw, raw, raw, raw, raw, raw, raw, raw, raw);
+
+  return walletMatches.length === 1 ? walletMatches[0] : null;
 }
 
 function resolveExistingApplicantProfileId(applicantId) {
