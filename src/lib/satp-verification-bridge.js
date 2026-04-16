@@ -1,10 +1,11 @@
 /**
  * SATP Verification Bridge (V3)
  * 
- * After a verification is confirmed, sends a SINGLE TX with 3 instructions:
+ * After a verification is confirmed, sends a SINGLE TX with 4 instructions:
  *   1. create_attestation → creates attestation account
  *   2. verify_attestation → marks it verified (same issuer/signer)
  *   3. recompute_score → reads attestations, CPIs score update to identity
+ *   4. recompute_level → reads attestations, CPIs level update to identity
  * 
  * No program upgrade needed — uses existing deployed instructions.
  */
@@ -12,17 +13,19 @@
 const { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction, ComputeBudgetProgram } = require('@solana/web3.js');
 const crypto = require('crypto');
 const fs = require('fs');
-const { getV3AttestationPDA, getGenesisPDA: getCanonicalGenesisPDA } = require('../satp-client/src/v3-pda');
+const { getV3AttestationPDA, getGenesisPDA: getCanonicalGenesisPDA, getV3ValidationAuthorityPDA, getV3ProgramIds } = require('../satp-client/src/v3-pda');
 
 // V3 Program IDs (mainnet)
 const ATTESTATIONS_PROGRAM = new PublicKey('6Xd1dAQJPvQRJ4Ntr6LtPTjDjPUZ8nfnmYLZaZ2DtrdD');
 const IDENTITY_PROGRAM = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
+const VALIDATION_PROGRAM = getV3ProgramIds('mainnet').VALIDATION;
 
 // Attestations authority PDA
 const [ATTESTATIONS_AUTHORITY] = PublicKey.findProgramAddressSync(
   [Buffer.from('attestations_v3_authority')],
   ATTESTATIONS_PROGRAM
 );
+const [VALIDATION_AUTHORITY] = getV3ValidationAuthorityPDA('mainnet');
 
 const CONFIGURED_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/satp-mainnet-platform.json';
 const KEYPAIR_PATH = CONFIGURED_KEYPAIR_PATH === '/home/ubuntu/.config/solana/satp-mainnet-platform.json'
@@ -103,6 +106,25 @@ function getGenesisPDA(agentId) {
   return getCanonicalGenesisPDA(agentId, 'mainnet');
 }
 
+function buildRecomputeLevelInstruction(genesisPDA, keypair, attestationPubkeys = []) {
+  const keys = [
+    { pubkey: genesisPDA, isSigner: false, isWritable: true },
+    { pubkey: VALIDATION_AUTHORITY, isSigner: false, isWritable: false },
+    { pubkey: IDENTITY_PROGRAM, isSigner: false, isWritable: false },
+    { pubkey: keypair.publicKey, isSigner: true, isWritable: true },
+  ];
+
+  for (const att of attestationPubkeys.slice(0, 20)) {
+    keys.push({ pubkey: att, isSigner: false, isWritable: false });
+  }
+
+  return new TransactionInstruction({
+    programId: VALIDATION_PROGRAM,
+    keys,
+    data: anchorDisc('recompute_level'),
+  });
+}
+
 function logBridgeError(context, error) {
   const message = error?.message || String(error);
   const logs = Array.isArray(error?.logs) ? error.logs : [];
@@ -160,7 +182,7 @@ async function postVerificationAttestation(agentId, platform, proofObj) {
   console.log(`[SATP Bridge] Creating verified attestation + recompute for ${agentId}/${platform} (proofBytes=${Buffer.byteLength(proofData, 'utf8')}, attPDA=${attPDA.toBase58()})`);
   
   const tx = new Transaction();
-  tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400000 }));
+  tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 700000 }));
   tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5000 }));
 
   // IX 1: create_attestation
@@ -212,11 +234,13 @@ async function postVerificationAttestation(agentId, platform, proofObj) {
     data: anchorDisc('recompute_score'),
   }));
 
+  tx.add(buildRecomputeLevelInstruction(genesisPDA, keypair, allAtts));
+
   try {
     const sig = await conn.sendTransaction(tx, [keypair], { skipPreflight: false });
     await conn.confirmTransaction(sig, 'confirmed');
-    console.log(`[SATP Bridge] ✅ Created + verified + recomputed for ${agentId}/${platform} TX: ${sig}`);
-    return { txSignature: sig, attestationPDA: attPDA.toBase58() };
+    console.log(`[SATP Bridge] ✅ Created + verified + recomputed score/level for ${agentId}/${platform} TX: ${sig}`);
+    return { txSignature: sig, attestationPDA: attPDA.toBase58(), levelRecomputed: true };
   } catch (e) {
     const logs = Array.isArray(e?.logs) ? e.logs : [];
     logBridgeError(`TX failed for ${agentId}/${platform}`, e);
@@ -328,7 +352,7 @@ async function verifyExistingAttestation(agentId, platform, attestationType, att
   }
 
   const tx = new Transaction();
-  tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 500000 }));
+  tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 700000 }));
   tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 1000 }));
 
   if (!alreadyVerified) {
@@ -359,6 +383,7 @@ async function verifyExistingAttestation(agentId, platform, attestationType, att
       keys: recomputeKeys,
       data: anchorDisc('recompute_score'),
     }));
+    tx.add(buildRecomputeLevelInstruction(genesisPDA, keypair, allAtts));
   }
 
   if (tx.instructions.length <= 2) {
@@ -374,7 +399,7 @@ async function verifyExistingAttestation(agentId, platform, attestationType, att
   try {
     const sig = await conn.sendTransaction(tx, [keypair], { skipPreflight: false });
     await conn.confirmTransaction(sig, 'confirmed');
-    console.log(`[SATP Bridge] Existing attestation fixed for ${agentId}/${platform}: ${sig}`);
+    console.log(`[SATP Bridge] Existing attestation fixed and level recomputed for ${agentId}/${platform}: ${sig}`);
     return {
       txSignature: sig,
       attestationPDA: attPDA.toBase58(),
@@ -382,6 +407,7 @@ async function verifyExistingAttestation(agentId, platform, attestationType, att
       alreadyVerified,
       verifiedNow: !alreadyVerified,
       recomputed: !!hasGenesis,
+      levelRecomputed: !!hasGenesis,
     };
   } catch (e) {
     logBridgeError('Existing attestation verify/recompute failed', e);
@@ -412,20 +438,21 @@ async function triggerRecomputeOnly(agentId, keypair, conn) {
   }
 
   const tx = new Transaction().add(
-    ComputeBudgetProgram.setComputeUnitLimit({ units: 300000 }),
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 450000 }),
     ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 5000 }),
     new TransactionInstruction({
       programId: ATTESTATIONS_PROGRAM,
       keys: recomputeKeys,
       data: anchorDisc('recompute_score'),
-    })
+    }),
+    buildRecomputeLevelInstruction(genesisPDA, keypair, atts)
   );
 
   try {
     const sig = await conn.sendTransaction(tx, [keypair], { skipPreflight: false });
     await conn.confirmTransaction(sig, 'confirmed');
-    console.log(`[SATP Bridge] Recomputed score for ${agentId}: TX ${sig}`);
-    return { txSignature: sig };
+    console.log(`[SATP Bridge] Recomputed score + level for ${agentId}: TX ${sig}`);
+    return { txSignature: sig, levelRecomputed: true };
   } catch (e) {
     logBridgeError(`recompute failed for ${agentId}`, e);
     throw e;
@@ -437,3 +464,4 @@ module.exports = {
   getAgentAttestations,
   triggerRecomputeOnly,
 };
+
