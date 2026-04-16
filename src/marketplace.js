@@ -690,6 +690,85 @@ function buildMarketplaceJobRecord({
 
 function registerRoutes(app) {
 
+  // GET /api/escrow/check?wallet=<solana>&targetAgent=<profileId>
+  // Legacy compatibility route used by the profile review form.
+  app.get('/api/escrow/check', async (req, res) => {
+    const wallet = String(req.query.wallet || '').trim();
+    const rawTarget = String(req.query.targetAgent || '').trim();
+    const targetAgent = normalizeActorId(rawTarget) || rawTarget;
+
+    if (!WALLET_ADDRESS_RE.test(wallet)) {
+      return res.status(400).json({ error: 'wallet required', hasCompletedEscrow: false });
+    }
+    if (!targetAgent) {
+      return res.status(400).json({ error: 'targetAgent required', hasCompletedEscrow: false });
+    }
+
+    const loweredWallet = wallet.toLowerCase();
+    const targetCandidates = new Set([rawTarget, targetAgent].filter(Boolean).map((v) => String(v).trim()));
+    const jobs = getAllFiles(path.join(DATA_DIR, 'jobs')).map(hydrateJobEscrowState);
+
+    for (const job of jobs) {
+      if (!job) continue;
+      const escrow = getJobEscrow(job);
+      const clientIds = [job.clientId, job.postedBy].filter(Boolean).map((v) => String(v).trim());
+      const workerIds = [job.selectedAgentId, job.acceptedApplicant, job.assignedTo, job.assigneeId, job.assignee, escrow?.agentId, job.agentId]
+        .filter(Boolean)
+        .map((v) => String(v).trim());
+
+      const targetIsClient = clientIds.some((id) => targetCandidates.has(id));
+      const targetIsWorker = workerIds.some((id) => targetCandidates.has(id));
+      if (!targetIsClient && !targetIsWorker) continue;
+
+      const workerWalletCandidates = [
+        escrow?.agentWallet,
+        job.v3EscrowAgentWallet,
+        resolveApplicantPrimaryWallet(job.selectedAgentId || job.acceptedApplicant || job.assignedTo || job.assigneeId || job.assignee || escrow?.agentId || job.agentId),
+      ].filter(Boolean).map((v) => String(v).trim().toLowerCase());
+      const clientWalletCandidates = [job.clientWallet].filter(Boolean).map((v) => String(v).trim().toLowerCase());
+
+      const walletIsClient = clientWalletCandidates.includes(loweredWallet) || clientIds.some((id) => walletMatchesClaimedActor(id, wallet));
+      const walletIsWorker = workerWalletCandidates.includes(loweredWallet) || workerIds.some((id) => walletMatchesClaimedActor(id, wallet));
+
+      const counterpartyMatch = (targetIsWorker && walletIsClient) || (targetIsClient && walletIsWorker);
+      if (!counterpartyMatch) continue;
+
+      let completed = Boolean(
+        job.fundsReleased ||
+        job.releasedAt ||
+        escrow?.releasedAt ||
+        ['released', 'auto_released'].includes(String(escrow?.status || '').toLowerCase()) ||
+        String(job.status || '').toLowerCase() === 'completed'
+      );
+
+      if (!completed) {
+        try {
+          const fundingState = await getVerifiedFundingState(job, escrow);
+          const onchainStatus = String(fundingState?.onchainState?.status || '');
+          completed = ['released', 'auto_released', 'Released', 'Resolved'].includes(onchainStatus);
+        } catch (_) {}
+      }
+
+      if (completed) {
+        return res.json({
+          hasCompletedEscrow: true,
+          hasEscrow: true,
+          jobId: job.id,
+          escrowId: job.escrowId || null,
+          targetAgent,
+          wallet,
+        });
+      }
+    }
+
+    return res.json({
+      hasCompletedEscrow: false,
+      hasEscrow: false,
+      targetAgent,
+      wallet,
+    });
+  });
+
   // 1. POST /api/marketplace/jobs — Create a job
   app.post('/api/marketplace/jobs', (req, res) => {
     const { title, description, budget, budgetAmount, currency, postedBy, clientId, skills, skills_required, deadline, category, budgetType, budgetCurrency, timeline, requirements, escrowRequired, budgetMax, attachments, expiresAt } = req.body;
