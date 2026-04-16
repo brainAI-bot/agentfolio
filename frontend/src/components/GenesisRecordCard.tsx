@@ -46,15 +46,15 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
   const [genesis, setGenesis] = useState<GenesisData | null>(null);
 
   useEffect(() => {
-    Promise.all([
-        fetch(`/api/satp/explorer/agents`).then(r => r.json()).catch(() => ({})),
-        fetch(`/api/profile/${agentId}/trust-score`).then(r => r.json()).catch(() => ({})),
-      ]).then(([explorerRes, tsRes]) => {
+    fetch(`/api/satp/explorer/agents`)
+      .then((r) => r.json())
+      .catch(() => ({}))
+      .then((explorerRes) => {
         const agents = explorerRes.agents || explorerRes || [];
         const match = Array.isArray(agents)
           ? agents.find((row: any) => {
               const rowName = String(row.name || row.agentName || '').toLowerCase();
-              const rowProfileId = String(row.profileId || (`agent_${rowName}`)).toLowerCase();
+              const rowProfileId = String(row.profileId || row.agentId || (`agent_${rowName}`)).toLowerCase();
               return rowProfileId === String(agentId).toLowerCase() || rowName === String(agentId).toLowerCase().replace(/^agent_/, '');
             })
           : null;
@@ -64,31 +64,22 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
               agentName: match.name || match.agentName || agentId,
               description: match.description || '',
               category: match.category || '',
-              verificationLevel: 0,
-              verificationLabel: 'Unverified',
-              reputationScore: 0,
-              reputationPct: '0',
-              isBorn: false,
-              bornAt: null,
-              faceImage: '',
-              faceMint: '',
-              faceBurnTx: '',
+              verificationLevel: match.verificationLevel ?? match.level ?? 0,
+              verificationLabel: match.verificationLabel || match.levelName || match.tier || 'Unverified',
+              reputationScore: normalizeScore(match.reputationScore ?? match.score ?? match.trustScore ?? 0),
+              reputationPct: String(normalizeScore(match.reputationScore ?? match.score ?? match.trustScore ?? 0)),
+              isBorn: !!match.isBorn,
+              bornAt: match.bornAt || match.createdAt || null,
+              faceImage: match.faceImage || match.nftImage || match.avatar || match.nftAvatar?.image || '',
+              faceMint: match.faceMint || match.nftMint || match.nftAvatar?.identifier || '',
+              faceBurnTx: match.faceBurnTx || match.nftAvatar?.burnTxSignature || '',
               createdAt: match.createdAt || null,
               authority: match.authority || '',
             }
           : null;
-        if (!g) return;
-        if (tsRes.data) {
-          g.isBorn = tsRes.data.isBorn ?? g.isBorn;
-          g.bornAt = tsRes.data.bornAt ?? g.bornAt;
-          g.faceImage = tsRes.data.faceImage || g.faceImage || '';
-          g.faceMint = tsRes.data.faceMint || g.faceMint || '';
-          g.verificationLevel = tsRes.data.verificationLevel ?? g.verificationLevel;
-          g.verificationLabel = tsRes.data.verificationLabel || g.verificationLabel;
-          g.reputationScore = normalizeScore(tsRes.data.reputationScore ?? g.reputationScore);
-        }
-        setGenesis(g);
-      }).catch(() => {});
+        if (g) setGenesis(g);
+      })
+      .catch(() => {});
   }, [agentId]);
 
   if (!genesis) return null;
