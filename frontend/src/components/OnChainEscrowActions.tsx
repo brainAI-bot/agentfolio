@@ -140,7 +140,12 @@ export function OnChainEscrowActions({
       setStep("error");
       return;
     }
-    if (actionType !== "fund" && !isPoster) {
+    if (posterIdentityPending) {
+      setMsg("Still resolving the poster wallet. Please wait a moment and try again.");
+      setStep("error");
+      return;
+    }
+    if (!isPoster) {
       setMsg("Only the job poster can manage escrow");
       setStep("error");
       return;
@@ -261,10 +266,10 @@ export function OnChainEscrowActions({
     }
   }, [publicKey, sendTransaction, signTransaction, signMessage, actorId, isPoster, jobId, escrowId, onchainEscrowPDA, walletAddr, budget, assigneeId, connection]);
 
-  const posterGate = !publicKey || isPoster || posterIdentityPending;
-  const canFund = ["open", "in_progress"].includes(jobStatus) && !onchainEscrowPDA && escrowStatus !== "released";
-  const canRelease = !posterIdentityPending && posterGate && !!onchainEscrowPDA && !!escrowId && jobStatus !== "completed" && escrowStatus !== "released";
-  const canRefund = !posterIdentityPending && posterGate && !!onchainEscrowPDA && !!escrowId && jobStatus !== "completed" && escrowStatus !== "released";
+  const posterGate = !!publicKey && (isPoster || posterIdentityPending);
+  const canFund = posterGate && ["open", "in_progress"].includes(jobStatus) && !onchainEscrowPDA && escrowStatus !== "released";
+  const canRelease = !!publicKey && !posterIdentityPending && isPoster && !!onchainEscrowPDA && !!escrowId && jobStatus !== "completed" && escrowStatus !== "released";
+  const canRefund = !!publicKey && !posterIdentityPending && isPoster && !!onchainEscrowPDA && !!escrowId && jobStatus !== "completed" && escrowStatus !== "released";
 
   if (!canFund && !canRelease && !canRefund) {
     if (onchainEscrowPDA) {
