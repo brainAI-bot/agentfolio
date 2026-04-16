@@ -13,11 +13,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 function deserializeEscrowTransaction(base64Tx: string): Transaction | VersionedTransaction {
   const raw = Buffer.from(base64Tx, "base64");
-  try {
-    return VersionedTransaction.deserialize(raw);
-  } catch {
-    return Transaction.from(raw);
-  }
+  return raw.length > 0 && raw[0] >= 128 ? VersionedTransaction.deserialize(raw) : Transaction.from(raw);
 }
 
 interface SubmitWorkFormProps {
