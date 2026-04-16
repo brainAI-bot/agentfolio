@@ -232,12 +232,25 @@ function calculateProfileCompletenessPercent(raw = {}) {
   const links = raw.links || {};
   const wallets = raw.wallets || {};
   const skills = Array.isArray(raw.skills) ? raw.skills.filter(Boolean) : [];
+  const nftAvatar = raw.nftAvatar || raw.nft_avatar || null;
+  const hasAvatar = (() => {
+    if (String(raw.avatar || '').trim()) return true;
+    if (!nftAvatar || typeof nftAvatar !== 'object') return false;
+    return !!String(
+      nftAvatar.image
+      || nftAvatar.arweaveUrl
+      || nftAvatar.faceImage
+      || nftAvatar.soulboundMint
+      || nftAvatar.identifier
+      || ''
+    ).trim();
+  })();
   let filled = 0;
   const total = 8;
 
   if (String(raw.name || '').trim()) filled++;
   if (String(raw.bio || raw.description || '').trim()) filled++;
-  if (String(raw.avatar || '').trim()) filled++;
+  if (hasAvatar) filled++;
   if (skills.length > 0) filled++;
   if (vd.x?.verified || vd.twitter?.verified || String(links.x || links.twitter || '').trim()) filled++;
   if (vd.github?.verified || String(links.github || '').trim()) filled++;
@@ -546,6 +559,8 @@ function enrichProfile(row) {
     } catch {}
   }
 
+  const parsedNftAvatar = parseJsonField(row.nft_avatar, null);
+
   return {
     ...row,
     walletAddress: row.wallet || null,
@@ -632,7 +647,8 @@ function enrichProfile(row) {
     endorsements_given: parseJsonField(row.endorsements_given),
     custom_badges: parseJsonField(row.custom_badges),
     metadata: parsedMetadata,
-    nft_avatar: parseJsonField(row.nft_avatar, {}),
+    nft_avatar: parsedNftAvatar || null,
+    nftAvatar: parsedNftAvatar || null,
     endorsements: { items: endorsements, total: endorsements.length },
     verifications: (() => {
       const vMap = {};
@@ -1345,8 +1361,9 @@ function registerRoutes(app) {
       }
       const { _trust_score: ts, _trust_level: dbLevel, ...cleanRest } = rest;
       const _md = parseJsonField(cleanRest.metadata);
+      const parsedNftAvatar = parseJsonField(cleanRest.nft_avatar, null);
       const unclaimed = (cleanRest.claimed === 0 || cleanRest.claimed === "0") || _md.unclaimed === true || _md.isPlaceholder === true || _md.placeholder === true;
-      return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: {} /* [P0] chain-cache only, no DB reads */, portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: _md, nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, _dbLevel: dbLevel || null, claimed, unclaimed };
+      return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: {} /* [P0] chain-cache only, no DB reads */, portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: _md, nft_avatar: parsedNftAvatar || null, nftAvatar: parsedNftAvatar || null, trust_score: ts || 0, _dbLevel: dbLevel || null, claimed, unclaimed };
     });
 
     // A1: Compute scores for all profiles using chain-cache-derived verifications
