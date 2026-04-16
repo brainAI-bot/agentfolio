@@ -49,19 +49,50 @@ function isNonPublicExplorerAgent(agent) {
   return false;
 }
 
-// A1: Helper to compute score for any profile
-function getComputedScore(profileId) {
+// A1: Helper to compute score for any profile using the unified trust scorer
+function getComputedScore(profileId, explorerAgent = null) {
+  let db;
   try {
-    const { computeScore } = require('../lib/compute-score');
+    const { computeUnifiedTrustScore } = require('../lib/unified-trust-score');
     const Database = require('better-sqlite3');
     const path = require('path');
-    const db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
-    const verifs = db.prepare('SELECT platform, identifier FROM verifications WHERE profile_id = ?').all(profileId);
-    db.close();
-    const hasSatp = verifs.some(v => v.platform === 'satp');
-    return computeScore(verifs, { hasSatpIdentity: hasSatp, claimed: true });
+    db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+    const row = db.prepare('SELECT * FROM profiles WHERE lower(id) = lower(?) LIMIT 1').get(profileId);
+    if (!row) {
+      return explorerAgent ? {
+        score: explorerAgent.reputationScore || 0,
+        level: explorerAgent.verificationLevel || 0,
+        levelName: explorerAgent.tierLabel || explorerAgent.tier || 'Unverified',
+      } : null;
+    }
+    let verificationData = {};
+    try { verificationData = JSON.parse(row.verification_data || '{}'); } catch {}
+    const hasPersistedSatp = Boolean(verificationData?.satp_v3?.verified || verificationData?.satp?.verified);
+    const unified = computeUnifiedTrustScore(db, { ...row, id: profileId }, {
+      v3Score: explorerAgent ? {
+        reputationScore: explorerAgent.reputationScore || 0,
+        verificationLevel: explorerAgent.verificationLevel || (hasPersistedSatp ? 1 : 0),
+        verificationLabel: explorerAgent.tierLabel || explorerAgent.tier || 'Registered',
+        isBorn: explorerAgent.isBorn,
+        onChain: explorerAgent,
+      } : null,
+      hasBoaAvatar: Boolean(explorerAgent?.isBorn),
+    });
+    return {
+      score: unified.score || 0,
+      level: unified.level || 0,
+      levelName: unified.levelName || 'Unverified',
+    };
   } catch (_) {
-    return null;
+    return explorerAgent ? {
+      score: explorerAgent.reputationScore || 0,
+      level: explorerAgent.verificationLevel || 0,
+      levelName: explorerAgent.tierLabel || explorerAgent.tier || 'Unverified',
+    } : null;
+  } finally {
+    try {
+      if (db) db.close();
+    } catch (_) {}
   }
 }
 
@@ -447,7 +478,7 @@ router.get('/leaderboard', async (req, res) => {
         rank: i + 1,
         name: a.agentName,
         profileId,
-        ...(() => { const cs = getComputedScore(profileId); return cs ? { reputationScore: cs.score, verificationLevel: cs.level, tier: cs.levelName, tierLabel: cs.levelName } : { reputationScore: a.reputationScore, verificationLevel: a.verificationLevel, tier: a.tier, tierLabel: a.tierLabel }; })(),
+        ...(() => { const cs = getComputedScore(profileId, a); return cs ? { reputationScore: cs.score, verificationLevel: cs.level, tier: cs.levelName, tierLabel: cs.levelName } : { reputationScore: a.reputationScore, verificationLevel: a.verificationLevel, tier: a.tier, tierLabel: a.tierLabel }; })(),
         platforms,
         platformCount: platforms.length,
         nftImage: a.faceImage || null,
@@ -505,14 +536,16 @@ router.get('/search', async (req, res) => {
     const results = matches.slice(0, maxLimit).map(a => {
       const profileId = 'agent_' + a.agentName.toLowerCase();
       const platforms = chainCache.getVerifiedPlatforms(profileId);
+      const cs = getComputedScore(profileId, a);
       
       return {
         name: a.agentName,
         profileId,
         description: a.description,
         category: a.category,
-        ...(() => { const pid = 'agent_' + a.agentName.toLowerCase(); const cs = getComputedScore(pid); return cs ? { reputationScore: cs.score, verificationLevel: cs.level } : { reputationScore: a.reputationScore, verificationLevel: a.verificationLevel }; })(),
-        tierLabel: a.tierLabel,
+        reputationScore: cs ? cs.score : a.reputationScore,
+        verificationLevel: cs ? cs.level : a.verificationLevel,
+        tierLabel: cs ? cs.levelName : a.tierLabel,
         platforms,
         nftImage: a.faceImage || null,
         isBorn: a.isBorn,
