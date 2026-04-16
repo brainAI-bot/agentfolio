@@ -458,6 +458,25 @@ function enrichApplication(app) {
 }
 
 // Normalize job.applications to always be an array and hydrate release state from escrow
+function syncJobDeliverableSummary(job, deliverable = null) {
+  if (!job) return job;
+  let resolved = deliverable;
+  if (!resolved && job.deliverableId) {
+    resolved = readJSON(path.join(DATA_DIR, 'deliverables', `${job.deliverableId}.json`));
+  }
+  if (resolved) {
+    job.deliverableId = resolved.id || job.deliverableId;
+    job.deliverableDescription = resolved.description || null;
+    job.deliverableStatus = resolved.status || null;
+    job.deliverableSubmittedAt = resolved.submittedAt || null;
+  } else if (!job.deliverableId) {
+    job.deliverableDescription = null;
+    job.deliverableStatus = null;
+    job.deliverableSubmittedAt = null;
+  }
+  return job;
+}
+
 function hydrateJobEscrowState(job) {
   if (!job) return job;
   if (!Array.isArray(job.applications)) job.applications = [];
@@ -503,7 +522,7 @@ function hydrateJobEscrowState(job) {
     }
   }
 
-  return job;
+  return syncJobDeliverableSummary(job);
 }
 
 function readJob(filepath) {
@@ -1061,7 +1080,9 @@ function registerRoutes(app) {
 
     job.deliverableId = deliverable.id;
     job.updatedAt = new Date().toISOString();
+    syncJobDeliverableSummary(job, deliverable);
     writeJSON(jobPath, job);
+    try { syncMarketplaceJobToDb(job); } catch (e) { console.warn('[Marketplace] job DB sync failed after deliver:', e.message); }
 
     res.status(201).json(deliverable);
   });
@@ -1138,9 +1159,13 @@ function registerRoutes(app) {
       const dlv = readJSON(dlvPath);
       if (dlv) {
         dlv.status = 'approved';
+        dlv.approvedAt = new Date().toISOString();
         writeJSON(dlvPath, dlv);
+        syncJobDeliverableSummary(job, dlv);
+        writeJSON(jobPath, job);
       }
     }
+    try { syncMarketplaceJobToDb(job); } catch (e) { console.warn('[Marketplace] job DB sync failed after release:', e.message); }
 
     res.json({
       message: 'Payment released',
@@ -1269,7 +1294,10 @@ function registerRoutes(app) {
       deliverable.status = 'approved';
       deliverable.approvedAt = new Date().toISOString();
       writeJSON(path.join(DATA_DIR, 'deliverables', `${deliverable.id}.json`), deliverable);
+      syncJobDeliverableSummary(job, deliverable);
+      writeJSON(jobPath, job);
     }
+    try { syncMarketplaceJobToDb(job); } catch (e) { console.warn('[Marketplace] job DB sync failed after complete:', e.message); }
 
     res.json({ success: true, message: 'Work approved! Payment released.', job });
   });
@@ -1307,12 +1335,14 @@ function registerRoutes(app) {
       requestedAt: new Date().toISOString(),
     });
     job.status = 'in_progress';
-    writeJSON(jobPath, job);
 
     deliverable.status = 'revision_requested';
     deliverable.revisionRequestedAt = new Date().toISOString();
     deliverable.revisionReason = note;
     writeJSON(path.join(DATA_DIR, 'deliverables', `${deliverable.id}.json`), deliverable);
+    syncJobDeliverableSummary(job, deliverable);
+    writeJSON(jobPath, job);
+    try { syncMarketplaceJobToDb(job); } catch (e) { console.warn('[Marketplace] job DB sync failed after revision request:', e.message); }
 
     res.json({ success: true, message: 'Changes requested', changeRequests: job.changeRequests });
   });
@@ -1502,6 +1532,11 @@ function registerRoutes(app) {
     dlv.revisionRequestedAt = new Date().toISOString();
     dlv.revisionReason = reason || 'Changes requested';
     writeJSON(dlvPath, dlv);
+
+    syncJobDeliverableSummary(job, dlv);
+    job.updatedAt = new Date().toISOString();
+    writeJSON(jobPath, job);
+    try { syncMarketplaceJobToDb(job); } catch (e) { console.warn('[Marketplace] job DB sync failed after deliverable revision:', e.message); }
 
     res.json({ message: 'Revision requested', deliverable: dlv });
   });
