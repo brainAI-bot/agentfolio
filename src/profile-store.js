@@ -1910,7 +1910,7 @@ function registerRoutes(app) {
       }
 
       if (!row) {
-        row = db.prepare(`
+        const matches = db.prepare(`
           SELECT id, name FROM profiles
           WHERE ${whereClause}
           ORDER BY COALESCE(
@@ -1918,8 +1918,21 @@ function registerRoutes(app) {
             julianday(REPLACE(SUBSTR(created_at, 1, 19), 'T', ' ')),
             0
           ) DESC, id DESC
-          LIMIT 1
-        `).get(...walletParams);
+          LIMIT 3
+        `).all(...walletParams);
+        if (!matches.length) {
+          return res.status(404).json({ found: false, error: 'No profile found for this wallet' });
+        }
+        if (matches.length > 1) {
+          return res.status(409).json({
+            found: false,
+            ambiguous: true,
+            error: 'Multiple profiles found for this wallet. Provide preferredProfileId.',
+            profileIds: matches.map((item) => item.id),
+            profiles: matches.map((item) => ({ id: item.id, name: item.name })),
+          });
+        }
+        row = matches[0];
       }
 
       if (row) {
