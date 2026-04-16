@@ -37,6 +37,31 @@ function getBurnStatus(txId) {
   return all[txId] || null;
 }
 
+function parseJson(value, fallback = null) {
+  if (value == null || value === "") return fallback;
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+
+function profileHasVerifiedWallet(profile, walletAddress) {
+  const normalWallet = String(walletAddress || "").toLowerCase();
+  if (!normalWallet) return false;
+
+  const verificationData = parseJson(profile?.verification_data, {});
+  const wallets = parseJson(profile?.wallets, {});
+  const legacyVerifications = Array.isArray(profile?.verifications) ? profile.verifications : [];
+
+  return legacyVerifications.some((verification) =>
+    verification?.type === "solana" &&
+    verification?.address?.toLowerCase() === normalWallet &&
+    verification?.verified
+  ) ||
+    (verificationData?.solana?.address?.toLowerCase() === normalWallet && verificationData?.solana?.verified) ||
+    (verificationData?.wallet?.solana?.address?.toLowerCase() === normalWallet && verificationData?.wallet?.solana?.verified) ||
+    (wallets?.solana?.toLowerCase() === normalWallet) ||
+    (String(profile?.wallet || "").toLowerCase() === normalWallet);
+}
+
 /**
  * Check if a profile already has a permanent (burned) avatar
  */
@@ -129,7 +154,7 @@ function buildBurnToBecomeTxData({ walletAddress, nftMint, arweaveUrl, profileId
     instructions: [
       {
         type: 'burn',
-        programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+        programId: 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
         mint: nftMint,
         owner: walletAddress,
       },
@@ -172,11 +197,7 @@ async function processBurnToBecome({ profileId, walletAddress, nftMint, nftName,
   }
   
   // Check wallet is verified on this profile
-  const walletVerified = profile.verifications?.some(v =>
-    v.type === 'solana' &&
-    v.address?.toLowerCase() === walletAddress.toLowerCase() &&
-    v.verified
-  );
+  const walletVerified = profileHasVerifiedWallet(profile, walletAddress);
   
   if (!walletVerified) {
     return { success: false, error: 'Wallet not verified on this profile' };
@@ -312,11 +333,7 @@ async function prepareBurnToBecome({ profileId, walletAddress, nftMint, nftName,
   }
   
   // Verify wallet ownership
-  const walletVerified = profile.verifications?.some(v =>
-    v.type === 'solana' &&
-    v.address?.toLowerCase() === walletAddress.toLowerCase() &&
-    v.verified
-  );
+  const walletVerified = profileHasVerifiedWallet(profile, walletAddress);
   
   if (!walletVerified) {
     return { success: false, error: 'Wallet not verified on this profile' };
