@@ -310,7 +310,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     setLoading(true);
     try {
       const walletAddress = publicKey.toBase58();
-      const actorId = resolvedProfileId || walletAddress;
+      const actorId = resolvedProfileId || myProfileId || walletAddress;
       const amount = parseFloat(postForm.budgetAmount);
       if (!Number.isFinite(amount) || amount <= 0) throw new Error("Invalid budget amount");
 
