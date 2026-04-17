@@ -2,7 +2,7 @@
 // WalletRequired removed — wallet adapter always loaded
 
 import { useState, useEffect } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { Flame, Wallet, Shield, AlertTriangle, CheckCircle, ExternalLink, Loader2, Sparkles, ArrowRight, Zap, Plus, FileText, Image as ImageIcon } from "lucide-react";
 
@@ -55,6 +55,7 @@ async function deserializeMintTransaction(base64Tx: string) {
 
 export default function MintPage() {
   const wallet = useWallet();
+  const { connection } = useConnection();
   const { smartConnect } = useSmartConnect();
   const [profileId, setProfileId] = useState("");
   const [step, setStep] = useState<Step>("connect");
@@ -251,7 +252,7 @@ export default function MintPage() {
   };
 
   const handleBurn = async () => {
-    if (!selectedNft || !wallet.publicKey || !wallet.signTransaction) return;
+    if (!selectedNft || !wallet.publicKey || (!wallet.sendTransaction && !wallet.signTransaction)) return;
     setStep("burning");
     setError("");
     try {
@@ -263,15 +264,23 @@ export default function MintPage() {
       if (!prepRes.ok) { const err = await prepRes.json(); throw new Error(err.error || "Failed to prepare burn"); }
       const { transaction: serializedTx } = await prepRes.json();
       const tx = await deserializeMintTransaction(serializedTx);
-      const signed = await wallet.signTransaction(tx as any);
+      const submitPayload: Record<string, string> = {
+        wallet: wallet.publicKey.toBase58(),
+        nftMint: selectedNft.mint,
+      };
+      if (wallet.sendTransaction) {
+        const burnSignature = await wallet.sendTransaction(tx as any, connection, { skipPreflight: false });
+        submitPayload.txSignature = burnSignature;
+      } else if (wallet.signTransaction) {
+        const signed = await wallet.signTransaction(tx as any);
+        submitPayload.signedTransaction = Buffer.from(signed.serialize()).toString("base64");
+      } else {
+        throw new Error("Connected wallet cannot sign burn transaction");
+      }
       const submitRes = await fetch(`${API}/api/burn-to-become/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wallet: wallet.publicKey.toBase58(),
-          nftMint: selectedNft.mint,
-          signedTransaction: Buffer.from(signed.serialize()).toString("base64"),
-        }),
+        body: JSON.stringify(submitPayload),
       });
       if (!submitRes.ok) { const err = await submitRes.json(); throw new Error(err.error || "Burn failed"); }
       const result = await submitRes.json();

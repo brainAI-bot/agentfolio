@@ -19,6 +19,7 @@ const path = require('path');
 const PIPELINE_DIR = "/home/ubuntu/agentfolio/boa-pipeline";
 const { safeBurnToBecome } = require('./safe-burn-to-become');
 const { loadNormalizedTrust } = require('../lib/normalized-trust');
+const bs58 = require('bs58');
 
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
 const connection = new Connection(RPC_URL, 'confirmed');
@@ -112,6 +113,64 @@ function getVersionedInstructionKeys(tx, compiledIx) {
   return compiledIx.accountKeyIndexes
     .map(index => tx.message.staticAccountKeys[index])
     .filter(Boolean);
+}
+
+function decodeInstructionData(data) {
+  if (!data) return Buffer.alloc(0);
+  if (Buffer.isBuffer(data)) return Buffer.from(data);
+  if (data instanceof Uint8Array) return Buffer.from(data);
+  if (Array.isArray(data)) return Buffer.from(data);
+  if (typeof data === 'string') {
+    try {
+      return Buffer.from(bs58.decode(data));
+    } catch {
+      return Buffer.alloc(0);
+    }
+  }
+  return Buffer.alloc(0);
+}
+
+function getConfirmedTransactionAccountKeys(txInfo) {
+  const message = txInfo?.transaction?.message;
+  const staticKeys = Array.isArray(message?.accountKeys)
+    ? message.accountKeys.map(key => new PublicKey(typeof key === 'string' ? key : (key?.pubkey || key?.toString?.() || String(key))))
+    : [];
+  const loadedWritable = (txInfo?.meta?.loadedAddresses?.writable || []).map(key => new PublicKey(key));
+  const loadedReadonly = (txInfo?.meta?.loadedAddresses?.readonly || []).map(key => new PublicKey(key));
+  return staticKeys.concat(loadedWritable, loadedReadonly);
+}
+
+function getConfirmedTransactionFeePayer(txInfo) {
+  return getConfirmedTransactionAccountKeys(txInfo)[0] || null;
+}
+
+function getConfirmedTransactionProgramIds(txInfo) {
+  const keys = getConfirmedTransactionAccountKeys(txInfo);
+  return (txInfo?.transaction?.message?.instructions || [])
+    .map(ix => keys[ix.programIdIndex])
+    .filter(Boolean);
+}
+
+function getConfirmedTransactionSignerMatches(txInfo, pubkey) {
+  const keys = getConfirmedTransactionAccountKeys(txInfo);
+  const signerCount = txInfo?.transaction?.message?.header?.numRequiredSignatures || 0;
+  return keys.slice(0, signerCount).some(key => key.equals(pubkey));
+}
+
+function getConfirmedTransactionInstructionKeys(txInfo, ix) {
+  const keys = getConfirmedTransactionAccountKeys(txInfo);
+  return (ix?.accounts || []).map(index => keys[index]).filter(Boolean);
+}
+
+async function getConfirmedTransactionWithRetry(signature, attempts = 8) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const txInfo = await connection.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
+    if (txInfo) return txInfo;
+    if (attempt < attempts - 1) {
+      await new Promise(resolve => setTimeout(resolve, Math.min(500 * (attempt + 1), 2000)));
+    }
+  }
+  return null;
 }
 
 async function checkSatpOnChain(wallet) {
@@ -1160,8 +1219,10 @@ function handleBurnToBecome(req, res, url) {
   if (url.pathname === '/api/burn-to-become/submit' && req.method === 'POST') {
     (async () => {
       try {
-        const { wallet, nftMint, signedTransaction } = req.body || {};
-        if (!wallet || !nftMint || !signedTransaction) return sendJson(400, { error: 'wallet, nftMint, and signedTransaction required' });
+        const { wallet, nftMint, signedTransaction, txSignature } = req.body || {};
+        const hasSignedTransaction = typeof signedTransaction === 'string' && signedTransaction.length > 0;
+        const hasTxSignature = typeof txSignature === 'string' && txSignature.length > 0;
+        if (!wallet || !nftMint || (!hasSignedTransaction && !hasTxSignature)) return sendJson(400, { error: 'wallet, nftMint, and either signedTransaction or txSignature required' });
 
         const { PublicKey } = require('@solana/web3.js');
         try {
@@ -1246,17 +1307,18 @@ function handleBurnToBecome(req, res, url) {
           console.warn('[BurnPublic] DB permanent face check failed (non-blocking — on-chain SATP is authority):', checkErr.message);
         }
         
-        // 1. Validate the signed burn transaction before broadcast
+        // 1. Validate the burn transaction before proceeding
         const walletPubkey = new PublicKey(wallet);
         const mintPubkey = new PublicKey(nftMint);
-        const signedTxBuffer = Buffer.from(signedTransaction, 'base64');
+        const signedTxBuffer = hasSignedTransaction ? Buffer.from(signedTransaction, 'base64') : null;
         const submitReject = (message, extra = {}) => {
           try {
             console.warn('[BurnPublic] submit reject', JSON.stringify({
               reason: message,
               wallet,
               nftMint,
-              signedLength: signedTxBuffer.length,
+              signedLength: signedTxBuffer ? signedTxBuffer.length : null,
+              txSignature: hasTxSignature ? txSignature : null,
               ...extra,
             }));
           } catch (logErr) {
@@ -1264,111 +1326,90 @@ function handleBurnToBecome(req, res, url) {
           }
           return sendJson(400, { error: message });
         };
-        let submittedTx;
-        try {
-          submittedTx = isVersionedSerializedTransaction(signedTxBuffer)
-            ? VersionedTransaction.deserialize(signedTxBuffer)
-            : Transaction.from(signedTxBuffer);
-        } catch (parseErr) {
-          return submitReject('Invalid signed transaction payload', { parseError: parseErr?.message || String(parseErr) });
-        }
-        const submittedFeePayer = getSubmittedTransactionFeePayer(submittedTx);
-        const submittedSignatureDiagnostics = submittedTx instanceof VersionedTransaction
-          ? submittedTx.signatures.map((sig, index) => ({
-              index,
-              allZero: Buffer.from(sig).every(byte => byte === 0),
-              prefix: Buffer.from(sig).toString('base64').slice(0, 16),
-            }))
-          : submittedTx.signatures.map((sig, index) => ({
-              index,
-              publicKey: sig.publicKey?.toBase58?.() || null,
-              hasSignature: !!sig.signature,
-              allZero: !sig.signature || Buffer.from(sig.signature).every(byte => byte === 0),
-              prefix: sig.signature ? Buffer.from(sig.signature).toString('base64').slice(0, 16) : null,
-            }));
-        if (!submittedFeePayer || !submittedFeePayer.equals(walletPubkey)) {
-          return submitReject('Signed transaction fee payer does not match wallet', { submittedFeePayer: submittedFeePayer?.toBase58?.() || null });
-        }
-        const signerMatchesWallet = getSubmittedTransactionSignerMatches(submittedTx, walletPubkey);
-        if (!signerMatchesWallet) {
-          return submitReject('Signed transaction signer does not match wallet', {
-            submittedFeePayer: submittedFeePayer?.toBase58?.() || null,
-            signerMatchesWallet,
-            versioned: submittedTx instanceof VersionedTransaction,
-          });
-        }
-        const submittedPrograms = getSubmittedTransactionProgramIds(submittedTx).map(pid => pid.toBase58());
-        const allowedPrograms = new Set([
-          ComputeBudgetProgram.programId.toBase58(),
-          TOKEN_PROGRAM_ID.toBase58(),
-          TOKEN_2022_PROGRAM_ID.toBase58(),
-          'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d',
-        ]);
-        if (submittedPrograms.some(pid => !allowedPrograms.has(pid))) {
-          return submitReject('Signed transaction contains unsupported instructions', {
-            versioned: submittedTx instanceof VersionedTransaction,
-            submittedPrograms,
-          });
-        }
+        let submittedTx = null;
+        let submittedFeePayer = null;
+        let submittedPrograms = [];
+        let submittedSignatureDiagnostics = [];
+        let versionedSubmission = false;
         const submittedMintAccount = await connection.getAccountInfo(mintPubkey);
         if (!submittedMintAccount) {
           return sendJson(400, { error: 'NFT account not found: ' + nftMint });
         }
         const METAPLEX_CORE_PROGRAM = new PublicKey('CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d');
-        if (submittedMintAccount.owner.equals(METAPLEX_CORE_PROGRAM)) {
-          if (submittedTx instanceof VersionedTransaction) {
-            const coreIx = submittedTx.message.compiledInstructions.find(ix => {
-              const programId = submittedTx.message.staticAccountKeys[ix.programIdIndex];
+        const allowedPrograms = new Set([
+          ComputeBudgetProgram.programId.toBase58(),
+          TOKEN_PROGRAM_ID.toBase58(),
+          TOKEN_2022_PROGRAM_ID.toBase58(),
+          METAPLEX_CORE_PROGRAM.toBase58(),
+        ]);
+
+        if (hasTxSignature) {
+          await connection.confirmTransaction(txSignature, 'confirmed');
+          const confirmedTx = await getConfirmedTransactionWithRetry(txSignature);
+          if (!confirmedTx) {
+            return submitReject('Submitted burn transaction not found on-chain', { txSignature });
+          }
+          if (confirmedTx?.meta?.err) {
+            return submitReject('Submitted burn transaction failed on-chain', { txSignature, metaErr: confirmedTx.meta.err });
+          }
+          submittedFeePayer = getConfirmedTransactionFeePayer(confirmedTx);
+          if (!submittedFeePayer || !submittedFeePayer.equals(walletPubkey)) {
+            return submitReject('Signed transaction fee payer does not match wallet', { submittedFeePayer: submittedFeePayer?.toBase58?.() || null });
+          }
+          if (!getConfirmedTransactionSignerMatches(confirmedTx, walletPubkey)) {
+            return submitReject('Signed transaction signer does not match wallet', {
+              submittedFeePayer: submittedFeePayer?.toBase58?.() || null,
+              txSignature,
+            });
+          }
+          submittedPrograms = getConfirmedTransactionProgramIds(confirmedTx).map(pid => pid.toBase58());
+          if (submittedPrograms.some(pid => !allowedPrograms.has(pid))) {
+            return submitReject('Signed transaction contains unsupported instructions', {
+              versioned: confirmedTx.version === 0,
+              submittedPrograms,
+              txSignature,
+            });
+          }
+
+          const confirmedInstructions = confirmedTx?.transaction?.message?.instructions || [];
+          if (submittedMintAccount.owner.equals(METAPLEX_CORE_PROGRAM)) {
+            const coreIx = confirmedInstructions.find(ix => {
+              const programId = getConfirmedTransactionAccountKeys(confirmedTx)[ix.programIdIndex];
               return programId && programId.equals(METAPLEX_CORE_PROGRAM);
             });
             if (!coreIx) {
               return submitReject('Signed transaction does not contain the expected Core burn instruction', {
-                versioned: true,
+                versioned: confirmedTx.version === 0,
                 submittedPrograms,
+                txSignature,
               });
             }
-            const coreKeys = getVersionedInstructionKeys(submittedTx, coreIx);
+            const coreKeys = getConfirmedTransactionInstructionKeys(confirmedTx, coreIx);
             if (!coreKeys[0] || !coreKeys[0].equals(mintPubkey)) {
               return submitReject('Signed transaction asset does not match requested nftMint', {
-                versioned: true,
+                versioned: confirmedTx.version === 0,
                 coreKeys: coreKeys.map(k => k.toBase58()),
+                txSignature,
               });
             }
             if (!coreKeys.some(key => key.equals(walletPubkey))) {
               return submitReject('Signed transaction signer does not match wallet', {
-                versioned: true,
+                versioned: confirmedTx.version === 0,
                 coreKeys: coreKeys.map(k => k.toBase58()),
+                txSignature,
               });
             }
-          } else {
-            const coreIx = submittedTx.instructions.find(ix => ix.programId.equals(METAPLEX_CORE_PROGRAM));
-            if (!coreIx) {
-              return sendJson(400, { error: 'Signed transaction does not contain the expected Core burn instruction' });
-            }
-            if (!coreIx.keys[0] || !coreIx.keys[0].pubkey.equals(mintPubkey)) {
-              return submitReject('Signed transaction asset does not match requested nftMint', {
-                versioned: false,
-                coreKeys: coreIx.keys.map(k => k.pubkey.toBase58()),
-              });
-            }
-            if (!coreIx.keys.some(k => k.pubkey.equals(walletPubkey) && k.isSigner)) {
-              return submitReject('Signed transaction signer does not match wallet', {
-                versioned: false,
-                coreKeys: coreIx.keys.map(k => ({ pubkey: k.pubkey.toBase58(), isSigner: !!k.isSigner })),
-              });
-            }
-          }
-        } else if (submittedMintAccount.owner.equals(TOKEN_PROGRAM_ID) || submittedMintAccount.owner.equals(TOKEN_2022_PROGRAM_ID)) {
-          const tokenProgramId = submittedMintAccount.owner.equals(TOKEN_2022_PROGRAM_ID) ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
-          const expectedAta = await getAssociatedTokenAddress(mintPubkey, walletPubkey, false, tokenProgramId);
-          let sawBurn = false;
-          let sawClose = false;
-          if (submittedTx instanceof VersionedTransaction) {
-            for (const ix of submittedTx.message.compiledInstructions) {
-              const programId = submittedTx.message.staticAccountKeys[ix.programIdIndex];
+          } else if (submittedMintAccount.owner.equals(TOKEN_PROGRAM_ID) || submittedMintAccount.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+            const tokenProgramId = submittedMintAccount.owner.equals(TOKEN_2022_PROGRAM_ID) ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+            const expectedAta = await getAssociatedTokenAddress(mintPubkey, walletPubkey, false, tokenProgramId);
+            let sawBurn = false;
+            let sawClose = false;
+            for (const ix of confirmedInstructions) {
+              const programId = getConfirmedTransactionAccountKeys(confirmedTx)[ix.programIdIndex];
               if (!programId || !programId.equals(tokenProgramId)) continue;
-              const keys = getVersionedInstructionKeys(submittedTx, ix);
-              const opcode = ix.data && ix.data.length ? ix.data[0] : null;
+              const keys = getConfirmedTransactionInstructionKeys(confirmedTx, ix);
+              const data = decodeInstructionData(ix.data);
+              const opcode = data.length ? data[0] : null;
               if (opcode === 8 && keys[0] && keys[1] && keys[2] && keys[0].equals(expectedAta) && keys[1].equals(mintPubkey) && keys[2].equals(walletPubkey)) {
                 sawBurn = true;
               }
@@ -1376,78 +1417,218 @@ function handleBurnToBecome(req, res, url) {
                 sawClose = true;
               }
             }
-          } else {
-            for (const ix of submittedTx.instructions.filter(ix => ix.programId.equals(tokenProgramId))) {
-              const opcode = ix.data && ix.data.length ? ix.data[0] : null;
-              if (opcode === 8 && ix.keys[0] && ix.keys[1] && ix.keys[2] && ix.keys[0].pubkey.equals(expectedAta) && ix.keys[1].pubkey.equals(mintPubkey) && ix.keys[2].pubkey.equals(walletPubkey) && ix.keys[2].isSigner) {
-                sawBurn = true;
-              }
-              if (opcode === 9 && ix.keys[0] && ix.keys[1] && ix.keys[2] && ix.keys[0].pubkey.equals(expectedAta) && ix.keys[1].pubkey.equals(walletPubkey) && ix.keys[2].pubkey.equals(walletPubkey) && ix.keys[2].isSigner) {
-                sawClose = true;
-              }
+            if (!sawBurn || !sawClose) {
+              return submitReject('Signed transaction does not match the expected ' + (tokenProgramId.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'SPL') + ' burn flow', {
+                versioned: confirmedTx.version === 0,
+                sawBurn,
+                sawClose,
+                tokenProgramId: tokenProgramId.toBase58(),
+                submittedPrograms,
+                txSignature,
+              });
             }
-          }
-          if (!sawBurn || !sawClose) {
-            return submitReject('Signed transaction does not match the expected ' + (tokenProgramId.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'SPL') + ' burn flow', {
-              versioned: submittedTx instanceof VersionedTransaction,
-              sawBurn,
-              sawClose,
-              tokenProgramId: tokenProgramId.toBase58(),
+          } else {
+            return submitReject('Unsupported NFT program for burn: ' + submittedMintAccount.owner.toBase58(), {
+              mintOwner: submittedMintAccount.owner.toBase58(),
               submittedPrograms,
+              txSignature,
             });
           }
-        } else {
-          return submitReject('Unsupported NFT program for burn: ' + submittedMintAccount.owner.toBase58(), {
-            mintOwner: submittedMintAccount.owner.toBase58(),
-            submittedPrograms,
-          });
-        }
 
-        try {
-          console.log('[BurnPublic] submit validation passed', JSON.stringify({
-            wallet,
-            nftMint,
-            versioned: submittedTx instanceof VersionedTransaction,
-            submittedFeePayer: submittedFeePayer?.toBase58?.() || null,
-            signatureDiagnostics: submittedSignatureDiagnostics,
-            submittedPrograms,
-            mintOwner: submittedMintAccount.owner.toBase58(),
-          }));
-        } catch {}
-
-        // 2. Submit the signed burn transaction
-        const txBuffer = Buffer.from(signedTransaction, 'base64');
-        let burnTx;
-        try {
-          burnTx = await connection.sendRawTransaction(txBuffer);
-        } catch (sendErr) {
-          let sendLogs = null;
+          submittedSignatureDiagnostics = [{ txSignature, confirmedOnChain: true }];
+          versionedSubmission = confirmedTx.version === 0;
           try {
-            if (typeof sendErr?.getLogs === 'function') {
-              sendLogs = await sendErr.getLogs(connection);
-            }
-          } catch (sendLogErr) {
-            sendLogs = ['getLogs failed: ' + (sendLogErr?.message || String(sendLogErr))];
-          }
-          try {
-            console.error('[BurnPublic] submit sendRawTransaction failed', JSON.stringify({
+            console.log('[BurnPublic] submit validation passed', JSON.stringify({
               wallet,
               nftMint,
-              versioned: submittedTx instanceof VersionedTransaction,
+              versioned: versionedSubmission,
               submittedFeePayer: submittedFeePayer?.toBase58?.() || null,
               signatureDiagnostics: submittedSignatureDiagnostics,
               submittedPrograms,
-              sendError: sendErr?.message || String(sendErr),
-              transactionMessage: sendErr?.transactionMessage || null,
-              transactionLogs: sendErr?.transactionLogs || sendLogs || null,
+              mintOwner: submittedMintAccount.owner.toBase58(),
+              txSignature,
             }));
-          } catch (logErr) {
-            console.error('[BurnPublic] submit sendRawTransaction failed', sendErr, logErr?.message || logErr);
+          } catch {}
+        } else {
+          try {
+            submittedTx = isVersionedSerializedTransaction(signedTxBuffer)
+              ? VersionedTransaction.deserialize(signedTxBuffer)
+              : Transaction.from(signedTxBuffer);
+          } catch (parseErr) {
+            return submitReject('Invalid signed transaction payload', { parseError: parseErr?.message || String(parseErr) });
           }
-          throw sendErr;
+          submittedFeePayer = getSubmittedTransactionFeePayer(submittedTx);
+          submittedSignatureDiagnostics = submittedTx instanceof VersionedTransaction
+            ? submittedTx.signatures.map((sig, index) => ({
+                index,
+                allZero: Buffer.from(sig).every(byte => byte === 0),
+                prefix: Buffer.from(sig).toString('base64').slice(0, 16),
+              }))
+            : submittedTx.signatures.map((sig, index) => ({
+                index,
+                publicKey: sig.publicKey?.toBase58?.() || null,
+                hasSignature: !!sig.signature,
+                allZero: !sig.signature || Buffer.from(sig.signature).every(byte => byte === 0),
+                prefix: sig.signature ? Buffer.from(sig.signature).toString('base64').slice(0, 16) : null,
+              }));
+          if (!submittedFeePayer || !submittedFeePayer.equals(walletPubkey)) {
+            return submitReject('Signed transaction fee payer does not match wallet', { submittedFeePayer: submittedFeePayer?.toBase58?.() || null });
+          }
+          const signerMatchesWallet = getSubmittedTransactionSignerMatches(submittedTx, walletPubkey);
+          if (!signerMatchesWallet) {
+            return submitReject('Signed transaction signer does not match wallet', {
+              submittedFeePayer: submittedFeePayer?.toBase58?.() || null,
+              signerMatchesWallet,
+              versioned: submittedTx instanceof VersionedTransaction,
+            });
+          }
+          submittedPrograms = getSubmittedTransactionProgramIds(submittedTx).map(pid => pid.toBase58());
+          if (submittedPrograms.some(pid => !allowedPrograms.has(pid))) {
+            return submitReject('Signed transaction contains unsupported instructions', {
+              versioned: submittedTx instanceof VersionedTransaction,
+              submittedPrograms,
+            });
+          }
+          if (submittedMintAccount.owner.equals(METAPLEX_CORE_PROGRAM)) {
+            if (submittedTx instanceof VersionedTransaction) {
+              const coreIx = submittedTx.message.compiledInstructions.find(ix => {
+                const programId = submittedTx.message.staticAccountKeys[ix.programIdIndex];
+                return programId && programId.equals(METAPLEX_CORE_PROGRAM);
+              });
+              if (!coreIx) {
+                return submitReject('Signed transaction does not contain the expected Core burn instruction', {
+                  versioned: true,
+                  submittedPrograms,
+                });
+              }
+              const coreKeys = getVersionedInstructionKeys(submittedTx, coreIx);
+              if (!coreKeys[0] || !coreKeys[0].equals(mintPubkey)) {
+                return submitReject('Signed transaction asset does not match requested nftMint', {
+                  versioned: true,
+                  coreKeys: coreKeys.map(k => k.toBase58()),
+                });
+              }
+              if (!coreKeys.some(key => key.equals(walletPubkey))) {
+                return submitReject('Signed transaction signer does not match wallet', {
+                  versioned: true,
+                  coreKeys: coreKeys.map(k => k.toBase58()),
+                });
+              }
+            } else {
+              const coreIx = submittedTx.instructions.find(ix => ix.programId.equals(METAPLEX_CORE_PROGRAM));
+              if (!coreIx) {
+                return sendJson(400, { error: 'Signed transaction does not contain the expected Core burn instruction' });
+              }
+              if (!coreIx.keys[0] || !coreIx.keys[0].pubkey.equals(mintPubkey)) {
+                return submitReject('Signed transaction asset does not match requested nftMint', {
+                  versioned: false,
+                  coreKeys: coreIx.keys.map(k => k.pubkey.toBase58()),
+                });
+              }
+              if (!coreIx.keys.some(k => k.pubkey.equals(walletPubkey) && k.isSigner)) {
+                return submitReject('Signed transaction signer does not match wallet', {
+                  versioned: false,
+                  coreKeys: coreIx.keys.map(k => ({ pubkey: k.pubkey.toBase58(), isSigner: !!k.isSigner })),
+                });
+              }
+            }
+          } else if (submittedMintAccount.owner.equals(TOKEN_PROGRAM_ID) || submittedMintAccount.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+            const tokenProgramId = submittedMintAccount.owner.equals(TOKEN_2022_PROGRAM_ID) ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+            const expectedAta = await getAssociatedTokenAddress(mintPubkey, walletPubkey, false, tokenProgramId);
+            let sawBurn = false;
+            let sawClose = false;
+            if (submittedTx instanceof VersionedTransaction) {
+              for (const ix of submittedTx.message.compiledInstructions) {
+                const programId = submittedTx.message.staticAccountKeys[ix.programIdIndex];
+                if (!programId || !programId.equals(tokenProgramId)) continue;
+                const keys = getVersionedInstructionKeys(submittedTx, ix);
+                const opcode = ix.data && ix.data.length ? ix.data[0] : null;
+                if (opcode === 8 && keys[0] && keys[1] && keys[2] && keys[0].equals(expectedAta) && keys[1].equals(mintPubkey) && keys[2].equals(walletPubkey)) {
+                  sawBurn = true;
+                }
+                if (opcode === 9 && keys[0] && keys[1] && keys[2] && keys[0].equals(expectedAta) && keys[1].equals(walletPubkey) && keys[2].equals(walletPubkey)) {
+                  sawClose = true;
+                }
+              }
+            } else {
+              for (const ix of submittedTx.instructions.filter(ix => ix.programId.equals(tokenProgramId))) {
+                const opcode = ix.data && ix.data.length ? ix.data[0] : null;
+                if (opcode === 8 && ix.keys[0] && ix.keys[1] && ix.keys[2] && ix.keys[0].pubkey.equals(expectedAta) && ix.keys[1].pubkey.equals(mintPubkey) && ix.keys[2].pubkey.equals(walletPubkey) && ix.keys[2].isSigner) {
+                  sawBurn = true;
+                }
+                if (opcode === 9 && ix.keys[0] && ix.keys[1] && ix.keys[2] && ix.keys[0].pubkey.equals(expectedAta) && ix.keys[1].pubkey.equals(walletPubkey) && ix.keys[2].pubkey.equals(walletPubkey) && ix.keys[2].isSigner) {
+                  sawClose = true;
+                }
+              }
+            }
+            if (!sawBurn || !sawClose) {
+              return submitReject('Signed transaction does not match the expected ' + (tokenProgramId.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'SPL') + ' burn flow', {
+                versioned: submittedTx instanceof VersionedTransaction,
+                sawBurn,
+                sawClose,
+                tokenProgramId: tokenProgramId.toBase58(),
+                submittedPrograms,
+              });
+            }
+          } else {
+            return submitReject('Unsupported NFT program for burn: ' + submittedMintAccount.owner.toBase58(), {
+              mintOwner: submittedMintAccount.owner.toBase58(),
+              submittedPrograms,
+            });
+          }
+
+          versionedSubmission = submittedTx instanceof VersionedTransaction;
+          try {
+            console.log('[BurnPublic] submit validation passed', JSON.stringify({
+              wallet,
+              nftMint,
+              versioned: versionedSubmission,
+              submittedFeePayer: submittedFeePayer?.toBase58?.() || null,
+              signatureDiagnostics: submittedSignatureDiagnostics,
+              submittedPrograms,
+              mintOwner: submittedMintAccount.owner.toBase58(),
+            }));
+          } catch {}
         }
-        await connection.confirmTransaction(burnTx, 'confirmed');
-        console.log('[BurnPublic] Burn confirmed:', burnTx);
+
+        // 2. Submit or confirm the burn transaction
+        let burnTx;
+        if (hasTxSignature) {
+          burnTx = txSignature;
+          console.log('[BurnPublic] Burn confirmed via wallet broadcast:', burnTx);
+        } else {
+          const txBuffer = Buffer.from(signedTransaction, 'base64');
+          try {
+            burnTx = await connection.sendRawTransaction(txBuffer);
+          } catch (sendErr) {
+            let sendLogs = null;
+            try {
+              if (typeof sendErr?.getLogs === 'function') {
+                sendLogs = await sendErr.getLogs(connection);
+              }
+            } catch (sendLogErr) {
+              sendLogs = ['getLogs failed: ' + (sendLogErr?.message || String(sendLogErr))];
+            }
+            try {
+              console.error('[BurnPublic] submit sendRawTransaction failed', JSON.stringify({
+                wallet,
+                nftMint,
+                versioned: submittedTx instanceof VersionedTransaction,
+                submittedFeePayer: submittedFeePayer?.toBase58?.() || null,
+                signatureDiagnostics: submittedSignatureDiagnostics,
+                submittedPrograms,
+                sendError: sendErr?.message || String(sendErr),
+                transactionMessage: sendErr?.transactionMessage || null,
+                transactionLogs: sendErr?.transactionLogs || sendLogs || null,
+              }));
+            } catch (logErr) {
+              console.error('[BurnPublic] submit sendRawTransaction failed', sendErr, logErr?.message || logErr);
+            }
+            throw sendErr;
+          }
+          await connection.confirmTransaction(burnTx, 'confirmed');
+          console.log('[BurnPublic] Burn confirmed:', burnTx);
+        }
         
         // 2. Determine artwork URI
         let artworkUri, metadataUri, nftName;

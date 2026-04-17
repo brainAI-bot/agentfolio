@@ -158,16 +158,24 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
       }));
 
       const tx = await deserializeBurnTransaction(prepData.transaction);
-      const signed = await wallet.signTransaction(tx as any);
+      const submitPayload: Record<string, string> = {
+        wallet: walletAddress,
+        nftMint: state.selectedNFT.mint,
+      };
+      if (wallet.signAndSendTransaction) {
+        const sent = await wallet.signAndSendTransaction(tx as any);
+        const burnSignature = typeof sent === "string" ? sent : sent?.signature;
+        if (!burnSignature) throw new Error("Wallet did not return a burn transaction signature");
+        submitPayload.txSignature = burnSignature;
+      } else {
+        const signed = await wallet.signTransaction(tx as any);
+        submitPayload.signedTransaction = Buffer.from(signed.serialize()).toString("base64");
+      }
 
       const submitRes = await fetch(`${API}/api/burn-to-become/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wallet: walletAddress,
-          nftMint: state.selectedNFT.mint,
-          signedTransaction: Buffer.from(signed.serialize()).toString("base64"),
-        }),
+        body: JSON.stringify(submitPayload),
       });
       const submitData = await submitRes.json().catch(() => ({}));
       if (!submitRes.ok) throw new Error(submitData.error || "Burn failed");
