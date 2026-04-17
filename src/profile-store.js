@@ -1871,12 +1871,16 @@ function registerRoutes(app) {
         for (const p of all) {
           try {
             const w = JSON.parse(p.wallets || '{}');
-            if (w.solana === wallet) { match = { id: p.id, name: p.name, wallet: p.wallet || null, wallets: p.wallets || null, claimed_by: p.claimed_by || null }; break; }
+            if (w.solana === wallet) { match = { id: p.id, name: p.name, wallet: p.wallet || null, wallets: w || null, claimed_by: p.claimed_by || null }; break; }
           } catch (_) {}
         }
       }
       if (match) {
-        return res.json({ found: true, profileId: match.id, name: match.name, wallet: match.wallet || null, wallets: match.wallets || null, claimed_by: match.claimed_by || null, profile: { id: match.id, name: match.name, wallet: match.wallet || null, wallets: match.wallets || null, claimed_by: match.claimed_by || null } });
+        let normalizedWallets = match.wallets || null;
+        if (typeof normalizedWallets === 'string') {
+          try { normalizedWallets = JSON.parse(normalizedWallets); } catch {}
+        }
+        return res.json({ found: true, profileId: match.id, name: match.name, wallet: match.wallet || null, wallets: normalizedWallets, claimed_by: match.claimed_by || null, profile: { id: match.id, name: match.name, wallet: match.wallet || null, wallets: normalizedWallets, claimed_by: match.claimed_by || null } });
       }
       return res.status(404).json({ found: false, error: 'No profile found for this wallet' });
     } catch (e) {

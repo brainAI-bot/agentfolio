@@ -443,10 +443,14 @@ function registerFrontendBridge(app, profileStore) {
       const { addr } = req.params;
       const like = `%${String(addr || '').replace(/'/g, '')}%`;
       const profile = db.prepare(
-        'SELECT id, name, avatar, handle, claimed, wallet, wallets, created_at, updated_at FROM profiles WHERE wallet = ? OR claimed_by = ? OR wallets LIKE ? ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1'
+        'SELECT id, name, avatar, handle, claimed, wallet, wallets, claimed_by, created_at, updated_at FROM profiles WHERE wallet = ? OR claimed_by = ? OR wallets LIKE ? ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1'
       ).get(addr, addr, like);
       if (!profile) return res.status(404).json({ found: false, address: addr });
-      res.json({ found: true, profileId: profile.id, name: profile.name, avatar: profile.avatar, handle: profile.handle, wallet: profile.wallet || null, wallets: profile.wallets || null, claimed_by: profile.claimed_by || null, claimed: !!profile.claimed, profile: { id: profile.id, name: profile.name, wallet: profile.wallet || null, wallets: profile.wallets || null, claimed_by: profile.claimed_by || null } });
+      let normalizedWallets = profile.wallets || null;
+      if (typeof normalizedWallets === 'string') {
+        try { normalizedWallets = JSON.parse(normalizedWallets); } catch {}
+      }
+      res.json({ found: true, profileId: profile.id, name: profile.name, avatar: profile.avatar, handle: profile.handle, wallet: profile.wallet || null, wallets: normalizedWallets, claimed_by: profile.claimed_by || null, claimed: !!profile.claimed, profile: { id: profile.id, name: profile.name, wallet: profile.wallet || null, wallets: normalizedWallets, claimed_by: profile.claimed_by || null } });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
