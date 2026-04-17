@@ -10,7 +10,8 @@ import "@solana/wallet-adapter-react-ui/styles.css";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "";
 const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
-const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || clusterApiUrl(SOLANA_CLUSTER as "devnet" | "testnet" | "mainnet-beta");
+const FALLBACK_HELIUS_RPC_URL = "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb";
+const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || FALLBACK_HELIUS_RPC_URL || clusterApiUrl(SOLANA_CLUSTER as "devnet" | "testnet" | "mainnet-beta");
 
 function isMobileBrowser(): boolean {
   if (typeof window === "undefined") return false;
