@@ -1568,7 +1568,9 @@ function registerRoutes(app) {
       }
     }
     if (enriched) {
-      enriched.profileCompleteness = calculateProfileCompletenessPercent(enriched);
+      const completeness = calculateProfileCompletenessPercent(enriched);
+      enriched.profileCompleteness = completeness;
+      enriched.profile_completeness = completeness;
     }
     res.json(enriched);
   });
