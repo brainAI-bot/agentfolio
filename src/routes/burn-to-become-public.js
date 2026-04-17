@@ -1250,20 +1250,39 @@ function handleBurnToBecome(req, res, url) {
         const walletPubkey = new PublicKey(wallet);
         const mintPubkey = new PublicKey(nftMint);
         const signedTxBuffer = Buffer.from(signedTransaction, 'base64');
+        const submitReject = (message, extra = {}) => {
+          try {
+            console.warn('[BurnPublic] submit reject', JSON.stringify({
+              reason: message,
+              wallet,
+              nftMint,
+              signedLength: signedTxBuffer.length,
+              ...extra,
+            }));
+          } catch (logErr) {
+            console.warn('[BurnPublic] submit reject', message, logErr?.message || logErr);
+          }
+          return sendJson(400, { error: message });
+        };
         let submittedTx;
         try {
           submittedTx = isVersionedSerializedTransaction(signedTxBuffer)
             ? VersionedTransaction.deserialize(signedTxBuffer)
             : Transaction.from(signedTxBuffer);
-        } catch {
-          return sendJson(400, { error: 'Invalid signed transaction payload' });
+        } catch (parseErr) {
+          return submitReject('Invalid signed transaction payload', { parseError: parseErr?.message || String(parseErr) });
         }
         const submittedFeePayer = getSubmittedTransactionFeePayer(submittedTx);
         if (!submittedFeePayer || !submittedFeePayer.equals(walletPubkey)) {
-          return sendJson(400, { error: 'Signed transaction fee payer does not match wallet' });
+          return submitReject('Signed transaction fee payer does not match wallet', { submittedFeePayer: submittedFeePayer?.toBase58?.() || null });
         }
-        if (!getSubmittedTransactionSignerMatches(submittedTx, walletPubkey)) {
-          return sendJson(400, { error: 'Signed transaction signer does not match wallet' });
+        const signerMatchesWallet = getSubmittedTransactionSignerMatches(submittedTx, walletPubkey);
+        if (!signerMatchesWallet) {
+          return submitReject('Signed transaction signer does not match wallet', {
+            submittedFeePayer: submittedFeePayer?.toBase58?.() || null,
+            signerMatchesWallet,
+            versioned: submittedTx instanceof VersionedTransaction,
+          });
         }
         const submittedPrograms = getSubmittedTransactionProgramIds(submittedTx).map(pid => pid.toBase58());
         const allowedPrograms = new Set([
@@ -1273,7 +1292,10 @@ function handleBurnToBecome(req, res, url) {
           'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d',
         ]);
         if (submittedPrograms.some(pid => !allowedPrograms.has(pid))) {
-          return sendJson(400, { error: 'Signed transaction contains unsupported instructions' });
+          return submitReject('Signed transaction contains unsupported instructions', {
+            versioned: submittedTx instanceof VersionedTransaction,
+            submittedPrograms,
+          });
         }
         const submittedMintAccount = await connection.getAccountInfo(mintPubkey);
         if (!submittedMintAccount) {
@@ -1287,14 +1309,23 @@ function handleBurnToBecome(req, res, url) {
               return programId && programId.equals(METAPLEX_CORE_PROGRAM);
             });
             if (!coreIx) {
-              return sendJson(400, { error: 'Signed transaction does not contain the expected Core burn instruction' });
+              return submitReject('Signed transaction does not contain the expected Core burn instruction', {
+                versioned: true,
+                submittedPrograms,
+              });
             }
             const coreKeys = getVersionedInstructionKeys(submittedTx, coreIx);
             if (!coreKeys[0] || !coreKeys[0].equals(mintPubkey)) {
-              return sendJson(400, { error: 'Signed transaction asset does not match requested nftMint' });
+              return submitReject('Signed transaction asset does not match requested nftMint', {
+                versioned: true,
+                coreKeys: coreKeys.map(k => k.toBase58()),
+              });
             }
             if (!coreKeys.some(key => key.equals(walletPubkey))) {
-              return sendJson(400, { error: 'Signed transaction signer does not match wallet' });
+              return submitReject('Signed transaction signer does not match wallet', {
+                versioned: true,
+                coreKeys: coreKeys.map(k => k.toBase58()),
+              });
             }
           } else {
             const coreIx = submittedTx.instructions.find(ix => ix.programId.equals(METAPLEX_CORE_PROGRAM));
@@ -1302,10 +1333,16 @@ function handleBurnToBecome(req, res, url) {
               return sendJson(400, { error: 'Signed transaction does not contain the expected Core burn instruction' });
             }
             if (!coreIx.keys[0] || !coreIx.keys[0].pubkey.equals(mintPubkey)) {
-              return sendJson(400, { error: 'Signed transaction asset does not match requested nftMint' });
+              return submitReject('Signed transaction asset does not match requested nftMint', {
+                versioned: false,
+                coreKeys: coreIx.keys.map(k => k.pubkey.toBase58()),
+              });
             }
             if (!coreIx.keys.some(k => k.pubkey.equals(walletPubkey) && k.isSigner)) {
-              return sendJson(400, { error: 'Signed transaction signer does not match wallet' });
+              return submitReject('Signed transaction signer does not match wallet', {
+                versioned: false,
+                coreKeys: coreIx.keys.map(k => ({ pubkey: k.pubkey.toBase58(), isSigner: !!k.isSigner })),
+              });
             }
           }
         } else if (submittedMintAccount.owner.equals(TOKEN_PROGRAM_ID) || submittedMintAccount.owner.equals(TOKEN_2022_PROGRAM_ID)) {
@@ -1338,11 +1375,31 @@ function handleBurnToBecome(req, res, url) {
             }
           }
           if (!sawBurn || !sawClose) {
-            return sendJson(400, { error: 'Signed transaction does not match the expected ' + (tokenProgramId.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'SPL') + ' burn flow' });
+            return submitReject('Signed transaction does not match the expected ' + (tokenProgramId.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'SPL') + ' burn flow', {
+              versioned: submittedTx instanceof VersionedTransaction,
+              sawBurn,
+              sawClose,
+              tokenProgramId: tokenProgramId.toBase58(),
+              submittedPrograms,
+            });
           }
         } else {
-          return sendJson(400, { error: 'Unsupported NFT program for burn: ' + submittedMintAccount.owner.toBase58() });
+          return submitReject('Unsupported NFT program for burn: ' + submittedMintAccount.owner.toBase58(), {
+            mintOwner: submittedMintAccount.owner.toBase58(),
+            submittedPrograms,
+          });
         }
+
+        try {
+          console.log('[BurnPublic] submit validation passed', JSON.stringify({
+            wallet,
+            nftMint,
+            versioned: submittedTx instanceof VersionedTransaction,
+            submittedFeePayer: submittedFeePayer?.toBase58?.() || null,
+            submittedPrograms,
+            mintOwner: submittedMintAccount.owner.toBase58(),
+          }));
+        } catch {}
 
         // 2. Submit the signed burn transaction
         const txBuffer = Buffer.from(signedTransaction, 'base64');
