@@ -84,6 +84,36 @@ function serializeBurnPrepareTransaction(tx) {
   return tx.serialize({ requireAllSignatures: false }).toString('base64');
 }
 
+function getSubmittedTransactionFeePayer(tx) {
+  if (tx instanceof VersionedTransaction) {
+    return tx.message.staticAccountKeys?.[0] || null;
+  }
+  return tx.feePayer || null;
+}
+
+function getSubmittedTransactionProgramIds(tx) {
+  if (tx instanceof VersionedTransaction) {
+    return tx.message.compiledInstructions
+      .map(ix => tx.message.staticAccountKeys[ix.programIdIndex])
+      .filter(Boolean);
+  }
+  return tx.instructions.map(ix => ix.programId);
+}
+
+function getSubmittedTransactionSignerMatches(tx, pubkey) {
+  if (tx instanceof VersionedTransaction) {
+    const signerCount = tx.message.header?.numRequiredSignatures || 0;
+    return tx.message.staticAccountKeys.slice(0, signerCount).some(key => key.equals(pubkey));
+  }
+  return tx.signatures.some(sig => sig.publicKey && sig.publicKey.equals(pubkey));
+}
+
+function getVersionedInstructionKeys(tx, compiledIx) {
+  return compiledIx.accountKeyIndexes
+    .map(index => tx.message.staticAccountKeys[index])
+    .filter(Boolean);
+}
+
 async function checkSatpOnChain(wallet) {
   const { Connection } = require('@solana/web3.js');
   const conn = new Connection(HELIUS_RPC, 'confirmed');
@@ -1219,16 +1249,23 @@ function handleBurnToBecome(req, res, url) {
         // 1. Validate the signed burn transaction before broadcast
         const walletPubkey = new PublicKey(wallet);
         const mintPubkey = new PublicKey(nftMint);
+        const signedTxBuffer = Buffer.from(signedTransaction, 'base64');
         let submittedTx;
         try {
-          submittedTx = Transaction.from(Buffer.from(signedTransaction, 'base64'));
+          submittedTx = isVersionedSerializedTransaction(signedTxBuffer)
+            ? VersionedTransaction.deserialize(signedTxBuffer)
+            : Transaction.from(signedTxBuffer);
         } catch {
           return sendJson(400, { error: 'Invalid signed transaction payload' });
         }
-        if (!submittedTx.feePayer || !submittedTx.feePayer.equals(walletPubkey)) {
+        const submittedFeePayer = getSubmittedTransactionFeePayer(submittedTx);
+        if (!submittedFeePayer || !submittedFeePayer.equals(walletPubkey)) {
           return sendJson(400, { error: 'Signed transaction fee payer does not match wallet' });
         }
-        const submittedPrograms = submittedTx.instructions.map(ix => ix.programId.toBase58());
+        if (!getSubmittedTransactionSignerMatches(submittedTx, walletPubkey)) {
+          return sendJson(400, { error: 'Signed transaction signer does not match wallet' });
+        }
+        const submittedPrograms = getSubmittedTransactionProgramIds(submittedTx).map(pid => pid.toBase58());
         const allowedPrograms = new Set([
           ComputeBudgetProgram.programId.toBase58(),
           TOKEN_PROGRAM_ID.toBase58(),
@@ -1244,28 +1281,60 @@ function handleBurnToBecome(req, res, url) {
         }
         const METAPLEX_CORE_PROGRAM = new PublicKey('CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d');
         if (submittedMintAccount.owner.equals(METAPLEX_CORE_PROGRAM)) {
-          const coreIx = submittedTx.instructions.find(ix => ix.programId.equals(METAPLEX_CORE_PROGRAM));
-          if (!coreIx) {
-            return sendJson(400, { error: 'Signed transaction does not contain the expected Core burn instruction' });
-          }
-          if (!coreIx.keys[0] || !coreIx.keys[0].pubkey.equals(mintPubkey)) {
-            return sendJson(400, { error: 'Signed transaction asset does not match requested nftMint' });
-          }
-          if (!coreIx.keys.some(k => k.pubkey.equals(walletPubkey) && k.isSigner)) {
-            return sendJson(400, { error: 'Signed transaction signer does not match wallet' });
+          if (submittedTx instanceof VersionedTransaction) {
+            const coreIx = submittedTx.message.compiledInstructions.find(ix => {
+              const programId = submittedTx.message.staticAccountKeys[ix.programIdIndex];
+              return programId && programId.equals(METAPLEX_CORE_PROGRAM);
+            });
+            if (!coreIx) {
+              return sendJson(400, { error: 'Signed transaction does not contain the expected Core burn instruction' });
+            }
+            const coreKeys = getVersionedInstructionKeys(submittedTx, coreIx);
+            if (!coreKeys[0] || !coreKeys[0].equals(mintPubkey)) {
+              return sendJson(400, { error: 'Signed transaction asset does not match requested nftMint' });
+            }
+            if (!coreKeys.some(key => key.equals(walletPubkey))) {
+              return sendJson(400, { error: 'Signed transaction signer does not match wallet' });
+            }
+          } else {
+            const coreIx = submittedTx.instructions.find(ix => ix.programId.equals(METAPLEX_CORE_PROGRAM));
+            if (!coreIx) {
+              return sendJson(400, { error: 'Signed transaction does not contain the expected Core burn instruction' });
+            }
+            if (!coreIx.keys[0] || !coreIx.keys[0].pubkey.equals(mintPubkey)) {
+              return sendJson(400, { error: 'Signed transaction asset does not match requested nftMint' });
+            }
+            if (!coreIx.keys.some(k => k.pubkey.equals(walletPubkey) && k.isSigner)) {
+              return sendJson(400, { error: 'Signed transaction signer does not match wallet' });
+            }
           }
         } else if (submittedMintAccount.owner.equals(TOKEN_PROGRAM_ID) || submittedMintAccount.owner.equals(TOKEN_2022_PROGRAM_ID)) {
           const tokenProgramId = submittedMintAccount.owner.equals(TOKEN_2022_PROGRAM_ID) ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
           const expectedAta = await getAssociatedTokenAddress(mintPubkey, walletPubkey, false, tokenProgramId);
           let sawBurn = false;
           let sawClose = false;
-          for (const ix of submittedTx.instructions.filter(ix => ix.programId.equals(tokenProgramId))) {
-            const opcode = ix.data && ix.data.length ? ix.data[0] : null;
-            if (opcode === 8 && ix.keys[0] && ix.keys[1] && ix.keys[2] && ix.keys[0].pubkey.equals(expectedAta) && ix.keys[1].pubkey.equals(mintPubkey) && ix.keys[2].pubkey.equals(walletPubkey) && ix.keys[2].isSigner) {
-              sawBurn = true;
+          if (submittedTx instanceof VersionedTransaction) {
+            for (const ix of submittedTx.message.compiledInstructions) {
+              const programId = submittedTx.message.staticAccountKeys[ix.programIdIndex];
+              if (!programId || !programId.equals(tokenProgramId)) continue;
+              const keys = getVersionedInstructionKeys(submittedTx, ix);
+              const opcode = ix.data && ix.data.length ? ix.data[0] : null;
+              if (opcode === 8 && keys[0] && keys[1] && keys[2] && keys[0].equals(expectedAta) && keys[1].equals(mintPubkey) && keys[2].equals(walletPubkey)) {
+                sawBurn = true;
+              }
+              if (opcode === 9 && keys[0] && keys[1] && keys[2] && keys[0].equals(expectedAta) && keys[1].equals(walletPubkey) && keys[2].equals(walletPubkey)) {
+                sawClose = true;
+              }
             }
-            if (opcode === 9 && ix.keys[0] && ix.keys[1] && ix.keys[2] && ix.keys[0].pubkey.equals(expectedAta) && ix.keys[1].pubkey.equals(walletPubkey) && ix.keys[2].pubkey.equals(walletPubkey) && ix.keys[2].isSigner) {
-              sawClose = true;
+          } else {
+            for (const ix of submittedTx.instructions.filter(ix => ix.programId.equals(tokenProgramId))) {
+              const opcode = ix.data && ix.data.length ? ix.data[0] : null;
+              if (opcode === 8 && ix.keys[0] && ix.keys[1] && ix.keys[2] && ix.keys[0].pubkey.equals(expectedAta) && ix.keys[1].pubkey.equals(mintPubkey) && ix.keys[2].pubkey.equals(walletPubkey) && ix.keys[2].isSigner) {
+                sawBurn = true;
+              }
+              if (opcode === 9 && ix.keys[0] && ix.keys[1] && ix.keys[2] && ix.keys[0].pubkey.equals(expectedAta) && ix.keys[1].pubkey.equals(walletPubkey) && ix.keys[2].pubkey.equals(walletPubkey) && ix.keys[2].isSigner) {
+                sawClose = true;
+              }
             }
           }
           if (!sawBurn || !sawClose) {
