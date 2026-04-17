@@ -1947,14 +1947,24 @@ function registerRoutes(app) {
       }
 
       if (row) {
+        let parsedWallets = {};
+        if (row.wallets) {
+          try {
+            parsedWallets = typeof row.wallets === 'string' ? JSON.parse(row.wallets) : row.wallets;
+          } catch (_) {
+            parsedWallets = {};
+          }
+        }
+        const primaryWallet = row.wallet || parsedWallets.solana || parsedWallets.solana_wallet || parsedWallets.wallet || '';
         return res.json({
           found: true,
           id: row.id,
           profileId: row.id,
           name: row.name,
-          profile: { id: row.id, name: row.name, wallet: row.wallet || '', wallets: row.wallets || '{}' },
-          wallet: row.wallet || '',
-          wallets: row.wallets || '{}',
+          profile: { id: row.id, name: row.name, wallet: primaryWallet, wallets: parsedWallets },
+          wallet: primaryWallet,
+          walletAddress: primaryWallet,
+          wallets: parsedWallets,
           preferredMatched: !!(preferredId && row.id === preferredId),
         });
       }
