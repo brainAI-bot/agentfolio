@@ -222,6 +222,88 @@ app.get('/api/avatar/onchain', (req, res) => handleOnChainAvatarRequest(req, res
 const PORT = process.env.PORT || 3333;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
+function escapeXml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function toLastMod(value) {
+  if (!value) return new Date().toISOString();
+  const normalized = String(value).includes('T') ? String(value) : String(value).replace(' ', 'T');
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+}
+
+app.get('/robots.txt', (_req, res) => {
+  res.type('text/plain').send([
+    'User-agent: *',
+    'Allow: /',
+    'Disallow: /api/',
+    'Disallow: /profile/*/edit',
+    `Sitemap: ${SITE_URL}/sitemap.xml`,
+    '',
+  ].join('\n'));
+});
+
+app.get('/sitemap.xml', (_req, res) => {
+  try {
+    const db = profileStore.getDb();
+    const rows = db.prepare(`
+      SELECT id, updated_at, created_at
+      FROM profiles
+      WHERE status = 'active' AND (hidden = 0 OR hidden IS NULL)
+      ORDER BY COALESCE(updated_at, created_at) DESC, id DESC
+      LIMIT 5000
+    `).all();
+
+    const generatedAt = new Date().toISOString();
+    const staticPages = [
+      { url: SITE_URL, changefreq: 'daily', priority: '1.0' },
+      { url: `${SITE_URL}/register`, changefreq: 'weekly', priority: '0.9' },
+      { url: `${SITE_URL}/marketplace`, changefreq: 'daily', priority: '0.8' },
+      { url: `${SITE_URL}/leaderboard`, changefreq: 'daily', priority: '0.7' },
+      { url: `${SITE_URL}/satp/explorer`, changefreq: 'weekly', priority: '0.6' },
+      { url: `${SITE_URL}/how-it-works`, changefreq: 'monthly', priority: '0.5' },
+      { url: `${SITE_URL}/verify`, changefreq: 'monthly', priority: '0.5' },
+      { url: `${SITE_URL}/docs`, changefreq: 'monthly', priority: '0.5' },
+      { url: `${SITE_URL}/stats`, changefreq: 'daily', priority: '0.6' },
+      { url: `${SITE_URL}/import/github`, changefreq: 'monthly', priority: '0.5' },
+    ];
+
+    const urls = [
+      ...staticPages.map((page) => `  <url>
+    <loc>${escapeXml(page.url)}</loc>
+    <lastmod>${toLastMod(generatedAt)}</lastmod>
+    <changefreq>${page.changefreq}</changefreq>
+    <priority>${page.priority}</priority>
+  </url>`),
+      ...rows.map((row) => `  <url>
+    <loc>${escapeXml(`${SITE_URL}/profile/${row.id}`)}</loc>
+    <lastmod>${toLastMod(row.updated_at || row.created_at)}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>`),
+    ];
+
+    const xml = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+      ...urls,
+      '</urlset>',
+      '',
+    ].join('\n');
+
+    res.type('application/xml').send(xml);
+  } catch (error) {
+    logger.error('Failed to generate sitemap.xml', { error: error?.message || String(error) });
+    res.status(500).type('text/plain').send('Failed to generate sitemap.xml');
+  }
+});
+
 const emptyToUndefined = (value) => typeof value === 'string' && value.trim() == '' ? undefined : value;
 const profileIdInput = z.string().trim().min(1).max(128);
 const challengeIdInput = z.string().trim().min(1).max(256);
