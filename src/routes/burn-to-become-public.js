@@ -1353,8 +1353,12 @@ function handleBurnToBecome(req, res, url) {
             return submitReject('Submitted burn transaction failed on-chain', { txSignature, metaErr: confirmedTx.meta.err });
           }
           submittedFeePayer = getConfirmedTransactionFeePayer(confirmedTx);
-          if (!submittedFeePayer || !submittedFeePayer.equals(walletPubkey)) {
-            return submitReject('Signed transaction fee payer does not match wallet', { submittedFeePayer: submittedFeePayer?.toBase58?.() || null });
+          const allowCoreInfraFeePayer = submittedMintAccount.owner.equals(METAPLEX_CORE_PROGRAM) && deployerKeypair && submittedFeePayer && submittedFeePayer.equals(deployerKeypair.publicKey);
+          if (!submittedFeePayer || (!submittedFeePayer.equals(walletPubkey) && !allowCoreInfraFeePayer)) {
+            return submitReject('Signed transaction fee payer does not match wallet', {
+              submittedFeePayer: submittedFeePayer?.toBase58?.() || null,
+              allowCoreInfraFeePayer,
+            });
           }
           if (!getConfirmedTransactionSignerMatches(confirmedTx, walletPubkey)) {
             return submitReject('Signed transaction signer does not match wallet', {
@@ -1471,8 +1475,12 @@ function handleBurnToBecome(req, res, url) {
                 allZero: !sig.signature || Buffer.from(sig.signature).every(byte => byte === 0),
                 prefix: sig.signature ? Buffer.from(sig.signature).toString('base64').slice(0, 16) : null,
               }));
-          if (!submittedFeePayer || !submittedFeePayer.equals(walletPubkey)) {
-            return submitReject('Signed transaction fee payer does not match wallet', { submittedFeePayer: submittedFeePayer?.toBase58?.() || null });
+          const allowCoreInfraFeePayer = submittedMintAccount.owner.equals(METAPLEX_CORE_PROGRAM) && deployerKeypair && submittedFeePayer && submittedFeePayer.equals(deployerKeypair.publicKey);
+          if (!submittedFeePayer || (!submittedFeePayer.equals(walletPubkey) && !allowCoreInfraFeePayer)) {
+            return submitReject('Signed transaction fee payer does not match wallet', {
+              submittedFeePayer: submittedFeePayer?.toBase58?.() || null,
+              allowCoreInfraFeePayer,
+            });
           }
           const signerMatchesWallet = getSubmittedTransactionSignerMatches(submittedTx, walletPubkey);
           if (!signerMatchesWallet) {
