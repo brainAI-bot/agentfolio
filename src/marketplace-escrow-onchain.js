@@ -134,6 +134,13 @@ function isJobPoster(actorId, job) {
   return !!job && (matchesActor(actorId, job.clientId) || matchesActor(actorId, job.postedBy));
 }
 
+function walletMatchesJobPoster(walletAddress, job) {
+  return !!job && !!walletAddress && (
+    walletMatchesClaimedActor(job.clientId, walletAddress) ||
+    walletMatchesClaimedActor(job.postedBy, walletAddress)
+  );
+}
+
 function isAcceptedWorker(actorId, job) {
   return !!job && (matchesActor(actorId, job.acceptedApplicant) || matchesActor(actorId, job.selectedAgentId));
 }
@@ -159,7 +166,7 @@ function buildMarketplaceAuthMessage({ action, jobId = '-', escrowId = '-', acto
   ].join(':');
 }
 
-function verifyMarketplaceOnchainAction(req, { action, job, actorId, escrowId = '-' }) {
+function verifyMarketplaceOnchainAction(req, { action, job, actorId, escrowId = '-', requirePoster = false, requireWorker = false }) {
   const walletAddress = String(req.headers['x-wallet-address'] || req.body?.walletAddress || '').trim();
   const walletSignature = String(req.headers['x-wallet-signature'] || req.body?.walletSignature || '').trim();
   const walletMessage = String(req.headers['x-wallet-message'] || req.body?.walletMessage || '').trim();
@@ -207,8 +214,12 @@ function verifyMarketplaceOnchainAction(req, { action, job, actorId, escrowId = 
     return { ok: false, status: 403, error: 'Signed wallet does not control the claimed marketplace actor' };
   }
   const effectiveActorId = normalizeActorId(claimedActorId || walletActorId) || claimedActorId || walletActorId;
-  if (job && !isJobPoster(effectiveActorId, job) && !isJobPoster(walletAddress, job)) {
+
+  if (job && requirePoster && !isJobPoster(effectiveActorId, job) && !walletMatchesJobPoster(walletAddress, job)) {
     return { ok: false, status: 403, error: 'Only the job poster can perform this action' };
+  }
+  if (job && requireWorker && !isAcceptedWorker(effectiveActorId, job) && !walletMatchesAcceptedWorker(walletAddress, job)) {
+    return { ok: false, status: 403, error: 'Only the accepted worker can perform this action' };
   }
 
   return { ok: true, actorId: effectiveActorId, walletAddress, walletTimestamp: timestampNumber };
@@ -270,6 +281,7 @@ function registerMarketplaceEscrowOnchain(app) {
         action: 'confirm_onchain_escrow',
         job,
         actorId: clientWallet,
+        requirePoster: true,
         escrowId: escrowPDA,
       });
       if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
@@ -363,7 +375,59 @@ function registerMarketplaceEscrowOnchain(app) {
     }
   });
 
-  // 4. Agent submits work on-chain (build unsigned TX)
+  // 4. Agent confirms escrow acceptance on-chain (backend submits signed TX)
+  app.post('/api/marketplace/jobs/:id/escrow/accept/confirm', async (req, res) => {
+    try {
+      const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
+      const job = readJSON(jobPath);
+      if (!job) return res.status(404).json({ error: 'Job not found' });
+      if (!job.onchainEscrowPDA) return res.status(400).json({ error: 'On-chain escrow not created for this job' });
+
+      const { txSignature, signedTransaction, agentWallet } = req.body;
+      if (!txSignature && !signedTransaction) return res.status(400).json({ error: 'signedTransaction or txSignature required' });
+      if (!agentWallet) return res.status(400).json({ error: 'agentWallet required' });
+
+      const auth = verifyMarketplaceOnchainAction(req, {
+        action: 'confirm_onchain_accept',
+        job,
+        actorId: agentWallet,
+        escrowId: job.onchainEscrowPDA,
+        requireWorker: true,
+      });
+      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
+      const confirmed = await escrowOnchain.confirmTransaction(signedTransaction || txSignature);
+      if (!confirmed) return res.status(400).json({ error: 'Transaction not confirmed on-chain' });
+      const finalTxSignature = confirmed.signature || txSignature;
+
+      const onchainState = await escrowOnchain.readEscrowAccount(job.id);
+      if (!onchainState?.exists) return res.status(400).json({ error: 'Escrow PDA not found on-chain' });
+      if (!['agent_accepted', 'work_submitted'].includes(onchainState.status)) {
+        return res.status(400).json({ error: `Escrow PDA is ${onchainState.status || 'not accepted'} on-chain` });
+      }
+
+      if (!job.selectedAgentId && !job.acceptedApplicant) {
+        job.selectedAgentId = auth.actorId;
+        job.acceptedApplicant = auth.actorId;
+      }
+      job.status = 'in_progress';
+      job.updatedAt = new Date().toISOString();
+      writeJSON(jobPath, job);
+      try { syncMarketplaceJobToDb(job); } catch (e) { console.warn('[Marketplace Escrow] job DB sync failed after accept confirm:', e.message); }
+
+      res.json({
+        message: 'Escrow accepted on-chain',
+        signature: finalTxSignature,
+        onchainState,
+        explorerUrl: `https://explorer.solana.com/tx/${finalTxSignature}`,
+      });
+    } catch (e) {
+      console.error('[Marketplace Escrow] Accept confirm error:', e.message);
+      res.status(500).json({ error: 'Failed to confirm accept transaction', details: e.message });
+    }
+  });
+
+  // 5. Agent submits work on-chain (build unsigned TX)
   app.post('/api/marketplace/jobs/:id/escrow/submit/onchain', async (req, res) => {
     try {
       const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
@@ -393,7 +457,55 @@ function registerMarketplaceEscrowOnchain(app) {
     }
   });
 
-  // 5. Release payment (build unsigned TX)
+  // 6. Agent confirms submitted work on-chain (backend submits signed TX)
+  app.post('/api/marketplace/jobs/:id/escrow/submit/confirm', async (req, res) => {
+    try {
+      const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
+      const job = readJSON(jobPath);
+      if (!job) return res.status(404).json({ error: 'Job not found' });
+      if (!job.onchainEscrowPDA) return res.status(400).json({ error: 'On-chain escrow not created for this job' });
+
+      const { txSignature, signedTransaction, agentWallet } = req.body;
+      if (!txSignature && !signedTransaction) return res.status(400).json({ error: 'signedTransaction or txSignature required' });
+      if (!agentWallet) return res.status(400).json({ error: 'agentWallet required' });
+
+      const auth = verifyMarketplaceOnchainAction(req, {
+        action: 'confirm_onchain_submit',
+        job,
+        actorId: agentWallet,
+        escrowId: job.onchainEscrowPDA,
+        requireWorker: true,
+      });
+      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
+      const confirmed = await escrowOnchain.confirmTransaction(signedTransaction || txSignature);
+      if (!confirmed) return res.status(400).json({ error: 'Transaction not confirmed on-chain' });
+      const finalTxSignature = confirmed.signature || txSignature;
+
+      const onchainState = await escrowOnchain.readEscrowAccount(job.id);
+      if (!onchainState?.exists) return res.status(400).json({ error: 'Escrow PDA not found on-chain' });
+      if (!['work_submitted', 'released', 'auto_released'].includes(onchainState.status)) {
+        return res.status(400).json({ error: `Escrow PDA is ${onchainState.status || 'not submitted'} on-chain` });
+      }
+
+      job.status = 'in_progress';
+      job.updatedAt = new Date().toISOString();
+      writeJSON(jobPath, job);
+      try { syncMarketplaceJobToDb(job); } catch (e) { console.warn('[Marketplace Escrow] job DB sync failed after submit confirm:', e.message); }
+
+      res.json({
+        message: 'Work submitted on-chain',
+        signature: finalTxSignature,
+        onchainState,
+        explorerUrl: `https://explorer.solana.com/tx/${finalTxSignature}`,
+      });
+    } catch (e) {
+      console.error('[Marketplace Escrow] Submit confirm error:', e.message);
+      res.status(500).json({ error: 'Failed to confirm submit transaction', details: e.message });
+    }
+  });
+
+  // 7. Release payment (build unsigned TX)
   app.post('/api/marketplace/escrow/:id/release/onchain', async (req, res) => {
     try {
       const escrowPath = path.join(DATA_DIR, 'escrow', `${req.params.id}.json`);
@@ -457,6 +569,7 @@ function registerMarketplaceEscrowOnchain(app) {
         action: 'confirm_onchain_release',
         job,
         actorId: clientWallet,
+        requirePoster: true,
         escrowId: escrow.id,
       });
       if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
@@ -561,6 +674,7 @@ function registerMarketplaceEscrowOnchain(app) {
         action: 'confirm_onchain_refund',
         job,
         actorId: clientWallet,
+        requirePoster: true,
         escrowId: escrow.id,
       });
       if (!auth.ok) return res.status(auth.status).json({ error: auth.error });

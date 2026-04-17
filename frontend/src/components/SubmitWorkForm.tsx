@@ -1,12 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { Transaction, VersionedTransaction } from "@solana/web3.js";
 import { Send, Package, AlertCircle } from "lucide-react";
 import { createMarketplaceWalletAuth } from "@/lib/marketplace-auth";
 import { profileHasWallet } from "@/lib/profile-wallets";
-import { signAndSendV3Tx } from "@/lib/v3-escrow";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -29,6 +28,18 @@ function isVersionedSerializedTransaction(raw: Uint8Array): boolean {
 function deserializeEscrowTransaction(base64Tx: string): Transaction | VersionedTransaction {
   const raw = Uint8Array.from(Buffer.from(base64Tx, "base64"));
   return isVersionedSerializedTransaction(raw) ? VersionedTransaction.deserialize(raw) : Transaction.from(Buffer.from(raw));
+}
+
+async function signEscrowTransaction(
+  base64Tx: string,
+  signTransaction?: ((tx: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>) | null,
+): Promise<string> {
+  if (!signTransaction) {
+    throw new Error("Connected wallet must support signTransaction() for on-chain work submission");
+  }
+  const tx = deserializeEscrowTransaction(base64Tx);
+  const signedTx = await signTransaction(tx);
+  return Buffer.from(signedTx.serialize()).toString("base64");
 }
 
 interface SubmitWorkFormProps {
@@ -56,8 +67,7 @@ export function SubmitWorkForm({
   escrowId,
   onchainEscrowPDA,
 }: SubmitWorkFormProps) {
-  const { connected, publicKey, signMessage, sendTransaction, signTransaction } = useWallet();
-  const { connection } = useConnection();
+  const { connected, publicKey, signMessage, signTransaction } = useWallet();
   const [resolvedId, setResolvedId] = useState<string | null>(null);
   const [resolvedWorkerId, setResolvedWorkerId] = useState<string | null>(null);
   const [resolvedClientId, setResolvedClientId] = useState<string | null>(null);
@@ -158,8 +168,8 @@ export function SubmitWorkForm({
       setResult({ ok: false, msg: "Connect the accepted worker wallet first" });
       return;
     }
-    if (!signMessage || (!sendTransaction && !signTransaction)) {
-      setResult({ ok: false, msg: "Connect a wallet that supports signing first" });
+    if (!signMessage || !signTransaction) {
+      setResult({ ok: false, msg: "Connect a wallet that supports message and transaction signing first" });
       return;
     }
 
@@ -191,8 +201,28 @@ export function SubmitWorkForm({
           if (!acceptRes.ok || acceptData?.error) {
             throw new Error(acceptData?.error || "Failed to build on-chain escrow acceptance");
           }
-          const acceptTx = deserializeEscrowTransaction(acceptData.transaction);
-          acceptTxSignature = await signAndSendV3Tx(acceptTx as any, connection, publicKey, sendTransaction, signTransaction);
+          const signedAcceptTransaction = await signEscrowTransaction(acceptData.transaction, signTransaction);
+          const acceptAuthHeaders = await createMarketplaceWalletAuth({
+            action: "confirm_onchain_accept",
+            walletAddress,
+            actorId: workerActorId,
+            jobId,
+            escrowId: acceptData.escrowPDA,
+            signMessage,
+          });
+          const acceptConfirmRes = await fetch(`${API_BASE}/api/marketplace/jobs/${jobId}/escrow/accept/confirm`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...acceptAuthHeaders },
+            body: JSON.stringify({
+              signedTransaction: signedAcceptTransaction,
+              agentWallet: walletAddress,
+            }),
+          });
+          const acceptConfirmData = await acceptConfirmRes.json();
+          if (!acceptConfirmRes.ok || acceptConfirmData?.error) {
+            throw new Error(acceptConfirmData?.error || "Failed to confirm on-chain escrow acceptance");
+          }
+          acceptTxSignature = acceptConfirmData?.signature || null;
         }
 
         const submitRes = await fetch(`${API_BASE}/api/marketplace/jobs/${jobId}/escrow/submit/onchain`, {
@@ -204,8 +234,28 @@ export function SubmitWorkForm({
         if (!submitRes.ok || submitData?.error) {
           throw new Error(submitData?.error || "Failed to build on-chain submit-work transaction");
         }
-        const submitTx = deserializeEscrowTransaction(submitData.transaction);
-        submitTxSignature = await signAndSendV3Tx(submitTx as any, connection, publicKey, sendTransaction, signTransaction);
+        const signedSubmitTransaction = await signEscrowTransaction(submitData.transaction, signTransaction);
+        const submitAuthHeaders = await createMarketplaceWalletAuth({
+          action: "confirm_onchain_submit",
+          walletAddress,
+          actorId: workerActorId,
+          jobId,
+          escrowId: submitData.escrowPDA,
+          signMessage,
+        });
+        const submitConfirmRes = await fetch(`${API_BASE}/api/marketplace/jobs/${jobId}/escrow/submit/confirm`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...submitAuthHeaders },
+          body: JSON.stringify({
+            signedTransaction: signedSubmitTransaction,
+            agentWallet: walletAddress,
+          }),
+        });
+        const submitConfirmData = await submitConfirmRes.json();
+        if (!submitConfirmRes.ok || submitConfirmData?.error) {
+          throw new Error(submitConfirmData?.error || "Failed to confirm on-chain submit-work transaction");
+        }
+        submitTxSignature = submitConfirmData?.signature || null;
       }
 
       const authHeaders = await createMarketplaceWalletAuth({
