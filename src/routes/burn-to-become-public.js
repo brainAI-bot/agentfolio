@@ -11,7 +11,7 @@
  */
 
 const https = require('https');
-const { Connection, PublicKey, Transaction, TransactionInstruction, Keypair, SystemProgram, ComputeBudgetProgram } = require('@solana/web3.js');
+const { Connection, PublicKey, Transaction, VersionedTransaction, TransactionInstruction, Keypair, SystemProgram, ComputeBudgetProgram } = require('@solana/web3.js');
 const { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddress, createBurnInstruction, createCloseAccountInstruction, createAssociatedTokenAccountInstruction, createInitializeMintInstruction, createMintToInstruction, createInitializeNonTransferableMintInstruction, createInitializeMetadataPointerInstruction, getMintLen, ExtensionType } = require('@solana/spl-token');
 const { createInitializeInstruction: createInitializeMetadataInstruction, createUpdateFieldInstruction, pack: packTokenMetadata } = require('@solana/spl-token-metadata');
 const fs = require('fs');
@@ -60,6 +60,28 @@ function getBoaSoulboundPDA(walletPubkey, issuerPubkey) {
 
 const DEPLOYER_PUBKEY = 'Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc';
 const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+
+function isVersionedSerializedTransaction(raw) {
+  let offset = 0;
+  let sigCount = 0;
+  let shift = 0;
+  while (offset < raw.length) {
+    const byte = raw[offset];
+    sigCount |= (byte & 0x7f) << shift;
+    offset += 1;
+    if ((byte & 0x80) === 0) break;
+    shift += 7;
+  }
+  const messageOffset = offset + sigCount * 64;
+  return messageOffset < raw.length && (raw[messageOffset] & 0x80) !== 0;
+}
+
+function serializeBurnPrepareTransaction(tx) {
+  if (tx instanceof VersionedTransaction) {
+    return Buffer.from(tx.serialize()).toString('base64');
+  }
+  return tx.serialize({ requireAllSignatures: false }).toString('base64');
+}
 
 async function checkSatpOnChain(wallet) {
   const { Connection } = require('@solana/web3.js');
@@ -303,7 +325,9 @@ async function buildBurnTransaction(walletAddress, nftMint) {
           if (result.error) return reject(new Error(result.error));
           // Return the pre-built TX from the worker
           const txBuf = Buffer.from(result.transaction, 'base64');
-          const tx = Transaction.from(txBuf);
+          const tx = isVersionedSerializedTransaction(txBuf)
+            ? VersionedTransaction.deserialize(txBuf)
+            : Transaction.from(txBuf);
           resolve(tx);
         } catch (e) { reject(new Error('Core burn parse failed')); }
       });
@@ -730,7 +754,7 @@ function handleBurnToBecome(req, res, url) {
         if (!wallet || !nftMint) return sendJson(400, { error: 'wallet and nftMint required' });
         
         const tx = await buildBurnTransaction(wallet, nftMint);
-        const serialized = tx.serialize({ requireAllSignatures: false }).toString('base64');
+        const serialized = serializeBurnPrepareTransaction(tx);
         sendJson(200, { transaction: serialized });
       } catch (e) {
         console.error('[BurnPublic] prepare error:', e);
