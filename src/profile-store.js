@@ -85,6 +85,14 @@ const SATP_NETWORK = process.env.SATP_NETWORK || 'mainnet';
 const DB_PATH = path.join(__dirname, '..', 'data', 'agentfolio.db');
 
 const isLikelySolanaTxSignature = (value) => /^[1-9A-HJ-NP-Za-km-z]{60,120}$/.test(String(value || '').trim());
+const normalizeSolanaTxSignature = (value) => isLikelySolanaTxSignature(value) ? String(value).trim() : null;
+const pickVerificationTxSignature = (proof = {}, hint = {}) => {
+  return normalizeSolanaTxSignature(proof?.txSignature)
+    || normalizeSolanaTxSignature(hint?.txSignature)
+    || normalizeSolanaTxSignature(proof?.transactionSignature)
+    || normalizeSolanaTxSignature(proof?.signature)
+    || null;
+};
 const buildSolanaTxUrl = (value) => isLikelySolanaTxSignature(value) ? ('https://solana.fm/tx/' + String(value).trim()) : null;
 
 let db;
@@ -589,7 +597,7 @@ function enrichProfile(row) {
           let proofData = {};
           try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
           hints.set(plat, {
-            txSignature: att.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || null,
+            txSignature: pickVerificationTxSignature(proofData, { txSignature: att.txSignature }),
             verifiedAt: att.timestamp || att.verifiedAt || null,
           });
         }
@@ -602,7 +610,7 @@ function enrichProfile(row) {
           const displayId = ver.identifier || proof.identifier || proof.address || proof.wallet || row.wallet || null;
           if (!displayId) continue;
           const hint = hints.get(plat) || {};
-          const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || hint.txSignature || null;
+          const txSignature = pickVerificationTxSignature(proof, hint);
           if (plat === 'solana' && !txSignature) continue;
           vd[plat] = {
             verified: true,
@@ -664,7 +672,7 @@ function enrichProfile(row) {
           if (hints.has(platform)) continue;
           let proofData = {};
           try { proofData = typeof att.proofData === 'string' ? JSON.parse(att.proofData) : (att.proofData || {}); } catch {}
-          const txSignature = att.txSignature || proofData.txSignature || proofData.signature || proofData.transactionSignature || null;
+          const txSignature = pickVerificationTxSignature(proofData, { txSignature: att.txSignature });
           hints.set(platform, {
             txSignature,
             verifiedAt: att.timestamp || att.verifiedAt || null,
@@ -680,7 +688,7 @@ function enrichProfile(row) {
           const displayId = ver.identifier || proof.identifier || proof.address || proof.wallet || row.wallet || null;
           if (!displayId) continue;
           const hint = hints.get(platform) || {};
-          const txSignature = proof.txSignature || proof.signature || proof.transactionSignature || hint.txSignature || null;
+          const txSignature = pickVerificationTxSignature(proof, hint);
           if (platform === 'solana' && !txSignature) continue;
           const proofUrl = hint.url || buildSolanaTxUrl(txSignature);
           vMap[platform] = {
@@ -731,7 +739,7 @@ function enrichProfile(row) {
           if (platform === 'solana') {
             let proof = {};
             try { proof = typeof ver.proof === 'string' ? JSON.parse(ver.proof) : (ver.proof || {}); } catch {}
-            if (!(proof.txSignature || proof.signature || proof.transactionSignature)) return;
+            if (!pickVerificationTxSignature(proof)) return;
           }
           platforms.add(platform);
         });
