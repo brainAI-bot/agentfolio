@@ -1863,20 +1863,20 @@ function registerRoutes(app) {
     try {
       const db = getDb();
       // Check wallet column directly
-      let match = db.prepare('SELECT id, name FROM profiles WHERE wallet = ?').get(wallet);
-      if (!match) match = db.prepare('SELECT id, name FROM profiles WHERE claimed_by = ?').get(wallet);
+      let match = db.prepare('SELECT id, name, wallet, wallets, claimed_by FROM profiles WHERE wallet = ?').get(wallet);
+      if (!match) match = db.prepare('SELECT id, name, wallet, wallets, claimed_by FROM profiles WHERE claimed_by = ?').get(wallet);
       if (!match) {
         // Check wallets JSON column
-        const all = db.prepare('SELECT id, name, wallets FROM profiles').all();
+        const all = db.prepare('SELECT id, name, wallet, wallets, claimed_by FROM profiles').all();
         for (const p of all) {
           try {
             const w = JSON.parse(p.wallets || '{}');
-            if (w.solana === wallet) { match = { id: p.id, name: p.name }; break; }
+            if (w.solana === wallet) { match = { id: p.id, name: p.name, wallet: p.wallet || null, wallets: p.wallets || null, claimed_by: p.claimed_by || null }; break; }
           } catch (_) {}
         }
       }
       if (match) {
-        return res.json({ found: true, profileId: match.id, name: match.name, profile: { id: match.id, name: match.name } });
+        return res.json({ found: true, profileId: match.id, name: match.name, wallet: match.wallet || null, wallets: match.wallets || null, claimed_by: match.claimed_by || null, profile: { id: match.id, name: match.name, wallet: match.wallet || null, wallets: match.wallets || null, claimed_by: match.claimed_by || null } });
       }
       return res.status(404).json({ found: false, error: 'No profile found for this wallet' });
     } catch (e) {

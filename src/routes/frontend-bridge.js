@@ -446,7 +446,7 @@ function registerFrontendBridge(app, profileStore) {
         'SELECT id, name, avatar, handle, claimed, wallet, wallets, created_at, updated_at FROM profiles WHERE wallet = ? OR claimed_by = ? OR wallets LIKE ? ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1'
       ).get(addr, addr, like);
       if (!profile) return res.status(404).json({ found: false, address: addr });
-      res.json({ found: true, profileId: profile.id, name: profile.name, avatar: profile.avatar, handle: profile.handle, claimed: !!profile.claimed, profile: { id: profile.id, name: profile.name } });
+      res.json({ found: true, profileId: profile.id, name: profile.name, avatar: profile.avatar, handle: profile.handle, wallet: profile.wallet || null, wallets: profile.wallets || null, claimed_by: profile.claimed_by || null, claimed: !!profile.claimed, profile: { id: profile.id, name: profile.name, wallet: profile.wallet || null, wallets: profile.wallets || null, claimed_by: profile.claimed_by || null } });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
@@ -482,6 +482,9 @@ function registerFrontendBridge(app, profileStore) {
           avatar,
           api_key: profile.apiKey || null,
           claimed: !!(profile.claimed || profile.wallet || profile.claimed_by),
+          wallet: profile.wallet || profile.walletAddress || profile.wallets?.solana || null,
+          wallets: profile.wallets || null,
+          claimed_by: profile.claimed_by || profile.claimedBy || null,
           source: 'json',
         };
       };
@@ -521,7 +524,7 @@ function registerFrontendBridge(app, profileStore) {
       };
 
       const dbMatches = db.prepare(`
-        SELECT id, name, avatar, api_key, claimed FROM profiles
+        SELECT id, name, avatar, api_key, claimed, wallet, wallets, claimed_by FROM profiles
         WHERE ${whereClause}
         ORDER BY COALESCE(
           julianday(REPLACE(SUBSTR(updated_at, 1, 19), 'T', ' ')),
@@ -577,9 +580,19 @@ function registerFrontendBridge(app, profileStore) {
         name: profile.name,
         avatar: profile.avatar,
         apiKey: profile.api_key,
+        wallet: profile.wallet || null,
+        wallets: profile.wallets || null,
+        claimed_by: profile.claimed_by || null,
         claimed: !!profile.claimed,
         preferredMatched: !!(preferredId && profile.id === preferredId),
-        profile: { id: profile.id, name: profile.name, avatar: profile.avatar },
+        profile: {
+          id: profile.id,
+          name: profile.name,
+          avatar: profile.avatar,
+          wallet: profile.wallet || null,
+          wallets: profile.wallets || null,
+          claimed_by: profile.claimed_by || null,
+        },
       });
     } catch (e) {
       res.status(500).json({ found: false, error: e.message });
