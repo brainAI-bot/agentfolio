@@ -185,15 +185,19 @@ export default function SATPExplorerPage() {
         const onChainAgents = onChainData.agents || [];
 
         // Step 2: Fetch profiles for NFT avatar cross-referencing
-        let profilesByWallet: Record<string, any> = {};
+        const profilesByWallet: Record<string, any> = {};
+        const profilesById: Record<string, any> = {};
         try {
           const profilesRes = await fetch("/api/profiles?limit=200");
           if (profilesRes.ok) {
             const profilesPayload = await profilesRes.json();
             const profiles = profilesPayload?.profiles || profilesPayload || [];
             for (const p of profiles) {
+              if (p?.id) {
+                profilesById[p.id] = p;
+              }
               const wallet = p.wallets?.solana || p.wallet || p.verifications?.solana?.address || p.verifications?.solana?.identifier;
-              if (wallet) {
+              if (wallet && !profilesByWallet[wallet]) {
                 profilesByWallet[wallet] = p;
               }
             }
@@ -204,7 +208,7 @@ export default function SATPExplorerPage() {
         const cards: AgentCard[] = await Promise.all(
           onChainAgents.map(async (agent: any) => {
             const wallet = agent.authority;
-            const profile = profilesByWallet[wallet] || null;
+            const profile = (agent.profileId && profilesById[agent.profileId]) || profilesByWallet[wallet] || null;
             
             // NFT avatar from profile cross-reference
             const nftAvatar = profile?.nftAvatar || profile?.nft_avatar || null;
