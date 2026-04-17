@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Flame, AlertTriangle, Check, Loader2, X, Image, Skull, Shield, ExternalLink } from "lucide-react";
 import BirthCertificate from "./BirthCertificate";
 
@@ -66,6 +67,8 @@ async function deserializeBurnTransaction(base64Tx: string) {
 }
 
 export default function BurnToBecome({ profileId, walletAddress, apiKey, currentAvatar, onComplete }: Props) {
+  const { connection } = useConnection();
+  const { sendTransaction, signTransaction } = useWallet();
   const [nfts, setNfts] = useState<NFT[]>([]);
   const [loading, setLoading] = useState(true);
   const [state, setState] = useState<BurnState>({
@@ -136,8 +139,7 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
     }));
 
     try {
-      const wallet = typeof window !== "undefined" ? (window as any).solana : null;
-      if (!wallet?.signTransaction) {
+      if (!sendTransaction && !signTransaction) {
         throw new Error("Solana wallet not connected. Please connect your wallet.");
       }
 
@@ -162,14 +164,14 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
         wallet: walletAddress,
         nftMint: state.selectedNFT.mint,
       };
-      if (wallet.signAndSendTransaction) {
-        const sent = await wallet.signAndSendTransaction(tx as any);
-        const burnSignature = typeof sent === "string" ? sent : sent?.signature;
-        if (!burnSignature) throw new Error("Wallet did not return a burn transaction signature");
+      if (sendTransaction) {
+        const burnSignature = await sendTransaction(tx as any, connection, { skipPreflight: false });
         submitPayload.txSignature = burnSignature;
-      } else {
-        const signed = await wallet.signTransaction(tx as any);
+      } else if (signTransaction) {
+        const signed = await signTransaction(tx as any);
         submitPayload.signedTransaction = Buffer.from(signed.serialize()).toString("base64");
+      } else {
+        throw new Error("Connected wallet cannot sign burn transaction");
       }
 
       const submitRes = await fetch(`${API}/api/burn-to-become/submit`, {
@@ -185,10 +187,10 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
         burnProgress: { ...s.burnProgress, burn: "complete", soulbound: "active" },
       }));
 
-      if (submitData.burnToBecomeTx && wallet.signTransaction) {
+      if (submitData.burnToBecomeTx && signTransaction) {
         try {
           const burnToBecomeTx = await deserializeBurnTransaction(submitData.burnToBecomeTx);
-          const signedGenesis = await wallet.signTransaction(burnToBecomeTx as any);
+          const signedGenesis = await signTransaction(burnToBecomeTx as any);
           await fetch(`${API}/api/burn-to-become/submit-genesis`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
