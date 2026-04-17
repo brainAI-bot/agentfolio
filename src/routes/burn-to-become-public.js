@@ -1273,6 +1273,19 @@ function handleBurnToBecome(req, res, url) {
           return submitReject('Invalid signed transaction payload', { parseError: parseErr?.message || String(parseErr) });
         }
         const submittedFeePayer = getSubmittedTransactionFeePayer(submittedTx);
+        const submittedSignatureDiagnostics = submittedTx instanceof VersionedTransaction
+          ? submittedTx.signatures.map((sig, index) => ({
+              index,
+              allZero: Buffer.from(sig).every(byte => byte === 0),
+              prefix: Buffer.from(sig).toString('base64').slice(0, 16),
+            }))
+          : submittedTx.signatures.map((sig, index) => ({
+              index,
+              publicKey: sig.publicKey?.toBase58?.() || null,
+              hasSignature: !!sig.signature,
+              allZero: !sig.signature || Buffer.from(sig.signature).every(byte => byte === 0),
+              prefix: sig.signature ? Buffer.from(sig.signature).toString('base64').slice(0, 16) : null,
+            }));
         if (!submittedFeePayer || !submittedFeePayer.equals(walletPubkey)) {
           return submitReject('Signed transaction fee payer does not match wallet', { submittedFeePayer: submittedFeePayer?.toBase58?.() || null });
         }
@@ -1396,6 +1409,7 @@ function handleBurnToBecome(req, res, url) {
             nftMint,
             versioned: submittedTx instanceof VersionedTransaction,
             submittedFeePayer: submittedFeePayer?.toBase58?.() || null,
+            signatureDiagnostics: submittedSignatureDiagnostics,
             submittedPrograms,
             mintOwner: submittedMintAccount.owner.toBase58(),
           }));
@@ -1403,7 +1417,35 @@ function handleBurnToBecome(req, res, url) {
 
         // 2. Submit the signed burn transaction
         const txBuffer = Buffer.from(signedTransaction, 'base64');
-        const burnTx = await connection.sendRawTransaction(txBuffer);
+        let burnTx;
+        try {
+          burnTx = await connection.sendRawTransaction(txBuffer);
+        } catch (sendErr) {
+          let sendLogs = null;
+          try {
+            if (typeof sendErr?.getLogs === 'function') {
+              sendLogs = await sendErr.getLogs(connection);
+            }
+          } catch (sendLogErr) {
+            sendLogs = ['getLogs failed: ' + (sendLogErr?.message || String(sendLogErr))];
+          }
+          try {
+            console.error('[BurnPublic] submit sendRawTransaction failed', JSON.stringify({
+              wallet,
+              nftMint,
+              versioned: submittedTx instanceof VersionedTransaction,
+              submittedFeePayer: submittedFeePayer?.toBase58?.() || null,
+              signatureDiagnostics: submittedSignatureDiagnostics,
+              submittedPrograms,
+              sendError: sendErr?.message || String(sendErr),
+              transactionMessage: sendErr?.transactionMessage || null,
+              transactionLogs: sendErr?.transactionLogs || sendLogs || null,
+            }));
+          } catch (logErr) {
+            console.error('[BurnPublic] submit sendRawTransaction failed', sendErr, logErr?.message || logErr);
+          }
+          throw sendErr;
+        }
         await connection.confirmTransaction(burnTx, 'confirmed');
         console.log('[BurnPublic] Burn confirmed:', burnTx);
         
