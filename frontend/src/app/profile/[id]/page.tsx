@@ -567,9 +567,14 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
             <h2 className="text-sm font-semibold uppercase tracking-wider mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
               Trust Breakdown
             </h2>
-            {((((agent as any).trust_score?.score_breakdown) || trustScoreData?.breakdown) && agent.trustScore > 0) ? (() => {
-              const authoritativeBreakdown = ((agent as any).trust_score?.score_breakdown) || trustScoreData?.breakdown || {};
+            {((((agent as any).trust_score?.score_breakdown) || agent.trustBreakdown || trustScoreData?.breakdown || trustScoreData?.trustScoreBreakdown) && agent.trustScore > 0) ? (() => {
+              const authoritativeBreakdown = ((agent as any).trust_score?.score_breakdown) || agent.trustBreakdown || trustScoreData?.breakdown || trustScoreData?.trustScoreBreakdown || {};
               const colorMap: Record<string, string> = {
+                profile: '#58a6ff',
+                social: '#a371f7',
+                marketplace: '#f59e0b',
+                onchain: '#3fb950',
+                tenure: '#79c0ff',
                 satp: '#3fb950',
                 satp_identity: '#3fb950',
                 solana: '#58a6ff',
@@ -578,6 +583,11 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                 x: '#79c0ff',
               };
               const labelMap: Record<string, string> = {
+                profile: 'Profile',
+                social: 'Social',
+                marketplace: 'Marketplace',
+                onchain: 'On-Chain',
+                tenure: 'Tenure',
                 satp: 'SATP',
                 satp_identity: 'SATP Identity',
                 solana: 'Solana',
@@ -586,13 +596,20 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                 x: 'X',
               };
               const items = Object.entries(authoritativeBreakdown)
-                .map(([key, value]) => ({
-                  label: labelMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-                  value: Number(value) || 0,
-                  color: colorMap[key] || '#8b949e',
-                }))
+                .map(([key, value]) => {
+                  const numericValue = typeof value === 'number'
+                    ? value
+                    : (value && typeof value === 'object' && 'total' in value)
+                      ? Number((value as { total?: number }).total) || 0
+                      : 0;
+                  return {
+                    label: labelMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+                    value: numericValue,
+                    color: colorMap[key] || '#8b949e',
+                  };
+                })
                 .filter(i => i.value > 0);
-              const total = agent.trustScore || items.reduce((sum, item) => sum + item.value, 0);
+              const total = items.reduce((sum, item) => sum + item.value, 0) || agent.trustScore || 0;
               return (
                 <div className="space-y-3">
                   {/* Stacked bar */}
