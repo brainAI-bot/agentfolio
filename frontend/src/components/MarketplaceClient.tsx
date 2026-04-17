@@ -209,7 +209,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     ? jobs
     : filter === "my_jobs"
       ? jobs.filter((j) =>
-          (connected && publicKey && j.poster === publicKey.toBase58()) ||
+          (connected && publicKey && (j.poster === publicKey.toBase58() || j.clientWallet === publicKey.toBase58())) ||
           (activeProfileId && (j.assigneeId === activeProfileId || j.clientId === activeProfileId)) ||
           (!!j.clientId && !!posterWalletMatches[j.clientId])
         )
@@ -288,6 +288,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
             assignee: j.selectedAgentId || j.acceptedApplicant || undefined,
             assigneeId: j.selectedAgentId || j.acceptedApplicant || undefined,
             clientId: j.clientId || j.postedBy || undefined,
+            clientWallet: j.clientWallet || j.v3EscrowClientWallet || undefined,
             createdAt: j.createdAt || new Date().toISOString(),
             deliverableStatus: j.deliverableStatus || undefined,
           };
@@ -805,12 +806,13 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           const StatusIcon = sc.icon;
           const EscrowIcon = ec.icon;
           const isMyJob = Boolean(
-            (connected && publicKey && job.clientId === publicKey.toBase58()) ||
+            (connected && publicKey && (job.clientId === publicKey.toBase58() || job.clientWallet === publicKey.toBase58())) ||
             (activeProfileId && job.clientId === activeProfileId) ||
             (!!job.clientId && !!posterWalletMatches[job.clientId])
           );
           const jobPosterIdentityPending = Boolean(
             connected && publicKey && job.clientId &&
+            job.clientWallet !== publicKey.toBase58() &&
             job.clientId !== publicKey.toBase58() &&
             job.clientId !== activeProfileId &&
             typeof posterWalletMatches[job.clientId] === "undefined"
