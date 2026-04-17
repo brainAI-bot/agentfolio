@@ -64,6 +64,7 @@ export interface Job {
   assignee?: string;
   assigneeId?: string;
   clientId?: string;
+  clientWallet?: string | null;
   deliverableId?: string;
   deliverableDescription?: string;
   deliverableStatus?: string;

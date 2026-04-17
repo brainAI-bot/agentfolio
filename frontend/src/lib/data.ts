@@ -509,6 +509,7 @@ function mapMarketplaceApiJob(raw: any): Job | null {
     assignee: raw.selectedAgentId || raw.acceptedApplicant || undefined,
     assigneeId: raw.selectedAgentId || raw.acceptedApplicant || undefined,
     clientId: raw.clientId || raw.postedBy || undefined,
+    clientWallet: raw.clientWallet || raw.v3EscrowClientWallet || undefined,
     deliverableId: raw.deliverableId || undefined,
     deliverableDescription: raw.deliverableDescription || undefined,
     deliverableStatus: raw.deliverableStatus || undefined,
