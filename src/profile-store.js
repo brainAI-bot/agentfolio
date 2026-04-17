@@ -1914,7 +1914,7 @@ function registerRoutes(app) {
       let row = null;
       if (preferredId) {
         row = db.prepare(`
-          SELECT id, name FROM profiles
+          SELECT id, name, wallet, wallets FROM profiles
           WHERE id = ? AND (${whereClause})
           LIMIT 1
         `).get(preferredId, ...walletParams);
@@ -1922,7 +1922,7 @@ function registerRoutes(app) {
 
       if (!row) {
         const matches = db.prepare(`
-          SELECT id, name FROM profiles
+          SELECT id, name, wallet, wallets FROM profiles
           WHERE ${whereClause}
           ORDER BY COALESCE(
             julianday(REPLACE(SUBSTR(updated_at, 1, 19), 'T', ' ')),
@@ -1952,7 +1952,9 @@ function registerRoutes(app) {
           id: row.id,
           profileId: row.id,
           name: row.name,
-          profile: { id: row.id, name: row.name },
+          profile: { id: row.id, name: row.name, wallet: row.wallet || '', wallets: row.wallets || '{}' },
+          wallet: row.wallet || '',
+          wallets: row.wallets || '{}',
           preferredMatched: !!(preferredId && row.id === preferredId),
         });
       }
