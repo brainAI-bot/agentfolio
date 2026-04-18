@@ -154,7 +154,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           description: j.description,
           poster: j.clientId || j.poster || "Unknown",
           posterAvatar: "",
-          budget: `${j.budgetAmount || 0} ${j.budgetCurrency || "USDC"}`,
+          budget: `${j.budgetAmount || 0} ${j.budgetCurrency || "SOL"}`,
           skills: j.skills || [],
           status: j.status === "in_progress" ? "in_progress" : j.status || "open",
           escrowStatus: j.fundsReleased ? "released" : j.v3EscrowPDA ? "funded" : j.escrowFunded ? "locked" : "ready",
@@ -192,7 +192,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           skills: postForm.skills.split(",").map(s => s.trim()).filter(Boolean),
           budgetType: "fixed",
           budgetAmount: parseFloat(postForm.budgetAmount),
-          budgetCurrency: "USDC",
+          budgetCurrency: "SOL",
           timeline: postForm.timeline,
           requirements: postForm.requirements,
           escrowRequired: true,
@@ -240,12 +240,15 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     if (!connected || !publicKey || !sendTransaction || !selectedJob) return;
     setLoading(true);
     try {
-      // Parse budget amount — V3 escrow uses USDC
-      const budgetStr = selectedJob.budget.split(" ")[0];
+      const [budgetStr, budgetCurrencyRaw] = selectedJob.budget.split(" ");
+      const budgetCurrency = (budgetCurrencyRaw || "SOL").toUpperCase();
+      if (budgetCurrency !== "SOL") {
+        throw new Error(`This job is marked ${budgetCurrency}, but live V3 on-chain escrow settles in SOL. Update or recreate the job in SOL before funding.`);
+      }
       const amount = parseFloat(budgetStr);
-      if (!amount || amount <= 0) throw new Error("Invalid budget amount");
+      if (!amount || amount <= 0) throw new Error("Invalid SOL budget amount");
 
-      // V3 escrow uses USDC (amount in lamports for on-chain)
+      // V3 escrow uses SOL (amount in lamports for on-chain)
       const amountLamports = Math.round(amount * LAMPORTS_PER_SOL);
 
       // Resolve agent's wallet from their profile ID
@@ -674,7 +677,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                       { value: "1_month", label: "1 Month" },
                     ]} />
                 </div>
-                <Input label="Budget (USDC)" value={postForm.budgetAmount} onChange={(v) => setPostForm(p => ({ ...p, budgetAmount: v }))} placeholder="1.0" type="number" />
+                <Input label="Budget (SOL)" value={postForm.budgetAmount} onChange={(v) => setPostForm(p => ({ ...p, budgetAmount: v }))} placeholder="0.5" type="number" />
                 <Input label="Skills (comma separated)" value={postForm.skills} onChange={(v) => setPostForm(p => ({ ...p, skills: v }))} placeholder="Solana, Rust, TypeScript" />
                 <Textarea label="Requirements (optional)" value={postForm.requirements} onChange={(v) => setPostForm(p => ({ ...p, requirements: v }))} placeholder="Must have experience with..." />
                 <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", color: "#10b981" }}>
@@ -698,7 +701,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                 {resolvedProfileId && <div className="text-[11px]" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>Applying as: <strong>{resolvedProfileId}</strong></div>}
                 {!resolvingProfile && !resolvedProfileId && publicKey && <div className="text-[11px]" style={{ color: "var(--warning, #f59e0b)", fontFamily: "var(--font-mono)" }}>⚠️ No profile found for this wallet. Create a profile first.</div>}
                 <Textarea label="Your Proposal" value={applyMessage} onChange={setApplyMessage} placeholder="Why are you the best fit for this job?" />
-                <Input label="Your Bid (USDC, optional)" value={applyBid} onChange={setApplyBid} placeholder="Leave empty to match budget" type="number" />
+                <Input label="Your Bid (SOL, optional)" value={applyBid} onChange={setApplyBid} placeholder="Leave empty to match budget" type="number" />
                 <button onClick={handleApply} disabled={loading}
                   className="w-full py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-50"
                   style={{ fontFamily: "var(--font-mono)", background: "var(--accent)", color: "#fff" }}>
@@ -727,7 +730,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                 <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", color: "#10b981" }}>
                   <Shield size={12} className="inline mr-1" /> <strong>V3 Identity-Verified Escrow</strong>
                   <br />
-                  Your funds are locked in an on-chain escrow program with SATP identity verification. The agent must have a verified Genesis Record. You control release.
+                  Your funds are locked in a SOL-denominated on-chain escrow program with SATP identity verification. The agent must have a verified Genesis Record. You control release.
                 </div>
                 <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)", color: "#f59e0b" }}>
                   ⚠️ This will open your wallet (Phantom) to sign a Solana transaction. The funds go to the escrow program — not directly to the agent.
