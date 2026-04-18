@@ -470,7 +470,14 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
         if (tx instanceof VersionedTransaction && !signTransaction) {
           throw new Error("Connected wallet must support signTransaction() for versioned escrow transactions");
         }
-        const sig = await signAndSendV3Tx(tx as any, connection, publicKey!, sendTransaction, signTransaction);
+        let signedTransaction: string | null = null;
+        let txSignature: string | null = null;
+        if (signTransaction) {
+          const signedTx = await signTransaction(tx as any);
+          signedTransaction = Buffer.from(signedTx.serialize()).toString("base64");
+        } else {
+          txSignature = await signAndSendV3Tx(tx as any, connection, publicKey!, sendTransaction, signTransaction);
+        }
 
         const authHeaders = await createMarketplaceWalletAuth({
           action: "confirm_onchain_escrow",
@@ -485,7 +492,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           method: "POST",
           headers: { "Content-Type": "application/json", ...authHeaders },
           body: JSON.stringify({
-            txSignature: sig,
+            ...(signedTransaction ? { signedTransaction } : { txSignature }),
             escrowPDA: buildData.escrowPDA,
             clientWallet: walletAddress,
           }),
@@ -495,7 +502,8 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           throw new Error(confirmData.error || "Failed to confirm on-chain escrow funding");
         }
 
-        showMessage("success", `On-chain escrow funded! TX: ${sig.slice(0, 16)}... | PDA: ${buildData.escrowPDA.slice(0, 12)}...`);
+        const fundedTx = confirmData?.escrow?.txHash || confirmData?.signature || txSignature || "";
+        showMessage("success", `On-chain escrow funded! TX: ${fundedTx.slice(0, 16)}... | PDA: ${buildData.escrowPDA.slice(0, 12)}...`);
         setModal(null);
         await refreshJobs();
         return;
@@ -624,7 +632,14 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
         if (tx instanceof VersionedTransaction && !signTransaction) {
           throw new Error("Connected wallet must support signTransaction() for versioned escrow transactions");
         }
-        const sig = await signAndSendV3Tx(tx as any, connection, publicKey!, sendTransaction, signTransaction);
+        let signedTransaction: string | null = null;
+        let txSignature: string | null = null;
+        if (signTransaction) {
+          const signedTx = await signTransaction(tx as any);
+          signedTransaction = Buffer.from(signedTx.serialize()).toString("base64");
+        } else {
+          txSignature = await signAndSendV3Tx(tx as any, connection, publicKey!, sendTransaction, signTransaction);
+        }
 
         const authHeaders = await createMarketplaceWalletAuth({
           action: "confirm_onchain_release",
@@ -639,7 +654,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           method: "POST",
           headers: { "Content-Type": "application/json", ...authHeaders },
           body: JSON.stringify({
-            txSignature: sig,
+            ...(signedTransaction ? { signedTransaction } : { txSignature }),
             clientWallet: walletAddress,
           }),
         });
@@ -648,7 +663,8 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           throw new Error(confirmData.error || "Failed to confirm on-chain release");
         }
 
-        showMessage("success", `On-chain payment released! TX: ${sig.slice(0, 16)}...`);
+        const releaseTx = confirmData?.escrow?.releaseTxHash || confirmData?.signature || txSignature || "";
+        showMessage("success", `On-chain payment released! TX: ${releaseTx.slice(0, 16)}...`);
       } else {
         const authHeaders = await createMarketplaceWalletAuth({
           action: "complete_job",
