@@ -12,15 +12,15 @@ async function main() {
   console.log("Authority:", signer.publicKey.toBase58());
   
   const agents = [
-    { id: "agent_brainkid", level: 3, repBps: 750000 },
-    { id: "agent_brainchain", level: 1, repBps: 600000 },
-    { id: "agent_braingrowth", level: 1, repBps: 600000 },
-    { id: "agent_braintrade", level: 1, repBps: 550000 },
+    { id: "agent_brainkid", level: 3, repScore: 600 },
+    { id: "agent_brainchain", level: 1, repScore: 480 },
+    { id: "agent_braingrowth", level: 1, repScore: 480 },
+    { id: "agent_braintrade", level: 1, repScore: 440 },
   ];
   
   for (const a of agents) {
     try {
-      console.log("Updating " + a.id + ": level=" + a.level + ", rep=" + a.repBps);
+      console.log("Updating " + a.id + ": level=" + a.level + ", rep=" + a.repScore);
       
       const verTx = await sdk.buildUpdateVerification(signer.publicKey, a.id, a.level);
       verTx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
@@ -31,7 +31,7 @@ async function main() {
       
       await new Promise(r => setTimeout(r, 1000));
       
-      const repTx = await sdk.buildUpdateReputation(signer.publicKey, a.id, a.repBps);
+      const repTx = await sdk.buildUpdateReputation(signer.publicKey, a.id, a.repScore);
       repTx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
       repTx.feePayer = signer.publicKey;
       repTx.sign(signer);

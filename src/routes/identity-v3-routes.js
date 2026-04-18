@@ -149,7 +149,10 @@ function parseGenesisRecord(data, pda) {
       }
     }
 
-    const reputationScore = Number(data.readBigUInt64LE(offset)); offset += 8;
+    const rawReputationScore = Number(data.readBigUInt64LE(offset)); offset += 8;
+    const reputationScore = rawReputationScore > 800
+      ? Math.min(Math.round(rawReputationScore / 10000), 800)
+      : Math.max(0, rawReputationScore);
     const verificationLevel = data[offset]; offset += 1;
     const reputationUpdatedAt = readI64();
     const verificationUpdatedAt = readI64();
@@ -174,6 +177,7 @@ function parseGenesisRecord(data, pda) {
       authority,
       pendingAuthority,
       reputationScore,
+      rawReputationScore,
       verificationLevel,
       createdAt: new Date(createdAt * 1000).toISOString(),
       updatedAt: new Date(updatedAt * 1000).toISOString(),
@@ -213,7 +217,8 @@ function enrichFromDB(record) {
     } catch (e) {}
   }
   
-  if (record.reputationScore !== 500000 || record.verificationLevel !== 0) return record;
+  const hasDefaultV3Score = record && (record.reputationScore === 0 || record.reputationScore === 50 || record.reputationScore === 500000);
+  if (!hasDefaultV3Score || record.verificationLevel !== 0) return record;
   try {
     const db = new Database(pathMod.join(__dirname, '..', '..', 'data', 'agentfolio.db'), { readonly: true });
     const agentId = 'agent_' + record.agentName.toLowerCase();
