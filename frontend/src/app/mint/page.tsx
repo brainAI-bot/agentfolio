@@ -2,13 +2,14 @@
 import { WalletRequired } from "@/components/WalletRequired";
 
 import { useState, useEffect } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { Flame, Wallet, Shield, AlertTriangle, CheckCircle, ExternalLink, Loader2, Sparkles, ArrowRight, Zap, Plus, FileText, Image as ImageIcon } from "lucide-react";
 
 const MINTING_PAUSED = false;
 
 const API = process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot";
+const SOLANA_RPC_PROXY = `${API}/solana-rpc`;
 
 const GENESIS_REGISTRY: Record<string, { name: string; image: string; metadata: string; role: string }> = {
   "BP9TPSoo6LXpy2YvRTZnPg1kLA9ndnKxa6eHYxkdVMWE": {
@@ -29,8 +30,30 @@ interface NFTItem {
   isGenesis: boolean;
 }
 
+function isVersionedSerializedTransaction(raw: Uint8Array): boolean {
+  let offset = 0;
+  let sigCount = 0;
+  let shift = 0;
+  while (offset < raw.length) {
+    const byte = raw[offset];
+    sigCount |= (byte & 0x7f) << shift;
+    offset += 1;
+    if ((byte & 0x80) === 0) break;
+    shift += 7;
+  }
+  const messageOffset = offset + sigCount * 64;
+  return messageOffset < raw.length && (raw[messageOffset] & 0x80) !== 0;
+}
+
+async function deserializeMintTransaction(base64Tx: string) {
+  const { Transaction, VersionedTransaction } = await import("@solana/web3.js");
+  const raw = Uint8Array.from(Buffer.from(base64Tx, "base64"));
+  return isVersionedSerializedTransaction(raw) ? VersionedTransaction.deserialize(raw) : Transaction.from(Buffer.from(raw));
+}
+
 export default function MintPage() {
   const wallet = useWallet();
+  const { connection } = useConnection();
   const { smartConnect } = useSmartConnect();
   const [step, setStep] = useState<Step>("connect");
   const [nfts, setNfts] = useState<NFTItem[]>([]);
@@ -89,7 +112,7 @@ export default function MintPage() {
       if (!prepRes.ok) { const err = await prepRes.json(); throw new Error(err.error || "Failed to prepare mint"); }
       const prepData = await prepRes.json();
       const { Transaction, Connection } = await import("@solana/web3.js");
-      const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb", "confirmed");
+      const connection = new Connection(SOLANA_RPC_PROXY, "confirmed");
       const txBuf = Buffer.from(prepData.transaction, "base64");
       const tx = Transaction.from(txBuf);
       const signed = await wallet.signTransaction(tx);
@@ -147,7 +170,7 @@ export default function MintPage() {
         // Paid mint (1 SOL) — user sends payment, then server mints via Metaplex
         if (!wallet.sendTransaction) return;
         const { Connection, Transaction, SystemProgram, PublicKey } = await import("@solana/web3.js");
-        const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb", "confirmed");
+        const connection = new Connection(SOLANA_RPC_PROXY, "confirmed");
         const treasury = new PublicKey("FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be");
         const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
         const tx = new Transaction({ blockhash, lastValidBlockHeight, feePayer: wallet.publicKey }).add(
@@ -187,7 +210,7 @@ export default function MintPage() {
     setError("");
     try {
       const { Connection } = await import("@solana/web3.js");
-      const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb", "confirmed");
+      const connection = new Connection(SOLANA_RPC_PROXY, "confirmed");
       let mintCompleted = false;
       for (let attempt = 0; attempt < 10 && !mintCompleted; attempt++) {
         if (attempt > 0) await new Promise(r => setTimeout(r, Math.min(4000 * attempt, 20000)));
@@ -220,7 +243,7 @@ export default function MintPage() {
   };
 
   const handleBurn = async () => {
-    if (!selectedNft || !wallet.publicKey || !wallet.signTransaction) return;
+    if (!selectedNft || !wallet.publicKey || (!wallet.sendTransaction && !wallet.signTransaction)) return;
     setStep("burning");
     setError("");
     try {
@@ -231,23 +254,53 @@ export default function MintPage() {
       });
       if (!prepRes.ok) { const err = await prepRes.json(); throw new Error(err.error || "Failed to prepare burn"); }
       const { transaction: serializedTx } = await prepRes.json();
-      const { Transaction } = await import("@solana/web3.js");
-      const tx = Transaction.from(Buffer.from(serializedTx, "base64"));
-      const signed = await wallet.signTransaction(tx);
+      const tx = await deserializeMintTransaction(serializedTx);
+      const submitPayload: Record<string, string> = {
+        wallet: wallet.publicKey.toBase58(),
+        nftMint: selectedNft.mint,
+      };
+      if (wallet.sendTransaction) {
+        const burnSignature = await wallet.sendTransaction(tx as any, connection, { skipPreflight: false });
+        submitPayload.txSignature = burnSignature;
+        submitPayload.submissionMode = "sendTransaction";
+      } else if (wallet.signTransaction) {
+        const signed = await wallet.signTransaction(tx as any);
+        submitPayload.signedTransaction = Buffer.from(signed.serialize()).toString("base64");
+        submitPayload.submissionMode = "signTransaction";
+      } else {
+        throw new Error("Connected wallet cannot sign burn transaction");
+      }
       const submitRes = await fetch(`${API}/api/burn-to-become/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wallet: wallet.publicKey.toBase58(),
-          nftMint: selectedNft.mint,
-          signedTransaction: Buffer.from(signed.serialize()).toString("base64"),
-        }),
+        body: JSON.stringify(submitPayload),
       });
       if (!submitRes.ok) { const err = await submitRes.json(); throw new Error(err.error || "Burn failed"); }
       const result = await submitRes.json();
       setBurnTx(result.burnTx);
       setSoulboundMint(result.soulboundMint);
-      // Genesis Record dropped
+      if (result.burnToBecomeTx && (wallet.sendTransaction || wallet.signTransaction)) {
+        try {
+          const btbTx = await deserializeMintTransaction(result.burnToBecomeTx);
+          const genesisPayload: Record<string, string> = {};
+          if (wallet.sendTransaction) {
+            const genesisSignature = await wallet.sendTransaction(btbTx as any, connection, { skipPreflight: false });
+            genesisPayload.txSignature = genesisSignature;
+            genesisPayload.submissionMode = "sendTransaction";
+          } else if (wallet.signTransaction) {
+            const signedBtb = await wallet.signTransaction(btbTx as any);
+            genesisPayload.signedTransaction = Buffer.from(signedBtb.serialize()).toString("base64");
+            genesisPayload.submissionMode = "signTransaction";
+          }
+          await fetch(`${API}/api/burn-to-become/submit-genesis`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(genesisPayload),
+          });
+        } catch (btbErr) {
+          console.warn("burnToBecome signing failed (non-critical):", btbErr);
+        }
+      }
       setStep("complete");
     } catch (e: any) {
       const msg = e?.code === 4001 ? "Transaction rejected in wallet"
