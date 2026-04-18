@@ -81,7 +81,7 @@ function initializeSchema() {
       skills TEXT DEFAULT '[]',  -- JSON array
       budget_type TEXT DEFAULT 'fixed',
       budget_amount REAL DEFAULT 0,
-      budget_currency TEXT DEFAULT 'USDC',
+      budget_currency TEXT DEFAULT 'SOL',
       budget_max REAL,
       timeline TEXT DEFAULT 'flexible',
       status TEXT DEFAULT 'open',
@@ -210,7 +210,7 @@ function initializeSchema() {
       agent_id TEXT,
       agent_wallet TEXT,
       amount REAL NOT NULL,
-      currency TEXT DEFAULT 'USDC',
+      currency TEXT DEFAULT 'SOL',
       platform_fee REAL,
       agent_payout REAL,
       status TEXT DEFAULT 'pending',
