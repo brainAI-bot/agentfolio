@@ -1423,24 +1423,89 @@ function registerRoutes(app) {
 
   // GET /api/profile-by-wallet?wallet=<address> — find profile by Solana wallet
   app.get('/api/profile-by-wallet', (req, res) => {
-    const { wallet } = req.query;
+    const { wallet, preferredProfileId } = req.query;
     if (!wallet) return res.status(400).json({ error: 'wallet required' });
     try {
       const db = getDb();
-      const profiles = db.prepare('SELECT id, name, verification_data, wallets FROM profiles').all();
-      for (const p of profiles) {
-        try {
-          const vd = JSON.parse(p.verification_data || '{}');
-          if (vd.solana && vd.solana.address === wallet && vd.solana.verified) {
-            return res.json({ id: p.id, name: p.name });
-          }
-          const w = JSON.parse(p.wallets || '{}');
-          if (w.solana === wallet) {
-            return res.json({ id: p.id, name: p.name });
-          }
-        } catch (e2) {}
+      const normalizedWallet = String(wallet).trim();
+      const preferredId = String(preferredProfileId || '').trim();
+      const walletParams = [
+        normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet,
+        normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet, normalizedWallet,
+      ];
+      const whereClause = `
+        LOWER(wallet) = LOWER(?)
+           OR LOWER(claimed_by) = LOWER(?)
+           OR LOWER(json_extract(wallets, '$.solana')) = LOWER(?)
+           OR LOWER(json_extract(wallets, '$.solana_wallet')) = LOWER(?)
+           OR LOWER(json_extract(wallets, '$.wallet')) = LOWER(?)
+           OR LOWER(json_extract(wallets, '$.ethereum')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.solana.address')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.solana.identifier')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.eth.address')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.eth.identifier')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.ethereum.address')) = LOWER(?)
+           OR LOWER(json_extract(verification_data, '$.ethereum.identifier')) = LOWER(?)
+      `;
+
+      let row = null;
+      if (preferredId) {
+        row = db.prepare(`
+          SELECT id, name, wallet, wallets FROM profiles
+          WHERE id = ? AND (${whereClause})
+          LIMIT 1
+        `).get(preferredId, ...walletParams)
       }
-      return res.status(404).json({ error: 'No profile found for this wallet' });
+
+      if (!row) {
+        const matches = db.prepare(`
+          SELECT id, name, wallet, wallets FROM profiles
+          WHERE ${whereClause}
+          ORDER BY COALESCE(
+            julianday(REPLACE(SUBSTR(updated_at, 1, 19), 'T', ' ')),
+            julianday(REPLACE(SUBSTR(created_at, 1, 19), 'T', ' ')),
+            0
+          ) DESC, id DESC
+          LIMIT 3
+        `).all(...walletParams);
+        if (!matches.length) {
+          return res.status(404).json({ found: false, error: 'No profile found for this wallet' });
+        }
+        if (matches.length > 1) {
+          return res.status(409).json({
+            found: false,
+            ambiguous: true,
+            error: 'Multiple profiles found for this wallet. Provide preferredProfileId.',
+            profileIds: matches.map((item) => item.id),
+            profiles: matches.map((item) => ({ id: item.id, name: item.name })),
+          });
+        }
+        row = matches[0];
+      }
+
+      if (row) {
+        let parsedWallets = {};
+        if (row.wallets) {
+          try {
+            parsedWallets = typeof row.wallets === 'string' ? JSON.parse(row.wallets) : row.wallets;
+          } catch (_) {
+            parsedWallets = {};
+          }
+        }
+        const primaryWallet = row.wallet || parsedWallets.solana || parsedWallets.solana_wallet || parsedWallets.wallet || '';
+        return res.json({
+          found: true,
+          id: row.id,
+          profileId: row.id,
+          name: row.name,
+          profile: { id: row.id, name: row.name, wallet: primaryWallet, wallets: parsedWallets },
+          wallet: primaryWallet,
+          walletAddress: primaryWallet,
+          wallets: parsedWallets,
+          preferredMatched: !!(preferredId && row.id === preferredId),
+        });
+      }
+      return res.status(404).json({ found: false, error: 'No profile found for this wallet' });
     } catch (e) {
       return res.status(500).json({ error: e.message });
     }

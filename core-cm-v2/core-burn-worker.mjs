@@ -18,7 +18,7 @@ import {
   createNoopSigner,
   none,
 } from '@metaplex-foundation/umi';
-import { toWeb3JsTransaction, toWeb3JsLegacyTransaction } from '@metaplex-foundation/umi-web3js-adapters';
+import { toWeb3JsTransaction } from '@metaplex-foundation/umi-web3js-adapters';
 import { Connection } from '@solana/web3.js';
 import fs from 'fs';
 
@@ -103,9 +103,8 @@ async function run() {
       }));
 
     const tx = await builder.setFeePayer(ownerSigner).buildWithLatestBlockhash(umi);
-    const web3Tx = toWeb3JsLegacyTransaction(tx);
-    const serialized = web3Tx.serialize({ requireAllSignatures: false });
-    const base64Tx = Buffer.from(serialized).toString('base64');
+    const web3Tx = toWeb3JsTransaction(tx);
+    const base64Tx = Buffer.from(web3Tx.serialize()).toString('base64');
 
     console.log(JSON.stringify({
       success: true,
