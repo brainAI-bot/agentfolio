@@ -31,8 +31,8 @@ import {
   some,
   none,
 } from '@metaplex-foundation/umi';
-import { toWeb3JsLegacyTransaction } from '@metaplex-foundation/umi-web3js-adapters';
-import { Keypair } from '@solana/web3.js';
+import { toWeb3JsTransaction } from '@metaplex-foundation/umi-web3js-adapters';
+import { Keypair, Transaction, VersionedTransaction } from '@solana/web3.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -129,23 +129,37 @@ async function run() {
 
   // Build with recipient as fee payer
   const tx = await builder.setFeePayer(ownerSigner).buildWithLatestBlockhash(umi);
-  const web3Tx = toWeb3JsLegacyTransaction(tx);
+  const web3Tx = toWeb3JsTransaction(tx);
 
   // Server-side partial signing:
   // 1. Asset signer (generated keypair for the NFT)
   const assetWeb3Kp = Keypair.fromSecretKey(Uint8Array.from(asset.secretKey));
-  web3Tx.partialSign(assetWeb3Kp);
 
   // 2. Deployer co-signs for free flow (thirdPartySigner guard)
-  if (flow === 'free') {
-    const deployerWeb3Kp = Keypair.fromSecretKey(Uint8Array.from(secretKey));
-    web3Tx.partialSign(deployerWeb3Kp);
+  const deployerWeb3Kp = flow === 'free'
+    ? Keypair.fromSecretKey(Uint8Array.from(secretKey))
+    : null;
+
+  if (web3Tx instanceof VersionedTransaction) {
+    const signers = deployerWeb3Kp ? [assetWeb3Kp, deployerWeb3Kp] : [assetWeb3Kp];
+    web3Tx.sign(signers);
+  } else {
+    web3Tx.partialSign(assetWeb3Kp);
+    if (deployerWeb3Kp) web3Tx.partialSign(deployerWeb3Kp);
+  }
+
+  if (deployerWeb3Kp) {
     console.error('[Atomic Prepare] Deployer co-signed for free flow');
   }
 
   // Serialize (user still needs to sign as payer + authority)
-  const serialized = web3Tx.serialize({ requireAllSignatures: false });
+  const serialized = web3Tx instanceof VersionedTransaction
+    ? web3Tx.serialize()
+    : web3Tx.serialize({ requireAllSignatures: false });
   const base64Tx = Buffer.from(serialized).toString('base64');
+  const feePayer = web3Tx instanceof VersionedTransaction
+    ? web3Tx.message.staticAccountKeys[0].toString()
+    : web3Tx.feePayer?.toString() || null;
 
   console.log(JSON.stringify({
     success: true,
@@ -159,6 +173,8 @@ async function run() {
     cmIndex: nextIndex,
     flow,
     atomic: true,
+    feePayer,
+    txVersion: web3Tx instanceof VersionedTransaction ? 'v0' : 'legacy',
     message: flow === 'free'
       ? 'Sign to mint + burn your BOA in one click (free, deployer co-signed)'
       : 'Sign to mint + burn your BOA in one click (1 SOL)',
