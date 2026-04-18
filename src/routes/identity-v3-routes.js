@@ -29,6 +29,13 @@ const IDENTITY_PROGRAM_ID = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnz
 
 const conn = new Connection(RPC_URL, 'confirmed');
 
+
+function normalizeTrustScoreValue(score) {
+  const numeric = Number(score || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return numeric > 800 ? Math.min(Math.round(numeric / 10000), 800) : Math.max(0, numeric);
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function hashAgentId(agentId) {
@@ -227,7 +234,8 @@ function enrichFromDB(record) {
     db.close();
     if (row) {
       const numLevel = typeof row.level === 'number' ? row.level : (LEVEL_MAP[String(row.level).toUpperCase()] || 0);
-      record.reputationScore = row.overall_score || record.reputationScore;
+      const normalizedOverallScore = normalizeTrustScoreValue(row.overall_score);
+      record.reputationScore = normalizedOverallScore || record.reputationScore;
       record.verificationLevel = numLevel;
       record.verificationLabel = LEVEL_LABELS[numLevel] || 'Unknown';
       record._enrichedFromDB = true;

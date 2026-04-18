@@ -39,6 +39,12 @@ try {
   console.warn('[SATP V3] SDK not available:', e.message);
 }
 
+function normalizeTrustScoreValue(score) {
+  const numeric = Number(score || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return numeric > 800 ? Math.min(Math.round(numeric / 10000), 800) : Math.max(0, numeric);
+}
+
 // V3 Score Service — batch on-chain scoring
 let v3ScoreService;
 try {
@@ -461,7 +467,7 @@ function enrichProfile(row) {
     const trustRow = d.prepare('SELECT overall_score, level, score_breakdown FROM satp_trust_scores WHERE agent_id = ?').get(row.id);
     if (trustRow) {
       trust_score = {
-        overall_score: trustRow.overall_score,
+        overall_score: normalizeTrustScoreValue(trustRow.overall_score),
         level: trustRow.level,
         score_breakdown: parseJsonField(trustRow.score_breakdown, {}),
       };
@@ -932,7 +938,8 @@ function registerRoutes(app) {
               const numLevel = typeof trustRow.level === 'number' ? trustRow.level : (levelMap[String(trustRow.level).toUpperCase()] || 0);
               record.verificationLevel = numLevel;
               record.verificationLabel = levelLabels[numLevel] || 'Unclaimed';
-              record.reputationScore = trustRow.overall_score || record.reputationScore;
+              const normalizedOverallScore = normalizeTrustScoreValue(trustRow.overall_score);
+              record.reputationScore = normalizedOverallScore || record.reputationScore;
               record._enrichedFromDB = true;
             }
           }

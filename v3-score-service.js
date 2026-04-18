@@ -79,7 +79,7 @@ function parseGenesisRecord(data) {
     offset += 1;
     if (hasPending === 1) offset += 32;
 
-    const reputationScore = Number(data.readBigUInt64LE(offset));
+    const rawReputationScore = Number(data.readBigUInt64LE(offset));
     offset += 8;
     const verificationLevel = data[offset];
     offset += 1;
@@ -93,8 +93,9 @@ function parseGenesisRecord(data) {
 
     return {
       agentName,
-      reputationScore,
-      reputationPct: (reputationScore / 10000).toFixed(2),
+      reputationScore: Math.min(Math.round(rawReputationScore / 10000), 800),
+      rawReputationScore,
+      reputationPct: (rawReputationScore / 10000).toFixed(2),
       verificationLevel,
       verificationLabel: ['Unverified','Registered','Verified','Established','Trusted','Sovereign'][verificationLevel] || 'Unknown',
       isBorn: genesisRecord > 0,

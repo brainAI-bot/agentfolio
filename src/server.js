@@ -52,6 +52,12 @@ async function getV3Score(agentIdOrName) {
   return _rawGetV3Score(agentIdOrName);
 }
 
+function normalizeTrustScoreValue(score) {
+  const numeric = Number(score || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return numeric > 800 ? Math.min(Math.round(numeric / 10000), 800) : Math.max(0, numeric);
+}
+
 // x402 Payment Layer
 const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
 const { HTTPFacilitatorClient } = require('@x402/core/server');
@@ -346,7 +352,8 @@ app.get('/api/explorer/:agentId', async (req, res) => {
           const levelLabels = ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'];
           v3Data.verificationLevel = numLevel;
           v3Data.verificationLabel = levelLabels[numLevel] || 'Unclaimed';
-          v3Data.reputationScore = trustRow.overall_score || v3Data.reputationScore;
+          const normalizedOverallScore = normalizeTrustScoreValue(trustRow.overall_score);
+          v3Data.reputationScore = normalizedOverallScore || v3Data.reputationScore;
           v3Data._enrichedFromDB = true;
         }
       } catch (enrichErr) {
@@ -526,7 +533,7 @@ app.get('/api/profile/:id/trust-score', async (req, res) => {
     if (trustRow) {
       return res.json({
         agentId: resolvedId,
-        score: trustRow.overall_score,
+        score: normalizeTrustScoreValue(trustRow.overall_score),
         level: trustRow.level,
         levelName: ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'][trustRow.level] || 'Unclaimed',
         tier: trustRow.level >= 4 ? 'Elite' : trustRow.level >= 3 ? 'Established' : trustRow.level >= 2 ? 'Verified' : trustRow.level >= 1 ? 'Basic' : 'Unclaimed',
@@ -1199,7 +1206,7 @@ app.get('/profile/:id', async (req, res) => {
     mainDb.close();
     if (trustRow) {
       trustScore = {
-        overall_score: trustRow.overall_score,
+        overall_score: normalizeTrustScoreValue(trustRow.overall_score),
         level: trustRow.level,
         breakdown: JSON.parse(trustRow.score_breakdown || '{}'),
       };
