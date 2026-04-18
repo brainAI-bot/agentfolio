@@ -5,6 +5,7 @@ import { Flame, AlertTriangle, Check, Loader2, X, Image, Skull, Shield, External
 import BirthCertificate from "./BirthCertificate";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot";
+const SOLANA_RPC_PROXY = `${API}/solana-rpc`;
 
 interface NFT {
   mint: string;
@@ -141,7 +142,7 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
           const { Connection, PublicKey, Transaction, SystemProgram } = await import("@solana/web3.js");
           const { createBurnInstruction, TOKEN_PROGRAM_ID, getAssociatedTokenAddress } = await import("@solana/spl-token");
 
-          const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
+          const connection = new Connection(SOLANA_RPC_PROXY, "confirmed");
           const wallet = (window as any).solana;
           const ownerPubkey = new PublicKey(walletAddress);
           const mintPubkey = new PublicKey(state.selectedNFT.mint);
