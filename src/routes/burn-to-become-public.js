@@ -132,12 +132,19 @@ function decodeInstructionData(data) {
 
 function getConfirmedTransactionAccountKeys(txInfo) {
   const message = txInfo?.transaction?.message;
-  const staticKeys = Array.isArray(message?.accountKeys)
-    ? message.accountKeys.map(key => new PublicKey(typeof key === 'string' ? key : (key?.pubkey || key?.toString?.() || String(key))))
-    : [];
+  const staticKeys = Array.isArray(message?.staticAccountKeys)
+    ? message.staticAccountKeys.map(key => new PublicKey(typeof key === 'string' ? key : (key?.pubkey || key?.toString?.() || String(key))))
+    : Array.isArray(message?.accountKeys)
+      ? message.accountKeys.map(key => new PublicKey(typeof key === 'string' ? key : (key?.pubkey || key?.toString?.() || String(key))))
+      : [];
   const loadedWritable = (txInfo?.meta?.loadedAddresses?.writable || []).map(key => new PublicKey(key));
   const loadedReadonly = (txInfo?.meta?.loadedAddresses?.readonly || []).map(key => new PublicKey(key));
   return staticKeys.concat(loadedWritable, loadedReadonly);
+}
+
+function getConfirmedTransactionInstructions(txInfo) {
+  const message = txInfo?.transaction?.message;
+  return message?.compiledInstructions || message?.instructions || [];
 }
 
 function getConfirmedTransactionFeePayer(txInfo) {
@@ -146,7 +153,7 @@ function getConfirmedTransactionFeePayer(txInfo) {
 
 function getConfirmedTransactionProgramIds(txInfo) {
   const keys = getConfirmedTransactionAccountKeys(txInfo);
-  return (txInfo?.transaction?.message?.instructions || [])
+  return getConfirmedTransactionInstructions(txInfo)
     .map(ix => keys[ix.programIdIndex])
     .filter(Boolean);
 }
@@ -159,7 +166,8 @@ function getConfirmedTransactionSignerMatches(txInfo, pubkey) {
 
 function getConfirmedTransactionInstructionKeys(txInfo, ix) {
   const keys = getConfirmedTransactionAccountKeys(txInfo);
-  return (ix?.accounts || []).map(index => keys[index]).filter(Boolean);
+  const indexes = ix?.accounts || ix?.accountKeyIndexes || [];
+  return indexes.map(index => keys[index]).filter(Boolean);
 }
 
 async function getConfirmedTransactionWithRetry(signature, attempts = 8) {
@@ -1377,7 +1385,7 @@ function handleBurnToBecome(req, res, url) {
             });
           }
 
-          const confirmedInstructions = confirmedTx?.transaction?.message?.instructions || [];
+          const confirmedInstructions = getConfirmedTransactionInstructions(confirmedTx);
           if (submittedMintAccount.owner.equals(METAPLEX_CORE_PROGRAM)) {
             const coreIx = confirmedInstructions.find(ix => {
               const programId = getConfirmedTransactionAccountKeys(confirmedTx)[ix.programIdIndex];
