@@ -31,13 +31,13 @@ async function main() {
   
   // Update brainKID: 5 verifications → Level 3
   const agents = [
-    { id: "agent_brainkid", level: 3, repBps: 750000 },  // 5 verifications, 75%
-    { id: "agent_brainforge", level: 2, repBps: 750000 },  // already at 2, keep
+    { id: "agent_brainkid", level: 3, repScore: 600 },  // 5 verifications, 600/800
+    { id: "agent_brainforge", level: 2, repScore: 600 },  // already at 2, keep
   ];
   
   for (const a of agents) {
     try {
-      console.log(`\nUpdating ${a.id}: level=${a.level}, rep=${a.repBps}`);
+      console.log(`\nUpdating ${a.id}: level=${a.level}, rep=${a.repScore}`);
       
       // Update verification level
       const { transaction: verTx } = await client.buildUpdateVerification(signer.publicKey, a.id, a.level);
@@ -48,7 +48,7 @@ async function main() {
       console.log(`  Verification updated: ${verSig}`);
       
       // Update reputation
-      const { transaction: repTx } = await client.buildUpdateReputation(signer.publicKey, a.id, a.repBps);
+      const { transaction: repTx } = await client.buildUpdateReputation(signer.publicKey, a.id, a.repScore);
       repTx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
       repTx.feePayer = signer.publicKey;
       repTx.sign(signer);

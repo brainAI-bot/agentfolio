@@ -322,10 +322,9 @@ function parseIdentityAccount(data) {
     }
     
     // reputation_score: u64, verification_level: u8
-    let reputationScore = 0, verificationLevel = 0;
+    let rawReputationScore = 0, verificationLevel = 0;
     if (data.length >= offset + 8) {
-      const raw = Number(data.readBigUInt64LE(offset));
-      if (raw <= 1000000) reputationScore = raw;
+      rawReputationScore = Number(data.readBigUInt64LE(offset));
       offset += 8;
     }
     if (data.length >= offset + 1) {
@@ -333,14 +332,17 @@ function parseIdentityAccount(data) {
       if (lvl <= 5) verificationLevel = lvl;
       offset += 1;
     }
+    const reputationScore = rawReputationScore > 800
+      ? Math.min(Math.round(rawReputationScore / 10000), 800)
+      : Math.max(0, rawReputationScore);
     
     return {
       authority, name, description, metadataUri, version,
-      reputationScore: reputationScore / 10000,
-      reputationScoreRaw: reputationScore,
+      reputationScore,
+      reputationScoreRaw: rawReputationScore,
       verificationLevel,
       verificationLabel: levelToLabel(verificationLevel),
-      reputationRank: scoreToRank(reputationScore / 10000),
+      reputationRank: scoreToRank(reputationScore),
       createdAt, updatedAt, onChain: true,
     };
   } catch (err) {

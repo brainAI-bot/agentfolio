@@ -172,10 +172,13 @@ async function main() {
       const trustScore = calcTrustScoreV2(profile, verifications);
       const level = calcVerificationLevel(verifications);
 
-      // Scale trust score: 0-800 → 0-1000000 (on-chain format)
-      const onChainScore = Math.round((trustScore / 800) * 1000000);
+      // Normalize legacy raw values (e.g. 5120000) into the current 0-800 reputation scale.
+      const currentOnChainScore = genesis.reputationScore > 800
+        ? Math.min(Math.round(genesis.reputationScore / 10000), 800)
+        : Math.max(0, genesis.reputationScore);
+      const onChainScore = trustScore;
 
-      console.log(`[ScoreSync] ${profileId}: trust=${trustScore}/800 (on-chain: ${onChainScore}), level=${level} (was: score=${genesis.reputationScore}, level=${genesis.verificationLevel})`);
+      console.log(`[ScoreSync] ${profileId}: trust=${trustScore}/800 (write: ${onChainScore}), level=${level} (was: score=${currentOnChainScore}, raw=${genesis.reputationScore}, level=${genesis.verificationLevel})`);
 
       if (DRY_RUN) {
         updated++;
@@ -197,9 +200,9 @@ async function main() {
         }
       }
 
-      // Write reputation score if changed significantly (>5% diff)
-      const scoreDiff = Math.abs(onChainScore - genesis.reputationScore);
-      if (scoreDiff > 50000 || genesis.reputationScore === 0) {
+      // Write reputation score if changed significantly (>10 points)
+      const scoreDiff = Math.abs(onChainScore - currentOnChainScore);
+      if (scoreDiff > 10 || currentOnChainScore === 0) {
         try {
           const { transaction: repTx } = await client.buildUpdateReputation(signer.publicKey, profileId, onChainScore);
           repTx.sign(signer);

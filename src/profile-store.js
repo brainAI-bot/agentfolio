@@ -925,7 +925,8 @@ function registerRoutes(app) {
           if (dbRow) {
             const trustRow = require('better-sqlite3')(require('path').join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true })
               .prepare('SELECT overall_score, level, score_breakdown FROM satp_trust_scores WHERE agent_id = ?').get(dbRow.id);
-            if (trustRow && (record.verificationLevel === 0 || record.reputationScore === 500000)) {
+            const hasDefaultV3Score = record && (record.reputationScore === 0 || record.reputationScore === 50 || record.reputationScore === 500000);
+            if (trustRow && (record.verificationLevel === 0 || hasDefaultV3Score)) {
               const levelMap = { UNCLAIMED: 0, REGISTERED: 1, VERIFIED: 2, ESTABLISHED: 3, TRUSTED: 4, SOVEREIGN: 5 };
               const levelLabels = ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'];
               const numLevel = typeof trustRow.level === 'number' ? trustRow.level : (levelMap[String(trustRow.level).toUpperCase()] || 0);
