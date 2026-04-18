@@ -4,7 +4,6 @@ import { useMemo, useCallback, ReactNode, useState, createContext, useContext } 
 import { ConnectionProvider, WalletProvider as SolanaWalletProvider, useWallet } from "@solana/wallet-adapter-react";
 import { WalletModalProvider, useWalletModal } from "@solana/wallet-adapter-react-ui";
 // Removed explicit adapter imports — standard wallet detection handles all wallets
-import { clusterApiUrl } from "@solana/web3.js";
 
 import "@solana/wallet-adapter-react-ui/styles.css";
 
@@ -116,7 +115,7 @@ function SmartConnectProvider({ children }: { children: ReactNode }) {
 }
 
 export function WalletProvider({ children }: { children: ReactNode }) {
-  const endpoint = useMemo(() => clusterApiUrl("mainnet-beta"), []);
+  const endpoint = useMemo(() => `${process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot"}/solana-rpc`, []);
   const wallets = useMemo(() => [], []); // Empty = use standard wallet detection (no plugin.install errors)
 
   return (
