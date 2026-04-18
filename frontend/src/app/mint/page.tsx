@@ -111,10 +111,9 @@ export default function MintPage() {
       });
       if (!prepRes.ok) { const err = await prepRes.json(); throw new Error(err.error || "Failed to prepare mint"); }
       const prepData = await prepRes.json();
-      const { Transaction, Connection } = await import("@solana/web3.js");
+      const { Connection } = await import("@solana/web3.js");
       const connection = new Connection(SOLANA_RPC_PROXY, "confirmed");
-      const txBuf = Buffer.from(prepData.transaction, "base64");
-      const tx = Transaction.from(txBuf);
+      const tx = await deserializeMintTransaction(prepData.transaction);
       const signed = await wallet.signTransaction(tx);
       const sig = await connection.sendRawTransaction(signed.serialize(), { skipPreflight: false });
       await connection.confirmTransaction(sig, "confirmed");
