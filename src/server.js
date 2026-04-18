@@ -332,7 +332,8 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     }
     
     // DB enrichment: when V3 on-chain shows defaults, use DB trust scores
-    if (v3Data && (v3Data.verificationLevel === 0 || v3Data.reputationScore === 500000)) {
+    const hasDefaultV3Score = v3Data && (v3Data.reputationScore === 0 || v3Data.reputationScore === 50 || v3Data.reputationScore === 500000);
+    if (v3Data && (v3Data.verificationLevel === 0 || hasDefaultV3Score)) {
       try {
         const Database = require('better-sqlite3');
         const path = require('path');
