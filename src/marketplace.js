@@ -13,6 +13,13 @@ try { addActivity = require('./profile-store').addActivity; } catch { addActivit
 
 const DATA_DIR = path.join(__dirname, '..', 'data', 'marketplace');
 
+
+function normalizeTrustScoreValue(score) {
+  const numeric = Number(score || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return numeric > 800 ? Math.min(Math.round(numeric / 10000), 800) : Math.max(0, numeric);
+}
+
 // Helper: resolve wallet address to profile ID
 function resolveApplicantId(applicantId) {
   if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(applicantId)) {
@@ -89,7 +96,7 @@ function enrichApplication(app) {
       try {
         const trustRow = db.prepare('SELECT overall_score, level FROM satp_trust_scores WHERE agent_id = ?').get(row.id);
         if (trustRow) {
-          trustScore = trustRow.overall_score || 0;
+          trustScore = normalizeTrustScoreValue(trustRow.overall_score);
           // level can be a number or a string label
           const lvl = trustRow.level;
           if (typeof lvl === 'number') {
