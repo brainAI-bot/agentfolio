@@ -4,6 +4,7 @@ import {
   TransactionInstruction,
   SystemProgram,
   Transaction,
+  clusterApiUrl,
 } from "@solana/web3.js";
 
 export const IDENTITY_REGISTRY_PROGRAM_ID = new PublicKey(
@@ -14,11 +15,9 @@ export const ESCROW_PROGRAM_ID = new PublicKey(
 );
 
 export const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
-export const SOLANA_RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || (
-  SOLANA_CLUSTER === "mainnet-beta"
-    ? "https://api.mainnet-beta.solana.com"
-    : `https://api.${SOLANA_CLUSTER}.solana.com`
-);
+const SITE_URL = (typeof window !== "undefined" ? window.location.origin : "") || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot";
+const DEFAULT_SOLANA_RPC_PROXY_URL = `${SITE_URL}/solana-rpc`;
+export const SOLANA_RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || DEFAULT_SOLANA_RPC_PROXY_URL || clusterApiUrl(SOLANA_CLUSTER as "devnet" | "testnet" | "mainnet-beta");
 
 // register_agent discriminator from IDL
 const REGISTER_AGENT_DISCRIMINATOR = Buffer.from([135, 157, 66, 195, 2, 113, 175, 30]);
