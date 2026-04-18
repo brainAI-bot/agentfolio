@@ -171,17 +171,22 @@ export default function MintPage() {
         if (confirmData.soulboundMint) {
           setSoulboundMint(confirmData.soulboundMint);
         }
-        // If server returns a burnToBecome TX (genesis record update), have user sign it
-        if (confirmData.burnToBecomeTx && wallet.signTransaction) {
+        // If server returns a burnToBecome TX (genesis record update), have user sign or send it
+        if (confirmData.burnToBecomeTx && (wallet.sendTransaction || wallet.signTransaction)) {
           try {
             const btbTx = await deserializeMintTransaction(confirmData.burnToBecomeTx);
-            const signedBtb = await wallet.signTransaction(btbTx as any);
+            const genesisPayload: Record<string, string> = {};
+            if (wallet.sendTransaction) {
+              const genesisSignature = await wallet.sendTransaction(btbTx as any, connection, { skipPreflight: false });
+              genesisPayload.txSignature = genesisSignature;
+            } else if (wallet.signTransaction) {
+              const signedBtb = await wallet.signTransaction(btbTx as any);
+              genesisPayload.signedTransaction = Buffer.from(signedBtb.serialize()).toString("base64");
+            }
             const btbRes = await fetch(`${API}/api/burn-to-become/submit-genesis`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                signedTransaction: Buffer.from(signedBtb.serialize()).toString("base64"),
-              }),
+              body: JSON.stringify(genesisPayload),
             });
             if (btbRes.ok) {
               const btbResult = await btbRes.json();
