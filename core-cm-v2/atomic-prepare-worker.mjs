@@ -31,14 +31,13 @@ import {
   some,
   none,
 } from '@metaplex-foundation/umi';
-import { toWeb3JsLegacyTransaction } from '@metaplex-foundation/umi-web3js-adapters';
-import { Keypair } from '@solana/web3.js';
+import { toWeb3JsTransaction } from '@metaplex-foundation/umi-web3js-adapters';
+import { Keypair, Transaction, VersionedTransaction } from '@solana/web3.js';
 import fs from 'fs';
 import path from 'path';
 
 const recipient = process.argv[2];
 const flow = process.argv[3] || 'free';
-const agentId = process.argv[4] || null; // Optional: for on-chain PDA anti-gaming
 
 if (!recipient) {
   console.log(JSON.stringify({ error: 'Usage: node atomic-prepare-worker.mjs <wallet> <flow>' }));
@@ -57,25 +56,12 @@ async function run() {
   const secretKey = JSON.parse(fs.readFileSync(DEPLOYER_PATH, 'utf-8'));
 
   const umi = createUmi(RPC).use(mplCandyMachine());
-  const deployerUmiKeypair = umi.eddsa.createKeypairFromSecretKey(Uint8Array.from(secretKey));
-
-  // Set USER as UMI identity + payer (noop signer — will be signed client-side in Phantom)
-  const recipientPk = publicKey(recipient);
-  const userIdentity = createNoopSigner(recipientPk);
-  umi.identity = userIdentity;
-  umi.payer = userIdentity;
-
-  // Deployer signer — only used for thirdPartySigner guard (free flow)
-  // This is a real signer that will partial-sign server-side
-  const deployerSigner = {
-    publicKey: deployerUmiKeypair.publicKey,
-    signMessage: async (msg) => umi.eddsa.sign(msg, deployerUmiKeypair),
-    signTransaction: async (tx) => tx,
-    signAllTransactions: async (txs) => txs,
-  };
+  const deployerKeypair = umi.eddsa.createKeypairFromSecretKey(Uint8Array.from(secretKey));
+  umi.use(keypairIdentity(deployerKeypair));
 
   const cmPk = publicKey(cmState.candyMachine);
   const collPk = publicKey(cmState.collection);
+  const recipientPk = publicKey(recipient);
 
   // Fetch candy machine state
   const cm = await fetchCandyMachine(umi, cmPk);
@@ -103,22 +89,20 @@ async function run() {
   const ownerSigner = createNoopSigner(recipientPk);
 
   // Build atomic TX: Mint + Burn
-  // USER pays ALL rent + fees. Deployer only co-signs as CM authority.
   let builder = transactionBuilder()
-    .add(setComputeUnitLimit(umi, { units: 400_000 }))
-    .add(setComputeUnitPrice(umi, { microLamports: 5_000 }));
+    .add(setComputeUnitLimit(umi, { units: 1_000_000 }))
+    .add(setComputeUnitPrice(umi, { microLamports: 250_000 }));
 
-  // Step 1: Mint from Candy Machine (owner = recipient, payer = recipient)
+  // Step 1: Mint from Candy Machine (owner = recipient)
   if (flow === 'free') {
     builder = builder.add(cmMintV1(umi, {
       candyMachine: cmPk,
       asset,
       collection: collPk,
       owner: recipientPk,
-      payer: ownerSigner,
       group: some('free'),
       mintArgs: {
-        thirdPartySigner: some({ signer: deployerSigner }),
+        thirdPartySigner: some({ signer: umi.identity }),
       },
     }));
   } else {
@@ -127,11 +111,9 @@ async function run() {
       asset,
       collection: collPk,
       owner: recipientPk,
-      payer: ownerSigner,
       group: some('paid'),
       mintArgs: {
         solPayment: some({ destination: publicKey('FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be') }),
-        mintLimit: some({ id: 1 }),
       },
     }));
   }
@@ -145,75 +127,39 @@ async function run() {
     compressionProof: none(),
   }));
 
-  // REMOVED: Mint tracker PDA on-chain marker (2026-03-31)
-  // Anti-gaming now handled by SATP Genesis Record isBorn flag.
-  // The old approach caused InsufficientFundsForRent errors when users had
-  // barely enough SOL. The server-side prepare-mint endpoint already checks
-  // isBorn via V3 Genesis Record — no need for a redundant PDA marker.
-  if (false && agentId) { // DISABLED — using SATP Genesis Record instead
-    try {
-      const { PublicKey: PK, SystemProgram: SP } = await import('@solana/web3.js');
-      const agentHash = await import('crypto').then(c => c.createHash('sha256').update(agentId).digest());
-      const cmBytes = new PK(cmState.candyMachine).toBuffer();
-      
-      // Derive PDA: ["boa_mint_tracker", sha256(agent_id), candy_machine_pubkey]
-      const [mintTrackerPda] = PK.findProgramAddressSync(
-        [Buffer.from('boa_mint_tracker'), agentHash, cmBytes],
-        SP.programId
-      );
-      
-      // Check if PDA already has lamports (= already minted)
-      const { Connection: C2 } = await import('@solana/web3.js');
-      const conn = new C2(RPC, 'confirmed');
-      const existing = await conn.getAccountInfo(mintTrackerPda);
-      
-      if (!existing) {
-        // First mint: transfer rent-exempt minimum to PDA to mark it
-        // SystemProgram.transfer to a PDA just needs the sender to sign
-        const recipientWeb3Pk = new PK(recipient);
-        const { fromWeb3JsInstruction } = await import('@metaplex-foundation/umi-web3js-adapters');
-        
-        // Transfer 1_000 lamports from USER to PDA as marker (user pays everything)
-        const transferIx = SP.transfer({
-          fromPubkey: recipientWeb3Pk,
-          toPubkey: mintTrackerPda,
-          lamports: 890_880, // rent-exempt minimum for 0-byte account
-        });
-        
-        builder = builder.add({
-          instruction: fromWeb3JsInstruction(transferIx),
-          signers: [ownerSigner],
-          bytesCreatedOnChain: 0,
-        });
-        
-        console.error('[Atomic Prepare] Added mint-tracker marker for', agentId, 'PDA:', mintTrackerPda.toBase58());
-      } else {
-        console.error('[Atomic Prepare] Mint tracker already exists for', agentId, '- agent already minted');
-      }
-    } catch (e) {
-      console.error('[Atomic Prepare] PDA marker failed (non-blocking):', e.message);
-    }
-  }
-
   // Build with recipient as fee payer
   const tx = await builder.setFeePayer(ownerSigner).buildWithLatestBlockhash(umi);
-  const web3Tx = toWeb3JsLegacyTransaction(tx);
+  const web3Tx = toWeb3JsTransaction(tx);
 
   // Server-side partial signing:
   // 1. Asset signer (generated keypair for the NFT)
   const assetWeb3Kp = Keypair.fromSecretKey(Uint8Array.from(asset.secretKey));
-  web3Tx.partialSign(assetWeb3Kp);
 
-  // 2. Deployer co-signs for free flow (thirdPartySigner guard) — NOT as payer
-  if (flow === 'free') {
-    const deployerWeb3Kp = Keypair.fromSecretKey(Uint8Array.from(secretKey));
-    web3Tx.partialSign(deployerWeb3Kp);
-    console.error('[Atomic Prepare] Deployer co-signed as thirdPartySigner (NOT payer)');
+  // 2. Deployer co-signs for free flow (thirdPartySigner guard)
+  const deployerWeb3Kp = flow === 'free'
+    ? Keypair.fromSecretKey(Uint8Array.from(secretKey))
+    : null;
+
+  if (web3Tx instanceof VersionedTransaction) {
+    const signers = deployerWeb3Kp ? [assetWeb3Kp, deployerWeb3Kp] : [assetWeb3Kp];
+    web3Tx.sign(signers);
+  } else {
+    web3Tx.partialSign(assetWeb3Kp);
+    if (deployerWeb3Kp) web3Tx.partialSign(deployerWeb3Kp);
+  }
+
+  if (deployerWeb3Kp) {
+    console.error('[Atomic Prepare] Deployer co-signed for free flow');
   }
 
   // Serialize (user still needs to sign as payer + authority)
-  const serialized = web3Tx.serialize({ requireAllSignatures: false });
+  const serialized = web3Tx instanceof VersionedTransaction
+    ? web3Tx.serialize()
+    : web3Tx.serialize({ requireAllSignatures: false });
   const base64Tx = Buffer.from(serialized).toString('base64');
+  const feePayer = web3Tx instanceof VersionedTransaction
+    ? web3Tx.message.staticAccountKeys[0].toString()
+    : web3Tx.feePayer?.toString() || null;
 
   console.log(JSON.stringify({
     success: true,
@@ -227,6 +173,8 @@ async function run() {
     cmIndex: nextIndex,
     flow,
     atomic: true,
+    feePayer,
+    txVersion: web3Tx instanceof VersionedTransaction ? 'v0' : 'legacy',
     message: flow === 'free'
       ? 'Sign to mint + burn your BOA in one click (free, deployer co-signed)'
       : 'Sign to mint + burn your BOA in one click (1 SOL)',
