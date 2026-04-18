@@ -778,7 +778,14 @@ const v3sdk = require('@brainai/satp-v3');
 // Legacy V3 SDK wrapper — maps old createSATPClient/SATPV3SDK to new SDK
 class SATPV3SDK {
   constructor(opts = {}) {
-    this.client = new v3sdk.SatpV3Client(opts);
+    const rpcUrl = typeof opts === 'string'
+      ? opts
+      : (opts.rpcUrl || opts.url || opts.endpoint || 'https://api.mainnet-beta.solana.com');
+    this.rpcUrl = rpcUrl;
+    this.network = typeof opts === 'object' && opts.network
+      ? opts.network
+      : (rpcUrl.includes('mainnet') ? 'mainnet' : 'devnet');
+    this.client = new v3sdk.SatpV3Client(rpcUrl);
   }
   async getGenesis(agentId) { return this.client.getGenesis ? this.client.getGenesis(agentId) : null; }
   async getAttestation(pda) { return this.client.getAttestation ? this.client.getAttestation(pda) : null; }
@@ -786,7 +793,15 @@ class SATPV3SDK {
 }
 
 function createSATPClient(opts = {}) {
-  return new v3sdk.SatpV3Client(opts);
+  const rpcUrl = typeof opts === 'string'
+    ? opts
+    : (opts.rpcUrl || opts.url || opts.endpoint || 'https://api.mainnet-beta.solana.com');
+  const client = new v3sdk.SatpV3Client(rpcUrl);
+  client.rpcUrl = rpcUrl;
+  client.network = typeof opts === 'object' && opts.network
+    ? opts.network
+    : (rpcUrl.includes('mainnet') ? 'mainnet' : 'devnet');
+  return client;
 }
 
 // Legacy borsh reader — keep for any V2 code paths
