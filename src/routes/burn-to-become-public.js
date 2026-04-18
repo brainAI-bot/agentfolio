@@ -1219,9 +1219,10 @@ function handleBurnToBecome(req, res, url) {
   if (url.pathname === '/api/burn-to-become/submit' && req.method === 'POST') {
     (async () => {
       try {
-        const { wallet, nftMint, signedTransaction, txSignature } = req.body || {};
+        const { wallet, nftMint, signedTransaction, txSignature, submissionMode } = req.body || {};
         const hasSignedTransaction = typeof signedTransaction === 'string' && signedTransaction.length > 0;
         const hasTxSignature = typeof txSignature === 'string' && txSignature.length > 0;
+        const resolvedSubmissionMode = submissionMode || (hasSignedTransaction ? 'signTransaction' : hasTxSignature ? 'sendTransaction' : 'unknown');
         if (!wallet || !nftMint || (!hasSignedTransaction && !hasTxSignature)) return sendJson(400, { error: 'wallet, nftMint, and either signedTransaction or txSignature required' });
 
         const { PublicKey } = require('@solana/web3.js');
@@ -1319,6 +1320,7 @@ function handleBurnToBecome(req, res, url) {
               nftMint,
               signedLength: signedTxBuffer ? signedTxBuffer.length : null,
               txSignature: hasTxSignature ? txSignature : null,
+              submissionMode: resolvedSubmissionMode,
               ...extra,
             }));
           } catch (logErr) {
@@ -1451,6 +1453,7 @@ function handleBurnToBecome(req, res, url) {
               submittedPrograms,
               mintOwner: submittedMintAccount.owner.toBase58(),
               txSignature,
+              submissionMode: resolvedSubmissionMode,
             }));
           } catch {}
         } else {
@@ -1488,6 +1491,7 @@ function handleBurnToBecome(req, res, url) {
               submittedFeePayer: submittedFeePayer?.toBase58?.() || null,
               signerMatchesWallet,
               versioned: submittedTx instanceof VersionedTransaction,
+              submissionMode: resolvedSubmissionMode,
             });
           }
           submittedPrograms = getSubmittedTransactionProgramIds(submittedTx).map(pid => pid.toBase58());
@@ -1595,6 +1599,7 @@ function handleBurnToBecome(req, res, url) {
               signatureDiagnostics: submittedSignatureDiagnostics,
               submittedPrograms,
               mintOwner: submittedMintAccount.owner.toBase58(),
+              submissionMode: resolvedSubmissionMode,
             }));
           } catch {}
         }

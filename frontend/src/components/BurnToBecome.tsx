@@ -167,9 +167,11 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
       if (signTransaction) {
         const signed = await signTransaction(tx as any);
         submitPayload.signedTransaction = Buffer.from(signed.serialize()).toString("base64");
+        submitPayload.submissionMode = "signTransaction";
       } else if (sendTransaction) {
         const burnSignature = await sendTransaction(tx as any, connection, { skipPreflight: false });
         submitPayload.txSignature = burnSignature;
+        submitPayload.submissionMode = "sendTransaction";
       } else {
         throw new Error("Connected wallet cannot sign burn transaction");
       }

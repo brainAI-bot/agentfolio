@@ -271,9 +271,11 @@ export default function MintPage() {
       if (wallet.signTransaction) {
         const signed = await wallet.signTransaction(tx as any);
         submitPayload.signedTransaction = Buffer.from(signed.serialize()).toString("base64");
+        submitPayload.submissionMode = "signTransaction";
       } else if (wallet.sendTransaction) {
         const burnSignature = await wallet.sendTransaction(tx as any, connection, { skipPreflight: false });
         submitPayload.txSignature = burnSignature;
+        submitPayload.submissionMode = "sendTransaction";
       } else {
         throw new Error("Connected wallet cannot sign burn transaction");
       }
