@@ -196,9 +196,11 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
           if (sendTransaction) {
             const genesisSignature = await sendTransaction(burnToBecomeTx as any, connection, { skipPreflight: false });
             genesisPayload.txSignature = genesisSignature;
+            genesisPayload.submissionMode = "sendTransaction";
           } else if (signTransaction) {
             const signedGenesis = await signTransaction(burnToBecomeTx as any);
             genesisPayload.signedTransaction = Buffer.from(signedGenesis.serialize()).toString("base64");
+            genesisPayload.submissionMode = "signTransaction";
           }
           await fetch(`${API}/api/burn-to-become/submit-genesis`, {
             method: "POST",

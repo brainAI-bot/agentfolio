@@ -1113,9 +1113,10 @@ function handleBurnToBecome(req, res, url) {
   if (url.pathname === '/api/burn-to-become/submit-genesis' && req.method === 'POST') {
     (async () => {
       try {
-        const { signedTransaction, txSignature } = req.body || {};
+        const { signedTransaction, txSignature, submissionMode } = req.body || {};
         if (!signedTransaction && !txSignature) return sendJson(400, { error: 'signedTransaction or txSignature required' });
         
+        const resolvedSubmissionMode = submissionMode || (txSignature ? 'sendTransaction' : signedTransaction ? 'signTransaction' : 'unknown');
         let sig = txSignature || null;
         if (sig) {
           await connection.confirmTransaction(sig, 'confirmed');
@@ -1125,7 +1126,7 @@ function handleBurnToBecome(req, res, url) {
           await connection.confirmTransaction(sig, 'confirmed');
         }
         try { require('../v3-score-service').clearV3Cache(); } catch {}
-        console.log('[SubmitGenesis] burnToBecome TX confirmed:', sig);
+        console.log('[SubmitGenesis] burnToBecome TX confirmed:', JSON.stringify({ signature: sig, submissionMode: resolvedSubmissionMode }));
         sendJson(200, { success: true, signature: sig });
       } catch (e) {
         console.error('[SubmitGenesis] error:', e.message);

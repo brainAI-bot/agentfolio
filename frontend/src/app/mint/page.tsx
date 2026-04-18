@@ -179,9 +179,13 @@ export default function MintPage() {
             if (wallet.sendTransaction) {
               const genesisSignature = await wallet.sendTransaction(btbTx as any, connection, { skipPreflight: false });
               genesisPayload.txSignature = genesisSignature;
+            genesisPayload.submissionMode = "sendTransaction";
+              genesisPayload.submissionMode = "sendTransaction";
             } else if (wallet.signTransaction) {
               const signedBtb = await wallet.signTransaction(btbTx as any);
               genesisPayload.signedTransaction = Buffer.from(signedBtb.serialize()).toString("base64");
+            genesisPayload.submissionMode = "signTransaction";
+              genesisPayload.submissionMode = "signTransaction";
             }
             const btbRes = await fetch(`${API}/api/burn-to-become/submit-genesis`, {
               method: "POST",
