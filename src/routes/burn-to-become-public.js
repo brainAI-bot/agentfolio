@@ -158,10 +158,14 @@ function getConfirmedTransactionProgramIds(txInfo) {
     .filter(Boolean);
 }
 
-function getConfirmedTransactionSignerMatches(txInfo, pubkey) {
+function getConfirmedTransactionRequiredSignerKeys(txInfo) {
   const keys = getConfirmedTransactionAccountKeys(txInfo);
   const signerCount = txInfo?.transaction?.message?.header?.numRequiredSignatures || 0;
-  return keys.slice(0, signerCount).some(key => key.equals(pubkey));
+  return keys.slice(0, signerCount);
+}
+
+function getConfirmedTransactionSignerMatches(txInfo, pubkey) {
+  return getConfirmedTransactionRequiredSignerKeys(txInfo).some(key => key.equals(pubkey));
 }
 
 function getConfirmedTransactionInstructionKeys(txInfo, ix) {
@@ -1369,20 +1373,28 @@ function handleBurnToBecome(req, res, url) {
             return submitReject('Submitted burn transaction failed on-chain', { txSignature, metaErr: confirmedTx.meta.err });
           }
           submittedFeePayer = getConfirmedTransactionFeePayer(confirmedTx);
+          const confirmedRequiredSignerKeys = getConfirmedTransactionRequiredSignerKeys(confirmedTx).map(key => key.toBase58());
+          const confirmedAccountKeys = getConfirmedTransactionAccountKeys(confirmedTx).map(key => key.toBase58());
+          submittedPrograms = getConfirmedTransactionProgramIds(confirmedTx).map(pid => pid.toBase58());
           const allowCoreInfraFeePayer = submittedMintAccount.owner.equals(METAPLEX_CORE_PROGRAM) && deployerKeypair && submittedFeePayer && submittedFeePayer.equals(deployerKeypair.publicKey);
           if (!submittedFeePayer || (!submittedFeePayer.equals(walletPubkey) && !allowCoreInfraFeePayer)) {
             return submitReject('Signed transaction fee payer does not match wallet', {
               submittedFeePayer: submittedFeePayer?.toBase58?.() || null,
               allowCoreInfraFeePayer,
+              confirmedRequiredSignerKeys,
+              confirmedAccountKeys,
+              submittedPrograms,
             });
           }
           if (!getConfirmedTransactionSignerMatches(confirmedTx, walletPubkey)) {
             return submitReject('Signed transaction signer does not match wallet', {
               submittedFeePayer: submittedFeePayer?.toBase58?.() || null,
               txSignature,
+              confirmedRequiredSignerKeys,
+              confirmedAccountKeys,
+              submittedPrograms,
             });
           }
-          submittedPrograms = getConfirmedTransactionProgramIds(confirmedTx).map(pid => pid.toBase58());
           if (submittedPrograms.some(pid => !allowedPrograms.has(pid))) {
             return submitReject('Signed transaction contains unsupported instructions', {
               versioned: confirmedTx.version === 0,
