@@ -189,16 +189,21 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
         burnProgress: { ...s.burnProgress, burn: "complete", soulbound: "active" },
       }));
 
-      if (submitData.burnToBecomeTx && signTransaction) {
+      if (submitData.burnToBecomeTx && (sendTransaction || signTransaction)) {
         try {
           const burnToBecomeTx = await deserializeBurnTransaction(submitData.burnToBecomeTx);
-          const signedGenesis = await signTransaction(burnToBecomeTx as any);
+          const genesisPayload: Record<string, string> = {};
+          if (sendTransaction) {
+            const genesisSignature = await sendTransaction(burnToBecomeTx as any, connection, { skipPreflight: false });
+            genesisPayload.txSignature = genesisSignature;
+          } else if (signTransaction) {
+            const signedGenesis = await signTransaction(burnToBecomeTx as any);
+            genesisPayload.signedTransaction = Buffer.from(signedGenesis.serialize()).toString("base64");
+          }
           await fetch(`${API}/api/burn-to-become/submit-genesis`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              signedTransaction: Buffer.from(signedGenesis.serialize()).toString("base64"),
-            }),
+            body: JSON.stringify(genesisPayload),
           });
         } catch (genesisErr) {
           console.warn("[BurnToBecome] submit-genesis failed (non-critical):", genesisErr);
