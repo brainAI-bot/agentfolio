@@ -1376,6 +1376,16 @@ function handleBurnToBecome(req, res, url) {
           const confirmedRequiredSignerKeys = getConfirmedTransactionRequiredSignerKeys(confirmedTx).map(key => key.toBase58());
           const confirmedAccountKeys = getConfirmedTransactionAccountKeys(confirmedTx).map(key => key.toBase58());
           submittedPrograms = getConfirmedTransactionProgramIds(confirmedTx).map(pid => pid.toBase58());
+          if (submittedPrograms.some(pid => !allowedPrograms.has(pid))) {
+            return submitReject('Signed transaction contains unsupported instructions', {
+              versioned: confirmedTx.version === 0,
+              submittedPrograms,
+              txSignature,
+              submittedFeePayer: submittedFeePayer?.toBase58?.() || null,
+              confirmedRequiredSignerKeys,
+              confirmedAccountKeys,
+            });
+          }
           const allowCoreInfraFeePayer = submittedMintAccount.owner.equals(METAPLEX_CORE_PROGRAM) && deployerKeypair && submittedFeePayer && submittedFeePayer.equals(deployerKeypair.publicKey);
           if (!submittedFeePayer || (!submittedFeePayer.equals(walletPubkey) && !allowCoreInfraFeePayer)) {
             return submitReject('Signed transaction fee payer does not match wallet', {
@@ -1393,13 +1403,6 @@ function handleBurnToBecome(req, res, url) {
               confirmedRequiredSignerKeys,
               confirmedAccountKeys,
               submittedPrograms,
-            });
-          }
-          if (submittedPrograms.some(pid => !allowedPrograms.has(pid))) {
-            return submitReject('Signed transaction contains unsupported instructions', {
-              versioned: confirmedTx.version === 0,
-              submittedPrograms,
-              txSignature,
             });
           }
 
