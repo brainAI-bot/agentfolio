@@ -254,20 +254,31 @@ router.get('/reputation/:agentId', requireSDK, async (req, res) => {
       return res.status(404).json({ error: 'Agent not found', agentId });
     }
 
-    const payload = applyNormalizedTrust({
+    let normalizedOnchain = null;
+    try {
+      const { getV3Score } = require('../../v3-score-service');
+      normalizedOnchain = await getV3Score(agentId);
+    } catch (_) {}
+
+    const onchainScore = normalizedOnchain?.reputationScore ?? Math.min(Math.round((identity.reputationScore || 0) / 10000), 800);
+    const onchainLevel = normalizedOnchain?.verificationLevel ?? identity.verificationLevel ?? 0;
+    const onchainLabel = normalizedOnchain?.verificationLabel || identity.tierLabel || null;
+    const onchainPct = normalizedOnchain?.reputationPct || ((identity.reputationScore || 0) / 10000).toFixed(2);
+
+    res.json({
       agentId,
       pda: identity.pda,
-      reputationScore: identity.reputationScore || 0,
-      verificationLevel: identity.verificationLevel || 0,
-      tier: identity.tier || null,
-      tierLabel: identity.tierLabel || null,
-      verificationLabel: identity.tierLabel || null,
+      reputationScore: onchainScore,
+      verificationLevel: onchainLevel,
+      tier: identity.tier || onchainLabel || null,
+      tierLabel: onchainLabel,
+      verificationLabel: onchainLabel,
       authority: identity.authority,
-      isBorn: identity.isBorn || false,
+      isBorn: (normalizedOnchain?.isBorn ?? identity.isBorn) || false,
       network: NETWORK,
-    }, await getNormalizedProfileTrust(agentId))
-
-    res.json(payload);
+      reputationPct: onchainPct,
+      source: 'satp_v3_onchain',
+    });
   } catch (err) {
     console.error('[Reputation V3] get error:', err.message);
     res.status(500).json({ error: err.message });
@@ -292,26 +303,24 @@ router.get('/validation/:agentId', requireSDK, async (req, res) => {
     }
 
     const LEVEL_LABELS = ['Unverified', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
-    const normalized = applyNormalizedTrust({
-      agentId,
-      pda: identity.pda,
-      reputationScore: identity.reputationScore || 0,
-      verificationLevel: identity.verificationLevel || 0,
-      verificationLabel: identity.tierLabel || LEVEL_LABELS[identity.verificationLevel] || 'Unknown',
-      authority: identity.authority,
-      isBorn: identity.isBorn || false,
-      network: NETWORK,
-    }, await getNormalizedProfileTrust(agentId));
+    let normalizedOnchain = null;
+    try {
+      const { getV3Score } = require('../../v3-score-service');
+      normalizedOnchain = await getV3Score(agentId);
+    } catch (_) {}
+
+    const verificationLevel = normalizedOnchain?.verificationLevel ?? identity.verificationLevel ?? 0;
+    const verificationLabel = normalizedOnchain?.verificationLabel || identity.tierLabel || LEVEL_LABELS[verificationLevel] || 'Unknown';
 
     res.json({
       agentId,
       pda: identity.pda,
-      verificationLevel: normalized.verificationLevel || 0,
-      levelLabel: normalized.verificationLabel || LEVEL_LABELS[normalized.verificationLevel] || 'Unknown',
-      isBorn: normalized.isBorn || false,
+      verificationLevel,
+      levelLabel: verificationLabel,
+      isBorn: (normalizedOnchain?.isBorn ?? identity.isBorn) || false,
       authority: identity.authority,
       network: NETWORK,
-      source: normalized.source || 'v3-onchain',
+      source: 'satp_v3_onchain',
     });
   } catch (err) {
     console.error('[Validation V3] get error:', err.message);
