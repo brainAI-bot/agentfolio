@@ -19,6 +19,107 @@
 const express = require('express');
 const router = express.Router();
 
+const EXPLORER_TEST_NAME_PATTERNS = [
+  /^smoke(?:test)?(?:\b|\s|\d)/,
+  /^phase1(?:\b|_|\s|-)/,
+  /^p1t8(?:\b|\s|\d)/,
+  /^p1reg(?:\b|_|\s|-)/,
+  /^ratetest\d*$/,
+  /^ratecheck\d*$/,
+  /^ratelimit-probe$/,
+  /^__rate_test__$/,
+  /^ceo selftest(?:\b|\s|\d)/,
+  /^test$/,
+  /^mainnet-deploy-test$/,
+  /^e2etestagent$/,
+  /^smoketestagent$/,
+  /^smoketestbot$/,
+  /^agent_suppi$/,
+  /^brantest$/,
+];
+
+function isPublicExplorerAgent(agentOrName) {
+  const agentName = typeof agentOrName === 'string' ? agentOrName : agentOrName?.agentName;
+  const normalized = String(agentName || '').trim().toLowerCase();
+  if (!normalized) return false;
+  return !EXPLORER_TEST_NAME_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function buildProfileIndex() {
+  const walletIndex = new Map();
+  const idIndex = new Map();
+  const nameIndex = new Map();
+
+  try {
+    const profileStore = require('../profile-store');
+    const db = profileStore.getDb();
+    const rows = db.prepare('SELECT id, name, wallet, claimed_by, wallets, verification_data FROM profiles').all();
+
+    for (const row of rows) {
+      let wallets = {};
+      let verificationData = {};
+
+      try {
+        wallets = typeof row.wallets === 'string' ? JSON.parse(row.wallets || '{}') : (row.wallets || {});
+      } catch (_) {}
+
+      try {
+        verificationData = typeof row.verification_data === 'string'
+          ? JSON.parse(row.verification_data || '{}')
+          : (row.verification_data || {});
+      } catch (_) {}
+
+      const verifiedPlatforms = Object.values(verificationData).filter((entry) => entry && typeof entry === 'object' && (entry.verified || entry.linked || entry.success));
+      const profile = {
+        id: row.id,
+        name: row.name,
+        hasWallet: Boolean(row.wallet || row.claimed_by || wallets.solana || wallets.solana_wallet || wallets.wallet),
+        hasVerifiedProof: verifiedPlatforms.length > 0,
+      };
+
+      idIndex.set(String(row.id || '').trim().toLowerCase(), profile);
+      nameIndex.set(String(row.name || '').trim().toLowerCase(), profile);
+
+      const candidates = [
+        row.wallet,
+        row.claimed_by,
+        wallets.solana,
+        wallets.solana_wallet,
+        wallets.wallet,
+        verificationData?.solana?.address,
+        verificationData?.solana?.identifier,
+      ];
+
+      for (const candidate of candidates) {
+        const normalized = String(candidate || '').trim().toLowerCase();
+        if (normalized && !walletIndex.has(normalized)) {
+          walletIndex.set(normalized, profile);
+        }
+      }
+    }
+  } catch (_) {}
+
+  return { walletIndex, idIndex, nameIndex };
+}
+
+function getExplorerProfile(agent, profileIndex) {
+  const authority = String(agent?.authority || '').trim().toLowerCase();
+  const normalizedName = String(agent?.agentName || '').trim().toLowerCase();
+  const guessedProfileId = 'agent_' + normalizedName;
+  const matchedProfile =
+    (authority ? profileIndex?.walletIndex?.get(authority) : null) ||
+    profileIndex?.idIndex?.get(guessedProfileId) ||
+    profileIndex?.nameIndex?.get(normalizedName) ||
+    null;
+
+  return {
+    id: matchedProfile?.id || guessedProfileId,
+    name: matchedProfile?.name || agent?.agentName || guessedProfileId,
+    hasWallet: Boolean(matchedProfile?.hasWallet),
+    hasVerifiedProof: Boolean(matchedProfile?.hasVerifiedProof),
+  };
+}
+
 /**
  * GET /api/explorer/agents
  * 
@@ -37,19 +138,9 @@ router.get('/agents', async (req, res) => {
     const chainCache = require('../lib/chain-cache');
     
     let agents = await v3Explorer.fetchAllV3Agents();
-    
-    // Filter test/smoke accounts
-    const TEST_NAMES = new Set([
-      'braintest3', 'braintest11', 'braintest12', 'braintest20', 'braintest22',
-      'mainnet-deploy-test', 'smoketestagent', 'smoketest2', 'smoketest',
-      'smoketestbot', 'e2etestagent', 'brantest', 'agent_suppi',
-    ]);
-    const isTest = (name) => {
-      const ln = (name || '').toLowerCase();
-      return TEST_NAMES.has(ln) || (ln.startsWith('braintest') && ln !== 'braintest');
-    };
-    
-    agents = agents.filter(a => !isTest(a.agentName));
+    const profileIndex = buildProfileIndex();
+
+    agents = agents.filter(a => isPublicExplorerAgent(a));
     
     // Apply query filters
     const { category, minLevel, born, limit } = req.query;
@@ -67,7 +158,8 @@ router.get('/agents', async (req, res) => {
     
     // Enrich with chain-cache attestation data
     const enriched = agents.map(a => {
-      const profileId = 'agent_' + a.agentName.toLowerCase();
+      const profile = getExplorerProfile(a, profileIndex);
+      const profileId = profile.id;
       const attestations = chainCache.getVerifications(profileId);
       const platformSet = new Set(attestations.map(att => att.platform).filter(Boolean));
       
@@ -91,6 +183,7 @@ router.get('/agents', async (req, res) => {
         authority: a.authority,
         name: a.agentName,
         profileId,
+        matchedProfileName: profile.name,
         description: a.description,
         category: a.category,
         capabilities: a.capabilities,
@@ -140,9 +233,10 @@ router.get('/stats', async (req, res) => {
     const v3Explorer = require('../v3-explorer');
     
     const cacheStats = chainCache.getStats();
+    const profileIndex = buildProfileIndex();
     let v3Agents = [];
     try {
-      v3Agents = await v3Explorer.fetchAllV3Agents();
+      v3Agents = (await v3Explorer.fetchAllV3Agents()).filter(a => isPublicExplorerAgent(a));
     } catch (_) {}
     
     // Count by verification level
@@ -202,13 +296,8 @@ router.get('/leaderboard', async (req, res) => {
     const v3Explorer = require('../v3-explorer');
     const chainCache = require('../lib/chain-cache');
     
-    let agents = await v3Explorer.fetchAllV3Agents();
-    
-    // Filter test accounts
-    agents = agents.filter(a => {
-      const ln = (a.agentName || '').toLowerCase();
-      return !ln.startsWith('smoketest') && !ln.startsWith('e2etest') && ln !== 'mainnet-deploy-test';
-    });
+    const profileIndex = buildProfileIndex();
+    let agents = (await v3Explorer.fetchAllV3Agents()).filter(a => isPublicExplorerAgent(a));
     
     // Optional born filter
     if (req.query.born === 'true') {
@@ -222,7 +311,8 @@ router.get('/leaderboard', async (req, res) => {
     const top = agents.slice(0, maxLimit);
     
     const leaderboard = top.map((a, i) => {
-      const profileId = 'agent_' + a.agentName.toLowerCase();
+      const profile = getExplorerProfile(a, profileIndex);
+      const profileId = profile.id;
       const platforms = chainCache.getVerifiedPlatforms(profileId);
       
       return {
@@ -274,7 +364,8 @@ router.get('/search', async (req, res) => {
     const v3Explorer = require('../v3-explorer');
     const chainCache = require('../lib/chain-cache');
     
-    const agents = await v3Explorer.fetchAllV3Agents();
+    const profileIndex = buildProfileIndex();
+    const agents = (await v3Explorer.fetchAllV3Agents()).filter(a => isPublicExplorerAgent(a));
     const query = q.toLowerCase().trim();
     
     const matches = agents.filter(a => {
@@ -287,7 +378,8 @@ router.get('/search', async (req, res) => {
     
     const maxLimit = Math.min(parseInt(limit, 10) || 20, 50);
     const results = matches.slice(0, maxLimit).map(a => {
-      const profileId = 'agent_' + a.agentName.toLowerCase();
+      const profile = getExplorerProfile(a, profileIndex);
+      const profileId = profile.id;
       const platforms = chainCache.getVerifiedPlatforms(profileId);
       
       return {
