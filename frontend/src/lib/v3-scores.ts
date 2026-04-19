@@ -65,7 +65,8 @@ function parseGenesisRecord(data: Buffer, pda: PublicKey): V3Score | null {
     const hasPending = data[offset]; offset += 1;
     if (hasPending === 1) offset += 32;
 
-    const reputationScore = Number(data.readBigUInt64LE(offset)); offset += 8;
+    const rawReputationScore = Number(data.readBigUInt64LE(offset)); offset += 8;
+    const reputationScore = Math.min(Math.round(rawReputationScore / 10000), 800);
     const verificationLevel = data[offset]; offset += 1;
     offset += 8; // reputationUpdatedAt
     offset += 8; // verificationUpdatedAt
@@ -79,7 +80,7 @@ function parseGenesisRecord(data: Buffer, pda: PublicKey): V3Score | null {
       verificationLevel,
       verificationLabel: labels[verificationLevel] || "Unknown",
       reputationScore,
-      reputationPct: reputationScore / 10000,
+      reputationPct: rawReputationScore / 10000,
       isBorn: genesisRecord > 0,
       bornAt: genesisRecord > 0 ? new Date(genesisRecord * 1000).toISOString() : null,
       faceImage,

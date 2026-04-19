@@ -1089,7 +1089,7 @@ function registerRoutes(app) {
         for (const p of profiles) {
           // Try name first (chain uses display names), then DB ID
           const v3 = v3ByName.get(p.name) || v3ById.get(p.id);
-          if (v3 && v3.verificationLevel > 0) {
+          if (v3) {
             p.v3 = {
               level: v3.verificationLevel,
               score: v3.reputationScore,
@@ -1107,7 +1107,7 @@ function registerRoutes(app) {
         // DB enrichment fallback for agents with chain defaults (level=0)
         const levelMap = { 'NEW': 0, 'UNVERIFIED': 0, 'REGISTERED': 1, 'BASIC': 2, 'VERIFIED': 2, 'ESTABLISHED': 3, 'TRUSTED': 4, 'SOVEREIGN': 5 };
         for (const p of profiles) {
-          if (!p.v3 || !p.v3.level) {
+          if (!p.v3) {
             try {
               const d = getDb();
               let row = d.prepare('SELECT verification FROM profiles WHERE id = ?').get(p.id);
@@ -1199,8 +1199,8 @@ function registerRoutes(app) {
       const v = p.v3 || {};
       const cl = p.chain_level || 0;
       const cs = p.chain_score || 0;
-      p.level = v.verificationLevel || v.level || cl || 0;
-      p.score = v.reputationScore || v.score || cs || p.trust_score || 0;
+      p.level = v.verificationLevel ?? v.level ?? cl ?? 0;
+      p.score = v.reputationScore ?? v.score ?? cs ?? p.trust_score ?? 0;
       p.levelName = v.verificationLabel || levelLabels[p.level] || 'Unknown';
     }
 

@@ -66,7 +66,8 @@ function parseGenesisRecord(pubkey, data) {
     offset += 1;
     if (hasPending === 1) offset += 32;
 
-    var reputationScore = Number(data.readBigUInt64LE(offset));
+    var rawReputationScore = Number(data.readBigUInt64LE(offset));
+    var reputationScore = Math.min(Math.round(rawReputationScore / 10000), 800);
     offset += 8;
     var verificationLevel = data[offset];
     offset += 1;
@@ -90,6 +91,7 @@ function parseGenesisRecord(pubkey, data) {
       isBorn: genesisTimestamp > 0,
       bornAt: genesisTimestamp > 0 ? new Date(genesisTimestamp * 1000).toISOString() : null,
       reputationScore: reputationScore,
+      rawReputationScore: rawReputationScore,
       verificationLevel: verificationLevel,
       tier: tierName,
       tierLabel: 'L' + verificationLevel + ' \u00b7 ' + tierName.charAt(0).toUpperCase() + tierName.slice(1),
