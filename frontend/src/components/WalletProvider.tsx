@@ -3,10 +3,12 @@
 import { useMemo, useCallback, ReactNode, useState, createContext, useContext } from "react";
 import { ConnectionProvider, WalletProvider as SolanaWalletProvider, useWallet } from "@solana/wallet-adapter-react";
 import { WalletModalProvider, useWalletModal } from "@solana/wallet-adapter-react-ui";
-// Removed explicit adapter imports — standard wallet detection handles all wallets
+// Removed explicit adapter imports, standard wallet detection handles all wallets
 
 import "@solana/wallet-adapter-react-ui/styles.css";
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "";
+const SOLANA_RPC_URL = `${process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot"}/solana-rpc`;
 function isMobileBrowser(): boolean {
   if (typeof window === "undefined") return false;
   return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -115,7 +117,7 @@ function SmartConnectProvider({ children }: { children: ReactNode }) {
 }
 
 export function WalletProvider({ children }: { children: ReactNode }) {
-  const endpoint = useMemo(() => `${process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot"}/solana-rpc`, []);
+  const endpoint = useMemo(() => SOLANA_RPC_URL, []);
   const wallets = useMemo(() => [], []); // Empty = use standard wallet detection (no plugin.install errors)
 
   return (

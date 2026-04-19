@@ -894,7 +894,9 @@ function handleBurnToBecome(req, res, url) {
             if (!coreKeys[0] || !coreKeys[0].equals(mintPubkey)) {
               return sendJson(400, { error: 'Signed transaction asset does not match requested nftMint' });
             }
-            if (!coreKeys.some(key => key.equals(walletPubkey))) {
+            if (!coreKeys.some(key => key.equals(walletPubkey)) || !getSubmittedTransactionSignerMatches(submittedTx, walletPubkey)) {
+              return sendJson(400, { error: 'Signed transaction signer does not match wallet' });
+            }
               return sendJson(400, { error: 'Signed transaction signer does not match wallet' });
             }
           } else {
@@ -918,12 +920,14 @@ function handleBurnToBecome(req, res, url) {
             for (const ix of submittedTx.message.compiledInstructions) {
               const programId = submittedTx.message.staticAccountKeys[ix.programIdIndex];
               if (!programId || !programId.equals(tokenProgramId)) continue;
-              const keys = getVersionedInstructionKeys(submittedTx, ix);
               const opcode = ix.data && ix.data.length ? ix.data[0] : null;
-              if (opcode === 8 && keys[0] && keys[1] && keys[2] && keys[0].equals(expectedAta) && keys[1].equals(mintPubkey) && keys[2].equals(walletPubkey)) {
+              const ixKeys = getVersionedInstructionKeys(submittedTx, ix);
+              if (opcode === 8 && ixKeys[0] && ixKeys[1] && ixKeys[2] && ixKeys[0].equals(expectedAta) && ixKeys[1].equals(mintPubkey) && ixKeys[2].equals(walletPubkey) && getSubmittedTransactionSignerMatches(submittedTx, walletPubkey)) {
                 sawBurn = true;
               }
-              if (opcode === 9 && keys[0] && keys[1] && keys[2] && keys[0].equals(expectedAta) && keys[1].equals(walletPubkey) && keys[2].equals(walletPubkey)) {
+              if (opcode === 9 && ixKeys[0] && ixKeys[1] && ixKeys[2] && ixKeys[0].equals(expectedAta) && ixKeys[1].equals(walletPubkey) && ixKeys[2].equals(walletPubkey) && getSubmittedTransactionSignerMatches(submittedTx, walletPubkey)) {
+                sawClose = true;
+              }
                 sawClose = true;
               }
             }

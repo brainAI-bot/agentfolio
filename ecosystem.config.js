@@ -2,6 +2,7 @@ module.exports = {
   apps: [{
     name: "agentfolio",
     script: "src/server.js",
+    cwd: "/home/ubuntu/agentfolio",
     instances: 1,
     exec_mode: "fork",
     autorestart: true,

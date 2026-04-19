@@ -1429,7 +1429,48 @@ function registerRoutes(app) {
   });
 
 
-  // GET /api/profile-by-wallet?wallet=<address> — find profile by Solana wallet
+  // GET /api/wallet/lookup/:addr -- find profile by Solana wallet (frontend format)
+  app.get('/api/wallet/lookup/:addr', (req, res) => {
+    const wallet = req.params.addr;
+    if (!wallet) return res.status(400).json({ found: false, error: 'wallet address required' });
+    try {
+      const db = getDb();
+      let match = db.prepare('SELECT id, name, wallet, wallets FROM profiles WHERE wallet = ?').get(wallet);
+      if (!match) match = db.prepare('SELECT id, name, wallet, wallets FROM profiles WHERE claimed_by = ?').get(wallet);
+      if (!match) {
+        const all = db.prepare('SELECT id, name, wallet, wallets FROM profiles').all();
+        for (const p of all) {
+          try {
+            const w = typeof p.wallets === 'string' ? JSON.parse(p.wallets || '{}') : (p.wallets || {});
+            if (w.solana === wallet || w.solana_wallet === wallet || w.wallet === wallet) {
+              match = { id: p.id, name: p.name, wallet: p.wallet || w.solana || w.solana_wallet || w.wallet || wallet, wallets: w };
+              break;
+            }
+          } catch (_) {}
+        }
+      }
+      if (match) {
+        let parsedWallets = match.wallets || {};
+        if (typeof parsedWallets === 'string') {
+          try { parsedWallets = JSON.parse(parsedWallets); } catch { parsedWallets = {}; }
+        }
+        const resolvedWallet = match.wallet || parsedWallets.solana || parsedWallets.solana_wallet || parsedWallets.wallet || wallet;
+        return res.json({
+          found: true,
+          profileId: match.id,
+          name: match.name,
+          wallet: resolvedWallet,
+          wallets: parsedWallets,
+          profile: { id: match.id, name: match.name, wallet: resolvedWallet, wallets: parsedWallets },
+        });
+      }
+      return res.status(404).json({ found: false, error: 'No profile found for this wallet' });
+    } catch (e) {
+      return res.status(500).json({ found: false, error: e.message });
+    }
+  });
+
+  // GET /api/profile-by-wallet?wallet=<address> -- find profile by Solana wallet
   app.get('/api/profile-by-wallet', (req, res) => {
     const { wallet, preferredProfileId } = req.query;
     if (!wallet) return res.status(400).json({ error: 'wallet required' });
@@ -1500,7 +1541,7 @@ function registerRoutes(app) {
             parsedWallets = {};
           }
         }
-        const primaryWallet = row.wallet || parsedWallets.solana || parsedWallets.solana_wallet || parsedWallets.wallet || '';
+        const primaryWallet = row.wallet || parsedWallets.solana || parsedWallets.solana_wallet || parsedWallets.wallet || wallet || '';
         return res.json({
           found: true,
           id: row.id,

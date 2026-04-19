@@ -1,5 +1,10 @@
 export const revalidate = 120;
 import { getAllAgents, getAllJobs } from "@/lib/data";
+
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
+const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || "";
+const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
+const SOLANA_RPC_URL = `${API_BASE || SITE_URL}/solana-rpc`;
 import { BarChart3, Users, ShieldCheck, Fingerprint, Briefcase, DollarSign, ExternalLink, Wallet, TrendingUp, ArrowDownToLine, ArrowUpFromLine, AlertTriangle, Percent } from "lucide-react";
 import ProtocolActivity from "./ProtocolActivity";
 

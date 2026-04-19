@@ -13,7 +13,8 @@ export const ESCROW_PROGRAM_ID = new PublicKey(
   "4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a"
 );
 
-export const SOLANA_RPC = "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb";
+export const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
+export const SOLANA_RPC = `${process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot"}/solana-rpc`;
 
 // register_agent discriminator from IDL
 const REGISTER_AGENT_DISCRIMINATOR = Buffer.from([135, 157, 66, 195, 2, 113, 175, 30]);
