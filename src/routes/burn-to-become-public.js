@@ -897,8 +897,6 @@ function handleBurnToBecome(req, res, url) {
             if (!coreKeys.some(key => key.equals(walletPubkey)) || !getSubmittedTransactionSignerMatches(submittedTx, walletPubkey)) {
               return sendJson(400, { error: 'Signed transaction signer does not match wallet' });
             }
-              return sendJson(400, { error: 'Signed transaction signer does not match wallet' });
-            }
           } else {
             const coreIx = submittedTx.instructions.find(ix => ix.programId.equals(METAPLEX_CORE_PROGRAM));
             if (!coreIx) {
@@ -926,8 +924,6 @@ function handleBurnToBecome(req, res, url) {
                 sawBurn = true;
               }
               if (opcode === 9 && ixKeys[0] && ixKeys[1] && ixKeys[2] && ixKeys[0].equals(expectedAta) && ixKeys[1].equals(walletPubkey) && ixKeys[2].equals(walletPubkey) && getSubmittedTransactionSignerMatches(submittedTx, walletPubkey)) {
-                sawClose = true;
-              }
                 sawClose = true;
               }
             }
