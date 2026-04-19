@@ -189,8 +189,8 @@ function registerRoutes(app) {
   // GET /api/marketplace/jobs — List all jobs (with hydrated applications)
   app.get('/api/marketplace/jobs', (req, res) => {
     const jobs = getAllFiles(path.join(DATA_DIR, 'jobs'));
-    const status = req.query.status;
-    const filtered = status ? jobs.filter(j => j.status === status) : jobs;
+    const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
+    const filtered = status && status !== 'all' ? jobs.filter(j => j.status === status) : jobs;
     // Hydrate application IDs into full application objects (with profile enrichment)
     const hydrated = filtered.map(job => {
       if (Array.isArray(job.applications)) {

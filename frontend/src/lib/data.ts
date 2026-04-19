@@ -321,7 +321,7 @@ function loadAllJobs(): Job[] {
           poster: posterName,
           posterAvatar: "",
           budget: `${raw.budgetAmount} ${raw.budgetCurrency}`,
-          skills: raw.skills,
+          skills: Array.isArray(raw.skills) ? raw.skills.filter((skill): skill is string => typeof skill === "string" && skill.length > 0) : [],
           status: statusMap[raw.status] || "open",
           escrowStatus,
           proposals: raw.applicationCount,
