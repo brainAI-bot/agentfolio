@@ -2098,6 +2098,16 @@ app.get('/api/profile/:id/trading', async (req, res) => {
 
 // Burn-to-Become NFT collections
 const burnCollectionsFile = path.join(__dirname, '..', 'data', 'burn-to-become', 'collections.json');
+const mintedBoasFile = path.join(__dirname, '..', 'data', 'minted-boas.json');
+
+function loadMintedBoaCount() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(mintedBoasFile, 'utf8'));
+    return Array.isArray(raw) ? raw.length : 0;
+  } catch (e) {
+    return 0;
+  }
+}
 
 app.get('/api/burn-to-become/collections', (req, res) => {
   let collections = [];
@@ -2106,7 +2116,20 @@ app.get('/api/burn-to-become/collections', (req, res) => {
       collections = JSON.parse(fs.readFileSync(burnCollectionsFile, 'utf8'));
     }
   } catch (e) { /* empty */ }
-  res.json({ collections, total: collections.length });
+
+  if (!Array.isArray(collections) || collections.length === 0) {
+    const minted = loadMintedBoaCount();
+    collections = [{
+      name: 'Burned-Out Agents',
+      total: 100,
+      minted,
+      remaining: Math.max(0, 100 - minted),
+      mintPrice: '1 SOL',
+      freeMintThreshold: 100
+    }];
+  }
+
+  res.json({ collections, total: collections.length, message: 'Burn-to-Become collections' });
 });
 
 app.post('/api/burn-to-become/collections', (req, res) => {
