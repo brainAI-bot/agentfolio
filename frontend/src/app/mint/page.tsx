@@ -125,7 +125,7 @@ export default function MintPage() {
 
   // Client-signed mint flow (user signs in Phantom)
   const handleClientMint = async (flow: "free" | "paid") => {
-    if (!wallet.publicKey || !wallet.signTransaction) return;
+    if (!wallet.publicKey || (!wallet.sendTransaction && !wallet.signTransaction)) return;
     setStep("minting");
     setError("");
     try {
@@ -138,13 +138,22 @@ export default function MintPage() {
       if (!prepRes.ok) { const err = await prepRes.json(); throw new Error(err.error || "Failed to prepare mint"); }
       const prepData = await prepRes.json();
       const tx = await deserializeMintTransaction(prepData.transaction);
-      const signed = await wallet.signTransaction(tx as any);
+      const submitPayload: Record<string, string> = {};
+      if (wallet.sendTransaction) {
+        const mintSignature = await wallet.sendTransaction(tx as any, connection, { skipPreflight: false });
+        submitPayload.txSignature = mintSignature;
+        submitPayload.submissionMode = "sendTransaction";
+      } else if (wallet.signTransaction) {
+        const signed = await wallet.signTransaction(tx as any);
+        submitPayload.signedTransaction = Buffer.from(signed.serialize()).toString("base64");
+        submitPayload.submissionMode = "signTransaction";
+      } else {
+        throw new Error("Connected wallet cannot sign mint transaction");
+      }
       const submitRes = await fetch(API + "/api/burn-to-become/submit-mint", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          signedTransaction: Buffer.from(signed.serialize()).toString("base64"),
-        }),
+        body: JSON.stringify(submitPayload),
       });
       if (!submitRes.ok) {
         const err = await submitRes.json().catch(() => ({}));

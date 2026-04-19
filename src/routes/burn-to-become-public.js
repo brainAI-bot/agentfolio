@@ -2360,13 +2360,19 @@ try {
   if (url.pathname === '/api/burn-to-become/submit-mint' && req.method === 'POST') {
     (async () => {
       try {
-        const { signedTransaction } = req.body || {};
-        if (!signedTransaction) return sendJson(400, { error: 'signedTransaction required' });
+        const { signedTransaction, txSignature } = req.body || {};
+        if (!signedTransaction && !txSignature) return sendJson(400, { error: 'signedTransaction or txSignature required' });
 
-        const txBuffer = Buffer.from(signedTransaction, 'base64');
-        const sig = await connection.sendRawTransaction(txBuffer, { skipPreflight: false });
-        await connection.confirmTransaction(sig, 'confirmed');
-        console.log('[SubmitMint] client mint TX confirmed:', sig);
+        let sig = txSignature;
+        if (txSignature) {
+          await connection.confirmTransaction(txSignature, 'confirmed');
+          console.log('[SubmitMint] wallet-broadcast mint TX confirmed:', txSignature);
+        } else {
+          const txBuffer = Buffer.from(signedTransaction, 'base64');
+          sig = await connection.sendRawTransaction(txBuffer, { skipPreflight: false });
+          await connection.confirmTransaction(sig, 'confirmed');
+          console.log('[SubmitMint] client mint TX confirmed:', sig);
+        }
         sendJson(200, { success: true, signature: sig });
       } catch (e) {
         console.error('[SubmitMint] error:', e.message);
