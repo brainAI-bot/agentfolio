@@ -10,6 +10,7 @@
  * All functions return unsigned transactions for wallet signing.
  */
 
+import { Buffer } from 'buffer';
 import { Transaction, VersionedTransaction, Connection, PublicKey } from '@solana/web3.js';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333';
