@@ -23,14 +23,13 @@ const GENESIS_DISC = crypto.createHash('sha256')
 
 function parseGenesisRecord(pubkey, data) {
   if (!data || data.length < 100) return null;
-  
+
   // Check discriminator
   if (!data.slice(0, 8).equals(GENESIS_DISC)) return null;
-  
+
   try {
     var offset = 8;
-    var agentIdHashBytes = data.slice(offset, offset + 32);
-    offset += 32;
+    offset += 32; // agentId hash bytes
 
     var readString = function() {
       var len = data.readUInt32LE(offset);
@@ -46,6 +45,22 @@ function parseGenesisRecord(pubkey, data) {
       for (var i = 0; i < count; i++) arr.push(readString());
       return arr;
     };
+    var readPubkey = function() {
+      var value = new PublicKey(data.slice(offset, offset + 32));
+      offset += 32;
+      return value;
+    };
+    var readBool = function() {
+      var value = data[offset] === 1;
+      offset += 1;
+      return value;
+    };
+    var readOptionPubkey = function() {
+      var flag = data[offset];
+      offset += 1;
+      if (flag === 1) return readPubkey();
+      return null;
+    };
 
     var agentName = readString();
     var description = readString();
@@ -53,22 +68,35 @@ function parseGenesisRecord(pubkey, data) {
     var capabilities = readVecString();
     var metadataUri = readString();
     var faceImage = readString();
-    var faceMint = new PublicKey(data.slice(offset, offset + 32));
-    offset += 32;
+    var faceMint = readPubkey();
     var faceBurnTx = readString();
     var genesisTimestamp = Number(data.readBigInt64LE(offset));
     offset += 8;
-    var authority = new PublicKey(data.slice(offset, offset + 32));
-    offset += 32;
 
-    // Option<Pubkey>
-    var hasPending = data[offset];
-    offset += 1;
-    if (hasPending === 1) offset += 32;
+    var isActive = true;
+    var authority;
+    var pendingAuthority;
+    var peekByte = data[offset];
+    if (peekByte !== 0 && peekByte !== 1) {
+      authority = readPubkey();
+      pendingAuthority = readOptionPubkey();
+    } else {
+      var optionPos = offset + 1 + 32;
+      if (optionPos < data.length && (data[optionPos] === 0 || data[optionPos] === 1)) {
+        isActive = readBool();
+        authority = readPubkey();
+        pendingAuthority = readOptionPubkey();
+      } else {
+        authority = readPubkey();
+        pendingAuthority = readOptionPubkey();
+      }
+    }
 
     var rawReputationScore = Number(data.readBigUInt64LE(offset));
-    var reputationScore = Math.min(Math.round(rawReputationScore / 10000), 800);
     offset += 8;
+    var reputationScore = rawReputationScore > 10000
+      ? Math.min(Math.round(rawReputationScore / 1000), 800)
+      : Math.max(0, rawReputationScore);
     var verificationLevel = data[offset];
     offset += 1;
 
@@ -78,6 +106,7 @@ function parseGenesisRecord(pubkey, data) {
     return {
       pda: pubkey,
       authority: authority.toBase58(),
+      pendingAuthority: pendingAuthority ? pendingAuthority.toBase58() : null,
       agentName: agentName,
       description: description,
       category: category,
@@ -89,6 +118,7 @@ function parseGenesisRecord(pubkey, data) {
       soulbound: !!faceBurnTx && faceBurnTx.length > 10,
       genesisTimestamp: genesisTimestamp,
       isBorn: genesisTimestamp > 0,
+      isActive: isActive,
       bornAt: genesisTimestamp > 0 ? new Date(genesisTimestamp * 1000).toISOString() : null,
       reputationScore: reputationScore,
       rawReputationScore: rawReputationScore,
