@@ -13,3 +13,38 @@ logs/
 logs/
 *.bak-*
 sync-genesis-scores.js
+
+# Added during repo cleanup
+logs/
+*.log
+*.done
+progress.txt
+PUBLIC_URL.txt
+demo-video*.mp4
+demo-video*.mov
+tunnel.log
+server.log
+
+# Backup / archive directories (should not be in git)
+.backup-v2-sdk/
+backup-bak-files/
+backup-placeholders-*/
+archived/
+
+# Keys should NEVER be committed
+keys/
+*.keypair
+*keypair*.json
+
+# Temp / backup artifacts
+*.bak
+*.bak-*
+*.bak.*
+*.bad
+tmp*
+
+# OS cruft
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
