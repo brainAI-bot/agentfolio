@@ -117,7 +117,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   const filtered = skillFilter
     ? statusFiltered.filter((j) => j.skills.some(s => s.toLowerCase().includes(skillFilter.toLowerCase())))
     : statusFiltered;
-  const allSkills = [...new Set(jobs.flatMap(j => j.skills))].sort();
+  const allSkills = [...new Set(jobs.flatMap((j) => Array.isArray(j.skills) ? j.skills : []))].sort();
 
   const showMessage = (type: "success" | "error", text: string) => {
     setMessage({ type, text });
@@ -569,7 +569,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                     )}
                   </div>
                   <div className="flex flex-wrap gap-1.5 mt-3">
-                    {job.skills.map((s) => (
+                    {(Array.isArray(job.skills) ? job.skills : []).map((s) => (
                       <span key={s} className="px-2 py-0.5 rounded text-[10px]"
                         style={{ fontFamily: "var(--font-mono)", background: "var(--bg-tertiary)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}>
                         {s}
