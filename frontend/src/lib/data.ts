@@ -324,7 +324,7 @@ function loadAllJobs(): Job[] {
           status: statusMap[raw.status] || "open",
           escrowStatus,
           proposals: raw.applicationCount,
-          deadline: raw.timeline.replace("_", " "),
+          deadline: (raw.timeline || raw.deadline || "Flexible").replace(/_/g, " "),
           assignee: assigneeName,
           assigneeId: raw.selectedAgentId || raw.acceptedApplicant || undefined,
           clientId: raw.clientId,

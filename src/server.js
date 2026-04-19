@@ -837,62 +837,74 @@ app.get('/docs', (req, res) => {
 </html>`);
 });
 
+function getEcosystemStatsPayload() {
+  const d = profileStore.getDb();
+  const total = d.prepare('SELECT COUNT(*) as c FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL)').get('active').c;
+
+  // Count verified agents (those with at least one verification in verification_data)
+  const rows = d.prepare('SELECT verification_data FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL)').all('active');
+  let verified = 0;
+  let onChain = 0;
+  const allSkills = new Set();
+  const verificationTypes = new Set();
+
+  // Also count from JSON files for skills
+  const fs = require('fs');
+  const path = require('path');
+  const profilesDir = '/home/ubuntu/agentfolio/data/profiles';
+  const jsonFiles = fs.readdirSync(profilesDir).filter(f => f.endsWith('.json'));
+
+  for (const file of jsonFiles) {
+    try {
+      const p = JSON.parse(fs.readFileSync(path.join(profilesDir, file), 'utf-8'));
+      if (p.skills) {
+        for (const s of p.skills) {
+          const name = typeof s === 'string' ? s : s.name;
+          if (name) allSkills.add(name);
+        }
+      }
+    } catch {}
+  }
+
+  for (const row of rows) {
+    try {
+      const vd = typeof row.verification_data === 'string' ? JSON.parse(row.verification_data) : (row.verification_data || {});
+      const platforms = Object.keys(vd);
+      let hasVerification = false;
+      for (const platform of platforms) {
+        if (vd[platform] && vd[platform].verified) {
+          hasVerification = true;
+          verificationTypes.add(platform);
+        }
+      }
+      if (hasVerification) verified++;
+      if (vd.satp?.verified || vd.solana?.verified) onChain++;
+    } catch {}
+  }
+
+  return {
+    total,
+    totalAgents: Math.max(total, jsonFiles.length),
+    totalSkills: allSkills.size,
+    verified,
+    onChain,
+    verificationTypes: verificationTypes.size,
+    verificationPlatforms: [...verificationTypes].sort(),
+  };
+}
+
 // Ecosystem stats endpoint - for homepage hero stats
 app.get('/api/ecosystem/stats', (req, res) => {
   try {
-    const d = profileStore.getDb();
-    const total = d.prepare('SELECT COUNT(*) as c FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL)').get('active').c;
-    
-    // Count verified agents (those with at least one verification in verification_data)
-    const rows = d.prepare('SELECT verification_data FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL)').all('active');
-    let verified = 0;
-    let onChain = 0;
-    const allSkills = new Set();
-    const verificationTypes = new Set();
-    
-    // Also count from JSON files for skills
-    const fs = require('fs');
-    const path = require('path');
-    const profilesDir = '/home/ubuntu/agentfolio/data/profiles';
-    const jsonFiles = fs.readdirSync(profilesDir).filter(f => f.endsWith('.json'));
-    
-    for (const file of jsonFiles) {
-      try {
-        const p = JSON.parse(fs.readFileSync(path.join(profilesDir, file), 'utf-8'));
-        if (p.skills) {
-          for (const s of p.skills) {
-            const name = typeof s === 'string' ? s : s.name;
-            if (name) allSkills.add(name);
-          }
-        }
-      } catch {}
-    }
-    
-    for (const row of rows) {
-      try {
-        const vd = typeof row.verification_data === 'string' ? JSON.parse(row.verification_data) : (row.verification_data || {});
-        const platforms = Object.keys(vd);
-        let hasVerification = false;
-        for (const platform of platforms) {
-          if (vd[platform] && vd[platform].verified) {
-            hasVerification = true;
-            verificationTypes.add(platform);
-          }
-        }
-        if (hasVerification) verified++;
-        if (vd.satp?.verified || vd.solana?.verified) onChain++;
-      } catch {}
-    }
-    
-    res.json({
-      total,
-      totalAgents: Math.max(total, jsonFiles.length),
-      totalSkills: allSkills.size,
-      verified,
-      onChain,
-      verificationTypes: verificationTypes.size,
-      verificationPlatforms: [...verificationTypes].sort(),
-    });
+    res.json(getEcosystemStatsPayload());
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to compute stats' });
+  }
+});
+
+app.get('/api/stats', (req, res) => {
+  try {
+    res.json(getEcosystemStatsPayload());
   } catch (err) {
     res.status(500).json({ error: 'Failed to compute stats' });
   }
