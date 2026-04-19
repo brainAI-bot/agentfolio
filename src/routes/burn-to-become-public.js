@@ -1362,11 +1362,13 @@ function handleBurnToBecome(req, res, url) {
           return sendJson(400, { error: 'NFT account not found: ' + nftMint });
         }
         const METAPLEX_CORE_PROGRAM = new PublicKey('CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d');
+        const LIGHTHOUSE_PROGRAM = new PublicKey('L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95');
         const allowedPrograms = new Set([
           ComputeBudgetProgram.programId.toBase58(),
           TOKEN_PROGRAM_ID.toBase58(),
           TOKEN_2022_PROGRAM_ID.toBase58(),
           METAPLEX_CORE_PROGRAM.toBase58(),
+          LIGHTHOUSE_PROGRAM.toBase58(),
         ]);
 
         if (hasTxSignature) {
