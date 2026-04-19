@@ -2,7 +2,7 @@
   "name": "agent-portfolio",
   "version": "1.0.0",
   "description": "",
-  "main": "scripts/admin/setup-escrow-wallet.js",
+  "main": "src/server.js",
   "directories": {
     "doc": "docs"
   },
