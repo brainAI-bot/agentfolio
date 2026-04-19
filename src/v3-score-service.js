@@ -97,7 +97,7 @@ function parseGenesisRecord(data) {
 
     return {
       agentName,
-      reputationScore,
+      reputationScore: Math.min(Math.round(reputationScore / 10000), 800),
       reputationPct: (reputationScore / 10000).toFixed(2),
       verificationLevel,
       verificationLabel: ['Unverified','Registered','Verified','Established','Trusted','Sovereign'][verificationLevel] || 'Unknown',
