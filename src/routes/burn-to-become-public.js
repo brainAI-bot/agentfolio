@@ -430,6 +430,12 @@ async function getWalletNFTs(walletAddress) {
 
       // Filter: only include non-fungibles with supply 1 (or Core assets)
       // DAS already filters by owner, so most items here are valid NFTs
+      // Skip already-burned assets. Helius DAS can still surface burnt Core assets with owner metadata,
+      // but they are not real burn candidates and will fail worker prepare.
+      if (item.burnt === true) {
+        continue;
+      }
+
       // Skip soulbound tokens — they are permanent and should never be burned
       const nameLower = name.toLowerCase();
       if (nameLower.includes('soulbound') || nameLower.includes('soul bound') || nameLower.includes('soul-bound')) {
