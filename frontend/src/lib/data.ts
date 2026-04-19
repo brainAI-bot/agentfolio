@@ -97,7 +97,8 @@ interface RawJob {
   budgetAmount: number;
   budgetCurrency: string;
   budgetMax: number | null;
-  timeline: string;
+  timeline: string | null;
+  deadline?: string | null;
   status: string;
   attachments: any[];
   requirements: string;
