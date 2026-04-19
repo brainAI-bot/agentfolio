@@ -144,7 +144,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
 
   const refreshJobs = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/marketplace/jobs?status=all`);
+      const res = await fetch(`${API_BASE}/api/marketplace/jobs`);
       if (res.ok) {
         const data = await res.json();
         const jobList = data.jobs || data || [];
