@@ -26,9 +26,8 @@ import {
   transactionBuilder,
   createNoopSigner,
   some,
-} from '@metaplex-foundation/umi';
-import { toWeb3JsLegacyTransaction } from '@metaplex-foundation/umi-web3js-adapters';
-import { Connection, Transaction, PublicKey, Keypair } from '@solana/web3.js';
+import { toWeb3JsTransaction } from '@metaplex-foundation/umi-web3js-adapters';
+import { Keypair, VersionedTransaction } from '@solana/web3.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -118,25 +117,33 @@ async function run() {
 
   // Set the recipient as the payer for the transaction
   const tx = await builder.setFeePayer(ownerSigner).buildWithLatestBlockhash(umi);
-  
-  // Convert to web3.js Transaction for partial signing
-  const web3Tx = toWeb3JsLegacyTransaction(tx);
-  
-  // Server-side partial signing:
-  // 1. Asset signer MUST sign (it's a generated keypair for the NFT)
-  // 2. For "free" flow: deployer signs as thirdPartySigner
+  const web3Tx = toWeb3JsTransaction(tx);
+
+  // Server-side partial signing
   const assetWeb3Kp = Keypair.fromSecretKey(Uint8Array.from(asset.secretKey));
-  web3Tx.partialSign(assetWeb3Kp);
-  
-  if (flow === 'free') {
-    const deployerWeb3Kp = Keypair.fromSecretKey(Uint8Array.from(secretKey));
-    web3Tx.partialSign(deployerWeb3Kp);
-    console.error('[Prepare] Deployer co-signed for free flow (thirdPartySigner guard)');
+  const deployerWeb3Kp = flow === 'free'
+    ? Keypair.fromSecretKey(Uint8Array.from(secretKey))
+    : null;
+
+  if (web3Tx instanceof VersionedTransaction) {
+    const signers = deployerWeb3Kp ? [assetWeb3Kp, deployerWeb3Kp] : [assetWeb3Kp];
+    web3Tx.sign(signers);
+  } else {
+    web3Tx.partialSign(assetWeb3Kp);
+    if (deployerWeb3Kp) web3Tx.partialSign(deployerWeb3Kp);
   }
 
-  // Serialize (user still needs to sign as payer)
-  const serialized = web3Tx.serialize({ requireAllSignatures: false });
+  if (deployerWeb3Kp) {
+    console.error('[CM Prepare] Deployer co-signed for free flow');
+  }
+
+  const serialized = web3Tx instanceof VersionedTransaction
+    ? web3Tx.serialize()
+    : web3Tx.serialize({ requireAllSignatures: false });
   const base64Tx = Buffer.from(serialized).toString('base64');
+  const feePayer = web3Tx instanceof VersionedTransaction
+    ? web3Tx.message.staticAccountKeys[0].toString()
+    : web3Tx.feePayer?.toString() || null;
 
   const assetData = uploaded[boaId] || {};
 
@@ -151,9 +158,12 @@ async function run() {
     collection: cmState.collection,
     cmIndex: nextIndex,
     flow,
-    message: flow === 'free' 
-      ? 'Sign this transaction in your wallet to mint your free Burn-to-Become NFT'
-      : 'Sign this transaction in your wallet to mint a Bored Robot (1 SOL)',
+    atomic: false,
+    feePayer,
+    txVersion: web3Tx instanceof VersionedTransaction ? 'v0' : 'legacy',
+    message: flow === 'free'
+      ? 'Sign to mint your BOA (free, deployer co-signed). NFT goes to your wallet.'
+      : 'Sign to mint your BOA (1 SOL). NFT goes to your wallet.',
   }));
 }
 
