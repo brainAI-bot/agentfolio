@@ -560,18 +560,31 @@ async function buildBurnTransaction(walletAddress, nftMint) {
         cwd: '/home/ubuntu/agentfolio/core-cm-v2',
         env: { ...process.env, HOME: process.env.HOME },
       }, (err, stdout, stderr) => {
-        if (err) return reject(new Error('Core burn prepare failed'));
+        const stdoutText = String(stdout || '').trim();
+        const stderrText = String(stderr || '').trim();
+        let parsedResult = null;
+        if (stdoutText) {
+          try {
+            const lines = stdoutText.split('\n').filter(Boolean);
+            parsedResult = JSON.parse(lines[lines.length - 1]);
+          } catch {}
+        }
+        if (err) {
+          const detailedError = parsedResult?.error || stderrText || stdoutText || err.message || 'Core burn prepare failed';
+          return reject(new Error(detailedError));
+        }
         try {
-          const lines = stdout.trim().split('\n');
-          const result = JSON.parse(lines[lines.length - 1]);
-          if (result.error) return reject(new Error(result.error));
+          if (parsedResult?.error) return reject(new Error(parsedResult.error));
+          if (!parsedResult?.transaction) return reject(new Error(stderrText || 'Core burn parse failed'));
           // Return the pre-built TX from the worker
-          const txBuf = Buffer.from(result.transaction, 'base64');
+          const txBuf = Buffer.from(parsedResult.transaction, 'base64');
           const tx = isVersionedSerializedTransaction(txBuf)
             ? VersionedTransaction.deserialize(txBuf)
             : Transaction.from(txBuf);
           resolve(tx);
-        } catch (e) { reject(new Error('Core burn parse failed')); }
+        } catch (e) {
+          reject(new Error(stderrText || e?.message || 'Core burn parse failed'));
+        }
       });
     });
   }
