@@ -21,31 +21,7 @@ const router = express.Router();
 
 const SITE_URL = process.env.PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || 'https://agentfolio.bot';
 
-const NON_PUBLIC_EXPLORER_NAMES = new Set([
-  'Smoke 423064591',
-  'Smoke 423302531',
-  'Smoke 423302532',
-  'brainTEST',
-  'test',
-  'ratecheck',
-  'ratecheck2',
-  'ratetest1',
-  'ratetest2',
-  'ratetest3',
-  'ratelimit-probe',
-  '__rate_test__',
-  'CEO Selftest 55648944',
-]);
-
-function isNonPublicExplorerAgent(agent) {
-  const name = String(agent?.agentName || '').trim();
-  if (!name) return true;
-  if (NON_PUBLIC_EXPLORER_NAMES.has(name)) return true;
-  const lower = name.toLowerCase();
-  if (lower.startsWith('ratecheck') || lower.startsWith('ratetest')) return true;
-  if (lower === 'ratelimit-probe' || lower === '__rate_test__') return true;
-  if (lower === 'test') return true;
-  if (lower.startsWith('ceo selftest ')) return true;
+function isNonPublicExplorerAgent() {
   return false;
 }
 
@@ -83,43 +59,30 @@ function normalizePublicPlatforms(values) {
 function getComputedScore(profileId, explorerAgent = null) {
   let db;
   try {
-    const { computeUnifiedTrustScore } = require('../lib/unified-trust-score');
     const Database = require('better-sqlite3');
     const path = require('path');
     db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
     const row = db.prepare('SELECT * FROM profiles WHERE lower(id) = lower(?) LIMIT 1').get(profileId);
-    if (!row) {
-      return explorerAgent ? {
+    if (explorerAgent) {
+      return {
         score: explorerAgent.reputationScore || 0,
         level: explorerAgent.verificationLevel || 0,
-        levelName: explorerAgent.tierLabel || explorerAgent.tier || 'Unverified',
-        avatar: explorerAgent.faceImage || null,
-      } : null;
+        levelName: explorerAgent.verificationLabel || explorerAgent.tierLabel || explorerAgent.tier || 'Unverified',
+        avatar: row ? getProfileAvatar(row, explorerAgent.faceImage || null) : (explorerAgent.faceImage || null),
+      };
     }
-    let verificationData = {};
-    try { verificationData = JSON.parse(row.verification_data || '{}'); } catch {}
-    const hasPersistedSatp = Boolean(verificationData?.satp_v3?.verified || verificationData?.satp?.verified);
-    const unified = computeUnifiedTrustScore(db, { ...row, id: profileId }, {
-      v3Score: explorerAgent ? {
-        reputationScore: explorerAgent.reputationScore || 0,
-        verificationLevel: explorerAgent.verificationLevel || (hasPersistedSatp ? 1 : 0),
-        verificationLabel: explorerAgent.tierLabel || explorerAgent.tier || 'Registered',
-        isBorn: explorerAgent.isBorn,
-        onChain: explorerAgent,
-      } : null,
-      hasBoaAvatar: Boolean(explorerAgent?.isBorn),
-    });
+    if (!row) return null;
     return {
-      score: unified.score || 0,
-      level: unified.level || 0,
-      levelName: unified.levelName || 'Unverified',
-      avatar: getProfileAvatar(row, explorerAgent?.faceImage || null),
+      score: 0,
+      level: 0,
+      levelName: 'Unverified',
+      avatar: getProfileAvatar(row, null),
     };
   } catch (_) {
     return explorerAgent ? {
       score: explorerAgent.reputationScore || 0,
       level: explorerAgent.verificationLevel || 0,
-      levelName: explorerAgent.tierLabel || explorerAgent.tier || 'Unverified',
+      levelName: explorerAgent.verificationLabel || explorerAgent.tierLabel || explorerAgent.tier || 'Unverified',
       avatar: explorerAgent.faceImage || null,
     } : null;
   } finally {

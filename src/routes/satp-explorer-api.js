@@ -342,6 +342,9 @@ for (const agent of filteredAgents) {
       createdAt: agent.createdAt || null,
     },
   });
+  const onChainTrustScore = Number(agent.reputationScore || 0);
+  const onChainVerificationLevel = Number(agent.verificationLevel || 0);
+  const onChainVerificationName = agent.verificationLabel || levelLabels[onChainVerificationLevel] || 'Unverified';
 
   const txHints = new Map();
   const addTxHint = (platform, txSignature, timestamp = null, solscanUrl = null) => {
@@ -440,17 +443,18 @@ for (const agent of filteredAgents) {
   enrichedAgents.push({
     ...agent,
     profileId: profile.id,
-    agentId: profile.id,
-    score: unified.score,
-    reputationScore: unified.score,
-    trustScore: unified.score,
-    level: unified.level,
-    tier: unified.levelName,
-    levelName: unified.levelName,
-    verificationLevel: unified.level,
-    verificationLabel: unified.levelName,
-    verificationLevelName: unified.levelName || levelLabels[unified.level] || 'Unverified',
-    verificationBadge: levelBadges[unified.level] || '⚪',
+    agentId: agent.agentId || agent.pda,
+    score: onChainTrustScore,
+    reputationScore: onChainTrustScore,
+    trustScore: onChainTrustScore,
+    computedTrustScore: unified.score,
+    level: onChainVerificationLevel,
+    tier: onChainVerificationName,
+    levelName: onChainVerificationName,
+    verificationLevel: onChainVerificationLevel,
+    verificationLabel: onChainVerificationName,
+    verificationLevelName: onChainVerificationName,
+    verificationBadge: levelBadges[onChainVerificationLevel] || '⚪',
     trustCredentialUrl: `/trust/${encodeURIComponent(profile.id)}`,
     avatar: profileAvatar || agent.nftImage || null,
     nftImage: profileAvatar || agent.nftImage || null,
@@ -465,26 +469,15 @@ for (const agent of filteredAgents) {
 }
     _db.close();
 
-    const dedupedAgents = [];
-    const seenKeys = new Set();
     const rankedAgents = [...enrichedAgents].sort((a, b) => {
-      const aHasProfile = !!a?.profileId;
-      const bHasProfile = !!b?.profileId;
-      if (aHasProfile !== bHasProfile) return aHasProfile ? -1 : 1;
-      const scoreDelta = Number(b?.profileMatchScore || 0) - Number(a?.profileMatchScore || 0);
+      const scoreDelta = Number(b?.reputationScore || 0) - Number(a?.reputationScore || 0);
       if (scoreDelta !== 0) return scoreDelta;
-      const updatedDelta = (Date.parse(b?.updatedAt || 0) || 0) - (Date.parse(a?.updatedAt || 0) || 0);
-      if (updatedDelta !== 0) return updatedDelta;
+      const levelDelta = Number(b?.verificationLevel || 0) - Number(a?.verificationLevel || 0);
+      if (levelDelta !== 0) return levelDelta;
       return String(a?.pda || '').localeCompare(String(b?.pda || ''));
     });
-    for (const agent of rankedAgents) {
-      const key = agent.profileId ? `profile:${agent.profileId}` : (agent.pda || agent.authority || (agent.name ? `name:${String(agent.name).toLowerCase()}` : `agent:${agent.agentId}`));
-      if (seenKeys.has(key)) continue;
-      seenKeys.add(key);
-      dedupedAgents.push(agent);
-    }
 
-    const sanitizedAgents = dedupedAgents.map((agent) => {
+    const sanitizedAgents = rankedAgents.map((agent) => {
       const attestationMemos = [];
       const seenAttestationKeys = new Set();
       for (const att of Array.isArray(agent.attestationMemos) ? agent.attestationMemos : []) {

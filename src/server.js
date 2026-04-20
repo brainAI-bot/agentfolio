@@ -686,10 +686,40 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     }
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
-    const v3Score = await getV3Score(profile.id).catch(() => null);
+    const parsedWallets = parseJsonFieldSafe(profile.wallets, {});
+    const v3Explorer = require('./v3-explorer');
+    const v3Agents = await v3Explorer.fetchAllV3Agents().catch(() => []);
+    const candidateAuthorities = [profile.wallet, profile.claimed_by, parsedWallets?.solana]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean);
+    const profileNameKey = String(profile.name || '').trim().toLowerCase();
+    const rawAgentKey = rawAgentId.toLowerCase();
+    const matchedV3Candidates = (Array.isArray(v3Agents) ? v3Agents : []).filter((agent) => {
+      const pda = String(agent?.pda || '').trim().toLowerCase();
+      const authority = String(agent?.authority || '').trim();
+      const authorityKey = authority.toLowerCase();
+      const nameKey = String(agent?.agentName || '').trim().toLowerCase();
+      return pda === rawAgentKey
+        || authorityKey === rawAgentKey
+        || (profileNameKey && nameKey === profileNameKey)
+        || candidateAuthorities.includes(authority);
+    });
+    const matchedV3 = matchedV3Candidates.reduce((best, agent) => {
+      const score =
+        (String(agent?.pda || '').trim().toLowerCase() === rawAgentKey ? 1_000_000_000 : 0)
+        + (candidateAuthorities.includes(String(agent?.authority || '').trim()) ? 100_000_000 : 0)
+        + (String(agent?.agentName || '').trim().toLowerCase() === profileNameKey ? 10_000_000 : 0)
+        + Number(agent?.reputationScore || 0);
+      if (!best || score > best.score) return { score, agent };
+      return best;
+    }, null)?.agent || null;
+    const v3Score = matchedV3 || await getV3Score(profile.id).catch(() => null);
     const unified = computeUnifiedTrustScore(db, profile, { v3Score });
     const parsedNftAvatar = parseJsonFieldSafe(profile.nft_avatar, null);
-    const resolvedAvatar = parsedNftAvatar?.image || parsedNftAvatar?.arweaveUrl || profile.avatar || null;
+    const resolvedAvatar = parsedNftAvatar?.image || parsedNftAvatar?.arweaveUrl || profile.avatar || matchedV3?.faceImage || null;
+    const displayTrustScore = matchedV3 ? (Number(matchedV3.reputationScore || 0) > 10000 ? Math.round(Number(matchedV3.reputationScore || 0) / 1000) : Number(matchedV3.reputationScore || 0)) : unified.score;
+    const displayVerificationLevel = matchedV3 ? Number(matchedV3.verificationLevel || 0) : unified.level;
+    const displayVerificationName = matchedV3 ? (matchedV3.verificationLabel || matchedV3.tierLabel || matchedV3.tier || unified.levelName) : unified.levelName;
 
     const attestationHints = new Map();
     try {
@@ -743,32 +773,36 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       profileId: profile.id,
       name: profile.name,
       did: 'did:agentfolio:' + profile.id,
-      trustScore: unified.score,
-      score: unified.score,
-      reputationScore: unified.score,
-      level: unified.level,
-      levelName: unified.levelName,
-      verificationLevel: unified.level,
-      verificationLevelName: unified.levelName,
-      verificationLabel: unified.levelName,
-      tier: unified.levelName,
-      verificationBadge: unified.badge,
+      trustScore: displayTrustScore,
+      score: displayTrustScore,
+      reputationScore: displayTrustScore,
+      level: displayVerificationLevel,
+      levelName: displayVerificationName,
+      verificationLevel: displayVerificationLevel,
+      verificationLevelName: displayVerificationName,
+      verificationLabel: displayVerificationName,
+      tier: displayVerificationName,
+      verificationBadge: ['⚪','🟡','🔵','🟢','🟠','🟣'][displayVerificationLevel] || unified.badge,
       scoreVersion: unified.source,
       verifications: publicVerifications,
       platforms: publicPlatforms,
+      pda: matchedV3?.pda || null,
+      authority: matchedV3?.authority || parsedWallets?.solana || null,
       avatar: resolvedAvatar,
       nftAvatar: parsedNftAvatar,
       nft_avatar: parsedNftAvatar,
       nftImage: parsedNftAvatar?.image || parsedNftAvatar?.arweaveUrl || resolvedAvatar,
-      wallets: parseJsonFieldSafe(profile.wallets, {}),
+      wallets: parsedWallets,
       tags: parseJsonFieldSafe(profile.tags, []),
       skills: parseJsonFieldSafe(profile.skills, []),
       onChainRegistered: unified.hasSatpIdentity,
       v3: {
-        reputationScore: unified.score,
-        verificationLevel: unified.level,
-        verificationLabel: unified.levelName,
-        isBorn: !!(v3Score && v3Score.isBorn),
+        reputationScore: displayTrustScore,
+        verificationLevel: displayVerificationLevel,
+        verificationLabel: displayVerificationName,
+        isBorn: !!(matchedV3 ? matchedV3.isBorn : (v3Score && v3Score.isBorn)),
+        bornAt: matchedV3?.bornAt || v3Score?.bornAt || null,
+        faceMint: matchedV3?.faceMint || v3Score?.faceMint || null,
       },
       breakdown: unified.breakdown || {},
       links: {
