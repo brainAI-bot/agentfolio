@@ -120,6 +120,34 @@ function getExplorerProfile(agent, profileIndex) {
   };
 }
 
+function parseJsonField(value, fallback = null) {
+  if (value === null || value === undefined || value === '') return fallback;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeExplorerPlatform(value) {
+  const platform = String(value || '').toLowerCase();
+  if (!platform) return null;
+  if (platform === 'twitter') return 'x';
+  if (platform === 'satp_v3') return null;
+  if (platform.startsWith('verification_')) return normalizeExplorerPlatform(platform.slice('verification_'.length));
+  if (platform.endsWith('_verification')) return normalizeExplorerPlatform(platform.slice(0, -'_verification'.length));
+  if (platform === 'solana_wallet') return 'solana';
+  if (platform === 'eth_wallet' || platform === 'ethereum_wallet' || platform === 'ethereum' || platform === 'evm') return 'eth';
+  if (platform === 'review' || platform.includes('satp')) return null;
+  return platform;
+}
+
+function normalizePublicPlatforms(values) {
+  const list = Array.isArray(values) ? values : [values];
+  return [...new Set(list.map(normalizeExplorerPlatform).filter(Boolean))];
+}
+
 /**
  * GET /api/explorer/agents
  * 
@@ -136,6 +164,12 @@ router.get('/agents', async (req, res) => {
   try {
     const v3Explorer = require('../v3-explorer');
     const chainCache = require('../lib/chain-cache');
+    const profileStore = require('../profile-store');
+    const db = profileStore.getDb();
+    const attestationsStmt = db.prepare('SELECT platform, tx_signature, created_at FROM attestations WHERE profile_id = ? AND tx_signature IS NOT NULL ORDER BY created_at DESC');
+    const verificationsStmt = db.prepare('SELECT platform, proof, verified_at FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC');
+    const profileVerificationStmt = db.prepare('SELECT verification_data FROM profiles WHERE lower(id) = lower(?) LIMIT 1');
+    const isLikelySolanaTxSignature = (value) => /^[1-9A-HJ-NP-Za-km-z]{60,120}$/.test(String(value || '').trim());
     
     let agents = await v3Explorer.fetchAllV3Agents();
     const profileIndex = buildProfileIndex();
@@ -157,25 +191,89 @@ router.get('/agents', async (req, res) => {
     }
     
     // Enrich with chain-cache attestation data
-    const enriched = agents.map(a => {
+    const enriched = await Promise.all(agents.map(async (a) => {
       const profile = getExplorerProfile(a, profileIndex);
       const profileId = profile.id;
-      const attestations = chainCache.getVerifications(profileId);
-      const platformSet = new Set(attestations.map(att => att.platform).filter(Boolean));
+      const attestations = (chainCache.getVerifications(profileId) || []).map((att) => ({ ...att }));
+      const txHints = new Map();
+      const addTxHint = (platform, txSignature, timestamp = null) => {
+        const normalized = normalizeExplorerPlatform(platform);
+        if (!normalized || !isLikelySolanaTxSignature(txSignature)) return;
+        if (!txHints.has(normalized)) {
+          txHints.set(normalized, {
+            platform: normalized,
+            txSignature,
+            timestamp,
+            solscanUrl: `https://solana.fm/tx/${txSignature}`,
+          });
+        }
+      };
+
+      for (const row of attestationsStmt.all(profileId)) {
+        addTxHint(row.platform, row.tx_signature, row.created_at || null);
+      }
+
+      if (typeof chainCache.resolveAttestationTxHintByPda === 'function') {
+        for (const att of attestations) {
+          if (!att?.pda || att?.txSignature) continue;
+          try {
+            const createdAtUnix = att?.timestamp ? Math.floor(new Date(att.timestamp).getTime() / 1000) : null;
+            const hint = await chainCache.resolveAttestationTxHintByPda(att.pda, createdAtUnix);
+            if (hint?.txSignature) {
+              att.txSignature = hint.txSignature;
+              att.solscanUrl = hint.solscanUrl || att.solscanUrl || (`https://solana.fm/tx/${hint.txSignature}`);
+              addTxHint(att.platform, hint.txSignature, att.timestamp || null);
+            }
+          } catch (_) {}
+        }
+      }
+
+      for (const row of verificationsStmt.all(profileId)) {
+        const proof = parseJsonField(row.proof, {});
+        addTxHint(row.platform, proof?.txSignature || proof?.signature || proof?.transactionSignature || null, row.verified_at || null);
+      }
+
+      const verificationData = parseJsonField(profileVerificationStmt.get(profileId)?.verification_data, {});
+      for (const [platform, value] of Object.entries(verificationData || {})) {
+        const txSignature = value && typeof value === 'object'
+          ? (value.txSignature || value.signature || value.transactionSignature || null)
+          : null;
+        const timestamp = value && typeof value === 'object'
+          ? (value.verifiedAt || value.timestamp || null)
+          : null;
+        addTxHint(platform, txSignature, timestamp);
+      }
+
+      const platformSet = new Set([
+        ...normalizePublicPlatforms(attestations.map((att) => att.platform)),
+        ...Array.from(txHints.keys()),
+      ]);
       
-      // Deduplicated attestation memos
+      // Deduplicated attestation memos with tx backfill
       const attMemos = [];
       const seen = new Set();
       for (const att of attestations) {
-        if (att.platform && !seen.has(att.platform)) {
-          seen.add(att.platform);
-          attMemos.push({
-            platform: att.platform,
-            txSignature: att.txSignature || null,
-            timestamp: att.timestamp || null,
-            solscanUrl: att.txSignature ? `https://solscan.io/tx/${att.txSignature}` : null,
-          });
-        }
+        const platform = normalizeExplorerPlatform(att.platform);
+        if (!platform || seen.has(platform)) continue;
+        seen.add(platform);
+        const hinted = txHints.get(platform) || null;
+        const txSignature = att.txSignature || hinted?.txSignature || null;
+        attMemos.push({
+          platform,
+          txSignature,
+          timestamp: att.timestamp || hinted?.timestamp || null,
+          solscanUrl: hinted?.solscanUrl || (isLikelySolanaTxSignature(txSignature) ? `https://solana.fm/tx/${txSignature}` : null),
+        });
+      }
+      for (const [platform, hinted] of txHints.entries()) {
+        if (seen.has(platform)) continue;
+        seen.add(platform);
+        attMemos.push({
+          platform,
+          txSignature: hinted.txSignature,
+          timestamp: hinted.timestamp || null,
+          solscanUrl: hinted.solscanUrl,
+        });
       }
       
       return {
@@ -203,7 +301,7 @@ router.get('/agents', async (req, res) => {
         programId: 'GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG',
         source: 'v3',
       };
-    });
+    }));
     
     // Apply limit
     const maxResults = limit ? parseInt(limit, 10) : enriched.length;
@@ -313,7 +411,7 @@ router.get('/leaderboard', async (req, res) => {
     const leaderboard = top.map((a, i) => {
       const profile = getExplorerProfile(a, profileIndex);
       const profileId = profile.id;
-      const platforms = chainCache.getVerifiedPlatforms(profileId);
+      const platforms = normalizePublicPlatforms(chainCache.getVerifiedPlatforms(profileId));
       
       return {
         rank: i + 1,
@@ -380,7 +478,7 @@ router.get('/search', async (req, res) => {
     const results = matches.slice(0, maxLimit).map(a => {
       const profile = getExplorerProfile(a, profileIndex);
       const profileId = profile.id;
-      const platforms = chainCache.getVerifiedPlatforms(profileId);
+      const platforms = normalizePublicPlatforms(chainCache.getVerifiedPlatforms(profileId));
       
       return {
         name: a.agentName,
