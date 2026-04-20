@@ -341,6 +341,24 @@ async function buildBurnTransaction(walletAddress, nftMint) {
   if (accountInfo.owner.equals(METAPLEX_CORE_PROGRAM)) {
     // ═══ CORE NFT: Use Core burn worker (returns unsigned TX) ═══
     console.log('[BurnPublic] Detected Core NFT, using Metaplex Core burn');
+    try {
+      const assetResp = await fetch(HELIUS_RPC, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 'core-burn-asset', method: 'getAsset', params: { id: nftMint } }),
+      });
+      const assetData = await assetResp.json();
+      const asset = assetData?.result || null;
+      if (asset?.burnt === true) {
+        throw new Error('This Core NFT has already been burned');
+      }
+      const owner = asset?.ownership?.owner || null;
+      if (!owner || owner !== walletAddress) {
+        throw new Error('Wallet does not own this Core NFT');
+      }
+    } catch (e) {
+      if (e && (e.message === 'Wallet does not own this Core NFT' || e.message === 'This Core NFT has already been burned')) throw e;
+      throw new Error('Unable to verify Core NFT ownership');
+    }
     const { execFile } = require('child_process');
     return new Promise((resolve, reject) => {
       execFile('node', ['/home/ubuntu/agentfolio/core-cm-v2/core-burn-worker.mjs', nftMint, walletAddress, 'prepare'], {
@@ -788,6 +806,12 @@ function handleBurnToBecome(req, res, url) {
         sendJson(200, { transaction: serialized });
       } catch (e) {
         console.error('[BurnPublic] prepare error:', e);
+        if (e?.message === 'Wallet does not own this Core NFT') {
+          return sendJson(403, { error: e.message });
+        }
+        if (e?.message === 'This Core NFT has already been burned') {
+          return sendJson(409, { error: e.message });
+        }
         sendJson(500, { error: e.message });
       }
     })();
