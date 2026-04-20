@@ -806,13 +806,15 @@ function handleBurnToBecome(req, res, url) {
         sendJson(200, { transaction: serialized });
       } catch (e) {
         console.error('[BurnPublic] prepare error:', e);
-        if (e?.message === 'Wallet does not own this Core NFT') {
-          return sendJson(403, { error: e.message });
-        }
-        if (e?.message === 'This Core NFT has already been burned') {
-          return sendJson(409, { error: e.message });
-        }
-        sendJson(500, { error: e.message });
+        const message = e?.message || 'Unknown error';
+        const validationError = (
+          message === 'Wallet does not own this Core NFT' ||
+          message === 'This Core NFT has already been burned' ||
+          message === 'Unable to verify Core NFT ownership' ||
+          message.startsWith('Unsupported NFT program for burn:') ||
+          message.startsWith('NFT account not found:')
+        );
+        sendJson(validationError ? 400 : 500, { error: message });
       }
     })();
     return true;
