@@ -21,6 +21,7 @@ const profileStore = require('./profile-store');
 
 // Scoring module
 const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainData } = require('./scoring');
+const { computeUnifiedTrustScore } = require('./lib/unified-trust-score');
 
 // Chain Cache — on-chain data layer (identities + attestations refresh loop)
 const chainCache = require('./lib/chain-cache');
@@ -293,198 +294,170 @@ try {
 
 // ─── API Explorer (agent profile deep-link) ─────────────
 app.get('/api/explorer/:agentId', async (req, res) => {
-  const { agentId } = req.params;
-  const profileStore = require('./profile-store');
+  const rawAgentId = String(req.params.agentId || '').trim();
+  const parseJsonFieldSafe = (value, fallback) => {
+    if (value === null || value === undefined || value === '') return fallback;
+    if (typeof value === 'object') return value;
+    try { return JSON.parse(value); } catch (_) { return fallback; }
+  };
+  const normalizeExplorerPlatform = (platform) => {
+    const normalized = String(platform || '').trim().toLowerCase();
+    if (!normalized) return null;
+    if (normalized === 'twitter') return 'x';
+    if (normalized === 'solana_wallet') return 'solana';
+    if (normalized === 'eth_wallet' || normalized === 'ethereum_wallet' || normalized === 'ethereum') return 'eth';
+    if (normalized.endsWith('_verification')) return normalizeExplorerPlatform(normalized.slice(0, -'_verification'.length));
+    return normalized;
+  };
+  const isPublicPlatform = (platform) => {
+    const normalized = normalizeExplorerPlatform(platform);
+    return !!normalized && !['satp', 'satp_v3', 'satp_verification'].includes(normalized);
+  };
+  const isLikelySolanaTxSignature = (value) => /^[1-9A-HJ-NP-Za-km-z]{60,120}$/.test(String(value || '').trim());
+
   try {
     const db = profileStore.getDb();
-    let profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId);
-    if (!profile && !agentId.startsWith('agent_')) {
-      profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + agentId);
+    let profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(rawAgentId);
+    if (!profile) profile = db.prepare('SELECT * FROM profiles WHERE handle = ?').get(rawAgentId);
+    if (!profile && rawAgentId && !rawAgentId.startsWith('agent_')) {
+      const prefixedId = 'agent_' + rawAgentId.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(prefixedId);
     }
-    if (!profile && !agentId.startsWith('agent_')) {
-      profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + agentId.toLowerCase());
+    if (!profile && rawAgentId) {
+      profile = db.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(rawAgentId);
     }
-    if (!profile) {
-      profile = db.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(agentId);
-    }
-    if (!profile && agentId.startsWith('agent_')) {
-      profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(agentId.replace(/^agent_/, ''));
-    }
-    if (!profile) {
-      return res.status(404).json({ error: 'Agent not found', agentId });
-    }
-    
-    let verifications = [], wallets = {}, tags = [], skills = [];
-    try {
-      let vData = JSON.parse(profile.verification_data || '[]');
-      if (vData && typeof vData === 'object' && !Array.isArray(vData)) {
-        vData = Object.entries(vData).map(([platform, info]) => ({ platform, ...info }));
-      }
-      verifications = Array.isArray(vData) ? vData : [];
-    } catch (_) {}
-    try { wallets = JSON.parse(profile.wallets || '{}'); } catch (_) {}
-    try { const t = JSON.parse(profile.tags || '[]'); tags = Array.isArray(t) ? t : []; } catch (_) {}
-    try { const s = JSON.parse(profile.skills || '[]'); skills = Array.isArray(s) ? s : []; } catch (_) {}
-    
-    const parsed = { ...profile, verifications, wallets, tags, skills };
-    const scoreResult = await computeScoreWithOnChain(parsed);
-    
-    // V3: Fetch authoritative on-chain Genesis Record score
-    let v3Data = null;
-    try {
-      v3Data = await getV3Score(profile.id);
-    } catch (e) {
-      console.warn('[Explorer] V3 score fetch failed for', profile.id, e.message);
-    }
-    
-    // DB enrichment: when V3 on-chain shows defaults, use DB trust scores
-    const hasDefaultV3Score = v3Data && (v3Data.reputationScore === 0 || v3Data.reputationScore === 50 || v3Data.reputationScore === 500000);
-    if (v3Data && (v3Data.verificationLevel === 0 || hasDefaultV3Score)) {
-      try {
-        const Database = require('better-sqlite3');
-        const path = require('path');
-        const mainDb = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
-        const trustRow = mainDb.prepare('SELECT overall_score, level FROM satp_trust_scores WHERE agent_id = ?').get(profile.id);
-        mainDb.close();
-        if (trustRow) {
-          const levelMap = { UNCLAIMED: 0, REGISTERED: 1, VERIFIED: 2, ESTABLISHED: 3, TRUSTED: 4, SOVEREIGN: 5 };
-          const numLevel = typeof trustRow.level === 'number' ? trustRow.level : (levelMap[String(trustRow.level).toUpperCase()] || 0);
-          const levelLabels = ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'];
-          v3Data.verificationLevel = numLevel;
-          v3Data.verificationLabel = levelLabels[numLevel] || 'Unclaimed';
-          const normalizedOverallScore = normalizeTrustScoreValue(trustRow.overall_score);
-          v3Data.reputationScore = normalizedOverallScore || v3Data.reputationScore;
-          v3Data._enrichedFromDB = true;
-        }
-      } catch (enrichErr) {
-        console.warn('[Explorer] DB enrichment failed:', enrichErr.message);
-      }
-    }
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
-    // Enrich face data from DB nft_avatar if on-chain is empty
-    if (v3Data && (!v3Data.faceImage || v3Data.faceImage === '')) {
-      try {
-        const Database = require('better-sqlite3');
-        const path = require('path');
-        const faceDb = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
-        const faceRow = faceDb.prepare('SELECT nft_avatar FROM profiles WHERE id = ?').get(profile.id);
-        faceDb.close();
-        if (faceRow && faceRow.nft_avatar) {
+    const parsedWallets = parseJsonFieldSafe(profile.wallets, {});
+    const v3Explorer = require('./v3-explorer');
+    const v3Agents = await v3Explorer.fetchAllV3Agents().catch(() => []);
+    const candidateAuthorities = [profile.wallet, profile.claimed_by, parsedWallets?.solana]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean);
+    const profileNameKey = String(profile.name || '').trim().toLowerCase();
+    const rawAgentKey = rawAgentId.toLowerCase();
+    const matchedV3Candidates = (Array.isArray(v3Agents) ? v3Agents : []).filter((agent) => {
+      const pda = String(agent?.pda || '').trim().toLowerCase();
+      const authority = String(agent?.authority || '').trim();
+      const authorityKey = authority.toLowerCase();
+      const nameKey = String(agent?.agentName || '').trim().toLowerCase();
+      return pda === rawAgentKey
+        || authorityKey === rawAgentKey
+        || (profileNameKey && nameKey === profileNameKey)
+        || candidateAuthorities.includes(authority);
+    });
+    const matchedV3 = matchedV3Candidates.reduce((best, agent) => {
+      const score =
+        (String(agent?.pda || '').trim().toLowerCase() === rawAgentKey ? 1_000_000_000 : 0)
+        + (candidateAuthorities.includes(String(agent?.authority || '').trim()) ? 100_000_000 : 0)
+        + (String(agent?.agentName || '').trim().toLowerCase() === profileNameKey ? 10_000_000 : 0)
+        + Number(agent?.reputationScore || 0);
+      if (!best || score > best.score) return { score, agent };
+      return best;
+    }, null)?.agent || null;
+    const v3Score = matchedV3 || await getV3Score(profile.id).catch(() => null);
+    const unified = computeUnifiedTrustScore(db, profile, { v3Score });
+    const parsedNftAvatar = parseJsonFieldSafe(profile.nft_avatar, null);
+    const resolvedAvatar = parsedNftAvatar?.image || parsedNftAvatar?.arweaveUrl || profile.avatar || matchedV3?.faceImage || null;
+    const displayTrustScore = matchedV3 ? (Number(matchedV3.reputationScore || 0) > 10000 ? Math.round(Number(matchedV3.reputationScore || 0) / 1000) : Number(matchedV3.reputationScore || 0)) : unified.score;
+    const displayVerificationLevel = matchedV3 ? Number(matchedV3.verificationLevel || 0) : unified.level;
+    const displayVerificationName = matchedV3 ? (matchedV3.verificationLabel || matchedV3.tierLabel || matchedV3.tier || unified.levelName) : unified.levelName;
+
+    const attestationHints = new Map();
+    try {
+      const chainCache = require('./lib/chain-cache');
+      const chainAttestations = (chainCache.getVerifications(profile.id) || []).map((att) => ({ ...att }));
+      if (typeof chainCache.resolveAttestationTxHintByPda === 'function') {
+        for (const att of chainAttestations) {
+          const currentTx = att?.txSignature || att?.tx_signature || null;
+          if (!att?.pda || isLikelySolanaTxSignature(currentTx)) continue;
           try {
-            const nftData = JSON.parse(faceRow.nft_avatar);
-            if (nftData.image) v3Data.faceImage = nftData.image;
-            if (nftData.soulboundMint) v3Data.faceMint = nftData.soulboundMint;
-            if (nftData.permanent) v3Data.isBorn = true;
-            if (nftData.burnedAt) v3Data.bornAt = nftData.burnedAt;
-          } catch (e) {}
+            const createdAtUnix = att?.timestamp ? Math.floor(new Date(att.timestamp).getTime() / 1000) : null;
+            const hint = await chainCache.resolveAttestationTxHintByPda(att.pda, createdAtUnix);
+            if (hint?.txSignature) {
+              att.txSignature = hint.txSignature;
+              att.solscanUrl = hint.solscanUrl || att.solscanUrl;
+            }
+          } catch (_) {}
         }
-      } catch (e) {}
-    }
+      }
+      for (const att of chainAttestations) {
+        const platform = normalizeExplorerPlatform(att?.platform || att?.attestationType);
+        const txSignature = att?.txSignature || att?.tx_signature || null;
+        if (!platform || !isLikelySolanaTxSignature(txSignature) || attestationHints.has(platform)) continue;
+        attestationHints.set(platform, {
+          txSignature,
+          solscanUrl: att?.solscanUrl || ('https://solana.fm/tx/' + txSignature),
+          timestamp: att?.timestamp || att?.verifiedAt || att?.createdAt || null,
+        });
+      }
+    } catch (_) {}
 
-    // Use V3 on-chain score if available, otherwise fall back to V2
-    const trustScore = v3Data ? v3Data.reputationScore : scoreResult.score;
-    const tier = v3Data
-      ? v3Data.verificationLabel.toUpperCase()
-      : (scoreResult.level || (scoreResult.score >= 80 ? 'ELITE' : scoreResult.score >= 60 ? 'PRO' : scoreResult.score >= 40 ? 'VERIFIED' : scoreResult.score >= 20 ? 'BASIC' : 'NEW'));
-    
+    const publicVerifications = (unified.verifications || [])
+      .filter(({ platform }) => isPublicPlatform(platform))
+      .map(({ platform, verified, txSignature, solscanUrl, timestamp }) => {
+        const normalizedPlatform = normalizeExplorerPlatform(platform);
+        const hinted = attestationHints.get(normalizedPlatform) || null;
+        const resolvedTxSignature = hinted?.txSignature || txSignature || null;
+        const resolvedSolscanUrl = hinted?.solscanUrl || (isLikelySolanaTxSignature(resolvedTxSignature) ? ('https://solana.fm/tx/' + resolvedTxSignature) : null);
+        return {
+          platform: normalizedPlatform || platform,
+          verified,
+          txSignature: resolvedTxSignature,
+          solscanUrl: resolvedSolscanUrl,
+          timestamp: timestamp || hinted?.timestamp || null,
+        };
+      });
+    const publicPlatforms = [...new Set(publicVerifications.map((entry) => entry.platform).filter(Boolean))];
+
     res.json({
       agentId: profile.id,
+      profileId: profile.id,
       name: profile.name,
-      did: `did:agentfolio:${profile.id}`,
-      trustScore,
-      tier,
-      scoreVersion: v3Data ? 'v3' : 'v2',
-      verifications: (() => {
-        // Merge DB verification_data (has identifiers) with chain-cache attestations (has TX proofs)
-        const cid = profile.id.startsWith('agent_') ? profile.id : ('agent_' + profile.id);
-        const chainVerifs = chainCache.getVerifications(cid) || chainCache.getVerifications(profile.id) || [];
-        const chainByPlatform = {};
-        chainVerifs.forEach(cv => { chainByPlatform[cv.platform] = cv; });
-        
-        // Identifier extraction from DB verification_data + profile wallets/links
-        const identifierMap = {};
-        // Parse links for fallback identifiers
-        let profileLinks = {};
-        try { profileLinks = typeof profile.links === 'string' ? JSON.parse(profile.links || '{}') : (profile.links || {}); } catch(_) {}
-        
-        verifications.forEach(v => {
-          if (v.verified === false) return;
-          const p = v.platform || v.type;
-          if (!p || p === 'review') return; // Filter out review
-          let identifier = null;
-          if (p === 'github') identifier = v.username || (v.proof && v.proof.username) || (v.stats && v.stats.username);
-          else if (p === 'x' || p === 'twitter') identifier = v.handle || v.username;
-          else if (p === 'agentmail') identifier = v.email || (v.proof && v.proof.email);
-          else if (p === 'solana') identifier = v.address;
-          else if (p === 'ethereum' || p === 'hyperliquid') identifier = v.address || v.wallet;
-          else if (p === 'polymarket') identifier = v.address;
-          else if (p === 'satp') identifier = v.identityPDA || ('did:satp:sol:' + (v.address || '').slice(0, 8));
-          else if (p === 'moltbook') identifier = v.username;
-          else if (p === 'mcp') identifier = v.url;
-          else if (p === 'a2a') identifier = v.url || v.agentName;
-          else if (p === 'website') identifier = v.url;
-          else if (p === 'domain') identifier = v.domain || v.url;
-          identifierMap[p] = identifier;
-        });
-        
-        // Fallback: fill missing identifiers from wallets and links
-        if (!identifierMap['x'] && !identifierMap['twitter'] && profileLinks.x) identifierMap['twitter'] = '@' + profileLinks.x;
-        if (!identifierMap['x'] && !identifierMap['twitter'] && profileLinks.twitter) identifierMap['twitter'] = '@' + profileLinks.twitter;
-        if (!identifierMap['website'] && profileLinks.website) identifierMap['website'] = profileLinks.website;
-        if (!identifierMap['domain'] && profileLinks.domain) identifierMap['domain'] = profileLinks.domain;
-        if (!identifierMap['domain'] && profileLinks.website) identifierMap['domain'] = profileLinks.website;
-        if (!identifierMap['hyperliquid'] && wallets.hyperliquid) identifierMap['hyperliquid'] = wallets.hyperliquid;
-        if (!identifierMap['ethereum'] && wallets.ethereum) identifierMap['ethereum'] = wallets.ethereum;
-        if (!identifierMap['ethereum'] && wallets.hyperliquid) identifierMap['ethereum'] = wallets.hyperliquid;
-
-        // Build merged list: all platforms from both DB and chain-cache, no 'review'
-        const allPlatforms = new Set([
-          ...verifications.filter(v => v.verified !== false && v.platform !== 'review' && v.type !== 'review').map(v => v.platform || v.type),
-          ...Object.keys(chainByPlatform).filter(p => p !== 'review')
-        ]);
-
-        return [...allPlatforms].map(platform => {
-          const chain = chainByPlatform[platform];
-          return {
-            platform,
-            verified: true,
-            identifier: identifierMap[platform] || null,
-            ...(chain ? {
-              source: 'on-chain',
-              txSignature: chain.txSignature,
-              solscanUrl: chain.solscanUrl,
-            } : { source: 'off-chain' }),
-          };
-        });
-      })(),
-      wallets,
-      tags,
-      skills,
-      onChainRegistered: v3Data ? v3Data.isBorn : (scoreResult.onChainRegistered || false),
-      ...(v3Data ? {
-        v3: {
-          reputationScore: v3Data.reputationScore,
-          reputationPct: v3Data.reputationPct,
-          verificationLevel: v3Data.verificationLevel,
-          verificationLabel: v3Data.verificationLabel,
-          isBorn: v3Data.isBorn,
-          bornAt: v3Data.bornAt,
-          faceImage: v3Data.faceImage,
-          faceMint: v3Data.faceMint,
-        },
-      } : {}),
-      breakdown: scoreResult.breakdown,
+      did: 'did:agentfolio:' + profile.id,
+      trustScore: displayTrustScore,
+      score: displayTrustScore,
+      reputationScore: displayTrustScore,
+      level: displayVerificationLevel,
+      levelName: displayVerificationName,
+      verificationLevel: displayVerificationLevel,
+      verificationLevelName: displayVerificationName,
+      verificationLabel: displayVerificationName,
+      tier: displayVerificationName,
+      verificationBadge: ['⚪','🟡','🔵','🟢','🟠','🟣'][displayVerificationLevel] || unified.badge,
+      scoreVersion: unified.source,
+      verifications: publicVerifications,
+      platforms: publicPlatforms,
+      pda: matchedV3?.pda || null,
+      authority: matchedV3?.authority || parsedWallets?.solana || null,
+      avatar: resolvedAvatar,
+      nftAvatar: parsedNftAvatar,
+      nft_avatar: parsedNftAvatar,
+      nftImage: parsedNftAvatar?.image || parsedNftAvatar?.arweaveUrl || resolvedAvatar,
+      wallets: parsedWallets,
+      tags: parseJsonFieldSafe(profile.tags, []),
+      skills: parseJsonFieldSafe(profile.skills, []),
+      onChainRegistered: unified.hasSatpIdentity,
+      v3: {
+        reputationScore: displayTrustScore,
+        verificationLevel: displayVerificationLevel,
+        verificationLabel: displayVerificationName,
+        isBorn: !!(matchedV3 ? matchedV3.isBorn : (v3Score && v3Score.isBorn)),
+        bornAt: matchedV3?.bornAt || v3Score?.bornAt || null,
+        faceMint: matchedV3?.faceMint || v3Score?.faceMint || null,
+      },
+      breakdown: unified.breakdown || {},
       links: {
-        profile: `https://agentfolio.bot/profile/${profile.id}`,
-        trustCredential: `https://agentfolio.bot/api/trust-credential/${profile.id}`,
-        api: `https://agentfolio.bot/api/profile/${profile.id}`,
+        profile: 'https://agentfolio.bot/profile/' + profile.id,
+        trustCredential: 'https://agentfolio.bot/trust/' + profile.id,
+        api: 'https://agentfolio.bot/api/profile/' + profile.id,
       },
       createdAt: profile.created_at,
       updatedAt: profile.updated_at,
     });
-  } catch (err) {
-    console.error('[Explorer] Error:', err);
-    res.status(500).json({ error: 'Failed to load agent', details: err.message });
+  } catch (e) {
+    console.error('[Explorer] unified route error:', e.stack || e.message);
+    res.status(500).json({ error: 'Internal error' });
   }
 });
 
