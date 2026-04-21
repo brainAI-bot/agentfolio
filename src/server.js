@@ -1725,7 +1725,8 @@ try {
 app.get('/api/satp/explorer/agents', async (req, res) => {
   try {
     const fetch = (await import('node-fetch')).default || globalThis.fetch;
-    const r = await fetch('http://localhost:3333/api/explorer/agents');
+    const query = req.url.includes('?') ? `?${req.url.split('?')[1]}` : '';
+    const r = await fetch(`http://localhost:3333/api/explorer/agents${query}`);
     const data = await r.json();
     res.json(data);
   } catch(e) { res.status(500).json({error: e.message}); }

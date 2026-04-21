@@ -189,9 +189,15 @@ router.get('/agents', async (req, res) => {
     if (born === 'true') {
       agents = agents.filter(a => a.isBorn);
     }
+
+    const total = agents.length;
+    const parsedLimit = Number.parseInt(String(limit || ''), 10);
+    const limitedAgents = Number.isFinite(parsedLimit) && parsedLimit > 0
+      ? agents.slice(0, parsedLimit)
+      : agents;
     
-    // Enrich with chain-cache attestation data
-    const enriched = await Promise.all(agents.map(async (a) => {
+    // Enrich only the requested slice, keep total for pagination/UX
+    const enriched = await Promise.all(limitedAgents.map(async (a) => {
       const profile = getExplorerProfile(a, profileIndex);
       const profileId = profile.id;
       const attestations = (chainCache.getVerifications(profileId) || []).map((att) => ({ ...att }));
@@ -303,14 +309,10 @@ router.get('/agents', async (req, res) => {
       };
     }));
     
-    // Apply limit
-    const maxResults = limit ? parseInt(limit, 10) : enriched.length;
-    const results = enriched.slice(0, isNaN(maxResults) ? enriched.length : maxResults);
-    
     res.json({
-      agents: results,
-      count: results.length,
-      total: enriched.length,
+      agents: enriched,
+      count: enriched.length,
+      total,
       source: 'solana-mainnet',
       cacheStats: chainCache.getStats(),
     });
