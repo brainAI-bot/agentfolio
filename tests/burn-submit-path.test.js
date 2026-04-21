@@ -25,4 +25,18 @@ describe('burn submit path regression guard', () => {
     assert.match(source, /const LIGHTHOUSE_PROGRAM = new PublicKey\('L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95'\)/);
     assert.match(source, /LIGHTHOUSE_PROGRAM\.toBase58\(\)/);
   });
+
+  it('accepts versioned signedTransaction payloads', () => {
+    assert.match(source, /submittedTx = isVersionedSerializedTransaction\(signedTxBuffer\)\s*\? VersionedTransaction\.deserialize\(signedTxBuffer\)\s*:\s*Transaction\.from\(signedTxBuffer\)/);
+    assert.match(source, /const submittedFeePayer = getSubmittedTransactionFeePayer\(submittedTx\)/);
+    assert.match(source, /getSubmittedTransactionSignerMatches\(submittedTx, walletPubkey\)/);
+    assert.match(source, /return sendJson\(400, \{ error: 'Invalid signed transaction payload' \}\)/);
+  });
+
+  it('validates versioned burn instructions via staticAccountKeys and compiledInstructions', () => {
+    assert.match(source, /submittedTx\.message\.compiledInstructions\.find\(ix => \{/);
+    assert.match(source, /submittedTx\.message\.staticAccountKeys\[ix\.programIdIndex\]/);
+    assert.match(source, /for \(const ix of submittedTx\.message\.compiledInstructions\)/);
+    assert.match(source, /const ixKeys = getVersionedInstructionKeys\(submittedTx, ix\)/);
+  });
 });
