@@ -95,7 +95,7 @@ function parseGenesisRecord(pubkey, data) {
     var rawReputationScore = Number(data.readBigUInt64LE(offset));
     offset += 8;
     var reputationScore = rawReputationScore > 10000
-      ? Math.min(Math.round(rawReputationScore / 1000), 800)
+      ? Math.min(Math.round(rawReputationScore / 10000), 800)
       : Math.max(0, rawReputationScore);
     var verificationLevel = data[offset];
     offset += 1;
