@@ -26,6 +26,10 @@ function loadWithMocks() {
           pubkey: new PublicKey('PDA11111111111111111111111111111111111111111'),
           account: { data: Buffer.alloc(96, 1) },
         },
+        {
+          pubkey: new PublicKey('PDA22222222222222222222222222222222222222222'),
+          account: { data: Buffer.alloc(96, 2) },
+        },
       ];
     }
   }
@@ -97,20 +101,59 @@ function loadWithMocks() {
       };
     }
     if (request === '../v3-score-service') {
+      let parseCalls = 0;
       return {
         parseGenesisRecord() {
+          parseCalls += 1;
           return {
             agentName: 'Alice',
-            authority: 'Auth11111111111111111111111111111111111111111',
-            reputationScore: 800,
-            verificationLevel: 3,
-            verificationLabel: 'Established',
+            authority: parseCalls === 1 ? 'Other1111111111111111111111111111111111111111' : 'Auth11111111111111111111111111111111111111111',
+            reputationScore: parseCalls === 1 ? 13 : 6,
+            verificationLevel: parseCalls === 1 ? 3 : 2,
+            verificationLabel: parseCalls === 1 ? 'Established' : 'Verified',
             isBorn: true,
             faceImage: '',
             faceMint: '',
             createdAt: '2026-01-01T00:00:00.000Z',
             updatedAt: '2026-01-02T00:00:00.000Z',
           };
+        },
+        async getV3Scores(agentIds) {
+          return new Map(agentIds.map((id) => [id, {
+            reputationScore: 13,
+            rawReputationScore: 130000,
+            verificationLevel: 3,
+            verificationLabel: 'Established',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          }]));
+        },
+      };
+    }
+    if (request === '../v3-explorer') {
+      return {
+        async fetchAllV3Agents() {
+          return [
+            {
+              pda: 'PDA11111111111111111111111111111111111111111',
+              agentName: 'Alice',
+              authority: 'Other1111111111111111111111111111111111111111',
+              reputationScore: 130000,
+              verificationLevel: 3,
+              tier: 'Established',
+              tierLabel: 'Established',
+              createdAt: '2026-01-01T00:00:00.000Z',
+            },
+            {
+              pda: 'PDA22222222222222222222222222222222222222222',
+              agentName: 'Alice',
+              authority: 'Auth11111111111111111111111111111111111111111',
+              reputationScore: 60000,
+              verificationLevel: 2,
+              tier: 'Verified',
+              tierLabel: 'Verified',
+              createdAt: '2026-01-01T00:00:00.000Z',
+            },
+          ];
         },
       };
     }
@@ -158,7 +201,7 @@ afterEach(() => {
 });
 
 describe('satp explorer card parity regression guard', () => {
-  it('preserves attestation/platform enrichment for explorer cards', async () => {
+  it('prefers the authority-matched explorer score while preserving attestation/platform enrichment', async () => {
     const loaded = loadWithMocks();
     cleanup = loaded.restore;
 
@@ -170,9 +213,10 @@ describe('satp explorer card parity regression guard', () => {
 
     const [agent] = result.agents;
     assert.strictEqual(agent.profileId, 'agent_alice');
-    assert.strictEqual(agent.verificationLevel, 3);
-    assert.strictEqual(agent.verificationLabel, 'Established');
-    assert.strictEqual(agent.trustScore, 800);
+    assert.strictEqual(agent.verificationLevel, 2);
+    assert.strictEqual(agent.verificationLabel, 'Verified');
+    assert.strictEqual(agent.trustScore, 60);
+    assert.strictEqual(agent.computedTrustScore, 612);
     assert.deepStrictEqual(agent.platforms.sort(), ['github', 'x']);
     assert.strictEqual(agent.onChainAttestations, 1);
     assert.ok(Array.isArray(agent.attestationMemos));
