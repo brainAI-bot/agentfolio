@@ -279,6 +279,15 @@ const filteredAgents = agents.map((v3) => {
   };
 }).filter(Boolean);
 
+const matchedProfileIds = [...new Set(filteredAgents.map((agent) => agent.profileId).filter(Boolean))];
+let canonicalV3ByProfileId = new Map();
+if (matchedProfileIds.length > 0 && typeof v3ScoreService.getV3Scores === 'function') {
+  try {
+    canonicalV3ByProfileId = await v3ScoreService.getV3Scores(matchedProfileIds);
+  } catch (e) {
+    console.warn('[SATP Explorer] canonical V3 score fetch failed:', e.message);
+  }
+}
 
 for (const agent of filteredAgents) {
   const profile = profileIndex.get(agent.profileId);
@@ -334,17 +343,21 @@ for (const agent of filteredAgents) {
   const profileNFTAvatar = profile.nft_avatar || null;
   const profileAvatar = profileNFTAvatar?.image || profileNFTAvatar?.arweaveUrl || profile.avatar || null;
   const reviewStats = reviewStatsByProfileId.get(profile.id) || { total: 0, avg_rating: 0 };
+  const canonicalV3 = canonicalV3ByProfileId.get(profile.id) || null;
+  const canonicalTrustScore = Number(canonicalV3?.reputationScore || 0);
+  const canonicalVerificationLevel = Number(canonicalV3?.verificationLevel || 0);
+  const canonicalVerificationName = canonicalV3?.verificationLabel || levelLabels[canonicalVerificationLevel] || 'Unknown';
   const unified = computeUnifiedTrustScore(_db, profile, {
     v3Score: {
-      reputationScore: agent.rawReputationScore || agent.reputationScore || 0,
-      verificationLevel: agent.verificationLevel || 0,
-      verificationLabel: agent.verificationLabel || levelLabels[agent.verificationLevel || 0] || 'Unknown',
-      createdAt: agent.createdAt || null,
+      reputationScore: Number(canonicalV3?.rawReputationScore || agent.rawReputationScore || agent.reputationScore || 0),
+      verificationLevel: canonicalV3 ? canonicalVerificationLevel : (agent.verificationLevel || 0),
+      verificationLabel: canonicalV3 ? canonicalVerificationName : (agent.verificationLabel || levelLabels[agent.verificationLevel || 0] || 'Unknown'),
+      createdAt: canonicalV3?.createdAt || agent.createdAt || null,
     },
   });
-  const onChainTrustScore = Number(agent.reputationScore || 0);
-  const onChainVerificationLevel = Number(agent.verificationLevel || 0);
-  const onChainVerificationName = agent.verificationLabel || levelLabels[onChainVerificationLevel] || 'Unverified';
+  const onChainTrustScore = canonicalV3 ? canonicalTrustScore : Number(agent.reputationScore || 0);
+  const onChainVerificationLevel = canonicalV3 ? canonicalVerificationLevel : Number(agent.verificationLevel || 0);
+  const onChainVerificationName = canonicalV3 ? canonicalVerificationName : (agent.verificationLabel || levelLabels[onChainVerificationLevel] || 'Unverified');
 
   const txHints = new Map();
   const addTxHint = (platform, txSignature, timestamp = null, solscanUrl = null) => {
@@ -499,7 +512,15 @@ for (const agent of filteredAgents) {
         onChainAttestations: attestationMemos.length || agent.onChainAttestations || platforms.length || 0,
       };
     });
-    const result = { agents: sanitizedAgents, count: sanitizedAgents.length, source: "solana-mainnet-v3" };
+    const dedupedAgents = [];
+    const seenAgentKeys = new Set();
+    for (const agent of sanitizedAgents) {
+      const dedupeKey = String(agent?.profileId || agent?.agentId || agent?.pda || '').trim();
+      if (dedupeKey && seenAgentKeys.has(dedupeKey)) continue;
+      if (dedupeKey) seenAgentKeys.add(dedupeKey);
+      dedupedAgents.push(agent);
+    }
+    const result = { agents: dedupedAgents, count: dedupedAgents.length, source: "solana-mainnet-v3" };
     if (!hasIncompleteExplorerCache(result)) {
       agentCache = { data: result, timestamp: Date.now() };
     } else {

@@ -26,6 +26,10 @@ function loadWithMocks() {
           pubkey: new PublicKey('PDA11111111111111111111111111111111111111111'),
           account: { data: Buffer.alloc(96, 1) },
         },
+        {
+          pubkey: new PublicKey('PDA22222222222222222222222222222222222222222'),
+          account: { data: Buffer.alloc(96, 2) },
+        },
       ];
     }
   }
@@ -97,20 +101,31 @@ function loadWithMocks() {
       };
     }
     if (request === '../v3-score-service') {
+      let parseCalls = 0;
       return {
         parseGenesisRecord() {
+          parseCalls += 1;
           return {
             agentName: 'Alice',
             authority: 'Auth11111111111111111111111111111111111111111',
-            reputationScore: 800,
-            verificationLevel: 3,
-            verificationLabel: 'Established',
+            reputationScore: parseCalls === 1 ? 13 : 6,
+            verificationLevel: parseCalls === 1 ? 3 : 2,
+            verificationLabel: parseCalls === 1 ? 'Established' : 'Verified',
             isBorn: true,
             faceImage: '',
             faceMint: '',
             createdAt: '2026-01-01T00:00:00.000Z',
             updatedAt: '2026-01-02T00:00:00.000Z',
           };
+        },
+        async getV3Scores(agentIds) {
+          return new Map(agentIds.map((id) => [id, {
+            reputationScore: 60,
+            rawReputationScore: 600000,
+            verificationLevel: 2,
+            verificationLabel: 'Verified',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          }]));
         },
       };
     }
@@ -170,9 +185,10 @@ describe('satp explorer card parity regression guard', () => {
 
     const [agent] = result.agents;
     assert.strictEqual(agent.profileId, 'agent_alice');
-    assert.strictEqual(agent.verificationLevel, 3);
-    assert.strictEqual(agent.verificationLabel, 'Established');
-    assert.strictEqual(agent.trustScore, 800);
+    assert.strictEqual(agent.verificationLevel, 2);
+    assert.strictEqual(agent.verificationLabel, 'Verified');
+    assert.strictEqual(agent.trustScore, 60);
+    assert.strictEqual(agent.computedTrustScore, 612);
     assert.deepStrictEqual(agent.platforms.sort(), ['github', 'x']);
     assert.strictEqual(agent.onChainAttestations, 1);
     assert.ok(Array.isArray(agent.attestationMemos));
