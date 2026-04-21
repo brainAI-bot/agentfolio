@@ -1,0 +1,12 @@
+title = "agentfolio gitleaks config"
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allow public Solana authority addresses and docs example Discord ID"
+regexTarget = "match"
+regexes = [
+  "4St74qSyzuGyV2TA9gxej9GvXG2TgVSTvp1HEpzJbwcP",
+  "Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc",
+  "123456789012345678"
+]
