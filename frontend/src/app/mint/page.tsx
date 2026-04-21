@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { Flame, Wallet, Shield, AlertTriangle, CheckCircle, ExternalLink, Loader2, Sparkles, ArrowRight, Zap, Plus, FileText, Image as ImageIcon } from "lucide-react";
+import { reconcileMintSelection } from "@/lib/mint-selection";
 
 const MINTING_PAUSED = false;
 
@@ -88,13 +89,19 @@ export default function MintPage() {
         fetch(`${API}/api/burn-to-become/wallet-nfts?wallet=${walletAddr}`).then(r => r.json()),
         fetch(`${API}/api/burn-to-become/eligibility?wallet=${walletAddr}`).then(r => r.json()),
       ]);
-      if (nftRes.status === "fulfilled") setNfts(nftRes.value.nfts || []);
+      if (nftRes.status === "fulfilled") {
+        const nextNfts = nftRes.value.nfts || [];
+        const nextState = reconcileMintSelection(step, selectedNft, nextNfts, !!GENESIS_REGISTRY[walletAddr]);
+        setNfts(nextNfts);
+        setSelectedNft(nextState.selectedNft as NFTItem | null);
+        if (nextState.step !== step) setStep(nextState.step as Step);
+      }
       if (scoreRes.status === "fulfilled") {
         setEligibility(scoreRes.value);
         setSatpScore(scoreRes.value.reputation ?? null);
       }
     } catch { /* continue */ }
-    setStep("choose");
+    setStep((currentStep) => currentStep === "loading" ? "choose" : currentStep);
   };
 
   // Client-signed mint flow (user signs in Phantom)
