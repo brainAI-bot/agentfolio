@@ -62,6 +62,39 @@ function getBoaSoulboundPDA(walletPubkey, issuerPubkey) {
 const DEPLOYER_PUBKEY = 'Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc';
 const HELIUS_RPC = 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
 
+async function fetchHeliusJsonWithRetry(body, { attempts = 4, initialDelayMs = 500 } = {}) {
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const resp = await fetch(HELIUS_RPC, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await resp.json().catch(() => null);
+      const message = json?.error?.message || '';
+      if (resp.ok && !json?.error) return json;
+      const rateLimited = resp.status === 429 || /rate limit|too many requests/i.test(message);
+      if (rateLimited && attempt + 1 < attempts) {
+        const delay = initialDelayMs * (2 ** attempt);
+        console.warn(`Server responded with 429 Too Many Requests.  Retrying after ${delay}ms delay...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      throw new Error(message || `Helius RPC failed (${resp.status})`);
+    } catch (err) {
+      lastError = err;
+      if (attempt + 1 < attempts) {
+        const delay = initialDelayMs * (2 ** attempt);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError || new Error('Helius RPC failed');
+}
+
 function isVersionedSerializedTransaction(raw) {
   let offset = 0;
   let sigCount = 0;
@@ -412,11 +445,12 @@ async function buildBurnTransaction(walletAddress, nftMint) {
     // ═══ CORE NFT: Use Core burn worker (returns unsigned TX) ═══
     console.log('[BurnPublic] Detected Core NFT, using Metaplex Core burn');
     try {
-      const assetResp = await fetch(HELIUS_RPC, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 'core-burn-asset', method: 'getAsset', params: { id: nftMint } }),
+      const assetData = await fetchHeliusJsonWithRetry({
+        jsonrpc: '2.0',
+        id: 'core-burn-asset',
+        method: 'getAsset',
+        params: { id: nftMint },
       });
-      const assetData = await assetResp.json();
       const asset = assetData?.result || null;
       if (asset?.burnt === true) {
         throw new Error('This Core NFT has already been burned');
