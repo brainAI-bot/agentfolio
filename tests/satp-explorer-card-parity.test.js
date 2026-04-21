@@ -107,7 +107,7 @@ function loadWithMocks() {
           parseCalls += 1;
           return {
             agentName: 'Alice',
-            authority: 'Auth11111111111111111111111111111111111111111',
+            authority: parseCalls === 1 ? 'Other1111111111111111111111111111111111111111' : 'Auth11111111111111111111111111111111111111111',
             reputationScore: parseCalls === 1 ? 13 : 6,
             verificationLevel: parseCalls === 1 ? 3 : 2,
             verificationLabel: parseCalls === 1 ? 'Established' : 'Verified',
@@ -120,12 +120,40 @@ function loadWithMocks() {
         },
         async getV3Scores(agentIds) {
           return new Map(agentIds.map((id) => [id, {
-            reputationScore: 60,
-            rawReputationScore: 600000,
-            verificationLevel: 2,
-            verificationLabel: 'Verified',
+            reputationScore: 13,
+            rawReputationScore: 130000,
+            verificationLevel: 3,
+            verificationLabel: 'Established',
             createdAt: '2026-01-01T00:00:00.000Z',
           }]));
+        },
+      };
+    }
+    if (request === '../v3-explorer') {
+      return {
+        async fetchAllV3Agents() {
+          return [
+            {
+              pda: 'PDA11111111111111111111111111111111111111111',
+              agentName: 'Alice',
+              authority: 'Other1111111111111111111111111111111111111111',
+              reputationScore: 130000,
+              verificationLevel: 3,
+              tier: 'Established',
+              tierLabel: 'Established',
+              createdAt: '2026-01-01T00:00:00.000Z',
+            },
+            {
+              pda: 'PDA22222222222222222222222222222222222222222',
+              agentName: 'Alice',
+              authority: 'Auth11111111111111111111111111111111111111111',
+              reputationScore: 60000,
+              verificationLevel: 2,
+              tier: 'Verified',
+              tierLabel: 'Verified',
+              createdAt: '2026-01-01T00:00:00.000Z',
+            },
+          ];
         },
       };
     }
@@ -173,7 +201,7 @@ afterEach(() => {
 });
 
 describe('satp explorer card parity regression guard', () => {
-  it('preserves attestation/platform enrichment for explorer cards', async () => {
+  it('prefers the authority-matched explorer score while preserving attestation/platform enrichment', async () => {
     const loaded = loadWithMocks();
     cleanup = loaded.restore;
 
