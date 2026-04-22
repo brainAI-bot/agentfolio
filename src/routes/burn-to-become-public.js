@@ -542,10 +542,12 @@ async function buildBurnTransaction(walletAddress, nftMint) {
       throw new Error('Unable to verify Core NFT ownership');
     }
     const { execFile } = require('child_process');
+    const coreBurnWorkerPath = path.join(__dirname, '../../core-cm-v2/core-burn-worker.mjs');
+    const coreBurnWorkerCwd = path.dirname(coreBurnWorkerPath);
     return new Promise((resolve, reject) => {
-      execFile('node', ['/home/ubuntu/agentfolio/core-cm-v2/core-burn-worker.mjs', nftMint, walletAddress, 'prepare'], {
+      execFile('node', [coreBurnWorkerPath, nftMint, walletAddress, 'prepare'], {
         timeout: 30000,
-        cwd: '/home/ubuntu/agentfolio/core-cm-v2',
+        cwd: coreBurnWorkerCwd,
         env: { ...process.env, HOME: process.env.HOME },
       }, (err, stdout, stderr) => {
         if (err) return reject(new Error('Core burn prepare failed: ' + err.message));

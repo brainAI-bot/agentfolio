@@ -42,6 +42,13 @@ describe('burn submit path regression guard', () => {
     assert.match(source, /Burn to Become requires Level 3\+ and Rep 50\+\./);
   });
 
+  it('runs the Core burn worker from the current runtime tree', () => {
+    assert.match(source, /const coreBurnWorkerPath = path\.join\(__dirname, '\.\.\/\.\.\/core-cm-v2\/core-burn-worker\.mjs'\)/);
+    assert.match(source, /const coreBurnWorkerCwd = path\.dirname\(coreBurnWorkerPath\)/);
+    assert.match(source, /execFile\('node', \[coreBurnWorkerPath, nftMint, walletAddress, 'prepare'\], \{/);
+    assert.doesNotMatch(source, /execFile\('node', \['\/home\/ubuntu\/agentfolio\/core-cm-v2\/core-burn-worker\.mjs'/);
+  });
+
   it('validates versioned burn instructions via staticAccountKeys and compiledInstructions', () => {
     assert.match(source, /submittedTx\.message\.compiledInstructions\.find\(ix => \{/);
     assert.match(source, /submittedTx\.message\.staticAccountKeys\[ix\.programIdIndex\]/);
