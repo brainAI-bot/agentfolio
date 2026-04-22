@@ -265,14 +265,14 @@ export default function MintPage() {
         wallet: wallet.publicKey.toBase58(),
         nftMint: selectedNft.mint,
       };
-      if (wallet.signTransaction) {
-        const signed = await wallet.signTransaction(tx as any);
-        submitPayload.signedTransaction = Buffer.from(signed.serialize()).toString("base64");
-        submitPayload.submissionMode = "signTransaction";
-      } else if (wallet.sendTransaction) {
+      if (wallet.sendTransaction) {
         const burnSignature = await wallet.sendTransaction(tx as any, connection, { skipPreflight: false });
         submitPayload.txSignature = burnSignature;
         submitPayload.submissionMode = "sendTransaction";
+      } else if (wallet.signTransaction) {
+        const signed = await wallet.signTransaction(tx as any);
+        submitPayload.signedTransaction = Buffer.from(signed.serialize()).toString("base64");
+        submitPayload.submissionMode = "signTransaction";
       } else {
         throw new Error("Connected wallet cannot sign burn transaction");
       }
