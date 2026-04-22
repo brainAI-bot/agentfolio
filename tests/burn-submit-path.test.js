@@ -34,6 +34,14 @@ describe('burn submit path regression guard', () => {
     assert.match(source, /return sendJson\(400, \{ error: 'Invalid signed transaction payload' \}\)/);
   });
 
+  it('resolves the best profile for wallet-linked burn submissions', () => {
+    assert.match(source, /const \{ loadNormalizedTrust \} = require\('\.\.\/lib\/normalized-trust'\)/);
+    assert.match(source, /async function resolveBestProfileForWallet\(db, wallet, options = \{\}\)/);
+    assert.match(source, /const resolvedProfile = await resolveBestProfileForWallet\(gateDb, wallet\)/);
+    assert.match(source, /No AgentFolio profile linked to this wallet\. Register at agentfolio\.bot first\./);
+    assert.match(source, /Burn to Become requires Level 3\+ and Rep 50\+\./);
+  });
+
   it('validates versioned burn instructions via staticAccountKeys and compiledInstructions', () => {
     assert.match(source, /submittedTx\.message\.compiledInstructions\.find\(ix => \{/);
     assert.match(source, /submittedTx\.message\.staticAccountKeys\[ix\.programIdIndex\]/);
