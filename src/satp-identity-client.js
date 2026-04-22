@@ -63,22 +63,36 @@ const _cache = { accounts: null, time: 0, byAuthority: new Map(), byName: new Ma
 const CACHE_TTL_MS = 1_800_000; // 30min cache // 10min cache (accounts rarely change)
 
 let _cacheLoading = null; // prevent concurrent cache loads
+let sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+function refreshIdentityAccounts(connection) {
+  if (_cacheLoading) return _cacheLoading;
+  _cacheLoading = _loadAllAccounts(connection)
+    .catch(err => {
+      console.error('[SATP Cache] Refresh error:', err.message);
+      throw err;
+    })
+    .finally(() => {
+      _cacheLoading = null;
+    });
+  return _cacheLoading;
+}
 
 async function getAllIdentityAccounts(connection) {
   const now = Date.now();
   if (_cache.accounts && (now - _cache.time) < CACHE_TTL_MS) {
     return _cache.accounts;
   }
-  
-  // Prevent concurrent cache loads (thundering herd)
-  if (_cacheLoading) return _cacheLoading;
-  
-  _cacheLoading = _loadAllAccounts(connection);
-  try {
-    return await _cacheLoading;
-  } finally {
-    _cacheLoading = null;
+
+  if (_cache.accounts) {
+    if (!_cacheLoading) {
+      console.log(`[SATP Cache] Serving ${_cache.accounts.length} stale agents while refresh runs`);
+      refreshIdentityAccounts(connection).catch(() => {});
+    }
+    return _cache.accounts;
   }
+
+  return refreshIdentityAccounts(connection);
 }
 
 async function _loadAllAccounts(connection) {
@@ -88,7 +102,7 @@ async function _loadAllAccounts(connection) {
   
   for (let i = 0; i < allProgIds.length; i++) {
     const progId = allProgIds[i];
-    if (i > 0) await new Promise(r => setTimeout(r, 2000)); // 2s delay between programs to avoid 429
+    if (i > 0) await sleep(2000); // 2s delay between programs to avoid 429
     try {
       const accounts = await connection.getProgramAccounts(progId);
       for (const { pubkey, account } of accounts) {
@@ -105,7 +119,7 @@ async function _loadAllAccounts(connection) {
       }
       // Small delay between programs to avoid rate limiting
       if (allProgIds.indexOf(progId) < allProgIds.length - 1) {
-        await new Promise(r => setTimeout(r, 2000));
+        await sleep(2000);
       }
     } catch (e) {
       console.error(`[SATP Cache] ${progId.toBase58().slice(0,8)} error:`, e.message);
@@ -117,7 +131,7 @@ async function _loadAllAccounts(connection) {
     try {
       const v3Ids = getV3ProgramIds('mainnet');
       if (v3Ids && v3Ids.IDENTITY) {
-        await new Promise(r => setTimeout(r, 2000));
+        await sleep(2000);
         const v3Accounts = await connection.getProgramAccounts(v3Ids.IDENTITY);
         for (const { pubkey, account } of v3Accounts) {
           const pdaStr = pubkey.toBase58();
@@ -161,12 +175,13 @@ async function _loadAllAccounts(connection) {
 }
 
 // Warm cache on module load (after a delay to avoid startup congestion)
-setTimeout(() => {
+const warmupTimer = setTimeout(() => {
   const connection = new Connection(RPC_URL, 'confirmed');
   getAllIdentityAccounts(connection).catch(e => 
     console.error('[SATP Cache] Warmup error:', e.message)
   );
 }, 5000);
+if (typeof warmupTimer.unref === 'function') warmupTimer.unref();
 
 // ─── PDA Derivation ──────────────────────────────────────
 
@@ -611,4 +626,18 @@ module.exports = {
   ...(getGenesisPDA ? { getGenesisPDA } : {}),
   ...(getV3ProgramIds ? { getV3ProgramIds } : {}),
   ...(deserializeGenesisRecord ? { deserializeGenesisRecord } : {}),
+  __test: {
+    _cache,
+    getAllIdentityAccounts,
+    refreshIdentityAccounts,
+    setSleepForTests(fn) { sleep = fn; },
+    resetCache() {
+      _cache.accounts = null;
+      _cache.time = 0;
+      _cache.byAuthority.clear();
+      _cache.byName.clear();
+      _cacheLoading = null;
+      sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    },
+  },
 };
