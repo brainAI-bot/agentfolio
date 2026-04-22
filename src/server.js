@@ -813,6 +813,7 @@ app.get('/docs', (req, res) => {
 function getEcosystemStatsPayload() {
   const d = profileStore.getDb();
   const total = d.prepare('SELECT COUNT(*) as c FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL)').get('active').c;
+  const claimed = d.prepare('SELECT COUNT(*) as c FROM profiles WHERE status = ? AND claimed = 1 AND (hidden = 0 OR hidden IS NULL)').get('active').c;
 
   // Count verified agents (those with at least one verification in verification_data)
   const rows = d.prepare('SELECT verification_data FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL)').all('active');
@@ -820,6 +821,19 @@ function getEcosystemStatsPayload() {
   let onChain = 0;
   const allSkills = new Set();
   const verificationTypes = new Set();
+
+  let totalJobs = 0;
+  let openJobs = 0;
+  let inProgressJobs = 0;
+  let completedJobs = 0;
+  let totalVolume = 0;
+  try {
+    totalJobs = d.prepare('SELECT COUNT(*) as c FROM jobs').get().c;
+    openJobs = d.prepare("SELECT COUNT(*) as c FROM jobs WHERE status = 'open'").get().c;
+    inProgressJobs = d.prepare("SELECT COUNT(*) as c FROM jobs WHERE status = 'in_progress'").get().c;
+    completedJobs = d.prepare("SELECT COUNT(*) as c FROM jobs WHERE status = 'completed'").get().c;
+    totalVolume = d.prepare("SELECT COALESCE(SUM(COALESCE(agreed_budget, budget_amount)), 0) as total FROM jobs").get().total || 0;
+  } catch {}
 
   // Also count from JSON files for skills
   const fs = require('fs');
@@ -856,11 +870,26 @@ function getEcosystemStatsPayload() {
   }
 
   return {
+    agents: { total, verified, claimed, avgSkills: 3 },
     total,
     totalAgents: Math.max(total, jsonFiles.length),
     totalSkills: allSkills.size,
     verified,
+    verifiedAgents: verified,
+    claimed,
     onChain,
+    on_chain: onChain,
+    totalJobs,
+    totalVolume,
+    marketplace: {
+      totalJobs,
+      openJobs,
+      inProgress: inProgressJobs,
+      completed: completedJobs,
+    },
+    economy: {
+      totalVolume,
+    },
     verificationTypes: verificationTypes.size,
     verificationPlatforms: [...verificationTypes].sort(),
   };
@@ -1546,12 +1575,55 @@ app.post('/api/verify/agentmail/confirm', async (req, res) => {
 // ===== END HARDENED VERIFICATION ENDPOINTS =====
 
 app.get('/api/jobs', (req, res) => {
-  res.json({
-    jobs: [],
-    total: 0,
-    page: 1,
-    message: 'Jobs marketplace endpoint active'
-  });
+  try {
+    const d = profileStore.getDb();
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+    const offset = (page - 1) * limit;
+    const total = d.prepare('SELECT COUNT(*) as c FROM jobs').get().c;
+    const rows = d.prepare('SELECT * FROM jobs ORDER BY datetime(created_at) DESC LIMIT ? OFFSET ?').all(limit, offset);
+
+    const profileIds = [...new Set(rows.flatMap(row => [row.client_id, row.selected_agent_id]).filter(Boolean))];
+    const profiles = profileIds.length
+      ? d.prepare(`SELECT id, wallet, wallets FROM profiles WHERE id IN (${profileIds.map(() => '?').join(',')})`).all(...profileIds)
+      : [];
+    const profileMap = new Map(profiles.map(profile => {
+      let solanaWallet = profile.wallet || null;
+      try {
+        const wallets = typeof profile.wallets === 'string' ? JSON.parse(profile.wallets || '{}') : (profile.wallets || {});
+        if (wallets?.solana) solanaWallet = wallets.solana;
+      } catch {}
+      return [profile.id, solanaWallet || profile.wallet || profile.id];
+    }));
+
+    const jobs = rows.map(row => {
+      const budgetAmount = row.agreed_budget ?? row.budget_amount ?? 0;
+      const budgetCurrency = row.budget_currency || 'USDC';
+      let skills = [];
+      let attachments = [];
+      try { skills = JSON.parse(row.skills || '[]'); } catch {}
+      try { attachments = JSON.parse(row.attachments || '[]'); } catch {}
+      return {
+        ...row,
+        budget: `${budgetAmount} ${budgetCurrency}`,
+        budgetAmount,
+        budgetCurrency,
+        poster: profileMap.get(row.client_id) || row.client_id,
+        posterId: row.client_id,
+        assignee: row.selected_agent_id ? (profileMap.get(row.selected_agent_id) || row.selected_agent_id) : null,
+        assigneeId: row.selected_agent_id || null,
+        skills,
+        skills_required: skills,
+        attachments,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+    });
+
+    res.json({ jobs, total, page, pages: Math.max(1, Math.ceil(total / limit)) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Homepage
