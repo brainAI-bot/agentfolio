@@ -1,0 +1,8 @@
+{
+  "name": "AgentFolio A2A Smoke Agent",
+  "id": "agentfolio-a2a-smoke",
+  "url": "https://agentfolio.bot/mcp/sse",
+  "version": "1.0.0",
+  "description": "Temporary A2A agent card for Phase 1 end-to-end verification on AgentFolio production.",
+  "agentfolio": "agent_sm816063701"
+}
