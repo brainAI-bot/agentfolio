@@ -156,8 +156,8 @@ export default function SATPExplorerPage() {
                 scores?.data?.trustScore ??
                 scores?.trustScore ??
                 0,
-              tier: (agent.tier || scores?.data?.tier || scores?.tier || "unverified").toLowerCase(),
-              verificationLevel: agent.verificationLevel ?? scores?.data?.verificationLevel ?? scores?.verificationLevel ?? 0,
+              tier: (scores?.data?.tier ?? scores?.tier ?? agent.tier ?? "unverified").toLowerCase(),
+              verificationLevel: scores?.data?.verificationLevel ?? scores?.verificationLevel ?? agent.verificationLevel ?? 0,
               platforms,
               reviewCount: reviewData?.data?.stats?.total || reviewData?.stats?.total || 0,
               reviewAvg: reviewData?.data?.stats?.avg_rating || reviewData?.stats?.avg_rating || 0,
