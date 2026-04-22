@@ -42,6 +42,24 @@ describe('burn submit path regression guard', () => {
     assert.match(source, /Burn to Become requires Level 3\+ and Rep 50\+\./);
   });
 
+  it('runs the Core burn worker from the current runtime tree', () => {
+    assert.match(source, /const coreBurnWorkerPath = path\.join\(__dirname, '\.\.\/\.\.\/core-cm-v2\/core-burn-worker\.mjs'\)/);
+    assert.match(source, /const coreBurnWorkerCwd = path\.dirname\(coreBurnWorkerPath\)/);
+    assert.match(source, /execFile\('node', \[coreBurnWorkerPath, nftMint, walletAddress, 'prepare'\], \{/);
+    assert.doesNotMatch(source, /execFile\('node', \['\/home\/ubuntu\/agentfolio\/core-cm-v2\/core-burn-worker\.mjs'/);
+  });
+
+  it('runs atomic burn workers from the current runtime tree', () => {
+    assert.match(source, /const atomicPrepareWorkerPath = path\.join\(__dirname, '\.\.\/\.\.\/core-cm-v2\/atomic-prepare-worker\.mjs'\)/);
+    assert.match(source, /const atomicPrepareWorkerCwd = path\.dirname\(atomicPrepareWorkerPath\)/);
+    assert.match(source, /execFile\("node", \[atomicPrepareWorkerPath, wallet, flow\], \{/);
+    assert.match(source, /const workerPath = path\.join\(__dirname, '\.\.\/\.\.\/core-cm-v2\/atomic-mint-burn-worker\.mjs'\)/);
+    assert.match(source, /const workerCwd = path\.dirname\(workerPath\)/);
+    assert.match(source, /cwd: workerCwd/);
+    assert.doesNotMatch(source, /atomic-prepare-worker\.mjs", wallet, flow\], \{\s*\n\s*timeout: 30000, cwd: "\/home\/ubuntu\/agentfolio\/core-cm-v2"/);
+    assert.doesNotMatch(source, /const workerPath = "\/home\/ubuntu\/agentfolio\/core-cm-v2\/atomic-mint-burn-worker\.mjs"/);
+  });
+
   it('validates versioned burn instructions via staticAccountKeys and compiledInstructions', () => {
     assert.match(source, /submittedTx\.message\.compiledInstructions\.find\(ix => \{/);
     assert.match(source, /submittedTx\.message\.staticAccountKeys\[ix\.programIdIndex\]/);
