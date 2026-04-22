@@ -976,6 +976,50 @@ function handleBurnToBecome(req, res, url) {
     return true;
   }
 
+  // POST /api/burn-to-become/submit-genesis — submit signed burnToBecome TX (client-side authority)
+  if (url.pathname === '/api/burn-to-become/submit-genesis' && req.method === 'POST') {
+    (async () => {
+      try {
+        const { signedTransaction, txSignature, submissionMode } = req.body || {};
+        if (!signedTransaction && !txSignature) return sendJson(400, { error: 'signedTransaction or txSignature required' });
+        
+        const resolvedSubmissionMode = submissionMode || (txSignature ? 'sendTransaction' : signedTransaction ? 'signTransaction' : 'unknown');
+        let sig = txSignature || null;
+        if (!sig) {
+          const txBuffer = Buffer.from(signedTransaction, 'base64');
+          sig = await connection.sendRawTransaction(txBuffer);
+        }
+
+        let confirmError = null;
+        try {
+          await connection.confirmTransaction(sig, 'confirmed');
+        } catch (err) {
+          confirmError = err;
+        }
+
+        const confirmedTx = await getConfirmedTransactionWithRetry(sig, confirmError ? 20 : 8);
+        if (!confirmedTx) {
+          const confirmMessage = confirmError?.message || String(confirmError || '');
+          if (/invalid length/i.test(confirmMessage)) {
+            return sendJson(400, { error: 'Invalid transaction signature format' });
+          }
+          return sendJson(404, { error: 'Transaction not found or not confirmed yet. Try again in a few seconds.', signature: sig, confirmError: confirmMessage || null });
+        }
+        if (confirmedTx.meta && confirmedTx.meta.err) {
+          return sendJson(400, { error: 'Transaction failed on-chain', txError: confirmedTx.meta.err, signature: sig });
+        }
+
+        try { require('../v3-score-service').clearV3Cache(); } catch {}
+        console.log('[SubmitGenesis] burnToBecome TX confirmed:', JSON.stringify({ signature: sig, submissionMode: resolvedSubmissionMode, hadConfirmTimeout: !!confirmError }));
+        sendJson(200, { success: true, signature: sig });
+      } catch (e) {
+        console.error('[SubmitGenesis] error:', e.message);
+        sendJson(500, { error: e.message });
+      }
+    })();
+    return true;
+  }
+
   // POST /api/burn-to-become/prepare
   if (url.pathname === '/api/burn-to-become/prepare' && req.method === 'POST') {
     (async () => {
