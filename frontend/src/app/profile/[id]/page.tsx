@@ -19,6 +19,7 @@ import { GenesisRecordCard } from "@/components/GenesisRecordCard";
 import { OnChainAvatar } from "@/components/OnChainAvatar";
 import { SATPOnChainSection } from "@/components/SATPOnChainSection";
 import { V3ReputationCard } from "@/components/V3ReputationCard";
+import { shouldFetchV3Reputation } from "@/lib/profile-v3";
 import Link from "next/link";
 import { ClaimButton } from "@/components/ClaimButton";
 import { WriteReviewForm } from "./WriteReviewForm";
@@ -112,15 +113,17 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
 
   // Fetch V3 on-chain reputation (from SATP V3 SDK — deserialization fixed 2026-03-29)
   let v3Reputation: any = null;
-  try {
-    const v3RepRes = await fetch(`https://agentfolio.bot/api/v3/reputation/${id}`, { next: { revalidate: 120 } });
-    if (v3RepRes.ok) {
-      const v3Data = await v3RepRes.json();
-      if (v3Data && v3Data.reputationScore !== undefined) {
-        v3Reputation = v3Data;
+  if (shouldFetchV3Reputation(id)) {
+    try {
+      const v3RepRes = await fetch(`https://agentfolio.bot/api/v3/reputation/${id}`, { next: { revalidate: 120 } });
+      if (v3RepRes.ok) {
+        const v3Data = await v3RepRes.json();
+        if (v3Data && v3Data.reputationScore !== undefined) {
+          v3Reputation = v3Data;
+        }
       }
-    }
-  } catch {}
+    } catch {}
+  }
 
   // V3 reputation (freshly deserialized) overrides genesis values for TrustBadge/sidebar
   if (v3Reputation && genesis) {
