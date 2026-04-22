@@ -1724,14 +1724,24 @@ try {
 // Alias for frontend compatibility
 app.get('/api/satp/explorer/agents', async (req, res) => {
   try {
-    const fetch = (await import('node-fetch')).default || globalThis.fetch;
-    const r = await fetch('http://localhost:3333/api/explorer/agents');
-    const data = await r.json();
-    res.json(data);
-  } catch(e) { res.status(500).json({error: e.message}); }
+    const { getSatpAgents } = require('./routes/satp-explorer-api');
+    const data = await getSatpAgents();
+    const allAgents = Array.isArray(data?.agents) ? data.agents : [];
+    const total = Number.isFinite(data?.total) ? data.total : allAgents.length;
+    const limit = Number.parseInt(req.query.limit, 10);
+
+    if (Number.isFinite(limit) && limit > 0) {
+      const agents = allAgents.slice(0, limit);
+      return res.json({ ...data, agents, count: agents.length, total });
+    }
+
+    return res.json({ ...data, total });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
 });
 app.get('/api/satp/explorer', (req, res) => {
-  res.redirect(301, '/api/explorer/agents' + (req.url.includes('?') ? '?' + req.url.split('?')[1] : ''));
+  res.redirect(301, '/api/satp/explorer/agents' + (req.url.includes('?') ? '?' + req.url.split('?')[1] : ''));
 });
 app.get('/api/x402/trust-score', (req, res) => {
   const agentId = req.query.agent_id || req.query.agentId || req.query.id;
