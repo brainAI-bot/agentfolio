@@ -149,9 +149,15 @@ export default function SATPExplorerPage() {
               avatar: nftAvatar?.image || nftAvatar?.arweaveUrl || agent.nftImage || profile?.avatar || "",
               wallet,
               pda: agent.pda,
-              trustScore: agent.reputationScore || scores?.data?.trustScore || scores?.trustScore || 0,
+              trustScore:
+                agent.computedTrustScore ??
+                agent.trustScore ??
+                agent.reputationScore ??
+                scores?.data?.trustScore ??
+                scores?.trustScore ??
+                0,
               tier: (agent.tier || scores?.data?.tier || scores?.tier || "unverified").toLowerCase(),
-              verificationLevel: agent.verificationLevel || scores?.data?.verificationLevel || scores?.verificationLevel || 0,
+              verificationLevel: agent.verificationLevel ?? scores?.data?.verificationLevel ?? scores?.verificationLevel ?? 0,
               platforms,
               reviewCount: reviewData?.data?.stats?.total || reviewData?.stats?.total || 0,
               reviewAvg: reviewData?.data?.stats?.avg_rating || reviewData?.stats?.avg_rating || 0,
