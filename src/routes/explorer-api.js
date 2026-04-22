@@ -148,6 +148,23 @@ function normalizePublicPlatforms(values) {
   return [...new Set(list.map(normalizeExplorerPlatform).filter(Boolean))];
 }
 
+function rankExplorerSearchMatch(agent, profile, rawQuery) {
+  const query = String(rawQuery || '').trim().toLowerCase();
+  if (!query) return 0;
+  const fields = [
+    agent?.pda,
+    agent?.authority,
+    agent?.agentName,
+    profile?.id,
+    profile?.name,
+  ].filter(Boolean).map((value) => String(value).trim().toLowerCase());
+
+  if (fields.some((value) => value === query)) return 0;
+  if (fields.some((value) => value.startsWith(query))) return 1;
+  if (fields.some((value) => value.includes(query))) return 2;
+  return 99;
+}
+
 /**
  * GET /api/explorer/agents
  * 
@@ -178,6 +195,7 @@ router.get('/agents', async (req, res) => {
     
     // Apply query filters
     const { category, minLevel, born, limit } = req.query;
+    const rawSearch = String(req.query.search || '').trim();
     
     if (category) {
       agents = agents.filter(a => a.category && a.category.toLowerCase() === category.toLowerCase());
@@ -189,9 +207,29 @@ router.get('/agents', async (req, res) => {
     if (born === 'true') {
       agents = agents.filter(a => a.isBorn);
     }
+    if (rawSearch) {
+      agents = agents
+        .map((agent) => {
+          const profile = getExplorerProfile(agent, profileIndex);
+          return {
+            agent,
+            profile,
+            rank: rankExplorerSearchMatch(agent, profile, rawSearch),
+          };
+        })
+        .filter((entry) => entry.rank < 99)
+        .sort((a, b) => a.rank - b.rank || String(a.profile?.name || a.agent?.agentName || a.agent?.pda || '').localeCompare(String(b.profile?.name || b.agent?.agentName || b.agent?.pda || '')))
+        .map((entry) => entry.agent);
+    }
+
+    const total = agents.length;
+    const parsedLimit = Number.parseInt(String(limit || ''), 10);
+    const limitedAgents = Number.isFinite(parsedLimit) && parsedLimit > 0
+      ? agents.slice(0, parsedLimit)
+      : agents;
     
-    // Enrich with chain-cache attestation data
-    const enriched = await Promise.all(agents.map(async (a) => {
+    // Enrich only the requested slice
+    const enriched = await Promise.all(limitedAgents.map(async (a) => {
       const profile = getExplorerProfile(a, profileIndex);
       const profileId = profile.id;
       const attestations = (chainCache.getVerifications(profileId) || []).map((att) => ({ ...att }));
@@ -303,14 +341,11 @@ router.get('/agents', async (req, res) => {
       };
     }));
     
-    // Apply limit
-    const maxResults = limit ? parseInt(limit, 10) : enriched.length;
-    const results = enriched.slice(0, isNaN(maxResults) ? enriched.length : maxResults);
-    
     res.json({
-      agents: results,
-      count: results.length,
-      total: enriched.length,
+      agents: enriched,
+      count: enriched.length,
+      total,
+      search: rawSearch || undefined,
       source: 'solana-mainnet',
       cacheStats: chainCache.getStats(),
     });
