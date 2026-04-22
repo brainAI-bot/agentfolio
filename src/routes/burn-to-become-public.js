@@ -1527,6 +1527,28 @@ function handleBurnToBecome(req, res, url) {
   }
 
 
+  // POST /api/burn-to-become/prepare-birth — build unsigned burnToBecome TX for recovery/client signing
+  if (url.pathname === "/api/burn-to-become/prepare-birth" && req.method === "POST") {
+    const agentId = req.body && req.body.agentId;
+    const faceImage = req.body && req.body.faceImage;
+    const faceMint = req.body && req.body.faceMint;
+    const faceBurnTx = req.body && req.body.faceBurnTx;
+    if (!agentId || !faceImage || !faceMint || !faceBurnTx) {
+      return sendJson(400, { error: "agentId, faceImage, faceMint, faceBurnTx all required" });
+    }
+
+    (async () => {
+      try {
+        const preparedBirth = await buildBurnToBecomeForWallet(agentId, faceImage, faceMint, faceBurnTx);
+        return sendJson(200, preparedBirth);
+      } catch (e) {
+        console.error('[BurnPublic] prepare-birth error:', e.message);
+        return sendJson(500, { error: e.message });
+      }
+    })();
+    return true;
+  }
+
   // POST /api/burn-to-become/submit-genesis (alias: submit-birth) — submit signed burnToBecome TX
   if ((url.pathname === "/api/burn-to-become/submit-genesis" || url.pathname === "/api/burn-to-become/submit-birth") && req.method === "POST") {
     const txSignature = req.body && req.body.txSignature;
