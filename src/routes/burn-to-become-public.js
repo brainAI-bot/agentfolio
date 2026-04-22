@@ -1550,8 +1550,10 @@ function handleBurnToBecome(req, res, url) {
 
         // Build unsigned TX via worker
         const { execFile } = require("child_process");
-        execFile("node", ["/home/ubuntu/agentfolio/core-cm-v2/atomic-prepare-worker.mjs", wallet, flow], {
-          timeout: 30000, cwd: "/home/ubuntu/agentfolio/core-cm-v2",
+        const atomicPrepareWorkerPath = path.join(__dirname, '../../core-cm-v2/atomic-prepare-worker.mjs');
+        const atomicPrepareWorkerCwd = path.dirname(atomicPrepareWorkerPath);
+        execFile("node", [atomicPrepareWorkerPath, wallet, flow], {
+          timeout: 30000, cwd: atomicPrepareWorkerCwd,
           env: { ...process.env, HOME: process.env.HOME },
         }, (err, stdout, stderr) => {
           if (err) return sendJson(500, { error: "Prepare failed: " + err.message });
@@ -1786,11 +1788,12 @@ try {
   console.warn("[BurnToBecome] SATP V3 SDK not available:", e.message);
 }
         // Use Core Candy Machine worker (separate node_modules in core-cm-v2)
-        const workerPath = "/home/ubuntu/agentfolio/core-cm-v2/atomic-mint-burn-worker.mjs";
+        const workerPath = path.join(__dirname, '../../core-cm-v2/atomic-mint-burn-worker.mjs');
+        const workerCwd = path.dirname(workerPath);
 
         execFile("node", [workerPath, wallet], {
           timeout: 120000,
-          cwd: "/home/ubuntu/agentfolio/core-cm-v2",
+          cwd: workerCwd,
           env: { ...process.env, HOME: process.env.HOME, SOLANA_RPC_URL: process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb" },
         }, (err, stdout, stderr) => {
           if (stderr) console.log("[MintBOA] stderr:", stderr.slice(0, 500));
