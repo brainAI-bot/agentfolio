@@ -19,6 +19,7 @@ const fs = require('fs');
 const path = require('path');
 const PIPELINE_DIR = "/home/ubuntu/agentfolio/boa-pipeline";
 const { safeBurnToBecome } = require('./safe-burn-to-become');
+const { findProfileIdByWallet } = require('../lib/profile-wallet-lookup');
 
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const connection = new Connection(RPC_URL, 'confirmed');
@@ -1417,12 +1418,8 @@ function handleBurnToBecome(req, res, url) {
           const Database = require("better-sqlite3");
           const dbPath = require("path").join(__dirname, "../../data/agentfolio.db");
           const db = new Database(dbPath, { readonly: true });
-          let profileId = null;
           const profiles = db.prepare("SELECT * FROM profiles").all();
-          for (const p of profiles) {
-            try { const vd = JSON.parse(p.verification_data || "{}"); if (vd.solana && vd.solana.address === wallet) { profileId = p.id; break; } } catch {}
-            try { const w = JSON.parse(p.wallets || "{}"); if (w.solana === wallet) { profileId = p.id; break; } } catch {}
-          }
+          const profileId = findProfileIdByWallet(profiles, wallet);
           db.close();
           if (!profileId) return sendJson(403, { error: "No profile found for this wallet" });
           
@@ -1489,20 +1486,9 @@ function handleBurnToBecome(req, res, url) {
         // Free mint: ONE per Genesis Record PDA. isBorn=true means already minted.
         // This is wallet-rotation proof — Genesis Record PDA is permanent identity.
         let v3IsBorn = false;
-        let agentIdForCount = null;
         const countDb = new Database(dbPath, { readonly: true });
         const allProfiles = countDb.prepare("SELECT * FROM profiles").all();
-        for (const p of allProfiles) {
-          try {
-            const vd = JSON.parse(p.verification_data || "{}");
-            if (vd.solana && vd.solana.address === wallet) { agentIdForCount = p.id; break; }
-          } catch {}
-          try {
-            const w = JSON.parse(p.wallets || "{}");
-            if (w.solana === wallet) { agentIdForCount = p.id; break; }
-          } catch {}
-          if (!agentIdForCount && p.wallet === wallet) { agentIdForCount = p.id; }
-        }
+        const agentIdForCount = findProfileIdByWallet(allProfiles, wallet);
         countDb.close();
         
         // Check V3 Genesis Record isBorn (on-chain source of truth)
@@ -1532,22 +1518,11 @@ function handleBurnToBecome(req, res, url) {
 
         // === 2. Unified eligibility check (DB level + rep) ===
         const checkDb = new Database(dbPath, { readonly: true });
-        let profileId = null;
         let isEligibleFree = false;
         
         // Find profile by wallet
         const profiles = checkDb.prepare("SELECT * FROM profiles").all();
-        for (const p of profiles) {
-          try {
-            const vd = JSON.parse(p.verification_data || "{}");
-            if (vd.solana && vd.solana.address === wallet) { profileId = p.id; break; }
-          } catch {}
-          try {
-            const w = JSON.parse(p.wallets || "{}");
-            if (w.solana === wallet) { profileId = p.id; break; }
-          if (!profileId && p.wallet === wallet) { profileId = p.id; break; }
-          } catch {}
-        }
+        const profileId = findProfileIdByWallet(profiles, wallet);
         
         if (profileId) {
           // Use best-of V3 on-chain + V2 computed scores (fixes stale Genesis Record bug)
@@ -1810,10 +1785,7 @@ try {
         try {
           const db = new Database(dbPath, { readonly: true });
           const profiles = db.prepare('SELECT * FROM profiles').all();
-          for (const p of profiles) {
-            try { const vd = JSON.parse(p.verification_data || '{}'); if (vd.solana && vd.solana.address === wallet) { agentId = p.id; break; } } catch {}
-            try { const w = JSON.parse(p.wallets || '{}'); if (w.solana === wallet) { agentId = p.id; break; } } catch {}
-          }
+          agentId = findProfileIdByWallet(profiles, wallet);
           db.close();
         } catch {}
         
