@@ -19,6 +19,7 @@ const fs = require('fs');
 const path = require('path');
 const PIPELINE_DIR = "/home/ubuntu/agentfolio/boa-pipeline";
 const { safeBurnToBecome } = require('./safe-burn-to-become');
+const { getRateLimitDelay } = require('../lib/rate-limit-retry');
 
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const connection = new Connection(RPC_URL, 'confirmed');
@@ -76,8 +77,9 @@ async function fetchHeliusJsonWithRetry(body, { attempts = 4, initialDelayMs = 5
       if (resp.ok && !json?.error) return json;
       const rateLimited = resp.status === 429 || /rate limit|too many requests/i.test(message);
       if (rateLimited && attempt + 1 < attempts) {
-        const delay = initialDelayMs * (2 ** attempt);
-        console.warn(`Server responded with 429 Too Many Requests.  Retrying after ${delay}ms delay...`);
+        const retryAfter = typeof resp.headers?.get === 'function' ? resp.headers.get('retry-after') : null;
+        const delay = getRateLimitDelay({ retryAfter, attempt, initialDelayMs });
+        console.warn(`[BurnPublic] Helius rate limited getAsset, retrying in ${delay}ms (attempt ${attempt + 1}/${attempts}${retryAfter ? `, Retry-After=${retryAfter}` : ''})`);
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
