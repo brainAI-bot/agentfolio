@@ -2,6 +2,7 @@
 import { WalletRequired } from "@/components/WalletRequired";
 
 import { useState } from "react";
+import { ClaimSearch } from "./ClaimSearch";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useSmartConnect } from "@/components/WalletProvider";
@@ -450,6 +451,19 @@ export default function RegisterPage() {
           </div>
         </div>
       </form>
+
+      <div
+        className="rounded-lg p-6 mt-6"
+        style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
+      >
+        <h2 className="text-sm font-semibold uppercase tracking-wider mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
+          Already on AgentFolio?
+        </h2>
+        <p className="text-xs mb-4" style={{ color: "var(--text-tertiary)" }}>
+          Search by name or wallet address to find and claim your existing profile.
+        </p>
+        <ClaimSearch />
+      </div>
     </div>
   );
 }
