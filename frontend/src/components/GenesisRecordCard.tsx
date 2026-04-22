@@ -1,7 +1,35 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Shield, ExternalLink, Flame } from "lucide-react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { Shield, ExternalLink, Flame, Loader2, AlertTriangle } from "lucide-react";
+
+const API = process.env.NEXT_PUBLIC_API_URL || "";
+
+function isLikelyBroadcastSignature(signature: unknown): signature is string {
+  return typeof signature === "string" && signature.length >= 80 && signature.length <= 100 && !/^1+$/.test(signature);
+}
+
+function isVersionedSerializedTransaction(raw: Uint8Array): boolean {
+  let offset = 0;
+  let sigCount = 0;
+  let shift = 0;
+  while (offset < raw.length) {
+    const byte = raw[offset];
+    sigCount |= (byte & 0x7f) << shift;
+    offset += 1;
+    if ((byte & 0x80) === 0) break;
+    shift += 7;
+  }
+  const messageOffset = offset + sigCount * 64;
+  return messageOffset < raw.length && (raw[messageOffset] & 0x80) !== 0;
+}
+
+async function deserializeBirthTransaction(base64Tx: string) {
+  const { Transaction, VersionedTransaction } = await import("@solana/web3.js");
+  const raw = Uint8Array.from(Buffer.from(base64Tx, "base64"));
+  return isVersionedSerializedTransaction(raw) ? VersionedTransaction.deserialize(raw) : Transaction.from(Buffer.from(raw));
+}
 
 interface GenesisData {
   pda: string;
@@ -31,7 +59,11 @@ interface NftAvatar {
 }
 
 export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nftAvatar?: NftAvatar }) {
+  const { connection } = useConnection();
+  const { publicKey, sendTransaction, signTransaction } = useWallet();
   const [genesis, setGenesis] = useState<GenesisData | null>(null);
+  const [recoveringBirth, setRecoveringBirth] = useState(false);
+  const [recoverMessage, setRecoverMessage] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -65,6 +97,77 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
     : nftAvatar?.verifiedAt
     ? new Date(nftAvatar.verifiedAt)
     : null;
+
+  const authorityWallet = genesis.authority || "";
+  const connectedWallet = publicKey?.toBase58() || "";
+  const canRecoverBirth = !isBorn && !!faceUrl && !!genesis.faceMint && !!burnTx;
+  const isAuthorityWallet = !!connectedWallet && !!authorityWallet && connectedWallet === authorityWallet;
+
+  const handleRecoverBirth = async () => {
+    if (!genesis || !faceUrl || !genesis.faceMint || !burnTx) return;
+    if (!publicKey || (!sendTransaction && !signTransaction)) {
+      setRecoverMessage("Connect the authority wallet to complete this birth.");
+      return;
+    }
+    if (authorityWallet && publicKey.toBase58() !== authorityWallet) {
+      setRecoverMessage(`Wrong wallet connected. Birth must be signed by ${authorityWallet.slice(0, 8)}...${authorityWallet.slice(-6)}.`);
+      return;
+    }
+
+    setRecoveringBirth(true);
+    setRecoverMessage(null);
+    try {
+      const prepRes = await fetch(`${API}/api/burn-to-become/prepare-birth`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId,
+          faceImage: faceUrl,
+          faceMint: genesis.faceMint,
+          faceBurnTx: burnTx,
+        }),
+      });
+      const prepData = await prepRes.json().catch(() => ({}));
+      if (!prepRes.ok) throw new Error(prepData.error || "Failed to prepare birth recovery transaction");
+
+      const tx = await deserializeBirthTransaction(prepData.transaction);
+      const submitPayload: Record<string, string> = {};
+      if (sendTransaction) {
+        const signature = await sendTransaction(tx as any, connection, { skipPreflight: false });
+        if (isLikelyBroadcastSignature(signature)) {
+          submitPayload.txSignature = signature;
+          submitPayload.submissionMode = "sendTransaction";
+        } else if (signTransaction) {
+          const signed = await signTransaction(tx as any);
+          submitPayload.signedTransaction = Buffer.from(signed.serialize()).toString("base64");
+          submitPayload.submissionMode = "signTransaction";
+        } else {
+          throw new Error("Wallet returned an invalid birth transaction signature");
+        }
+      } else if (signTransaction) {
+        const signed = await signTransaction(tx as any);
+        submitPayload.signedTransaction = Buffer.from(signed.serialize()).toString("base64");
+        submitPayload.submissionMode = "signTransaction";
+      } else {
+        throw new Error("Connected wallet cannot sign birth recovery transaction");
+      }
+
+      const submitRes = await fetch(`${API}/api/burn-to-become/submit-genesis`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(submitPayload),
+      });
+      const submitData = await submitRes.json().catch(() => ({}));
+      if (!submitRes.ok) throw new Error(submitData.error || "Failed to submit birth recovery transaction");
+
+      setGenesis((prev) => prev ? { ...prev, isBorn: true, bornAt: prev.bornAt || Math.floor(Date.now() / 1000) } : prev);
+      setRecoverMessage("Birth completed on-chain.");
+    } catch (err: any) {
+      setRecoverMessage(err?.message || "Birth recovery failed");
+    } finally {
+      setRecoveringBirth(false);
+    }
+  };
 
   // Level color coding
   const levelColor = genesis.verificationLevel >= 5 ? "#A855F7" :
@@ -160,6 +263,51 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
 
           </div>
         </div>
+
+        {canRecoverBirth && (
+          <div className="mt-3 rounded-lg p-3" style={{ background: "rgba(249,115,22,0.08)", border: "1px solid rgba(249,115,22,0.25)" }}>
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={14} style={{ color: "#F97316", marginTop: 2 }} />
+              <div className="flex-1">
+                <div className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "#F97316", fontFamily: "var(--font-mono)" }}>
+                  Birth Recovery Available
+                </div>
+                <div className="text-xs" style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+                  This agent has burn evidence but is not yet marked born on-chain. The authority wallet can finish the final genesis signature here.
+                </div>
+                {authorityWallet && (
+                  <div className="mt-2 text-[10px]" style={{ color: isAuthorityWallet ? "#10B981" : "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
+                    {connectedWallet
+                      ? isAuthorityWallet
+                        ? `Authority wallet connected: ${connectedWallet.slice(0, 8)}...${connectedWallet.slice(-6)}`
+                        : `Connect authority wallet ${authorityWallet.slice(0, 8)}...${authorityWallet.slice(-6)} to recover`
+                      : `Required authority: ${authorityWallet.slice(0, 8)}...${authorityWallet.slice(-6)}`}
+                  </div>
+                )}
+                <button
+                  onClick={handleRecoverBirth}
+                  disabled={recoveringBirth || !isAuthorityWallet}
+                  className="mt-3 inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs font-semibold transition-opacity"
+                  style={{
+                    background: !isAuthorityWallet || recoveringBirth ? "var(--bg-tertiary)" : "linear-gradient(135deg, #f97316, #ea580c)",
+                    color: !isAuthorityWallet || recoveringBirth ? "var(--text-tertiary)" : "#fff",
+                    border: !isAuthorityWallet || recoveringBirth ? "1px solid var(--border)" : "none",
+                    cursor: !isAuthorityWallet || recoveringBirth ? "not-allowed" : "pointer",
+                    opacity: recoveringBirth ? 0.8 : 1,
+                  }}
+                >
+                  {recoveringBirth ? <Loader2 size={14} className="animate-spin" /> : <Flame size={14} />}
+                  {recoveringBirth ? "Completing Birth..." : "Complete Birth"}
+                </button>
+                {recoverMessage && (
+                  <div className="mt-2 text-[10px]" style={{ color: recoverMessage === "Birth completed on-chain." ? "#10B981" : "#F97316", fontFamily: "var(--font-mono)" }}>
+                    {recoverMessage}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Footer: PDA + Authority + Burn TX links */}
         <div className="mt-3 pt-3 space-y-1" style={{ borderTop: "1px solid var(--border)" }}>
