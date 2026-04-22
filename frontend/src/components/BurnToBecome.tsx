@@ -10,6 +10,10 @@ const API = process.env.NEXT_PUBLIC_API_URL || SITE_URL;
 const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";
 const solanaExplorerUrl = (path: string) => SOLANA_CLUSTER === "mainnet-beta" ? `https://explorer.solana.com/${path}` : `https://explorer.solana.com/${path}?cluster=${SOLANA_CLUSTER}`;
 
+function isLikelyBroadcastSignature(signature: unknown): signature is string {
+  return typeof signature === "string" && signature.length >= 80 && signature.length <= 100 && !/^1+$/.test(signature);
+}
+
 interface NFT {
   mint: string;
   name: string | null;
@@ -166,8 +170,17 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
       };
       if (sendTransaction) {
         const burnSignature = await sendTransaction(tx as any, connection, { skipPreflight: false });
-        submitPayload.txSignature = burnSignature;
-        submitPayload.submissionMode = "sendTransaction";
+        if (isLikelyBroadcastSignature(burnSignature)) {
+          submitPayload.txSignature = burnSignature;
+          submitPayload.submissionMode = "sendTransaction";
+        } else if (signTransaction) {
+          console.warn("[BurnToBecome] sendTransaction returned a non-broadcast signature, falling back to signTransaction", burnSignature);
+          const signed = await signTransaction(tx as any);
+          submitPayload.signedTransaction = Buffer.from(signed.serialize()).toString("base64");
+          submitPayload.submissionMode = "signTransaction";
+        } else {
+          throw new Error("Wallet returned an invalid burn transaction signature");
+        }
       } else if (signTransaction) {
         const signed = await signTransaction(tx as any);
         submitPayload.signedTransaction = Buffer.from(signed.serialize()).toString("base64");
@@ -195,8 +208,17 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
           const genesisPayload: Record<string, string> = {};
           if (sendTransaction) {
             const genesisSignature = await sendTransaction(burnToBecomeTx as any, connection, { skipPreflight: false });
-            genesisPayload.txSignature = genesisSignature;
-            genesisPayload.submissionMode = "sendTransaction";
+            if (isLikelyBroadcastSignature(genesisSignature)) {
+              genesisPayload.txSignature = genesisSignature;
+              genesisPayload.submissionMode = "sendTransaction";
+            } else if (signTransaction) {
+              console.warn("[BurnToBecome] sendTransaction returned a non-broadcast genesis signature, falling back to signTransaction", genesisSignature);
+              const signedGenesis = await signTransaction(burnToBecomeTx as any);
+              genesisPayload.signedTransaction = Buffer.from(signedGenesis.serialize()).toString("base64");
+              genesisPayload.submissionMode = "signTransaction";
+            } else {
+              throw new Error("Wallet returned an invalid genesis transaction signature");
+            }
           } else if (signTransaction) {
             const signedGenesis = await signTransaction(burnToBecomeTx as any);
             genesisPayload.signedTransaction = Buffer.from(signedGenesis.serialize()).toString("base64");
