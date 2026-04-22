@@ -55,6 +55,8 @@ const PLATFORM_ICONS: Record<string, string> = {
   telegram: "✈️", mcp: "🔌", a2a: "🤖",
 };
 
+const SATP_V3_PROGRAM_ID = "GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG";
+
 type SortKey = "score" | "level" | "date" | "reviews";
 
 function formatDate(dateStr: string | null | undefined): string {
@@ -283,7 +285,7 @@ export default function SATPExplorerPage() {
           </span>
         </div>
         <p className="text-sm" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-          All data sourced directly from Solana mainnet · SATP Program: <a href="https://explorer.solana.com/address/97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: "var(--accent)" }}>97yL33...eSq</a>
+          All data sourced directly from Solana mainnet · SATP Program: <a href={`https://explorer.solana.com/address/${SATP_V3_PROGRAM_ID}`} target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: "var(--accent)" }}>{SATP_V3_PROGRAM_ID.slice(0, 6)}...{SATP_V3_PROGRAM_ID.slice(-4)}</a>
         </p>
         <div className="flex flex-wrap gap-3 mt-2 text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
           <span>{agents.length} on-chain agents</span>
