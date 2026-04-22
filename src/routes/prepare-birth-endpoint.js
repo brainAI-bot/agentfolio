@@ -13,6 +13,7 @@
 
 const { Connection, PublicKey, Transaction, TransactionInstruction, ComputeBudgetProgram } = require('@solana/web3.js');
 const crypto = require('crypto');
+const { getGenesisPDA: getCanonicalGenesisPDA, deserializeGenesisRecord } = require('../satp-client/src');
 
 const IDENTITY_V3 = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
@@ -22,28 +23,19 @@ function anchorDisc(name) {
 }
 
 function getGenesisPDA(agentId) {
-  const hash = crypto.createHash('sha256').update(agentId).digest();
-  return PublicKey.findProgramAddressSync([Buffer.from('genesis'), hash], IDENTITY_V3);
+  return getCanonicalGenesisPDA(agentId);
 }
 
 /**
- * Parse authority from Genesis Record.
- * Uses DEPLOYED struct layout (no is_active between genesis_record and authority).
+ * Parse authority from Genesis Record using the canonical SATP deserializer.
  */
 function parseGenesisAuthority(data) {
-  let o = 8; // disc
-  o += 32; // agent_id_hash
-  const readStr = () => { const l = data.readUInt32LE(o); o += 4; o += l; };
-  readStr(); readStr(); readStr(); // name, desc, category
-  const capCount = data.readUInt32LE(o); o += 4;
-  for (let i = 0; i < capCount; i++) readStr();
-  readStr(); readStr(); // metadataUri, faceImage
-  o += 32; // faceMint
-  readStr(); // faceBurnTx
-  const genesisRecord = Number(data.readBigInt64LE(o)); o += 8;
-  // NO is_active in deployed program
-  const authority = new PublicKey(data.slice(o, o + 32));
-  return { authority, isBorn: genesisRecord > 0 };
+  const record = deserializeGenesisRecord(data);
+  return {
+    authority: new PublicKey(record.authority),
+    isBorn: !!record.isBorn,
+    pendingAuthority: record.pendingAuthority || null,
+  };
 }
 
 /**
@@ -56,7 +48,7 @@ async function buildBurnToBecomeForWallet(agentId, faceImage, faceMint, faceBurn
   const acct = await conn.getAccountInfo(genesisPDA);
   if (!acct) throw new Error('Genesis Record not found for ' + agentId);
   
-  const { authority, isBorn } = parseGenesisAuthority(acct.data);
+  const { authority, isBorn, pendingAuthority } = parseGenesisAuthority(acct.data);
   if (isBorn) throw new Error('Agent already born');
   
   const disc = anchorDisc('burn_to_become');
@@ -91,6 +83,7 @@ async function buildBurnToBecomeForWallet(agentId, faceImage, faceMint, faceBurn
   return {
     transaction: tx.serialize({ requireAllSignatures: false, verifySignatures: false }).toString('base64'),
     authority: authority.toBase58(),
+    pendingAuthority,
     genesisPDA: genesisPDA.toBase58(),
     blockhash,
     lastValidBlockHeight,
