@@ -20,6 +20,7 @@ const path = require('path');
 const PIPELINE_DIR = "/home/ubuntu/agentfolio/boa-pipeline";
 const { safeBurnToBecome } = require('./safe-burn-to-become');
 const { getRateLimitDelay } = require('../lib/rate-limit-retry');
+const { loadNormalizedTrust } = require('../lib/normalized-trust');
 
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const connection = new Connection(RPC_URL, 'confirmed');
@@ -305,6 +306,81 @@ async function getSatpScore(walletAddress) {
     console.warn('[BurnPublic] SATP score read failed:', e.message);
     return 0;
   }
+}
+
+function safeJsonParse(raw, fallback) {
+  try { return raw ? JSON.parse(raw) : fallback; } catch { return fallback; }
+}
+
+function getProfileCreatedAtMs(profile) {
+  const parsed = Date.parse(profile?.created_at || profile?.updated_at || '');
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function profileMatchesWallet(profile, wallet) {
+  if (!profile || !wallet) return false;
+  if (profile.wallet === wallet) return true;
+  const verificationData = safeJsonParse(profile.verification_data, {});
+  if (verificationData?.solana?.address === wallet) return true;
+  const wallets = safeJsonParse(profile.wallets, {});
+  if (wallets?.solana === wallet) return true;
+  return false;
+}
+
+async function getNormalizedTrustForProfile(profileId) {
+  let level = 0, rep = 0;
+  try {
+    const trust = await loadNormalizedTrust(profileId);
+    if (trust && typeof trust.reputationScore === 'number') {
+      level = trust.verificationLevel || 0;
+      rep = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
+    }
+  } catch {}
+  return { level, rep };
+}
+
+async function resolveBestProfileForWallet(db, wallet, options = {}) {
+  if (!db || !wallet) return null;
+  const profiles = db.prepare('SELECT * FROM profiles').all().filter((profile) => profileMatchesWallet(profile, wallet));
+  if (!profiles.length) return null;
+
+  const preferredProfileId = options?.preferredProfileId ? String(options.preferredProfileId) : null;
+  if (preferredProfileId) {
+    const preferred = profiles.find((profile) => String(profile.id) === preferredProfileId);
+    if (preferred) {
+      const trust = await getNormalizedTrustForProfile(preferred.id);
+      return {
+        profile: preferred,
+        level: trust.level || 0,
+        rep: trust.rep || 0,
+        createdAtMs: getProfileCreatedAtMs(preferred),
+      };
+    }
+  }
+
+  const ranked = [];
+  for (const profile of profiles) {
+    const trust = await getNormalizedTrustForProfile(profile.id);
+    ranked.push({
+      profile,
+      level: trust.level || 0,
+      rep: trust.rep || 0,
+      createdAtMs: getProfileCreatedAtMs(profile),
+    });
+  }
+
+  ranked.sort((a, b) =>
+    (b.level - a.level) ||
+    (b.rep - a.rep) ||
+    (b.createdAtMs - a.createdAtMs) ||
+    String(b.profile.id || '').localeCompare(String(a.profile.id || ''))
+  );
+
+  if (ranked.length > 1) {
+    console.log('[BurnPublic] Multiple profiles matched wallet', wallet, '=>', ranked.map((item) => `${item.profile.id}:${item.level}/${item.rep}`).join(', '), 'selected', ranked[0].profile.id);
+  }
+
+  return ranked[0];
 }
 
 /**
@@ -938,9 +1014,38 @@ function handleBurnToBecome(req, res, url) {
           return sendJson(400, { error: 'wallet, nftMint, and either signedTransaction or txSignature required' });
         }
         
+        const Database = require('better-sqlite3');
+        const path = require('path');
+        const gateDb = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+        const resolvedProfile = await resolveBestProfileForWallet(gateDb, wallet);
+        const resolvedProfileId = resolvedProfile?.profile?.id || null;
+        try { gateDb.close(); } catch {}
+        if (!resolvedProfileId) {
+          return sendJson(403, { error: 'No AgentFolio profile linked to this wallet. Register at agentfolio.bot first.', wallet });
+        }
+
+        let level = resolvedProfile?.level || 0;
+        let rep = resolvedProfile?.rep || 0;
+        try {
+          const trust = await loadNormalizedTrust(resolvedProfileId);
+          if (trust && typeof trust.reputationScore === 'number') {
+            level = trust.verificationLevel || 0;
+            rep = trust.reputationScore > 10000 ? Math.round(trust.reputationScore / 10000) : trust.reputationScore;
+          }
+        } catch {}
+        if (level < 3 || rep < 50) {
+          return sendJson(403, { error: 'Burn to Become requires Level 3+ and Rep 50+.', level, rep, profileId: resolvedProfileId });
+        }
+
         // ON-CHAIN SATP SECURITY: Identity + boa_soulbound attestation check
         const burnSatpCheck = await checkSatpOnChain(wallet);
-        if (!burnSatpCheck.hasIdentity) {
+        let hasSatpIdentity = burnSatpCheck.hasIdentity;
+        try {
+          const { getV3Score } = require('../v3-score-service');
+          const v3 = await getV3Score(resolvedProfileId);
+          if (v3) hasSatpIdentity = true;
+        } catch {}
+        if (!hasSatpIdentity) {
           console.log('[BurnPublic] BLOCKED: No SATP identity for', wallet);
           return sendJson(403, { error: 'SATP identity required to burn. Verify your wallet at agentfolio.bot/verify first.' });
         }
@@ -951,15 +1056,13 @@ function handleBurnToBecome(req, res, url) {
 
         // SECURITY: Block burn if agent already has a permanent face (DB fallback)
         try {
-          const Database = require('better-sqlite3');
-          const path = require('path');
           const checkDb = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
-          // Check by wallet (genesis registry) or by any profile with this wallet
-          // Look up profile by wallet in DB (covers genesis + regular agents)
-          let profileId = null;
-          const byWallet = checkDb.prepare("SELECT id FROM profiles WHERE wallets LIKE ?").get('%' + wallet + '%');
-          if (byWallet) profileId = byWallet.id;
-          // Also check nft_avatar column for any profile with this wallet
+          // Prefer the already resolved profile identity for this request.
+          let profileId = resolvedProfileId || null;
+          if (!profileId) {
+            const byWallet = checkDb.prepare("SELECT id FROM profiles WHERE wallets LIKE ?").get('%' + wallet + '%');
+            if (byWallet) profileId = byWallet.id;
+          }
           if (!profileId) {
             const byNftWallet = checkDb.prepare("SELECT id FROM profiles WHERE nft_avatar LIKE ?").get('%' + wallet + '%');
             if (byNftWallet) profileId = byNftWallet.id;

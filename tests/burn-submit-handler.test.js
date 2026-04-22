@@ -89,6 +89,9 @@ function loadBurnModule() {
     if (request === './safe-burn-to-become') {
       return { safeBurnToBecome: async () => ({ success: true }) };
     }
+    if (request === '../lib/normalized-trust') {
+      return { loadNormalizedTrust: async () => null };
+    }
     return originalLoad(request, parent, isMain);
   };
 
