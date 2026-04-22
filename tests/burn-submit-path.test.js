@@ -18,7 +18,8 @@ describe('burn submit path regression guard', () => {
   it('validates confirmed on-chain burn transactions for txSignature flow', () => {
     assert.match(source, /async function getConfirmedTransactionWithRetry\(signature, attempts = 8\)/);
     assert.match(source, /await connection\.confirmTransaction\(txSignature, 'confirmed'\)/);
-    assert.match(source, /const confirmedTx = await getConfirmedTransactionWithRetry\(txSignature\)/);
+    assert.match(source, /confirmedTx = await getConfirmedTransactionWithRetry\(txSignature\)/);
+    assert.match(source, /Invalid burn transaction signature/);
   });
 
   it('allows lighthouse helper instructions in the burn validator', () => {

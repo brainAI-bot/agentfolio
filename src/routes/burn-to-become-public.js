@@ -1004,8 +1004,13 @@ function handleBurnToBecome(req, res, url) {
         ]);
 
         if (hasTxSignature) {
-          await connection.confirmTransaction(txSignature, 'confirmed');
-          const confirmedTx = await getConfirmedTransactionWithRetry(txSignature);
+          let confirmedTx;
+          try {
+            await connection.confirmTransaction(txSignature, 'confirmed');
+            confirmedTx = await getConfirmedTransactionWithRetry(txSignature);
+          } catch {
+            return sendJson(400, { error: 'Invalid burn transaction signature' });
+          }
           if (!confirmedTx) {
             return sendJson(400, { error: 'Submitted burn transaction not found on-chain' });
           }
