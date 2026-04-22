@@ -19,6 +19,7 @@ const fs = require('fs');
 const path = require('path');
 const PIPELINE_DIR = "/home/ubuntu/agentfolio/boa-pipeline";
 const { safeBurnToBecome } = require('./safe-burn-to-become');
+const { buildBurnToBecomeForWallet } = require('./prepare-birth-endpoint');
 const { getRateLimitDelay } = require('../lib/rate-limit-retry');
 const { loadNormalizedTrust } = require('../lib/normalized-trust');
 
@@ -1360,6 +1361,9 @@ function handleBurnToBecome(req, res, url) {
 
         // 3.5. Link soulbound BOA to SATP identity (Task 2)
         let boaSatpLinkTx = null;
+        let burnToBecomeTx = null;
+        let burnToBecomeAuthority = null;
+        let burnToBecomeAgentId = null;
         try {
           const { linkBoaToSatpIdentity } = require("../lib/satp-boa-linker");
           const linkResult = await linkBoaToSatpIdentity(wallet, soulboundResult.soulboundMint, burnTx, artworkUri);
@@ -1402,11 +1406,21 @@ function handleBurnToBecome(req, res, url) {
           }
           
           if (agentId) {
+            burnToBecomeAgentId = agentId;
             const burnResult = await safeBurnToBecome(agentId, artworkUri || '', soulboundResult.soulboundMint || '', burnTx || '');
             if (burnResult.success) {
               console.log('[BurnPublic] V3 burnToBecome confirmed for ' + agentId + ': tx=' + burnResult.txSignature);
             } else if (burnResult.needsClientSign) {
-              console.log('[BurnPublic] V3 burnToBecome needs client sign for ' + agentId + ' (authority: ' + burnResult.authority + ')');
+              burnToBecomeAuthority = burnResult.authority || null;
+              console.log('[BurnPublic] V3 burnToBecome needs client sign for ' + agentId + ' (authority: ' + burnToBecomeAuthority + ')');
+              try {
+                const preparedBirth = await buildBurnToBecomeForWallet(agentId, artworkUri || '', soulboundResult.soulboundMint || '', burnTx || '');
+                burnToBecomeTx = preparedBirth.transaction;
+                burnToBecomeAuthority = preparedBirth.authority || burnToBecomeAuthority;
+                console.log('[BurnPublic] Prepared client-side burnToBecome TX for ' + agentId + ' (authority: ' + burnToBecomeAuthority + ')');
+              } catch (birthPrepErr) {
+                console.warn('[BurnPublic] Could not prepare client-side burnToBecome TX for ' + agentId + ':', birthPrepErr.message);
+              }
             } else {
               console.log('[BurnPublic] V3 burnToBecome skipped for ' + agentId + ': ' + burnResult.reason);
             }
@@ -1556,6 +1570,9 @@ function handleBurnToBecome(req, res, url) {
           attestationTx,
           genesisRecordUrl: null,
           boaSatpLinkTx,
+          burnToBecomeTx,
+          burnToBecomeAuthority,
+          burnToBecomeAgentId,
         });
       } catch (e) {
         console.error('[BurnPublic] submit error:', e);
@@ -1565,6 +1582,36 @@ function handleBurnToBecome(req, res, url) {
     return true;
   }
 
+
+  // POST /api/burn-to-become/submit-genesis (alias: submit-birth) — submit signed burnToBecome TX
+  if ((url.pathname === "/api/burn-to-become/submit-genesis" || url.pathname === "/api/burn-to-become/submit-birth") && req.method === "POST") {
+    const txSignature = req.body && req.body.txSignature;
+    const signedTransaction = req.body && req.body.signedTransaction;
+    if (!txSignature && !signedTransaction) return sendJson(400, { error: "txSignature or signedTransaction required" });
+
+    (async () => {
+      try {
+        if (txSignature) {
+          try {
+            await connection.confirmTransaction(txSignature, 'confirmed');
+          } catch (confirmErr) {
+            console.warn('[BurnPublic] submit-genesis confirm warning:', confirmErr.message);
+          }
+          return sendJson(200, { success: true, txSignature, submissionMode: 'sendTransaction' });
+        }
+
+        const txBuf = Buffer.from(signedTransaction, 'base64');
+        const genesisSig = await connection.sendRawTransaction(txBuf, { skipPreflight: false });
+        await connection.confirmTransaction(genesisSig, 'confirmed');
+        console.log('[BurnPublic] burnToBecome TX confirmed:', genesisSig);
+        return sendJson(200, { success: true, txSignature: genesisSig, submissionMode: 'signTransaction' });
+      } catch (e) {
+        console.error('[BurnPublic] submit-genesis error:', e.message);
+        return sendJson(500, { error: e.message });
+      }
+    })();
+    return true;
+  }
 
   // POST /api/burn-to-become/prepare-mint — build unsigned TX for client-side signing
   if (url.pathname === "/api/burn-to-become/prepare-mint" && req.method === "POST") {
