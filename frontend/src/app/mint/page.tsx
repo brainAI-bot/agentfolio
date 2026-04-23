@@ -52,6 +52,10 @@ async function deserializeMintTransaction(base64Tx: string) {
   return isVersionedSerializedTransaction(raw) ? VersionedTransaction.deserialize(raw) : Transaction.from(Buffer.from(raw));
 }
 
+function isLikelyBroadcastSignature(signature: unknown): signature is string {
+  return typeof signature === "string" && signature.length >= 80 && signature.length <= 100 && !/^1+$/.test(signature);
+}
+
 export default function MintPage() {
   const wallet = useWallet();
   const { connection } = useConnection();
@@ -267,8 +271,17 @@ export default function MintPage() {
       };
       if (wallet.sendTransaction) {
         const burnSignature = await wallet.sendTransaction(tx as any, connection, { skipPreflight: false });
-        submitPayload.txSignature = burnSignature;
-        submitPayload.submissionMode = "sendTransaction";
+        if (isLikelyBroadcastSignature(burnSignature)) {
+          submitPayload.txSignature = burnSignature;
+          submitPayload.submissionMode = "sendTransaction";
+        } else if (wallet.signTransaction) {
+          console.warn("wallet.sendTransaction returned a non-broadcast signature, falling back to signTransaction", burnSignature);
+          const signed = await wallet.signTransaction(tx as any);
+          submitPayload.signedTransaction = Buffer.from(signed.serialize()).toString("base64");
+          submitPayload.submissionMode = "signTransaction";
+        } else {
+          throw new Error("Wallet returned an invalid transaction signature");
+        }
       } else if (wallet.signTransaction) {
         const signed = await wallet.signTransaction(tx as any);
         submitPayload.signedTransaction = Buffer.from(signed.serialize()).toString("base64");
@@ -291,8 +304,17 @@ export default function MintPage() {
           const genesisPayload: Record<string, string> = {};
           if (wallet.sendTransaction) {
             const genesisSignature = await wallet.sendTransaction(btbTx as any, connection, { skipPreflight: false });
-            genesisPayload.txSignature = genesisSignature;
-            genesisPayload.submissionMode = "sendTransaction";
+            if (isLikelyBroadcastSignature(genesisSignature)) {
+              genesisPayload.txSignature = genesisSignature;
+              genesisPayload.submissionMode = "sendTransaction";
+            } else if (wallet.signTransaction) {
+              console.warn("wallet.sendTransaction returned a non-broadcast genesis signature, falling back to signTransaction", genesisSignature);
+              const signedBtb = await wallet.signTransaction(btbTx as any);
+              genesisPayload.signedTransaction = Buffer.from(signedBtb.serialize()).toString("base64");
+              genesisPayload.submissionMode = "signTransaction";
+            } else {
+              throw new Error("Wallet returned an invalid genesis transaction signature");
+            }
           } else if (wallet.signTransaction) {
             const signedBtb = await wallet.signTransaction(btbTx as any);
             genesisPayload.signedTransaction = Buffer.from(signedBtb.serialize()).toString("base64");
