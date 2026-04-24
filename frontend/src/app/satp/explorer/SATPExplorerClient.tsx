@@ -87,11 +87,30 @@ export default function SATPExplorerPage() {
   useEffect(() => {
     async function fetchAll() {
       try {
-        // Step 1: Fetch on-chain agents from SATP Explorer API
-        const onChainRes = await fetch("/api/satp/explorer/agents");
-        if (!onChainRes.ok) throw new Error("Failed to fetch on-chain agents");
-        const onChainData = await onChainRes.json();
-        const onChainAgents = onChainData.agents || [];
+        // Step 1: Fetch on-chain agents from SATP Explorer API.
+        // Prefer the canonical explorer route and fall back to the legacy SATP route,
+        // because the legacy path has regressed to an empty payload in production.
+        let onChainAgents: any[] = [];
+        let onChainError: string | null = null;
+        for (const endpoint of ["/api/explorer/agents", "/api/satp/explorer/agents"]) {
+          try {
+            const onChainRes = await fetch(endpoint);
+            if (!onChainRes.ok) {
+              onChainError = `Failed to fetch on-chain agents from ${endpoint}`;
+              continue;
+            }
+            const onChainData = await onChainRes.json();
+            const agents = Array.isArray(onChainData?.agents) ? onChainData.agents : [];
+            if (agents.length > 0) {
+              onChainAgents = agents;
+              break;
+            }
+            onChainError = `No on-chain agents returned from ${endpoint}`;
+          } catch (e: any) {
+            onChainError = e?.message || `Failed to fetch on-chain agents from ${endpoint}`;
+          }
+        }
+        if (onChainAgents.length === 0 && onChainError) throw new Error(onChainError);
 
         // Step 2: Fetch profiles for NFT avatar cross-referencing
         let profilesById: Record<string, any> = {};
