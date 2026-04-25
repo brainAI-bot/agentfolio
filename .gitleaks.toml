@@ -1,12 +1,23 @@
-title = "agentfolio gitleaks config"
+title = "AgentFolio secret guardrails"
+
 [extend]
 useDefault = true
 
 [allowlist]
-description = "Allow public Solana authority addresses and docs example Discord ID"
+description = "Known public/example values from brainChain PR15 triage"
 regexTarget = "match"
 regexes = [
-  "4St74qSyzuGyV2TA9gxej9GvXG2TgVSTvp1HEpzJbwcP",
-  "Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc",
-  "123456789012345678"
+  '''Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc''',
+  '''123456789012345678''',
+  '''4St74qSyzuGyV2TA9gxej9GvXG2TgVSTvp1HEpzJbwcP''',
 ]
+paths = [
+  '''(^|/)\.gitleaks\.toml$''',
+]
+
+[[rules]]
+id = "solana-keypair-json"
+description = "Solana keypair JSON array committed under key-like paths"
+regex = '''\[\s*(?:[0-9]{1,3}\s*,\s*){63}[0-9]{1,3}\s*\]'''
+path = '''(?i)(^|/)(keys?/.*\.json|.*keypair.*\.json|.*\.keypair|id\.json)$'''
+tags = ["key", "solana", "keypair"]
