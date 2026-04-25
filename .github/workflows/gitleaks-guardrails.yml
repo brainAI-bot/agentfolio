@@ -1,0 +1,31 @@
+name: gitleaks-guardrails
+
+on:
+  pull_request:
+  push:
+    branches:
+      - 'brainforge/**'
+      - 'chore/**'
+
+jobs:
+  gitleaks-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          version=8.24.2
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_linux_x64.tar.gz" \
+            | tar -xz
+          sudo mv gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan branch diff for secrets
+        env:
+          GITLEAKS_BASE_REF: ${{ github.base_ref || 'brainforge/pr15-gitleaks-cleanup' }}
+        run: scripts/check-gitleaks-guardrails.sh
