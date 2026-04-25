@@ -10,6 +10,40 @@ api-keys.json
 *.pem
 *.key
 logs/
-logs/
 *.bak-*
 sync-genesis-scores.js
+
+# Secret material guardrails
+keys/
+keypairs/
+**/keys/
+**/keypairs/
+**/*keypair*.json
+**/*.keypair
+**/id.json
+config/*keypair*.json
+config/*wallet*.json
+config/id.json
+
+# Cleanup lineage artifacts
+*.log
+*.done
+progress.txt
+PUBLIC_URL.txt
+tunnel.log
+server.log
+.backup-v2-sdk/
+backup-bak-files/
+backup-placeholders-*/
+archived/
+archive/**/*.bak
+*.bak
+*.bak.*
+*.bad
+tmp*/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
