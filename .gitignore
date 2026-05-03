@@ -1,11 +1,13 @@
 .env
 .env.*
+!.env.example
 *.db
 *.sqlite
 data/
 node_modules/
 api-keys.json
 *secret*
+!.github/workflows/secret-scan.yml
 *credentials*
 *.pem
 *.key
