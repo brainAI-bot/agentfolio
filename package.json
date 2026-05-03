@@ -14,7 +14,7 @@
   "license": "ISC",
   "dependencies": {
     "@avilabs/ghost-cursor-playwright": "^2.1.5",
-    "@brainai/satp-v3": "^3.5.1",
+    "@brainai/satp-client": "file:../satp/dist/brainai-satp-client-0.0.0-extraction.tgz",
     "@coral-xyz/anchor": "^0.30.1",
     "@metaplex-foundation/mpl-token-metadata": "^3.4.0",
     "@metaplex-foundation/umi": "^1.5.1",
