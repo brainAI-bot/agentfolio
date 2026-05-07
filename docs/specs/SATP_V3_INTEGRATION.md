@@ -5,7 +5,7 @@
 ## Phase 1: Client Update (brainChain)
 **Deadline: EOD March 17**
 
-1. **Update AgentFolio SATP client** (`src/satp-client/src/constants.js` + `src/satp-identity-client.js`)
+1. **Update AgentFolio SATP client** (`@brainai/satp-client` + `src/satp-identity-client.js`)
    - Replace V2 program IDs with V3 mainnet program IDs:
      - Identity: GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG
      - Reviews: r9XX4frcqxxAZ6Au9V5PA3EAxs1zoNckqLLmoSRcNr4
@@ -17,8 +17,8 @@
    - Export new client functions: `createGenesisRecord()`, `burnToBecome()`, `getGenesisRecord()`
 
 2. **Deploy updated client to AgentFolio server** (16.16.78.208)
-   - Copy V3 client lib to `/home/ubuntu/agentfolio/src/satp-client/`
-   - Test: `node -e "const c = require('./src/satp-client'); console.log(c.PROGRAM_IDS)"` shows V3 IDs
+   - Install the pinned `@brainai/satp-client` package; do not copy protocol source into `/home/ubuntu/agentfolio/src/satp-client/`
+   - Test: `node -e "const c = require('@brainai/satp-client'); console.log(c.PROGRAM_IDS)"` shows V3 IDs
 
 3. **Migrate existing agents** (5 team agents + any registered agents)
    - Use `migrate_v2_to_v3` instruction for each existing V2 identity
@@ -77,8 +77,7 @@
 - [ ] Old V2 endpoints still work (backward compat) or gracefully redirect
 
 ## Key Files to Modify
-- `src/satp-client/src/constants.js` — V3 program IDs
-- `src/satp-client/src/index.js` — V3 client functions
+- `@brainai/satp-client` — V3 program IDs and client functions
 - `src/satp-identity-client.js` — V3 identity reads
 - `src/routes/satp-auto-identity.js` — V3 auto-create on registration
 - `src/routes/satp-api.js` — V3 API endpoints
