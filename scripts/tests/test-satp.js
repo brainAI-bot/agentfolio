@@ -1,4 +1,4 @@
-const { SATPSDK } = require("/home/ubuntu/agentfolio/satp-client/src");
+const { SATPSDK } = require("@brainai/satp-client");
 const { Keypair } = require("@solana/web3.js");
 const fs = require("fs");
 

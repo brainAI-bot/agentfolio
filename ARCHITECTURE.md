@@ -348,8 +348,6 @@ agentfolio/
 ├── test/                 # legacy/ad hoc tests, to rationalize
 ├── public/               # static assets
 ├── sdk/                  # AgentFolio platform SDK / helpers
-├── satp-client/          # TEMPORARY: embedded SATP client
-├── satp-idls/            # TEMPORARY: embedded SATP IDLs
 ├── core-cm/              # legacy chain-manager style logic
 ├── core-cm-v2/           # newer chain-manager style logic
 ├── boa-pipeline/         # burn/mint pipeline scripts/workers
@@ -368,7 +366,7 @@ New runtime code should go into `src/`, `frontend/`, `scripts/`, `tests/`, or a 
 
 ## 8. Target repo structure
 
-Before SATP extraction is complete, the repo may stay mostly flat. The target direction is:
+The repo remains mostly flat while app/package boundaries are rationalized. The target direction is:
 
 ```text
 agentfolio/
@@ -394,7 +392,7 @@ agentfolio/
     └── workflows/
 ```
 
-After SATP extraction, these should not remain as source-of-truth protocol directories:
+After SATP extraction, these must not remain as source-of-truth protocol directories:
 
 ```text
 satp-client/
@@ -403,7 +401,7 @@ programs/satp/
 tests/satp/
 ```
 
-AgentFolio should consume SATP through a package:
+AgentFolio consumes SATP through a package:
 
 ```text
 @brainai/satp
@@ -411,7 +409,7 @@ AgentFolio should consume SATP through a package:
 @brainai/satp-solana
 ```
 
-A temporary Git dependency is acceptable during migration.
+The current migration uses a pinned Git dependency plus minimal legacy compatibility shims under `src/satp-client/`; do not add protocol semantics to those shims.
 
 ---
 
