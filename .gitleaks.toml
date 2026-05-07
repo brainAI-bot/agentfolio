@@ -1,0 +1,7 @@
+title = "AgentFolio Gitleaks config"
+
+[allowlist]
+description = "Allow checked-in placeholder env template"
+paths = [
+  '''^\.env\.example$'''
+]
