@@ -13,3 +13,18 @@ test('SATP adapter resolves extracted @brainai/satp-client dependency without em
   assert.equal(typeof satpClient.SATPV3SDK, 'function');
   assert.equal(typeof satpClient.createSATPClient, 'function');
 });
+
+test('legacy SATP deep-require shims resolve against extracted package source paths', () => {
+  const shimCases = [
+    ['../src/satp-client/src/v3-sdk', 'SATPV3SDK'],
+    ['../src/satp-client/src/v3-pda', 'getV3ReviewPDA'],
+    ['../src/satp-client/src/borsh-reader', 'BorshReader'],
+  ];
+
+  for (const [shimPath, expectedExport] of shimCases) {
+    const resolved = require.resolve(shimPath);
+    assert.match(resolved, /src[\\/]satp-client[\\/]src[\\/]/);
+    const shim = require(shimPath);
+    assert.equal(typeof shim[expectedExport], 'function');
+  }
+});
