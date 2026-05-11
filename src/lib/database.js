@@ -44,14 +44,20 @@ function initializeSchema() {
       endorsements TEXT DEFAULT '[]',  -- JSON array
       endorsements_given TEXT DEFAULT '[]',  -- JSON array
       metadata TEXT DEFAULT '{}',  -- JSON overflow for arbitrary extra fields
+      hidden INTEGER DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
   `);
   
-  // Add metadata column if missing (migration for existing DBs)
+  // Add profile columns if missing (migrations for existing DBs)
   try {
     db.exec(`ALTER TABLE profiles ADD COLUMN metadata TEXT DEFAULT '{}'`);
+  } catch (e) {
+    // Column already exists - ignore
+  }
+  try {
+    db.exec(`ALTER TABLE profiles ADD COLUMN hidden INTEGER DEFAULT 0`);
   } catch (e) {
     // Column already exists - ignore
   }
