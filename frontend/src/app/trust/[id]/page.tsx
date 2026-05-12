@@ -1,3 +1,4 @@
+import { SATPTrustEvidenceCallout } from "@/components/SATPTrustEvidenceCallout";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -65,6 +66,11 @@ export default async function TrustCredentialPage({ params }: PageProps) {
   const proofColor = scoreColor(verificationLevel);
   const rawJson = JSON.stringify(decoded, null, 2);
   const rawEndpoint = `/api/trust-credential/${encodeURIComponent(id)}?format=json`;
+  const agentId = subject?.agentId || id;
+  const walletAddress = subject?.walletAddress || subject?.wallet || subject?.solanaAddress || null;
+  const did = subject?.did || subject?.satpDid || null;
+  const chainAttestationCount = Array.isArray(subject?.chainAttestations) ? subject.chainAttestations.length : Number(subject?.chainAttestationCount || 0);
+  const onChainReviewCount = Array.isArray(subject?.onChainReviews) ? subject.onChainReviews.length : Number(subject?.onChainReviewCount || 0);
   const verifyEndpoint = data?.jwt
     ? `/api/trust-credential/verify?token=${encodeURIComponent(data.jwt)}`
     : `/api/trust-credential/${encodeURIComponent(id)}`;
@@ -102,6 +108,19 @@ export default async function TrustCredentialPage({ params }: PageProps) {
             </a>
           </div>
         </div>
+      </div>
+
+      <div className="mb-6">
+        <SATPTrustEvidenceCallout
+          agentId={agentId}
+          walletAddress={walletAddress}
+          did={did}
+          chainAttestationCount={chainAttestationCount}
+          onChainReviewCount={onChainReviewCount}
+          rawCredentialHref={rawEndpoint}
+          verifyCredentialHref={verifyEndpoint}
+          compact
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
