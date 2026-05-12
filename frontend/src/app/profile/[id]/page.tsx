@@ -18,6 +18,7 @@ import BirthCertificate from "@/components/BirthCertificate";
 import { GenesisRecordCard } from "@/components/GenesisRecordCard";
 import { OnChainAvatar } from "@/components/OnChainAvatar";
 import { SATPOnChainSection } from "@/components/SATPOnChainSection";
+import { SATPTrustEvidenceCallout } from "@/components/SATPTrustEvidenceCallout";
 import { V3ReputationCard } from "@/components/V3ReputationCard";
 import { shouldFetchV3Reputation } from "@/lib/profile-v3";
 import Link from "next/link";
@@ -208,6 +209,8 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     avgRating = reviews.length > 0 ? reviews.reduce((sum: number, r: any) => sum + r.rating, 0) / reviews.length : 0;
   } catch (e) { /* API unavailable, show no reviews */ }
   const displayRating = avgRating > 0 ? avgRating : agent.rating;
+  const onChainReviewCount = reviews.filter((r: any) => r.tx_signature || r.source === "satp-onchain").length;
+  const satpDid = (v as any)?.satp?.did || satpIdentity?.data?.did || satpIdentity?.did || null;
 
   // JSON-LD Structured Data for SEO
   const jsonLd = {
@@ -362,6 +365,15 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Verification details */}
         <div className="lg:col-span-2 space-y-4">
+          <SATPTrustEvidenceCallout
+            agentId={agent.id}
+            walletAddress={solWallet}
+            did={satpDid}
+            chainAttestationCount={chainAttestations.length}
+            onChainReviewCount={onChainReviewCount}
+            credentialHref={`/trust/${agent.id}`}
+          />
+
           {/* Verification Status — dynamic, priority-ordered */}
           <div className="rounded-lg p-5" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
             <h2 className="text-sm font-semibold uppercase tracking-wider mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
