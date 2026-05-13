@@ -10,11 +10,18 @@ function makeApp() {
   const routes = new Map();
   return {
     routes,
-    get(routePath, handler) {
+    get(routePath, ...handlers) {
       assert.equal(routes.has(routePath), false, `duplicate test route registration: ${routePath}`);
-      routes.set(routePath, handler);
+      routes.set(routePath, handlers);
     },
   };
+}
+
+function getRouteHandler(app, routePath) {
+  const handlers = app.routes.get(routePath);
+  assert.ok(Array.isArray(handlers), `missing route handlers for ${routePath}`);
+  assert.equal(handlers.length, 2, `${routePath} should include a rate limiter and handler`);
+  return handlers[1];
 }
 
 function makeRes() {
@@ -102,7 +109,7 @@ test('returns read-only fee tiers without mounting legacy fee writes', () => {
     registerWorkflowReadRoutes(app, { dbPath });
 
     const res = makeRes();
-    app.routes.get('/api/fees/tiers')({ query: {} }, res);
+    getRouteHandler(app, '/api/fees/tiers')({ query: {} }, res);
 
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.ok, true);
@@ -121,7 +128,7 @@ test('returns marketplace stats from the canonical owner route', () => {
     registerWorkflowReadRoutes(app, { dbPath });
 
     const res = makeRes();
-    app.routes.get('/api/marketplace/stats')({ query: {} }, res);
+    getRouteHandler(app, '/api/marketplace/stats')({ query: {} }, res);
 
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.ok, true);
@@ -144,7 +151,7 @@ test('returns activity events from registration, verification, and score tables'
     registerWorkflowReadRoutes(app, { dbPath });
 
     const res = makeRes();
-    app.routes.get('/api/activity')({ query: { limit: '10' } }, res);
+    getRouteHandler(app, '/api/activity')({ query: { limit: '10' } }, res);
 
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.ok, true);

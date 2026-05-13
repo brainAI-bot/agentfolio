@@ -23,4 +23,4 @@ This file is the canonical workflow route ownership map. When a route is listed 
 
 ## Guardrail
 
-New public workflow routes must add an entry here and a route registration test before production promotion. Avoid adding large catch-all endpoint bundles when a single audited route is needed.
+New public workflow routes must add an entry here, a route registration test, and a route-local rate limiter before production promotion. Avoid adding large catch-all endpoint bundles when a single audited route is needed.

@@ -1,8 +1,15 @@
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 const Database = require('better-sqlite3');
 const fees = require('../lib/performance-fees');
 
 const DEFAULT_DB_PATH = path.join(__dirname, '..', '..', 'data', 'agentfolio.db');
+const workflowReadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 function openReadOnlyDb(dbPath) {
   return new Database(dbPath || DEFAULT_DB_PATH, { readonly: true });
@@ -38,7 +45,7 @@ function registerWorkflowReadRoutes(app, options = {}) {
 
   // Canonical public activity feed. Older docs referenced /api/activity/feed;
   // /api/activity is the frontend-facing workflow route.
-  app.get('/api/activity', (req, res) => {
+  app.get('/api/activity', workflowReadLimiter, (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
     const type = req.query.type;
@@ -168,7 +175,7 @@ function registerWorkflowReadRoutes(app, options = {}) {
 
   // Canonical marketplace read stats. This intentionally does not mount the
   // broader legacy sprint3 endpoint bundle, which also duplicates /api/search.
-  app.get('/api/marketplace/stats', (req, res) => {
+  app.get('/api/marketplace/stats', workflowReadLimiter, (req, res) => {
     let db;
     try {
       db = openReadOnlyDb(dbPath);
@@ -250,7 +257,7 @@ function registerWorkflowReadRoutes(app, options = {}) {
 
   // Read-only public tier catalog. Do not mount src/api/fees.js wholesale here:
   // that legacy module includes unauthenticated admin/write endpoints.
-  app.get('/api/fees/tiers', (req, res) => {
+  app.get('/api/fees/tiers', workflowReadLimiter, (req, res) => {
     return res.json({
       ok: true,
       tiers: fees.getFeeTiers(),
