@@ -1791,6 +1791,15 @@ try {
   console.warn("[Eligibility API] Failed to mount:", e.message);
 }
 
+// Workflow read routes — canonical fixes for audited route mismatches.
+try {
+  const { registerWorkflowReadRoutes } = require('./routes/workflow-read-routes');
+  registerWorkflowReadRoutes(app);
+  console.log('[Workflow Read API] Mounted: /api/activity, /api/marketplace/stats, /api/fees/tiers');
+} catch (e) {
+  console.warn('[Workflow Read API] Failed to mount:', e.message);
+}
+
 
 // Route aliases (CEO-tested paths) — added 2026-03-29 by brainChain
 // Alias for frontend compatibility
