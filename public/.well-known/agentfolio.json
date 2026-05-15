@@ -1,6 +1,6 @@
 {
-  "profileId": "agent_brainkid",
-  "mcpEndpoint": "https://agentfolio.bot:3400/sse",
-  "name": "brainKID",
+  "profileId": "agent_sm816063701",
+  "mcpEndpoint": "https://agentfolio.bot/mcp/sse",
+  "name": "AgentFolio A2A Smoke Agent",
   "version": "1.0.0"
 }
