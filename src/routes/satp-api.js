@@ -6,6 +6,7 @@
 
 const satpIdentity = require('../satp-identity-client');
 const satpReviewsOnchain = require('../satp-reviews-onchain');
+const { getGenesisPDA } = require('../satp-client/src/v3-pda');
 
 // V3 SDK (using SATPV3SDK directly for all V3 operations)
 let satpV3Client;
@@ -404,8 +405,12 @@ function registerSATPRoutes(app) {
    */
   app.get('/api/satp/v3/resolve/:agentId', (req, res) => {
     if (!satpV3Client) return res.status(503).json({ error: 'V3 SDK not available' });
-    const pda = satpV3Client.resolveAgent(req.params.agentId);
-    res.json({ ok: true, agentId: req.params.agentId, pda });
+    try {
+      const [pda] = getGenesisPDA(req.params.agentId, satpV3Client.network || 'mainnet');
+      res.json({ ok: true, agentId: req.params.agentId, pda: pda.toBase58() });
+    } catch (e) {
+      res.status(400).json({ error: 'Invalid agent id', detail: e.message });
+    }
   });
 
   // ═══ V3 NAME REGISTRY + LINKED WALLETS (added 2026-03-22) ═══
