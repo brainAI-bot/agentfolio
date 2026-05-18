@@ -13,7 +13,7 @@ function loadServerWithMocks() {
 
   const app = {
     use() {},
-    get(route, handler) { routeMap.set(`GET ${route}`, handler); },
+    get(route, ...handlers) { routeMap.set(`GET ${route}`, handlers.length === 1 ? handlers[0] : handlers); },
     post() {},
     put() {},
     delete() {},
@@ -219,6 +219,10 @@ function loadServerWithMocks() {
   };
 }
 
+function getLastRouteHandler(routeEntry) {
+  return Array.isArray(routeEntry) ? routeEntry[routeEntry.length - 1] : routeEntry;
+}
+
 let cleanup = null;
 
 afterEach(() => {
@@ -233,10 +237,13 @@ describe('explorer agent deep-link parity regression guard', () => {
     const loaded = loadServerWithMocks();
     cleanup = loaded.restore;
 
-    const freeHandler = loaded.routeMap.get('GET /api/leaderboard');
+    const freeRoute = loaded.routeMap.get('GET /api/leaderboard');
     const paidHandler = loaded.routeMap.get('GET /api/leaderboard/scores');
-    assert.ok(freeHandler, 'expected /api/leaderboard handler to be registered');
+    assert.ok(freeRoute, 'expected /api/leaderboard handler to be registered');
     assert.ok(paidHandler, 'expected /api/leaderboard/scores handler to remain registered');
+    assert.ok(Array.isArray(freeRoute), 'expected /api/leaderboard to include a rate limiter and handler');
+    assert.strictEqual(freeRoute.length, 2);
+    const freeHandler = getLastRouteHandler(freeRoute);
     assert.notStrictEqual(freeHandler, paidHandler);
 
     const req = { query: { limit: '1' } };

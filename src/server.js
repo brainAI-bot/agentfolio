@@ -7,6 +7,7 @@
 
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 
@@ -106,6 +107,13 @@ function hasClaimedProfile(row) {
   const verificationData = parseJsonFieldSafe(row.verification_data, {});
   return Object.values(verificationData || {}).some((v) => v && (v.verified === true || v.linked === true || v.success === true));
 }
+
+const publicLeaderboardLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // x402 Payment Layer
 const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
@@ -2087,7 +2095,7 @@ app.get('/api/score', async (req, res) => {
 // Free: public leaderboard. Keep this route separate from the metered
 // /api/leaderboard/scores endpoint so the directory and workflow gauntlet do
 // not drift into the x402 paywall.
-app.get('/api/leaderboard', (req, res) => {
+app.get('/api/leaderboard', publicLeaderboardLimiter, (req, res) => {
   try {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
     const db = profileStore.getDb();
