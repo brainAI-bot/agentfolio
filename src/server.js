@@ -115,6 +115,13 @@ const publicLeaderboardLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const trustScoreLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // x402 Payment Layer
 const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
 const { HTTPFacilitatorClient } = require('@x402/core/server');
@@ -561,7 +568,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
 
 
 // ─── Trust Score API (dedicated endpoint, x402-protected for API traffic) ────────────────
-app.get('/api/profile/:id/trust-score', trustScorePaymentMiddleware, async (req, res) => {
+app.get('/api/profile/:id/trust-score', trustScoreLimiter, trustScorePaymentMiddleware, async (req, res) => {
   const profileId = req.params.id;
   const profileStore = require('./profile-store');
   try {

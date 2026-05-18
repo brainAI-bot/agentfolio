@@ -295,7 +295,7 @@ describe('explorer agent deep-link parity regression guard', () => {
     const trustScoreRoute = loaded.routeMap.get('GET /api/profile/:id/trust-score');
     assert.ok(pricingHandler, 'expected /api/x402/pricing handler to be registered');
     assert.ok(Array.isArray(trustScoreRoute), 'expected /api/profile/:id/trust-score to include x402 middleware and handler');
-    assert.strictEqual(trustScoreRoute.length, 2);
+    assert.ok(trustScoreRoute.length >= 3, 'expected trust-score route to include rate limit, x402 middleware, and handler');
 
     let jsonBody = null;
     const res = {
