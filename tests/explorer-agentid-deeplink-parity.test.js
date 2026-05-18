@@ -29,12 +29,17 @@ function loadServerWithMocks() {
   const fakeProfile = {
     id: 'agent_alice',
     name: 'Alice',
+    handle: 'alice',
     wallet: 'Auth11111111111111111111111111111111111111111',
     claimed_by: null,
+    claimed: 1,
+    hidden: 0,
+    status: 'active',
+    verification_data: JSON.stringify({ github: { verified: true } }),
     wallets: JSON.stringify({ solana: 'Auth11111111111111111111111111111111111111111' }),
     tags: JSON.stringify(['agents']),
     skills: JSON.stringify(['shipping']),
-    nft_avatar: JSON.stringify({ image: 'https://example.com/alice.png' }),
+    nft_avatar: JSON.stringify({ image: 'https://node1.irys.xyz/alice.png', permanent: true }),
     avatar: null,
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-02T00:00:00.000Z',
@@ -50,6 +55,26 @@ function loadServerWithMocks() {
       }
       if (sql.includes('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)')) {
         return { get() { return null; } };
+      }
+      if (sql.includes("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'satp_trust_scores'")) {
+        return { get() { return { name: 'satp_trust_scores' }; } };
+      }
+      if (sql.includes('PRAGMA table_info(satp_trust_scores)')) {
+        return { all() { return [{ name: 'overall_score' }, { name: 'level' }, { name: 'score_breakdown' }]; } };
+      }
+      if (sql.includes('FROM profiles p') && sql.includes('leaderboard_score')) {
+        return {
+          all() {
+            return [
+              {
+                ...fakeProfile,
+                leaderboard_score: 777,
+                leaderboard_level: 4,
+                leaderboard_breakdown: JSON.stringify({ trust: 777 }),
+              },
+            ];
+          },
+        };
       }
       throw new Error(`Unexpected SQL in test: ${sql}`);
     },
@@ -204,6 +229,54 @@ afterEach(() => {
 });
 
 describe('explorer agent deep-link parity regression guard', () => {
+  it('keeps /api/leaderboard as a free public route distinct from the paid scores route', async () => {
+    const loaded = loadServerWithMocks();
+    cleanup = loaded.restore;
+
+    const freeHandler = loaded.routeMap.get('GET /api/leaderboard');
+    const paidHandler = loaded.routeMap.get('GET /api/leaderboard/scores');
+    assert.ok(freeHandler, 'expected /api/leaderboard handler to be registered');
+    assert.ok(paidHandler, 'expected /api/leaderboard/scores handler to remain registered');
+    assert.notStrictEqual(freeHandler, paidHandler);
+
+    const req = { query: { limit: '1' } };
+    let statusCode = 200;
+    let jsonBody = null;
+    const res = {
+      status(code) { statusCode = code; return this; },
+      json(payload) { jsonBody = payload; return this; },
+    };
+
+    await freeHandler(req, res);
+
+    assert.strictEqual(statusCode, 200);
+    assert.ok(jsonBody);
+    assert.strictEqual(jsonBody.ok, true);
+    assert.strictEqual(jsonBody.limit, 1);
+    assert.strictEqual(jsonBody.count, 1);
+    assert.strictEqual(jsonBody.total, 1);
+    assert.strictEqual(jsonBody.leaderboard.length, 1);
+    assert.deepStrictEqual(jsonBody.leaderboard[0], {
+      agentId: 'agent_alice',
+      id: 'agent_alice',
+      name: 'Alice',
+      handle: 'alice',
+      avatar: 'https://gateway.irys.xyz/alice.png',
+      score: 777,
+      reputationScore: 777,
+      level: 4,
+      levelName: 'Trusted',
+      verificationLevel: 4,
+      verificationLabel: 'Trusted',
+      source: 'satp_trust_scores',
+      isBorn: true,
+      claimed: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(jsonBody, 'payment'), false);
+  });
+
   it('preserves public verification/platform shaping for /api/explorer/:agentId', async () => {
     const loaded = loadServerWithMocks();
     cleanup = loaded.restore;

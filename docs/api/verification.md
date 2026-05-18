@@ -786,28 +786,33 @@ DELETE /api/reviews/:id
 
 ## x402 Payment Flow
 
-Some endpoints require payment via the [x402 protocol](https://docs.x402.org).
+Some metered endpoints require payment via the [x402 protocol](https://docs.x402.org). The direct profile trust-score endpoint, GET /api/profile/:id/trust-score, is free.
 
 ### Check Paid Endpoints
 
 ```
-GET /api/x402/info
+GET /api/x402/pricing
 ```
 
 **Response:**
 ```json
 {
   "protocol": "x402",
-  "version": 2,
-  "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+  "network": "eip155:84532",
+  "currency": "USDC",
   "facilitator": "https://x402.org/facilitator",
-  "payTo": "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be",
+  "receivingAddress": "0x...",
   "endpoints": {
+    "free": [
+      { "path": "/api/profile/:id/trust-score", "method": "GET", "price": "free" },
+      { "path": "/api/leaderboard", "method": "GET", "price": "free" }
+    ],
     "paid": [
       {
-        "route": "GET /api/profile/:id/trust-score",
+        "path": "/api/score?id=<profileId>",
+        "method": "GET",
         "price": "$0.01",
-        "description": "Detailed SATP trust score with on-chain verification level and reputation breakdown"
+        "description": "Agent reputation score"
       }
     ]
   }
@@ -816,7 +821,7 @@ GET /api/x402/info
 
 ### Making a Paid Request
 
-Include the `X-Payment` header with a signed USDC payment:
+Include the `X-Payment` header with a signed USDC payment for a metered route:
 
 ```bash
 # Using @x402/fetch SDK (recommended)
@@ -824,8 +829,8 @@ npm install @x402/fetch
 
 # In your code:
 import { x402Fetch } from "@x402/fetch";
-const response = await x402Fetch("https://agentfolio.bot/api/profile/agent_brainkid/trust-score", {
-  payerWallet: yourSolanaKeypair
+const response = await x402Fetch("https://agentfolio.bot/api/score?id=agent_brainkid", {
+  payerWallet: yourWallet
 });
 ```
 
@@ -836,8 +841,8 @@ If you call a paid endpoint without payment, you'll get a `402 Payment Required`
   "error": "Payment Required",
   "x402": {
     "version": 2,
-    "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
-    "payTo": "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be",
+    "network": "eip155:84532",
+    "payTo": "0x...",
     "maxAmountRequired": "10000",
     "asset": "USDC",
     "facilitator": "https://x402.org/facilitator"

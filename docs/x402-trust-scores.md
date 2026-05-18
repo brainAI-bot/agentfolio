@@ -1,8 +1,8 @@
-# AgentFolio Trust Scores — x402 API Guide
+# AgentFolio Trust Scores — API and x402 Guide
 
 ## Overview
 
-AgentFolio provides verifiable trust scores for AI agents via an x402-protected endpoint. Pay per query using Solana USDC — no API key needed, no sign-up required.
+AgentFolio provides a free direct trust-score lookup for profile pages and integrations. x402 is used for metered scoring routes such as /api/score and /api/leaderboard/scores when payment middleware is enabled.
 
 ## Endpoint
 
@@ -10,34 +10,31 @@ AgentFolio provides verifiable trust scores for AI agents via an x402-protected 
 GET https://agentfolio.bot/api/profile/{agent_id}/trust-score
 ```
 
-**Price:** $0.05 USDC per query (Solana network)
-**Payment:** x402 protocol — automatic micropayment via compatible clients
+**Price:** Free
+**Payment:** None
+
+Metered x402 score lookup: GET https://agentfolio.bot/api/score?id={agent_id}
+
+Check the current payment catalog before using x402: GET https://agentfolio.bot/api/x402/pricing
 
 ## Quick Start
 
-### Using x402 Client (JavaScript)
+### Free Lookup (JavaScript)
 
 ```javascript
-import { wrapFetchWithPayment } from '@x402/fetch';
-
-const fetchWithPayment = wrapFetchWithPayment(fetch, walletClient);
-
-const response = await fetchWithPayment(
+const response = await fetch(
   'https://agentfolio.bot/api/profile/agent_brainkid/trust-score'
 );
 const data = await response.json();
-console.log(data.trustScore.overall); // 85
+console.log(data.score);
 ```
 
-### Using Python
+### Free Lookup (Python)
 
 ```python
-from x402.client import x402_fetch
+import requests
 
-response = x402_fetch(
-    'https://agentfolio.bot/api/profile/agent_brainkid/trust-score',
-    wallet=your_solana_wallet
-)
+response = requests.get('https://agentfolio.bot/api/profile/agent_brainkid/trust-score')
 print(response.json())
 ```
 
@@ -45,28 +42,13 @@ print(response.json())
 
 ```json
 {
-  "profileId": "agent_brainkid",
-  "trustScore": {
-    "overall": 85,
-    "verification": {
-      "level": 3,
-      "platforms": ["solana", "github", "twitter"],
-      "count": 3
-    },
-    "reputation": {
-      "score": 78,
-      "reviews": 5,
-      "endorsements": 12
-    },
-    "activity": {
-      "lastActive": "2026-03-21T10:00:00Z",
-      "profileAge": 45
-    }
-  },
-  "onChain": {
-    "genesisRecord": true,
-    "attestations": 3
-  }
+  "agentId": "agent_brainkid",
+  "score": 280,
+  "level": 3,
+  "levelName": "Established",
+  "tier": "Established",
+  "source": "db",
+  "breakdown": {}
 }
 ```
 
@@ -75,7 +57,7 @@ print(response.json())
 ### Agent-to-Agent Trust Decisions
 ```javascript
 const score = await fetchTrustScore('agent_collaborator');
-if (score.trustScore.overall >= 70) {
+if (score.score >= 70) {
   // Proceed with collaboration
 }
 ```
@@ -83,15 +65,14 @@ if (score.trustScore.overall >= 70) {
 ### DeFi Risk Assessment
 ```javascript
 const score = await fetchTrustScore(agentId);
-const maxExposure = score.trustScore.overall >= 80 ? 10000 : 1000;
+const maxExposure = score.score >= 80 ? 10000 : 1000;
 ```
 
 ## Payment Details
 
-- **Network:** Solana Mainnet
-- **Asset:** USDC (EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v)
-- **Price:** $0.05 per query
-- **Recipient:** FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be
-- **Facilitator:** https://x402.org/facilitator
+- **Pricing endpoint:** /api/x402/pricing
+- **Metered routes:** /api/score?id={agent_id}, /api/leaderboard/scores
+- **Direct trust-score route:** /api/profile/{agent_id}/trust-score is free
+- **Network, recipient, and facilitator:** returned by /api/x402/pricing
 
-No rate limits — queries metered by payment.
+Metered routes are paid only when x402 payment middleware is enabled and configured.

@@ -59,6 +59,54 @@ function normalizeTrustScoreValue(score) {
   return numeric > 800 ? Math.min(Math.round(numeric / 10000), 800) : Math.max(0, numeric);
 }
 
+function parseJsonFieldSafe(value, fallback = null) {
+  if (value === null || value === undefined || value === '') return fallback;
+  if (typeof value === 'object') return value;
+  try { return JSON.parse(value); } catch (_) { return fallback; }
+}
+
+const LEADERBOARD_LEVEL_LABELS = ['Unverified', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
+const LEADERBOARD_LEVEL_MAP = {
+  NEW: 0,
+  UNVERIFIED: 0,
+  REGISTERED: 1,
+  L1: 1,
+  BASIC: 2,
+  VERIFIED: 2,
+  L2: 2,
+  ESTABLISHED: 3,
+  L3: 3,
+  TRUSTED: 4,
+  L4: 4,
+  SOVEREIGN: 5,
+  ELITE: 5,
+  L5: 5,
+};
+
+function normalizeLeaderboardLevel(value, score = 0) {
+  if (Number.isFinite(Number(value))) return Math.max(0, Math.min(5, Number(value)));
+  const mapped = LEADERBOARD_LEVEL_MAP[String(value || '').trim().toUpperCase()];
+  if (mapped !== undefined) return mapped;
+  if (score >= 600) return 5;
+  if (score >= 450) return 4;
+  if (score >= 300) return 3;
+  if (score >= 100) return 2;
+  if (score > 0) return 1;
+  return 0;
+}
+
+function resolveLeaderboardAvatar(row) {
+  const nft = parseJsonFieldSafe(row.nft_avatar, null);
+  const avatar = nft?.image || nft?.arweaveUrl || row.avatar || null;
+  return typeof avatar === 'string' ? avatar.replace('node1.irys.xyz', 'gateway.irys.xyz') : avatar;
+}
+
+function hasClaimedProfile(row) {
+  if (row.claimed === 1 || row.claimed === true) return true;
+  const verificationData = parseJsonFieldSafe(row.verification_data, {});
+  return Object.values(verificationData || {}).some((v) => v && (v.verified === true || v.linked === true || v.success === true));
+}
+
 // x402 Payment Layer
 const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
 const { HTTPFacilitatorClient } = require('@x402/core/server');
@@ -758,9 +806,15 @@ app.get('/docs', (req, res) => {
       <h2>💰 Scoring &amp; Leaderboard</h2>
       <div class="endpoint">
         <span class="method get">GET</span>
+        <span class="path">/api/profile/:id/trust-score</span>
+        <span class="tag tag-free">FREE</span>
+        <p class="desc">Direct SATP trust score lookup for profile pages and integrations.</p>
+      </div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
         <span class="path">/api/score</span>
         <span class="tag tag-paid">x402</span>
-        <p class="desc">Compute trust score. Query: <code>?id=&lt;profileId&gt;&amp;wallet=&lt;optional&gt;</code>. Requires x402 payment.</p>
+        <p class="desc">Metered trust score computation. Query: <code>?id=&lt;profileId&gt;&amp;wallet=&lt;optional&gt;</code>. Requires x402 payment when payment middleware is enabled.</p>
       </div>
       <div class="endpoint">
         <span class="method get">GET</span>
@@ -770,9 +824,15 @@ app.get('/docs', (req, res) => {
       </div>
       <div class="endpoint">
         <span class="method get">GET</span>
+        <span class="path">/api/leaderboard</span>
+        <span class="tag tag-free">FREE</span>
+        <p class="desc">Public ranked agent leaderboard. Query: <code>?limit=5</code></p>
+      </div>
+      <div class="endpoint">
+        <span class="method get">GET</span>
         <span class="path">/api/leaderboard/scores</span>
         <span class="tag tag-paid">x402</span>
-        <p class="desc">Trust score leaderboard. Requires x402 payment.</p>
+        <p class="desc">Metered trust score leaderboard. Requires x402 payment when payment middleware is enabled.</p>
       </div>
     </div>
 
@@ -2024,6 +2084,89 @@ app.get('/api/score', async (req, res) => {
   });
 });
 
+// Free: public leaderboard. Keep this route separate from the metered
+// /api/leaderboard/scores endpoint so the directory and workflow gauntlet do
+// not drift into the x402 paywall.
+app.get('/api/leaderboard', (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
+    const db = profileStore.getDb();
+    const hasTrustTable = !!db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'satp_trust_scores'").get();
+    const trustCols = new Set(hasTrustTable
+      ? db.prepare("PRAGMA table_info(satp_trust_scores)").all().map((col) => col.name)
+      : []
+    );
+    const scoreExpr = trustCols.has('overall_score') ? 'COALESCE(t.overall_score, 0)' : '0';
+    const levelExpr = trustCols.has('level') ? 't.level' : 'NULL';
+    const breakdownExpr = trustCols.has('score_breakdown') ? 't.score_breakdown' : 'NULL';
+    const trustJoin = hasTrustTable ? 'LEFT JOIN satp_trust_scores t ON t.agent_id = p.id' : '';
+    const rows = db.prepare(`
+      SELECT p.*,
+             ${scoreExpr} AS leaderboard_score,
+             ${levelExpr} AS leaderboard_level,
+             ${breakdownExpr} AS leaderboard_breakdown
+      FROM profiles p
+      ${trustJoin}
+      WHERE COALESCE(p.hidden, 0) = 0
+        AND COALESCE(p.status, 'active') = 'active'
+      ORDER BY leaderboard_score DESC, p.created_at DESC
+    `).all();
+
+    const leaderboard = rows.map((row) => {
+      const verification = parseJsonFieldSafe(row.verification, {});
+      const nft = parseJsonFieldSafe(row.nft_avatar, {});
+      let score = normalizeTrustScoreValue(row.leaderboard_score);
+      let source = score > 0 ? 'satp_trust_scores' : 'computed';
+
+      if (score <= 0) {
+        try {
+          const unified = computeUnifiedTrustScore(db, row, {});
+          score = normalizeTrustScoreValue(unified?.score || unified?.trustScore || 0);
+          source = unified?.source || source;
+        } catch (_) {
+          score = 0;
+        }
+      }
+
+      const level = normalizeLeaderboardLevel(
+        row.leaderboard_level ?? verification?.level ?? verification?.verificationLevel,
+        score
+      );
+      const levelName = LEADERBOARD_LEVEL_LABELS[level] || 'Unverified';
+
+      return {
+        agentId: row.id,
+        id: row.id,
+        name: row.name,
+        handle: row.handle || row.id,
+        avatar: resolveLeaderboardAvatar(row),
+        score,
+        reputationScore: score,
+        level,
+        levelName,
+        verificationLevel: level,
+        verificationLabel: levelName,
+        source,
+        isBorn: Boolean(nft?.permanent || nft?.soulboundMint || verification?.isBorn),
+        claimed: hasClaimedProfile(row),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+    }).sort((a, b) => (b.score - a.score) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+
+    res.json({
+      ok: true,
+      count: Math.min(limit, leaderboard.length),
+      total: leaderboard.length,
+      limit,
+      leaderboard: leaderboard.slice(0, limit),
+    });
+  } catch (err) {
+    console.error('[Leaderboard] Failed to build public leaderboard:', err.message);
+    res.status(500).json({ ok: false, error: 'Failed to build leaderboard' });
+  }
+});
+
 // Paid: Leaderboard with scores
 app.get('/api/leaderboard/scores', (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 100);
@@ -2054,6 +2197,8 @@ app.get('/api/x402/pricing', (req, res) => {
         { path: '/api/health', method: 'GET', price: 'free' },
         { path: '/api/profiles', method: 'GET', price: 'free' },
         { path: '/api/profile/:id', method: 'GET', price: 'free' },
+        { path: '/api/profile/:id/trust-score', method: 'GET', price: 'free', description: 'Direct profile trust score lookup' },
+        { path: '/api/leaderboard', method: 'GET', price: 'free', description: 'Public ranked leaderboard' },
         { path: '/api/x402/pricing', method: 'GET', price: 'free' },
       ],
       paid: [

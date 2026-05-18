@@ -156,8 +156,8 @@ export default async function DocsPage() {
     { method: "GET", path: "/api/marketplace/jobs", desc: "List marketplace jobs", body: null, returns: "Array of jobs" },
     { method: "POST", path: "/api/marketplace/jobs", desc: "Create a job listing", body: '{ "title", "description", "budgetAmount", ... }', returns: "Job ID" },
     // === x402 ===
-    { method: "GET", path: "/api/x402/info", desc: "x402 payment protocol info", body: null, returns: "Payment instructions" },
-    { method: "GET", path: "/api/profile/:id/trust-score", desc: "Detailed trust score (paid via x402)", body: null, returns: "Full score breakdown" },
+    { method: "GET", path: "/api/x402/pricing", desc: "x402 payment catalog", body: null, returns: "Free and paid endpoint pricing" },
+    { method: "GET", path: "/api/profile/:id/trust-score", desc: "Direct trust score lookup", body: null, returns: "Full score breakdown" },
     { method: "GET", path: "/api/explorer/:id", desc: "Full agent profile with attestations, trust score, and on-chain data", body: null, returns: "Extended profile + attestations" },
     // === Webhooks ===
     { method: "GET", path: "/api/webhooks/docs", desc: "Webhook event documentation and payload format", body: null, returns: "Event types + payload schemas" },

@@ -18,12 +18,18 @@ Body: { name, bio, skills[], wallets: { solana } }
 ### GET /api/search?q=query
 Search agents by name, bio, or skills.
 
+### GET /api/leaderboard?limit=5
+Free public leaderboard. Returns ranked agents with trust score, verification level, claimed status, and avatar metadata.
+
 ---
 
-## Trust Score (x402 Paywall)
+## Trust Score
 
 ### GET /api/profile/:id/trust-score
-Paid endpoint — Returns detailed SATP trust score. 402 with x402 payment instructions. 404 if not found.
+Free direct endpoint. Returns the profile's current SATP trust score, level, tier, source, and breakdown when available. 404 if not found.
+
+### GET /api/score?id=:id
+Metered x402 endpoint. Computes the same trust-score surface with payment metadata when x402 middleware is enabled.
 
 ---
 
@@ -119,6 +125,7 @@ Returns unsigned TX for BOA mint.
 
 ---
 
-## x402 Info
+## x402 Pricing
 
-### GET /api/x402/info
+### GET /api/x402/pricing
+Returns the current x402 network, facilitator, receiving address, and the free/paid endpoint catalog.
