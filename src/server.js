@@ -2160,6 +2160,7 @@ app.get('/api/leaderboard', (req, res) => {
       total: leaderboard.length,
       limit,
       leaderboard: leaderboard.slice(0, limit),
+      payment: { required: false, paidEndpoint: '/api/leaderboard/scores' },
     });
   } catch (err) {
     console.error('[Leaderboard] Failed to build public leaderboard:', err.message);

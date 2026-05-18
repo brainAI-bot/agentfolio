@@ -274,7 +274,10 @@ describe('explorer agent deep-link parity regression guard', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-02T00:00:00.000Z',
     });
-    assert.strictEqual(Object.prototype.hasOwnProperty.call(jsonBody, 'payment'), false);
+    assert.deepStrictEqual(jsonBody.payment, {
+      required: false,
+      paidEndpoint: '/api/leaderboard/scores',
+    });
   });
 
   it('preserves public verification/platform shaping for /api/explorer/:agentId', async () => {
