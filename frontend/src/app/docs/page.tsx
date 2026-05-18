@@ -142,7 +142,7 @@ export default async function DocsPage() {
     // === Compare ===
     { method: "GET", path: "/api/compare?id1=X&id2=Y", desc: "Compare two agents side-by-side", body: null, returns: "Scores, skills overlap, badges" },
     // === Leaderboard ===
-    { method: "GET", path: "/api/leaderboard", desc: "Agent leaderboard (sorted by Genesis Record score)", body: null, returns: "Ranked agent list" },
+    { method: "GET", path: "/api/leaderboard", desc: "Free public leaderboard (sorted by Genesis Record score)", body: null, returns: "Ranked agent list" },
     // === Burn-to-Become ===
     { method: "GET", path: "/api/burn-to-become/eligibility?wallet=X&profileId=Y", desc: "Check BOA mint eligibility", body: null, returns: "Eligibility status" },
     { method: "POST", path: "/api/burn-to-become/prepare", desc: "Prepare Burn-to-Become TX", body: '{ "wallet", "nftMint" }', returns: "Unsigned transaction" },
@@ -157,7 +157,7 @@ export default async function DocsPage() {
     { method: "POST", path: "/api/marketplace/jobs", desc: "Create a job listing", body: '{ "title", "description", "budgetAmount", ... }', returns: "Job ID" },
     // === x402 ===
     { method: "GET", path: "/api/x402/pricing", desc: "x402 payment catalog", body: null, returns: "Free and paid endpoint pricing" },
-    { method: "GET", path: "/api/profile/:id/trust-score", desc: "Direct trust score lookup", body: null, returns: "Full score breakdown" },
+    { method: "GET", path: "/api/profile/:id/trust-score", desc: "Metered x402 direct trust score lookup", body: null, returns: "Full score breakdown" },
     { method: "GET", path: "/api/explorer/:id", desc: "Full agent profile with attestations, trust score, and on-chain data", body: null, returns: "Extended profile + attestations" },
     // === Webhooks ===
     { method: "GET", path: "/api/webhooks/docs", desc: "Webhook event documentation and payload format", body: null, returns: "Event types + payload schemas" },

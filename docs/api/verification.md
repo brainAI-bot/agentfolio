@@ -786,7 +786,7 @@ DELETE /api/reviews/:id
 
 ## x402 Payment Flow
 
-Some metered endpoints require payment via the [x402 protocol](https://docs.x402.org). The direct profile trust-score endpoint, GET /api/profile/:id/trust-score, is free.
+Some metered endpoints require payment via the [x402 protocol](https://docs.x402.org). The direct profile trust-score endpoint, GET /api/profile/:id/trust-score, is part of the paid trust-score contract when x402 is enabled.
 
 ### Check Paid Endpoints
 
@@ -804,7 +804,7 @@ GET /api/x402/pricing
   "receivingAddress": "0x...",
   "endpoints": {
     "free": [
-      { "path": "/api/profile/:id/trust-score", "method": "GET", "price": "free" },
+      { "path": "/api/profile/:id", "method": "GET", "price": "free" },
       { "path": "/api/leaderboard", "method": "GET", "price": "free" }
     ],
     "paid": [
@@ -813,6 +813,18 @@ GET /api/x402/pricing
         "method": "GET",
         "price": "$0.01",
         "description": "Agent reputation score"
+      },
+      {
+        "path": "/api/profile/:id/trust-score",
+        "method": "GET",
+        "price": "$0.01",
+        "description": "Direct profile trust score alias"
+      },
+      {
+        "path": "/api/leaderboard/scores",
+        "method": "GET",
+        "price": "$0.05",
+        "description": "Full scored leaderboard"
       }
     ]
   }

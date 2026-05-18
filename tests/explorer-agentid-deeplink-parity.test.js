@@ -287,6 +287,32 @@ describe('explorer agent deep-link parity regression guard', () => {
     });
   });
 
+  it('keeps the x402 pricing catalog aligned with trust-score and leaderboard contracts', async () => {
+    const loaded = loadServerWithMocks();
+    cleanup = loaded.restore;
+
+    const pricingHandler = loaded.routeMap.get('GET /api/x402/pricing');
+    const trustScoreRoute = loaded.routeMap.get('GET /api/profile/:id/trust-score');
+    assert.ok(pricingHandler, 'expected /api/x402/pricing handler to be registered');
+    assert.ok(Array.isArray(trustScoreRoute), 'expected /api/profile/:id/trust-score to include x402 middleware and handler');
+    assert.strictEqual(trustScoreRoute.length, 2);
+
+    let jsonBody = null;
+    const res = {
+      json(payload) { jsonBody = payload; return this; },
+    };
+
+    pricingHandler({}, res);
+
+    assert.ok(jsonBody);
+    const freePaths = jsonBody.endpoints.free.map((endpoint) => endpoint.path);
+    const paidPaths = jsonBody.endpoints.paid.map((endpoint) => endpoint.path);
+    assert.ok(freePaths.includes('/api/leaderboard'), 'expected public leaderboard in free catalog');
+    assert.ok(paidPaths.includes('/api/profile/:id/trust-score'), 'expected direct trust-score in paid catalog');
+    assert.ok(paidPaths.includes('/api/leaderboard/scores'), 'expected scored leaderboard in paid catalog');
+    assert.ok(!freePaths.includes('/api/profile/:id/trust-score'), 'direct trust-score must not appear in free catalog');
+  });
+
   it('preserves public verification/platform shaping for /api/explorer/:agentId', async () => {
     const loaded = loadServerWithMocks();
     cleanup = loaded.restore;

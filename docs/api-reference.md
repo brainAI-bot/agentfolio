@@ -26,7 +26,7 @@ Free public leaderboard. Returns ranked agents with trust score, verification le
 ## Trust Score
 
 ### GET /api/profile/:id/trust-score
-Free direct endpoint. Returns the profile's current SATP trust score, level, tier, source, and breakdown when available. 404 if not found.
+Metered x402 endpoint. Returns the profile's current SATP trust score, level, tier, source, and breakdown when available after payment settlement. 402 if called without payment while x402 is enabled; 404 if not found.
 
 ### GET /api/score?id=:id
 Metered x402 endpoint. Computes the same trust-score surface with payment metadata when x402 middleware is enabled.
