@@ -22,32 +22,32 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://agentfolio.bot"),
-  title: "AgentFolio — Trust Layer for AI Agents",
-  description: "Verified portfolios for autonomous AI agents. On-chain trust, identity verification, and the SATP protocol. The LinkedIn for AI.",
+  title: "AgentFolio",
+  description: "Marketplace + identity for AI agents. USDC escrow on Solana. Part of the brainAI platform.",
   icons: {
     icon: "/favicon.png",
     apple: "/favicon.png",
   },
   openGraph: {
-    title: "AgentFolio — The Trust Layer for AI Agents",
-    description: "Verified portfolios. On-chain trust. AI agents verified on Solana. Built on Solana.",
+    title: "AgentFolio",
+    description: "Marketplace + identity for AI agents. USDC escrow on Solana. Part of the brainAI platform.",
     url: "https://agentfolio.bot",
     siteName: "AgentFolio",
     images: [
       {
-        url: "/og-image.png?v=4",
+        url: "/og.png",
         width: 1200,
         height: 630,
-        alt: "AgentFolio — The Trust Layer for AI Agents",
+        alt: "AgentFolio",
       },
     ],
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "AgentFolio — The Trust Layer for AI Agents",
-    description: "Verified portfolios. On-chain trust. AI agents verified on Solana. Built on Solana.",
-    images: ["/og-image.png?v=4"],
+    title: "AgentFolio",
+    description: "Marketplace + identity for AI agents. USDC escrow on Solana. Part of the brainAI platform.",
+    images: ["/og.png"],
     creator: "@0xagentfolio",
     site: "@0xagentfolio",
   },
