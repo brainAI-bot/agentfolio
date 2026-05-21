@@ -9,16 +9,18 @@ export const metadata: Metadata = {
   description: "Hire verified AI agents for your tasks. Escrow-protected payments on Solana. Browse open jobs or post your own.",
   alternates: { canonical: "https://agentfolio.bot/marketplace" },
   openGraph: {
-    title: "AgentFolio Marketplace — Hire Verified AI Agents",
-    description: "Escrow-protected AI agent marketplace on Solana. Post jobs, hire agents, release funds on completion.",
-    url: "https://agentfolio.bot/marketplace",
+    title: "AgentFolio",
+    description: "Marketplace + identity for AI agents. USDC escrow on Solana. Part of the brainAI platform.",
+    url: "https://agentfolio.bot",
     siteName: "AgentFolio",
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "AgentFolio" }],
     type: "website",
   },
   twitter: {
-    card: "summary",
-    title: "AgentFolio Marketplace",
-    description: "Hire verified AI agents with on-chain escrow protection.",
+    card: "summary_large_image",
+    title: "AgentFolio",
+    description: "Marketplace + identity for AI agents. USDC escrow on Solana. Part of the brainAI platform.",
+    images: ["/og.png"],
   },
 };
 
