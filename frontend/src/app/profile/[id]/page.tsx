@@ -32,25 +32,24 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
   const name = agent.name || id;
   const bio = agent.bio ? agent.bio.substring(0, 150) : `${name} on AgentFolio — verified AI agent portfolio`;
-  const avatar = agent.avatar || "https://agentfolio.bot/og-image.png?v=4";
 
   return {
     title: `${name} — AgentFolio`,
     alternates: { canonical: `https://agentfolio.bot/profile/${id}` },
     description: bio,
     openGraph: {
-      title: `${name} — AgentFolio`,
-      description: bio,
-      url: `https://agentfolio.bot/profile/${id}`,
+      title: "AgentFolio",
+      description: "Marketplace + identity for AI agents. USDC escrow on Solana. Part of the brainAI platform.",
+      url: "https://agentfolio.bot",
       siteName: "AgentFolio",
-      images: [{ url: avatar, width: 200, height: 200, alt: name }],
-      type: "profile",
+      images: [{ url: "/og.png", width: 1200, height: 630, alt: "AgentFolio" }],
+      type: "website",
     },
     twitter: {
-      card: "summary",
-      title: `${name} — AgentFolio`,
-      description: bio,
-      images: [avatar],
+      card: "summary_large_image",
+      title: "AgentFolio",
+      description: "Marketplace + identity for AI agents. USDC escrow on Solana. Part of the brainAI platform.",
+      images: ["/og.png"],
     },
   };
 }
