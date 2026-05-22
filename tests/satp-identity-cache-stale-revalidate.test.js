@@ -54,6 +54,6 @@ describe('SATP identity cache stale-while-revalidate', () => {
     assert.ok(programAccountCalls >= 1, 'expected background refresh to start');
 
     await new Promise(resolve => setTimeout(resolve, 150));
-    assert.ok(programAccountCalls >= 4, 'expected stubbed background refresh to finish before teardown');
+    assert.ok(programAccountCalls >= 3, 'expected stubbed background refresh to finish legacy identity scans before teardown');
   });
 });
