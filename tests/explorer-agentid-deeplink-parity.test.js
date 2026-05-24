@@ -307,9 +307,14 @@ describe('explorer agent deep-link parity regression guard', () => {
     assert.ok(jsonBody);
     const freePaths = jsonBody.endpoints.free.map((endpoint) => endpoint.path);
     const paidPaths = jsonBody.endpoints.paid.map((endpoint) => endpoint.path);
+    const paidByPath = new Map(jsonBody.endpoints.paid.map((endpoint) => [endpoint.path, endpoint]));
     assert.ok(freePaths.includes('/api/leaderboard'), 'expected public leaderboard in free catalog');
+    assert.ok(paidPaths.includes('/api/score?id=<profileId>'), 'expected query score lookup in paid catalog');
     assert.ok(paidPaths.includes('/api/profile/:id/trust-score'), 'expected direct trust-score in paid catalog');
     assert.ok(paidPaths.includes('/api/leaderboard/scores'), 'expected scored leaderboard in paid catalog');
+    assert.strictEqual(paidByPath.get('/api/score?id=<profileId>').price, '$0.01');
+    assert.strictEqual(paidByPath.get('/api/profile/:id/trust-score').price, '$0.01');
+    assert.strictEqual(paidByPath.get('/api/leaderboard/scores').price, '$0.05');
     assert.ok(!freePaths.includes('/api/profile/:id/trust-score'), 'direct trust-score must not appear in free catalog');
   });
 

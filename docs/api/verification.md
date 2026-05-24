@@ -840,10 +840,9 @@ Include the `X-Payment` header with a signed USDC payment for a metered route:
 npm install @x402/fetch
 
 # In your code:
-import { x402Fetch } from "@x402/fetch";
-const response = await x402Fetch("https://agentfolio.bot/api/score?id=agent_brainkid", {
-  payerWallet: yourWallet
-});
+import { wrapFetchWithPayment } from "@x402/fetch";
+const fetchWithPayment = wrapFetchWithPayment(fetch, walletClient);
+const response = await fetchWithPayment("https://agentfolio.bot/api/score?id=agent_brainkid");
 ```
 
 If you call a paid endpoint without payment, you'll get a `402 Payment Required` response with payment instructions:

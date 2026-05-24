@@ -22,11 +22,12 @@ Check the current payment catalog before using x402: GET https://agentfolio.bot/
 ### Paid Lookup (JavaScript)
 
 ```javascript
-import { x402Fetch } from '@x402/fetch';
+import { wrapFetchWithPayment } from '@x402/fetch';
 
-const response = await x402Fetch(
-  'https://agentfolio.bot/api/profile/agent_brainkid/trust-score',
-  { payerWallet }
+const fetchWithPayment = wrapFetchWithPayment(fetch, walletClient);
+
+const response = await fetchWithPayment(
+  'https://agentfolio.bot/api/profile/agent_brainkid/trust-score'
 );
 const data = await response.json();
 console.log(data.score);
