@@ -2061,7 +2061,10 @@ app.get('/api/satp/explorer/agents', async (req, res) => {
   }
 });
 app.get('/api/satp/explorer', (req, res) => {
-  res.redirect(301, '/api/satp/explorer/agents' + (req.url.includes('?') ? '?' + req.url.split('?')[1] : ''));
+  const requestUrl = req.originalUrl || req.url || '';
+  const queryIndex = requestUrl.indexOf('?');
+  const queryString = queryIndex >= 0 ? requestUrl.slice(queryIndex) : '';
+  res.redirect(301, '/api/satp/explorer/agents' + queryString);
 });
 app.get('/api/x402/trust-score', (req, res) => {
   const agentId = req.query.agent_id || req.query.agentId || req.query.id;
