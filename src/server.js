@@ -19,6 +19,12 @@ const { registerSATPWriteRoutes } = require('./routes/satp-write-api');
 
 // Profile Store (SQLite-backed persistent profiles, endorsements, reviews)
 const profileStore = require('./profile-store');
+const {
+  DID_METHOD,
+  createDID,
+  resolveDID,
+  getDIDMethodSpec,
+} = require('./lib/did');
 
 // Scoring module
 const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainData } = require('./scoring');
@@ -64,6 +70,58 @@ function parseJsonFieldSafe(value, fallback = null) {
   if (value === null || value === undefined || value === '') return fallback;
   if (typeof value === 'object') return value;
   try { return JSON.parse(value); } catch (_) { return fallback; }
+}
+
+function getRequestBaseUrl(req) {
+  const host = req.get('host') || 'agentfolio.bot';
+  const protocol = host.includes('localhost') || host.startsWith('127.')
+    ? req.protocol
+    : 'https';
+  return `${protocol}://${host}`;
+}
+
+function normalizeDidProfile(row) {
+  if (!row) return null;
+
+  const wallets = parseJsonFieldSafe(row.wallets, {});
+  if (row.wallet && !wallets.solana) wallets.solana = row.wallet;
+
+  const links = parseJsonFieldSafe(row.links, {});
+  if (row.github && !links.github) links.github = row.github;
+  if (row.twitter && !links.twitter && !links.x) links.twitter = row.twitter;
+  if (row.website && !links.website) links.website = row.website;
+
+  return {
+    ...row,
+    bio: row.bio || row.description || '',
+    wallets,
+    links,
+    verification: parseJsonFieldSafe(row.verification || row.verification_data, {}),
+    verificationData: parseJsonFieldSafe(row.verification_data, {}),
+    skills: parseJsonFieldSafe(row.skills || row.capabilities, []),
+  };
+}
+
+async function loadDidProfile(id) {
+  const rawId = String(id || '').trim();
+  if (!rawId) return null;
+
+  const db = profileStore.getDb();
+  let row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(rawId);
+  if (!row) row = db.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(rawId);
+  if (!row && !rawId.startsWith('agent_')) {
+    row = db.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + rawId.toLowerCase().replace(/[^a-z0-9_-]/g, ''));
+  }
+
+  return normalizeDidProfile(row);
+}
+
+function getProfileColumns(db) {
+  try {
+    return new Set(db.prepare('PRAGMA table_info(profiles)').all().map((col) => col.name));
+  } catch (_) {
+    return new Set();
+  }
 }
 
 const LEADERBOARD_LEVEL_LABELS = ['Unverified', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
@@ -386,6 +444,63 @@ app.get('/.well-known/did.json', (req, res) => {
   res.setHeader('Content-Type', 'application/did+json');
   res.setHeader('Cache-Control', 'public, max-age=3600');
   res.json(didDocument);
+});
+
+app.get('/api/did/method', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.json(getDIDMethodSpec());
+});
+
+app.get('/api/did/resolve', async (req, res) => {
+  const did = String(req.query.did || '').trim();
+  if (!did) return res.status(400).json({ error: 'Missing did parameter' });
+
+  try {
+    const resolution = await resolveDID(did, loadDidProfile, getRequestBaseUrl(req));
+    const error = resolution.didResolutionMetadata?.error;
+
+    res.setHeader('Content-Type', 'application/did+ld+json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (error) return res.status(error === 'notFound' ? 404 : 400).json(resolution);
+    return res.json(resolution);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/did/directory', (req, res) => {
+  try {
+    const db = profileStore.getDb();
+    const columns = getProfileColumns(db);
+    const where = [];
+    const params = [];
+
+    if (columns.has('status')) {
+      where.push('status = ?');
+      params.push(String(req.query.status || 'active'));
+    }
+    if (columns.has('hidden')) where.push('(hidden = 0 OR hidden IS NULL)');
+
+    const orderBy = columns.has('trust_score') ? 'trust_score DESC' : 'created_at DESC';
+    const parsedLimit = Number.parseInt(String(req.query.limit || '100'), 10);
+    const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 500) : 100;
+    const sql = `SELECT * FROM profiles${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY ${orderBy} LIMIT ?`;
+    const profiles = db.prepare(sql).all(...params, limit).map(normalizeDidProfile);
+    const baseUrl = getRequestBaseUrl(req);
+    const agents = profiles.map((profile) => ({
+      did: createDID(profile.id),
+      name: profile.name,
+      handle: profile.handle || null,
+      didDocument: `${baseUrl}/api/did/resolve?did=${encodeURIComponent(createDID(profile.id))}`,
+      erc8004: `${baseUrl}/api/profile/${encodeURIComponent(profile.id)}/erc8004`,
+      profile: `${baseUrl}/profile/${encodeURIComponent(profile.id)}`,
+    }));
+
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    return res.json({ method: DID_METHOD, count: agents.length, limit, agents });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
 });
 
 // Explorer API — /api/explorer/agents, /stats, /leaderboard, /search (MUST be before :agentId catch-all)

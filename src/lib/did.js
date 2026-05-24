@@ -179,13 +179,13 @@ function generateDIDDocument(profile, baseUrl = 'https://agentfolio.bot') {
   }
   
   // Twitter/X
-  if (profile.links?.twitter || verification.twitter?.verified) {
-    const xHandle = profile.links?.twitter?.replace(/https?:\/\/(www\.)?(twitter|x)\.com\//, '') ||
+  if (profile.links?.x || profile.links?.twitter || verification.twitter?.verified) {
+    const xHandle = (profile.links?.x || profile.links?.twitter || '').replace(/https?:\/\/(www\.)?(twitter|x)\.com\//, '') ||
                           verification.twitter?.handle;
     document.service.push({
       id: `${did}#twitter`,
       type: 'LinkedSocial',
-      serviceEndpoint: `https://x.com/${twitterHandle}`
+      serviceEndpoint: `https://x.com/${xHandle}`
     });
   }
   
@@ -201,8 +201,9 @@ function generateDIDDocument(profile, baseUrl = 'https://agentfolio.bot') {
   // Add alsoKnownAs for linked identities
   document.alsoKnownAs = [];
   
-  if (profile.links?.x) {
-    document.alsoKnownAs.push(`https://x.com/${profile.links.twitter.replace(/https?:\/\/(www\.)?(twitter|x)\.com\//, '')}`);
+  if (profile.links?.x || profile.links?.twitter) {
+    const xHandle = (profile.links.x || profile.links.twitter).replace(/https?:\/\/(www\.)?(twitter|x)\.com\//, '');
+    document.alsoKnownAs.push(`https://x.com/${xHandle}`);
   }
   if (profile.links?.github) {
     document.alsoKnownAs.push(profile.links.github);

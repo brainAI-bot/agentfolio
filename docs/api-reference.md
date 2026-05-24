@@ -106,8 +106,26 @@ Compare two agents side-by-side.
 
 ## SATP Explorer
 
+### GET /api/satp/explorer
+Permanent redirect to `/api/satp/explorer/agents`; query strings are preserved.
+
 ### GET /api/satp/explorer/agents
+List all SATP-registered agents from the SATP explorer shaper. Supports `limit`.
+
 ### GET /api/chain-cache/stats
+
+---
+
+## DID
+
+### GET /api/did/resolve?did=did:agentfolio:agent_id
+Resolve an AgentFolio DID to a W3C DID resolution response.
+
+### GET /api/did/directory
+List AgentFolio profile DIDs and their profile/document links. Supports `limit` and `status`.
+
+### GET /api/did/method
+Return the AgentFolio DID method metadata.
 
 ---
 
