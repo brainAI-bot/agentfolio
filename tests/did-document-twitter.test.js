@@ -13,6 +13,6 @@ describe('DID document linked social generation', () => {
 
     const twitterService = doc.service.find((service) => service.id.endsWith('#twitter'));
     assert.equal(twitterService.serviceEndpoint, 'https://x.com/example');
-    assert.ok(doc.alsoKnownAs.includes('https://x.com/example'));
+    assert.deepEqual(doc.alsoKnownAs, ['https://x.com/example']);
   });
 });

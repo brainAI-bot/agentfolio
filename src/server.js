@@ -180,6 +180,13 @@ const trustScoreLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const didDirectoryLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // x402 Payment Layer
 const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
 const { HTTPFacilitatorClient } = require('@x402/core/server');
@@ -468,7 +475,7 @@ app.get('/api/did/resolve', async (req, res) => {
   }
 });
 
-app.get('/api/did/directory', (req, res) => {
+app.get('/api/did/directory', didDirectoryLimiter, (req, res) => {
   try {
     const db = profileStore.getDb();
     const columns = getProfileColumns(db);

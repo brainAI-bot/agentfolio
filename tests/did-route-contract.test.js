@@ -10,7 +10,7 @@ describe('DID route contract regression guard', () => {
 
     assert.ok(source.includes("app.get('/api/did/resolve'"));
     assert.ok(source.includes('await resolveDID(did, loadDidProfile, getRequestBaseUrl(req))'));
-    assert.ok(source.includes("app.get('/api/did/directory'"));
+    assert.ok(source.includes("app.get('/api/did/directory', didDirectoryLimiter"));
     assert.ok(source.includes('didDocument: `${baseUrl}/api/did/resolve?did=${encodeURIComponent(createDID(profile.id))}`'));
     assert.ok(source.includes("app.get('/api/did/method'"));
   });
