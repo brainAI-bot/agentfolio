@@ -458,7 +458,7 @@ app.get('/api/did/method', (req, res) => {
   res.json(getDIDMethodSpec());
 });
 
-app.get('/api/did/resolve', async (req, res) => {
+app.get('/api/did/resolve', didDirectoryLimiter, async (req, res) => {
   const did = String(req.query.did || '').trim();
   if (!did) return res.status(400).json({ error: 'Missing did parameter' });
 

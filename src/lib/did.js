@@ -68,6 +68,29 @@ function isAgentFolioDID(did) {
   return parsed && parsed.method === DID_METHOD;
 }
 
+function normalizeXHandle(value) {
+  if (typeof value !== 'string') return '';
+
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+
+  try {
+    const url = new URL(trimmed);
+    const hostname = url.hostname.toLowerCase();
+    const isXHost = hostname === 'x.com' || hostname === 'www.x.com';
+    const isTwitterHost = hostname === 'twitter.com' || hostname === 'www.twitter.com';
+    if (!isXHost && !isTwitterHost) return '';
+
+    const handle = url.pathname.split('/').filter(Boolean)[0] || '';
+    return normalizeXHandle(handle);
+  } catch (_) {
+    // Treat non-URL values as plain handles below.
+  }
+
+  const handle = trimmed.replace(/^@+/, '').split(/[/?#]/)[0];
+  return /^[A-Za-z0-9_]{1,15}$/.test(handle) ? handle : '';
+}
+
 /**
  * Generate a W3C DID Document from an AgentFolio profile
  * @param {object} profile - The AgentFolio profile object
@@ -178,10 +201,11 @@ function generateDIDDocument(profile, baseUrl = 'https://agentfolio.bot') {
     });
   }
   
+  const xHandle = normalizeXHandle(profile.links?.x || profile.links?.twitter)
+    || normalizeXHandle(verification.twitter?.handle);
+
   // Twitter/X
-  if (profile.links?.x || profile.links?.twitter || verification.twitter?.verified) {
-    const xHandle = (profile.links?.x || profile.links?.twitter || '').replace(/https?:\/\/(www\.)?(twitter|x)\.com\//, '') ||
-                          verification.twitter?.handle;
+  if (xHandle) {
     document.service.push({
       id: `${did}#twitter`,
       type: 'LinkedSocial',
@@ -201,8 +225,7 @@ function generateDIDDocument(profile, baseUrl = 'https://agentfolio.bot') {
   // Add alsoKnownAs for linked identities
   document.alsoKnownAs = [];
   
-  if (profile.links?.x || profile.links?.twitter) {
-    const xHandle = (profile.links.x || profile.links.twitter).replace(/https?:\/\/(www\.)?(twitter|x)\.com\//, '');
+  if (xHandle) {
     document.alsoKnownAs.push(`https://x.com/${xHandle}`);
   }
   if (profile.links?.github) {
