@@ -23,7 +23,7 @@ const crypto = require('crypto');
 // Import SATP SDK (adjust path for prod deployment)
 let SATPSDK;
 try {
-  SATPSDK = require('../../satp-client/src/index').SATPSDK || require('../../satp-client/src/index');
+  SATPSDK = require('../satp-client/src/index').SATPSDK || require('../satp-client/src/index');
 } catch (e) {
   console.warn('[Escrow Routes] SATP SDK not found, escrow endpoints disabled:', e.message);
 }
@@ -367,7 +367,7 @@ router.get('/pda/derive', requireSDK, async (req, res) => {
     }
 
     const descHash = crypto.createHash('sha256').update(description).digest();
-    const { getEscrowPDA } = require('../../satp-client/src/pda');
+    const { getEscrowPDA } = require('../satp-client/src/pda');
     const [escrowPDA] = getEscrowPDA(clientKey, descHash, NETWORK);
 
     res.json({

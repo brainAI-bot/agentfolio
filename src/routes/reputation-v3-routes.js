@@ -25,7 +25,7 @@ let SATPV3SDK;
 let sdkInstance = null;
 
 try {
-  const mod = require('../../satp-client/src/index');
+  const mod = require('../satp-client/src/index');
   SATPV3SDK = mod.SATPV3SDK;
   if (!SATPV3SDK) throw new Error('SATPV3SDK not exported');
   console.log('[Rep/Val V3 Routes] V3 SDK loaded (SATPV3SDK)');
@@ -37,7 +37,7 @@ try {
     console.log('[Rep/Val V3 Routes] V3 SDK loaded from npm (SATPV3SDK)');
   } catch (e2) {
     console.warn('[Rep/Val V3 Routes] SATP V3 SDK not found. Endpoints disabled.');
-    console.warn('  Tried: ../../satp-client/src/index, satp-client');
+    console.warn('  Tried: ../satp-client/src/index, satp-client');
   }
 }
 

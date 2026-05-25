@@ -13,7 +13,7 @@
 
 const { Router } = require('express');
 const { PublicKey } = require('@solana/web3.js');
-const { SATPSDK, getReviewV3PDA } = require('../../satp-client/src/index');
+const { SATPSDK, getReviewV3PDA } = require('../satp-client/src/index');
 
 const router = Router();
 

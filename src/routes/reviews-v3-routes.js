@@ -34,7 +34,7 @@ let SATPV3SDK;
 let sdkInstance = null;
 
 try {
-  const mod = require('../../satp-client/src/index');
+  const mod = require('../satp-client/src/index');
   SATPV3SDK = mod.SATPV3SDK || mod.SATPSDK;
 } catch (e1) {
   try {

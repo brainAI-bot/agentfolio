@@ -64,3 +64,25 @@ test('embedded SATP source-of-truth directories are not present in AgentFolio', 
   walk(legacyShimRoot);
   assert.deepEqual(actualLegacyFiles.sort(), allowedLegacyShimFiles);
 });
+
+test('backend SATP imports resolve through the src compatibility shim', () => {
+  const repoRoot = path.resolve(__dirname, '..');
+  const scannedFiles = [
+    'src/routes/escrow-routes.js',
+    'src/routes/escrow-v3-routes.js',
+    'src/routes/reputation-v3-routes.js',
+    'src/routes/reviews-routes.js',
+    'src/routes/reviews-v3-routes.js',
+    'src/routes/satp-auto-identity.js',
+    'src/lib/wallet.js',
+  ];
+
+  for (const relativePath of scannedFiles) {
+    const source = fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
+    assert.equal(
+      source.includes('../../satp-client'),
+      false,
+      relativePath + ' must not resolve the removed root satp-client directory'
+    );
+  }
+});

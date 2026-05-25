@@ -21,7 +21,7 @@ const SATP_IDENTITY_PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6n
 // V3 SDK for Genesis Record creation
 let SATPV3SDK, hashAgentId, getGenesisPDA;
 try {
-  const idx = require('../../satp-client/src/index');
+  const idx = require('../satp-client/src/index');
   SATPV3SDK = idx.SATPV3SDK;
   hashAgentId = idx.hashAgentId;
   getGenesisPDA = idx.getGenesisPDA;
