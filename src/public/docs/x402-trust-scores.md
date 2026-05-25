@@ -79,6 +79,6 @@ const maxExposure = score.score >= 80 ? 10000 : 1000;
 - **Pricing endpoint:** /api/x402/pricing
 - **Metered routes:** /api/score?id={agent_id}, /api/profile/{agent_id}/trust-score, /api/leaderboard/scores
 - **Free route:** /api/leaderboard remains the public ranked leaderboard
-- **Network, recipient, and facilitator:** returned by /api/x402/pricing
+- **Default config:** X402_SCHEME=svm, X402_NETWORK=solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp, X402_RECEIVE_ADDRESS=<approved treasury wallet>, X402_FACILITATOR=https://facilitator.payai.network
 
 Metered routes are paid only when x402 payment middleware is enabled and configured.

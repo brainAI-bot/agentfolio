@@ -964,11 +964,12 @@ HTTP/1.1 402 Payment Required
   "error": "Payment Required",
   "x402": {
     "version": 1,
-    "network": "eip155:84532",
-    "payTo": "0x...",
+    "scheme": "svm",
+    "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+    "payTo": "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be",
     "maxAmountRequired": "10000",
     "asset": "USDC",
-    "facilitator": "https://x402.org/facilitator"
+    "facilitator": "https://facilitator.payai.network"
   }
 }
 ```
@@ -1027,10 +1028,11 @@ GET /api/x402/pricing
 ```json
 {
   "protocol": "x402",
-  "network": "eip155:84532",
+  "scheme": "svm",
+  "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
   "currency": "USDC",
-  "facilitator": "https://x402.org/facilitator",
-  "receivingAddress": "0x...",
+  "facilitator": "https://facilitator.payai.network",
+  "receivingAddress": "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be",
   "endpoints": {
     "free": [
       { "path": "/api/health", "description": "Health check" },

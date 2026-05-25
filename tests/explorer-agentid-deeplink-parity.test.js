@@ -168,7 +168,7 @@ function loadServerWithMocks() {
       };
     }
     if (request === '@x402/core/server') return { HTTPFacilitatorClient: class {} };
-    if (request === '@x402/evm/exact/server') return { ExactEvmScheme: class {} };
+    if (request === '@x402/svm/exact/server') return { ExactSvmScheme: class {} };
     if (request === './discord-verify-hardened') return noOpProvider;
     if (request === './telegram-verify') return noOpProvider;
     if (request === './domain-verify') return noOpProvider;
@@ -305,6 +305,10 @@ describe('explorer agent deep-link parity regression guard', () => {
     pricingHandler({}, res);
 
     assert.ok(jsonBody);
+    assert.strictEqual(jsonBody.scheme, 'svm');
+    assert.strictEqual(jsonBody.network, 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
+    assert.strictEqual(jsonBody.facilitator, 'https://facilitator.payai.network');
+    assert.strictEqual(jsonBody.receivingAddress, 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be');
     const freePaths = jsonBody.endpoints.free.map((endpoint) => endpoint.path);
     const paidPaths = jsonBody.endpoints.paid.map((endpoint) => endpoint.path);
     const paidByPath = new Map(jsonBody.endpoints.paid.map((endpoint) => [endpoint.path, endpoint]));

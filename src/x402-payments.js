@@ -9,15 +9,14 @@
 
 const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
 const { HTTPFacilitatorClient } = require('@x402/core/server');
-const { ExactEvmScheme } = require('@x402/evm/exact/server');
+const { ExactSvmScheme } = require('@x402/svm/exact/server');
 
-// Receiving wallet. Keep these defaults aligned with src/server.js.
-const PAY_TO_ADDRESS = process.env.X402_RECEIVE_ADDRESS || process.env.X402_PAY_TO || '0xEE13776767542F3a8d67d9fAd723fc43213052Bd';
+const SCHEME = process.env.X402_SCHEME || 'svm';
+const PAY_TO_ADDRESS = process.env.X402_RECEIVE_ADDRESS || process.env.X402_PAY_TO || 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
 
-const FACILITATOR_URL = process.env.X402_FACILITATOR || process.env.X402_FACILITATOR_URL || 'https://x402.org/facilitator';
+const FACILITATOR_URL = process.env.X402_FACILITATOR || process.env.X402_FACILITATOR_URL || 'https://facilitator.payai.network';
 
-// Base Sepolia testnet by default; switch to Base mainnet when the facilitator supports it.
-const NETWORK = process.env.X402_NETWORK || 'eip155:84532';
+const NETWORK = process.env.X402_NETWORK || 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 
 function setupX402(app) {
   console.log(`[x402] Initializing payment layer...`);
@@ -30,7 +29,7 @@ function setupX402(app) {
   });
 
   const resourceServer = new x402ResourceServer(facilitatorClient);
-  resourceServer.register('eip155:*', new ExactEvmScheme());
+  resourceServer.register('solana:*', new ExactSvmScheme());
 
   const middleware = paymentMiddleware(
     {
@@ -80,6 +79,7 @@ function setupX402(app) {
   app.get('/api/x402/pricing', (req, res) => {
     res.json({
       protocol: 'x402',
+      scheme: SCHEME,
       network: NETWORK,
       currency: 'USDC',
       facilitator: FACILITATOR_URL,
