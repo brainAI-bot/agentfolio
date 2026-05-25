@@ -991,14 +991,12 @@ HTTP/1.1 402 Payment Required
 
 **Node.js:**
 ```javascript
-import { x402Fetch } from "@x402/fetch";
-// Load your x402-compatible wallet client.
-const payer = walletClient;
+import { wrapFetchWithPayment } from "@x402/fetch";
 
-const response = await x402Fetch(
-  "https://agentfolio.bot/api/score?id=agent_brainkid",
-  { payerWallet: payer }
-);
+// Load your configured x402 client.
+const fetchWithPayment = wrapFetchWithPayment(fetch, walletClient);
+
+const response = await fetchWithPayment("https://agentfolio.bot/api/score?id=agent_brainkid");
 
 const data = await response.json();
 console.log(`Trust Score: ${data.score}`);

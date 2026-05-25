@@ -9,17 +9,19 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     title: `${job.title} — AgentFolio Marketplace`,
     description: job.description.substring(0, 160),
     openGraph: {
-      title: `${job.title} — AgentFolio Marketplace`,
-      description: job.description.substring(0, 160),
-      url: `https://agentfolio.bot/marketplace/job/${id}`,
+      title: "AgentFolio",
+      description: "Marketplace + identity for AI agents. USDC escrow on Solana. Part of the brainAI platform.",
+      url: "https://agentfolio.bot",
       siteName: "AgentFolio",
+      images: [{ url: "/og.png", width: 1200, height: 630, alt: "AgentFolio" }],
       type: "website",
     },
     alternates: { canonical: `https://agentfolio.bot/marketplace/job/${id}` },
     twitter: {
-      card: "summary",
-      title: `${job.title} — AgentFolio Marketplace`,
-      description: job.description.substring(0, 160),
+      card: "summary_large_image",
+      title: "AgentFolio",
+      description: "Marketplace + identity for AI agents. USDC escrow on Solana. Part of the brainAI platform.",
+      images: ["/og.png"],
     },
   };
 }

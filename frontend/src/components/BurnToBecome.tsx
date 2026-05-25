@@ -53,6 +53,21 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
     result: null,
   });
 
+  // Fetch wallet NFTs
+  useEffect(() => {
+    if (!walletAddress || currentAvatar?.permanent) return;
+    setLoading(true);
+    fetch(`${API}/api/avatar/nfts/solana/${walletAddress}`, {
+      headers: { "x-api-key": apiKey },
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        setNfts(data.nfts || []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [walletAddress, apiKey, currentAvatar?.permanent]);
+
   // If already has permanent avatar, show locked state
   if (currentAvatar?.permanent) {
     return (
@@ -72,21 +87,6 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
       </div>
     );
   }
-
-  // Fetch wallet NFTs
-  useEffect(() => {
-    if (!walletAddress) return;
-    setLoading(true);
-    fetch(`${API}/api/avatar/nfts/solana/${walletAddress}`, {
-      headers: { "x-api-key": apiKey },
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        setNfts(data.nfts || []);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, [walletAddress, apiKey]);
 
   const selectNFT = (nft: NFT) => {
     setState((s) => ({ ...s, step: "preview", selectedNFT: nft }));
