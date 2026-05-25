@@ -2450,7 +2450,10 @@ async function renderBadge(req, res) {
     const id = req.params.id.replace(/\.svg$/, '');
     const db = profileStore.getDb();
     const row = db.prepare('SELECT id, name, claimed, wallet, created_at FROM profiles WHERE id = ?').get(id);
-    if (!row) return res.status(404).type('text/plain').send('Profile not found');
+    if (!row) {
+      const fallbackSvg = generateBadgeSVG(id, 0, 0);
+      return res.set('Content-Type', 'image/svg+xml').set('Cache-Control', 'public, max-age=300').send(fallbackSvg);
+    }
 
     const v3Score = await getV3Score(id).catch(() => null);
     const unified = computeUnifiedTrustScore(db, row, { v3Score });

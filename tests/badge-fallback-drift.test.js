@@ -13,11 +13,13 @@ describe('badge fallback production drift guard', () => {
     assert.ok(source.includes('const v3Score = await getV3Score(id).catch(() => null);'));
     assert.ok(source.includes('const unified = computeUnifiedTrustScore(db, row, { v3Score });'));
     assert.ok(source.includes('const svg = generateBadgeSVG(row.name, unified.level, unified.score);'));
+    assert.ok(source.includes('const fallbackSvg = generateBadgeSVG(id, 0, 0);'));
     assert.ok(source.includes('const publicBadgeLimiter = rateLimit({'));
     assert.ok(source.includes("app.get('/api/badge/:id.svg', publicBadgeLimiter, renderBadge);"));
     assert.ok(source.includes("app.get('/api/badge/:id', publicBadgeLimiter, renderBadge);"));
     assert.ok(!source.includes('chainCache.getVerifications(id)'));
     assert.ok(!source.includes('<text x="155" y="19"'));
+    assert.ok(!source.includes("return res.status(404).type('text/plain').send('Profile not found')"));
   });
 
   it('escapes badge SVG text fields', () => {
