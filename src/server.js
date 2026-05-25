@@ -187,6 +187,13 @@ const didDirectoryLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const publicBadgeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // x402 Payment Layer
 const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
 const { HTTPFacilitatorClient } = require('@x402/core/server');
@@ -2437,29 +2444,30 @@ app.get('/api/verify/github/stats', async (req, res) => {
 });
 
 // Dynamic SVG trust badge
-app.get('/api/badge/:id.svg', async (req, res) => {
-  const id = req.params.id.replace(/\.svg$/, '');
-  let score = 0;
+const { generateBadgeSVG } = require('./lib/badge-svg');
+
+async function renderBadge(req, res) {
   try {
+    const id = req.params.id.replace(/\.svg$/, '');
     const db = profileStore.getDb();
-    const row = db.prepare('SELECT id FROM profiles WHERE id = ?').get(id);
-    if (row) {
-      const vfs = chainCache.getVerifications(id);
-      score = Math.min(100, (vfs ? vfs.length : 0) * 8);
+    const row = db.prepare('SELECT id, name, claimed, wallet, created_at FROM profiles WHERE id = ?').get(id);
+    if (!row) {
+      const fallbackSvg = generateBadgeSVG(id, 0, 0);
+      return res.set('Content-Type', 'image/svg+xml').set('Cache-Control', 'public, max-age=300').send(fallbackSvg);
     }
-  } catch(e) { /* fallback to 0 */ }
-  const tier = score >= 80 ? 'Elite' : score >= 60 ? 'Established' : score >= 40 ? 'Verified' : score >= 20 ? 'Registered' : 'Unverified';
-  const color = score >= 80 ? '#FFD700' : score >= 60 ? '#4CAF50' : score >= 40 ? '#2196F3' : score >= 20 ? '#9E9E9E' : '#616161';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="28">
-    <rect rx="4" width="200" height="28" fill="#1a1a2e"/>
-    <rect rx="4" x="110" width="90" height="28" fill="${color}"/>
-    <text x="8" y="19" fill="#fff" font-family="sans-serif" font-size="12" font-weight="bold">AgentFolio</text>
-    <text x="155" y="19" fill="#fff" font-family="sans-serif" font-size="11" text-anchor="middle">${tier} ${score}</text>
-  </svg>`;
-  res.setHeader('Content-Type', 'image/svg+xml');
-  res.setHeader('Cache-Control', 'public, max-age=300');
-  res.send(svg);
-});
+
+    const v3Score = await getV3Score(id).catch(() => null);
+    const unified = computeUnifiedTrustScore(db, row, { v3Score });
+    const svg = generateBadgeSVG(row.name, unified.level, unified.score);
+    res.set('Content-Type', 'image/svg+xml').set('Cache-Control', 'public, max-age=300').send(svg);
+  } catch (e) {
+    console.error('[Badge] unified route error:', e.stack || e.message);
+    res.status(500).type('text/plain').send('Error generating badge');
+  }
+}
+
+app.get('/api/badge/:id.svg', publicBadgeLimiter, renderBadge);
+app.get('/api/badge/:id', publicBadgeLimiter, renderBadge);
 
 // Profile endorsements (stub if not already defined)
 app.get('/api/profile/:id/endorsements', (req, res) => {

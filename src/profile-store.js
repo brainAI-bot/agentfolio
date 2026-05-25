@@ -1547,7 +1547,7 @@ function registerRoutes(app) {
           id: row.id,
           profileId: row.id,
           name: row.name,
-          profile: { id: row.id, name: row.name, wallet: primaryWallet, wallets: parsedWallets },
+          profile: { id: row.id, name: row.name, wallet: primaryWallet, walletAddress: primaryWallet, wallets: parsedWallets },
           wallet: primaryWallet,
           walletAddress: primaryWallet,
           wallets: parsedWallets,
