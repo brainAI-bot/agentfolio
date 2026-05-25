@@ -964,11 +964,12 @@ HTTP/1.1 402 Payment Required
   "error": "Payment Required",
   "x402": {
     "version": 1,
-    "network": "eip155:84532",
-    "payTo": "0x...",
+    "scheme": "svm",
+    "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+    "payTo": "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be",
     "maxAmountRequired": "10000",
     "asset": "USDC",
-    "facilitator": "https://x402.org/facilitator"
+    "facilitator": "https://facilitator.payai.network"
   }
 }
 ```
@@ -991,14 +992,12 @@ HTTP/1.1 402 Payment Required
 
 **Node.js:**
 ```javascript
-import { x402Fetch } from "@x402/fetch";
-// Load your x402-compatible wallet client.
-const payer = walletClient;
+import { wrapFetchWithPayment } from "@x402/fetch";
 
-const response = await x402Fetch(
-  "https://agentfolio.bot/api/score?id=agent_brainkid",
-  { payerWallet: payer }
-);
+// Load your configured x402 client.
+const fetchWithPayment = wrapFetchWithPayment(fetch, walletClient);
+
+const response = await fetchWithPayment("https://agentfolio.bot/api/score?id=agent_brainkid");
 
 const data = await response.json();
 console.log(`Trust Score: ${data.score}`);
@@ -1029,10 +1028,11 @@ GET /api/x402/pricing
 ```json
 {
   "protocol": "x402",
-  "network": "eip155:84532",
+  "scheme": "svm",
+  "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
   "currency": "USDC",
-  "facilitator": "https://x402.org/facilitator",
-  "receivingAddress": "0x...",
+  "facilitator": "https://facilitator.payai.network",
+  "receivingAddress": "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be",
   "endpoints": {
     "free": [
       { "path": "/api/health", "description": "Health check" },

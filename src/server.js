@@ -190,13 +190,12 @@ const didDirectoryLimiter = rateLimit({
 // x402 Payment Layer
 const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
 const { HTTPFacilitatorClient } = require('@x402/core/server');
-const { ExactEvmScheme } = require('@x402/evm/exact/server');
+const { ExactSvmScheme } = require('@x402/svm/exact/server');
 
-const X402_RECEIVE_ADDRESS = process.env.X402_RECEIVE_ADDRESS || '0xEE13776767542F3a8d67d9fAd723fc43213052Bd';
-const X402_FACILITATOR = process.env.X402_FACILITATOR || 'https://x402.org/facilitator';
-// Base Sepolia (testnet) for now — public facilitator only supports testnet
-// Switch to 'eip155:8453' (Base Mainnet) when self-hosting facilitator or using CDP mainnet
-const X402_NETWORK = process.env.X402_NETWORK || 'eip155:84532'; // Base Sepolia
+const X402_SCHEME = process.env.X402_SCHEME || 'svm';
+const X402_RECEIVE_ADDRESS = process.env.X402_RECEIVE_ADDRESS || process.env.X402_PAY_TO || 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
+const X402_FACILITATOR = process.env.X402_FACILITATOR || process.env.X402_FACILITATOR_URL || 'https://facilitator.payai.network';
+const X402_NETWORK = process.env.X402_NETWORK || 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 
 const X402_SCORE_PAYMENT_CONFIG = {
   accepts: [{
@@ -233,7 +232,7 @@ const X402_LEADERBOARD_SCORES_PAYMENT_CONFIG = {
 
 const x402Facilitator = new HTTPFacilitatorClient({ url: X402_FACILITATOR });
 const x402Server = new x402ResourceServer(x402Facilitator);
-x402Server.register('eip155:*', new ExactEvmScheme());
+x402Server.register('solana:*', new ExactSvmScheme());
 
 const trustScorePaymentMiddleware = paymentMiddleware(
   { 'GET /api/profile/[id]/trust-score': X402_TRUST_SCORE_PAYMENT_CONFIG },
@@ -2349,6 +2348,7 @@ app.get('/api/leaderboard/scores', (req, res) => {
 app.get('/api/x402/pricing', (req, res) => {
   res.json({
     protocol: 'x402',
+    scheme: X402_SCHEME,
     network: X402_NETWORK,
     currency: 'USDC',
     receivingAddress: X402_RECEIVE_ADDRESS,
@@ -2373,6 +2373,7 @@ app.get('/api/x402/pricing', (req, res) => {
 
 console.log(`[${new Date().toISOString()}] info: x402 payment layer initialized`, {
   service: 'agentfolio',
+  scheme: X402_SCHEME,
   network: X402_NETWORK,
   receivingAddress: X402_RECEIVE_ADDRESS,
   paidEndpoints: ['GET /api/score?id=<profileId> ($0.01)', 'GET /api/profile/:id/trust-score ($0.01)', 'GET /api/leaderboard/scores ($0.05)'],
