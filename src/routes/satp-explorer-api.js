@@ -40,6 +40,82 @@ function clearSatpExplorerCache() {
   agentCache = null;
 }
 
+const normalizeExplorerReputationScore = (value) => {
+  const numeric = Number(value || 0);
+  return numeric > 10000 ? Math.round(numeric / 1000) : numeric;
+};
+
+function normalizeSatpSourceAgent(agent) {
+  if (!agent) return null;
+  const name = String(agent.name || agent.agentName || '').trim();
+  if (!name) return null;
+  const rawReputationScore = Number(agent.rawReputationScore || agent.reputationScore || 0);
+  const reputationScore = normalizeExplorerReputationScore(agent.reputationScore || rawReputationScore || 0);
+  const verificationLevel = Number(agent.verificationLevel || 0);
+
+  return {
+    pda: agent.pda || agent.agentId || '',
+    authority: agent.authority || '',
+    agentId: agent.agentId || agent.pda || '',
+    name,
+    description: agent.description || '',
+    category: agent.category || '',
+    capabilities: Array.isArray(agent.capabilities) ? agent.capabilities : [],
+    metadataUri: agent.metadataUri || '',
+    reputationScore,
+    rawReputationScore,
+    verificationLevel,
+    verificationLabel: agent.verificationLabel || agent.tierLabel || agent.tier || '',
+    isBorn: !!(agent.isBorn || agent.soulbound),
+    faceImage: agent.faceImage || '',
+    faceMint: agent.faceMint || '',
+    createdAt: agent.createdAt || agent.bornAt || null,
+    updatedAt: agent.updatedAt || null,
+    programId: V3_PROGRAM.toBase58(),
+  };
+}
+
+async function fetchSatpSourceAgents(conn) {
+  if (typeof v3Explorer?.fetchAllV3Agents === 'function') {
+    try {
+      const explorerAgents = await v3Explorer.fetchAllV3Agents();
+      const normalized = (Array.isArray(explorerAgents) ? explorerAgents : [])
+        .map(normalizeSatpSourceAgent)
+        .filter(Boolean);
+      if (normalized.length > 0) return normalized;
+      console.warn('[SATP Explorer] v3-explorer returned zero agents; falling back to direct V3 scan');
+    } catch (e) {
+      console.warn('[SATP Explorer] v3-explorer source fetch failed:', e.message);
+    }
+  }
+
+  // Legacy fallback: keep the older direct scan path available, but do not let it
+  // diverge from the canonical V3 explorer source when that source is healthy.
+  const accounts = await conn.getProgramAccounts(V3_PROGRAM);
+  const agents = [];
+
+  for (const { pubkey, account } of accounts) {
+    const data = Buffer.from(account.data);
+    if (data.length < 80) continue;
+
+    try {
+      const parsed = v3ScoreService.parseGenesisRecord
+        ? v3ScoreService.parseGenesisRecord(data)
+        : null;
+
+      const normalized = normalizeSatpSourceAgent({
+        pda: pubkey.toBase58(),
+        agentId: pubkey.toBase58(),
+        ...parsed,
+        rawReputationScore: parsed?.rawReputationScore || parsed?.reputationScore || 0,
+      });
+      if (normalized) agents.push(normalized);
+    } catch (e) {}
+  }
+
+  return agents;
+}
+
 // NFT lookup (unchanged)
 async function lookupNFT(conn, wallet) {
   try {
@@ -89,44 +165,7 @@ async function getSatpAgents() {
 
   const conn = new Connection(RPC, "confirmed");
 
-  // Fetch ALL accounts from V3 program
-  const accounts = await conn.getProgramAccounts(V3_PROGRAM);
-  const agents = [];
-
-  for (const { pubkey, account } of accounts) {
-    const data = Buffer.from(account.data);
-    if (data.length < 80) continue;
-
-    // Use v3-score-service parser (same one that powers genesis endpoint)
-    try {
-      const parsed = v3ScoreService.parseGenesisRecord
-        ? v3ScoreService.parseGenesisRecord(data)
-        : null;
-
-      if (!parsed || !parsed.agentName) continue;
-
-      agents.push({
-        pda: pubkey.toBase58(),
-        authority: parsed.authority || "",
-        agentId: pubkey.toBase58(),
-        name: parsed.agentName,
-        description: "",
-        category: "",
-        capabilities: [],
-        metadataUri: "",
-        reputationScore: parsed.reputationScore > 10000 ? Math.round(parsed.reputationScore / 1000) : parsed.reputationScore,
-        rawReputationScore: parsed.reputationScore,
-        verificationLevel: parsed.verificationLevel,
-        verificationLabel: parsed.verificationLabel || "",
-        isBorn: parsed.isBorn || false,
-        faceImage: parsed.faceImage || "",
-        faceMint: parsed.faceMint || "",
-        createdAt: parsed.createdAt || null,
-        updatedAt: parsed.updatedAt || null,
-        programId: V3_PROGRAM.toBase58(),
-      });
-    } catch (e) {}
-  }
+  const agents = await fetchSatpSourceAgents(conn);
 
   try {
     const Database = require('better-sqlite3');
@@ -197,10 +236,6 @@ const getAgentDisplayName = (agent) => String(agent?.name || agent?.agentName ||
 const deriveProfileIdFromName = (name) => {
   const normalized = normalizeProfileKey(name);
   return normalized ? `agent_${normalized}` : '';
-};
-const normalizeExplorerReputationScore = (value) => {
-  const numeric = Number(value || 0);
-  return numeric > 10000 ? Math.round(numeric / 1000) : numeric;
 };
 const getProfileAuthorityCandidates = (profile) => [profile?.wallet, profile?.claimed_by, profile?.wallets?.solana]
   .map((value) => String(value || '').trim().toLowerCase())
@@ -575,5 +610,3 @@ for (const agent of filteredAgents) {
 }
 
 module.exports = { getSatpAgents, clearSatpExplorerCache };
-
-

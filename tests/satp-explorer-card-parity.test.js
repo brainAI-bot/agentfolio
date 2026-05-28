@@ -7,7 +7,7 @@ const targetPath = path.resolve(__dirname, '../src/routes/satp-explorer-api.js')
 const TWITTER_SIG = '4'.repeat(64);
 const GITHUB_SIG = '5'.repeat(64);
 
-function loadWithMocks() {
+function loadWithMocks(options = {}) {
   const originalLoad = Module._load;
 
   class PublicKey {
@@ -104,6 +104,7 @@ function loadWithMocks() {
       let parseCalls = 0;
       return {
         parseGenesisRecord() {
+          if (options.v3ScoreParserReturnsNull) return null;
           parseCalls += 1;
           return {
             agentName: 'Alice',
@@ -132,6 +133,7 @@ function loadWithMocks() {
     if (request === '../v3-explorer') {
       return {
         async fetchAllV3Agents() {
+          if (options.explorerAgents) return options.explorerAgents;
           return [
             {
               pda: 'PDA11111111111111111111111111111111111111111',
@@ -226,5 +228,35 @@ describe('satp explorer card parity regression guard', () => {
     assert.strictEqual(agent.attestationMemos[0].memo, 'GitHub verified');
     assert.strictEqual(agent.verifications[0].platform, 'x');
     assert.strictEqual(agent.verifications[0].txSignature, TWITTER_SIG);
+  });
+
+  it('keeps the SATP explorer nonempty when the legacy direct parser yields no rows but the canonical V3 explorer has agents', async () => {
+    const loaded = loadWithMocks({
+      v3ScoreParserReturnsNull: true,
+      explorerAgents: [
+        {
+          pda: 'PDA33333333333333333333333333333333333333333',
+          agentName: 'Bob',
+          authority: 'Auth33333333333333333333333333333333333333333',
+          reputationScore: 42,
+          rawReputationScore: 420000,
+          verificationLevel: 1,
+          tier: 'registered',
+          tierLabel: 'L1 Registered',
+          isBorn: true,
+          bornAt: '2026-02-01T00:00:00.000Z',
+        },
+      ],
+    });
+    cleanup = loaded.restore;
+
+    loaded.mod.clearSatpExplorerCache();
+    const result = await loaded.mod.getSatpAgents();
+
+    assert.strictEqual(result.count, 1);
+    assert.strictEqual(result.source, 'solana-mainnet-v3');
+    assert.strictEqual(result.agents[0].name, 'Bob');
+    assert.strictEqual(result.agents[0].reputationScore, 42);
+    assert.strictEqual(result.agents[0].verificationLevel, 1);
   });
 });
