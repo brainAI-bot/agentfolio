@@ -382,26 +382,13 @@ for (const agent of filteredAgents) {
     continue;
   }
 
-  if (!agent.authority) {
-    agent.nftMint = null;
-    agent.nftImage = null;
-    agent.soulbound = false;
-    agent.nftName = null;
-    continue;
-  }
-
-  const nft = await lookupNFT(conn, agent.authority);
-  if (nft) {
-    agent.nftMint = nft.nftMint;
-    agent.nftImage = nft.nftImage;
-    agent.soulbound = nft.soulbound;
-    agent.nftName = nft.nftName || null;
-  } else {
-    agent.nftMint = null;
-    agent.nftImage = null;
-    agent.soulbound = false;
-    agent.nftName = null;
-  }
+  // Keep the initial explorer payload on the canonical V3/DB path. Scanning
+  // Token-2022 accounts per authority here turns the cold route into a
+  // sequential wallet fanout and dominates SATP explorer latency.
+  agent.nftMint = null;
+  agent.nftImage = null;
+  agent.soulbound = false;
+  agent.nftName = null;
 }
 
 const enrichedAgents = [];
