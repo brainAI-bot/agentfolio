@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 describe('SATP explorer client profile matching', () => {
-  it('matches profiles by profileId before wallet and only applies wallet score enrichment when profileIds match', () => {
+  it('matches profiles by profileId before wallet and does not use wallet score enrichment for cards', () => {
     const source = fs.readFileSync(
       path.resolve(__dirname, '../frontend/src/app/satp/explorer/SATPExplorerClient.tsx'),
       'utf8'
@@ -14,17 +14,8 @@ describe('SATP explorer client profile matching', () => {
       source,
       /const profile = \(agentProfileId \? profilesById\[agentProfileId\] : null\) \|\| profilesByWallet\[wallet\] \|\| null;/
     );
-    assert.match(
-      source,
-      /const scoreMatchesProfile = Boolean\(scoreProfileId && profileId && scoreProfileId === profileId\);/
-    );
-    assert.match(
-      source,
-      /scoreMatchesProfile \? \(scores\?\.data\?\.tier \?\? scores\?\.tier\) : null/
-    );
-    assert.match(
-      source,
-      /scoreMatchesProfile \? \(scores\?\.data\?\.verificationLevel \?\? scores\?\.verificationLevel\) : null/
-    );
+    assert.match(source, /const profileId = agentProfileId \?\? profile\?\.id \?\? null;/);
+    assert.doesNotMatch(source, /scoreMatchesProfile/);
+    assert.doesNotMatch(source, /scoreProfileId/);
   });
 });
