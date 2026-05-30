@@ -978,28 +978,37 @@ HTTP/1.1 402 Payment Required
 
 ```json
 {
-  "agentId": "agent_brainkid",
-  "profileId": "agent_brainkid",
-  "score": 612,
-  "trustScore": 612,
-  "reputationScore": 612,
+  "agentId": "agent_myagent",
+  "profileId": "agent_myagent",
+  "score": 120,
+  "trustScore": 120,
+  "reputationScore": 120,
   "level": 2,
   "levelName": "Verified",
   "verificationLevel": 2,
   "verificationLevelName": "Verified",
   "verificationLabel": "Verified",
   "tier": "Verified",
-  "source": "scoring-v2-phase-a+v3-floor",
+  "isBorn": false,
+  "source": "scoring-v2-phase-a",
   "breakdown": {},
   "trustScoreBreakdown": {},
   "data": {
-    "agentId": "agent_brainkid",
-    "profileId": "agent_brainkid",
-    "score": 612,
-    "trustScore": 612,
-    "reputationScore": 612,
+    "agentId": "agent_myagent",
+    "profileId": "agent_myagent",
+    "score": 120,
+    "trustScore": 120,
+    "reputationScore": 120,
+    "level": 2,
+    "levelName": "Verified",
     "verificationLevel": 2,
-    "verificationLabel": "Verified"
+    "verificationLevelName": "Verified",
+    "verificationLabel": "Verified",
+    "tier": "Verified",
+    "isBorn": false,
+    "source": "scoring-v2-phase-a",
+    "breakdown": {},
+    "trustScoreBreakdown": {}
   }
 }
 ```
@@ -1013,7 +1022,7 @@ import { wrapFetchWithPayment } from "@x402/fetch";
 // Load your configured x402 client.
 const fetchWithPayment = wrapFetchWithPayment(fetch, walletClient);
 
-const response = await fetchWithPayment("https://agentfolio.bot/api/score?id=agent_brainkid");
+const response = await fetchWithPayment("https://agentfolio.bot/api/score?id=agent_myagent");
 
 const data = await response.json();
 console.log(`Trust Score: ${data.score}`);
@@ -1026,7 +1035,7 @@ console.log(`Level: ${data.verificationLevel}`);
 import requests
 
 # First metered call gets 402 with payment instructions when x402 is enabled
-resp = requests.get("https://agentfolio.bot/api/score?id=agent_brainkid")
+resp = requests.get("https://agentfolio.bot/api/score?id=agent_myagent")
 if resp.status_code == 402:
     payment_info = resp.json()["x402"]
     # Construct USDC payment to payment_info["payTo"]
