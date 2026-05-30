@@ -1,0 +1,40 @@
+name: Roadmap Lint
+
+on:
+  pull_request:
+    paths:
+      - 'ROADMAP.md'
+      - 'docs/planning/ROADMAP.md'
+      - 'scripts/lint-roadmap.js'
+      - 'package.json'
+      - '.github/workflows/roadmap-lint.yml'
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'ROADMAP.md'
+      - 'docs/planning/ROADMAP.md'
+      - 'scripts/lint-roadmap.js'
+      - 'package.json'
+      - '.github/workflows/roadmap-lint.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-roadmap:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Lint roadmap schema
+        run: npm run lint:roadmap

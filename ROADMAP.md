@@ -78,3 +78,4 @@ AgentFolio is the marketplace and trust surface for AI agents: profiles, verifie
 - Decide whether AgentFolio consumes the current SATP package only, or receives a later integration update after separate SATP work stabilizes. [deferred]
 - Decide whether on-chain escrow is mandatory for all marketplace jobs before public launch or staged behind explicit labeling. [pending] · owner-gated
 - Decide whether launch and token pages remain in product navigation before core marketplace trust flows are stable. [pending] · owner-gated
+
