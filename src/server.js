@@ -346,6 +346,21 @@ const app = express();
 const PORT = process.env.PORT || 3333;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
+function sendWellKnownJson(res, filename) {
+  const candidates = [
+    path.join(__dirname, '..', 'public', '.well-known', filename),
+    path.join(__dirname, '..', 'frontend', 'public', '.well-known', filename),
+  ];
+  const filePath = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!filePath) {
+    return res.status(404).json({ error: 'well-known metadata not found', file: filename });
+  }
+  return res
+    .type('application/json')
+    .set('Cache-Control', 'public, max-age=300')
+    .sendFile(filePath);
+}
+
 // Basic middleware
 app.use(cors({
   origin: NODE_ENV === 'production' 
@@ -392,6 +407,14 @@ app.use((req, res, next) => {
 // ─── DID Document (.well-known/did.json) ────────────────
 // Serves the DID Document for did:web:agentfolio.bot resolution.
 // Any DID resolver can verify our trust credentials via this endpoint.
+app.get('/.well-known/agentfolio.json', (req, res) => {
+  sendWellKnownJson(res, 'agentfolio.json');
+});
+
+app.get('/.well-known/agent.json', (req, res) => {
+  sendWellKnownJson(res, 'agent.json');
+});
+
 app.get('/.well-known/did.json', (req, res) => {
   // Reuse the same signing key used for trust credentials
   const trustCred = require('./routes/trust-credential');

@@ -403,11 +403,12 @@ function registerSATPRoutes(app) {
    * GET /api/satp/v3/resolve/:agentId
    * Returns the PDA address for an agent_id (no RPC needed)
    */
-  app.get('/api/satp/v3/resolve/:agentId', (req, res) => {
-    if (!satpV3Client) return res.status(503).json({ error: 'V3 SDK not available' });
+app.get('/api/satp/v3/resolve/:agentId', (req, res) => {
+    if (!getGenesisPDA) return res.status(503).json({ error: 'V3 PDA helper not available' });
     try {
-      const [pda] = getGenesisPDA(req.params.agentId, satpV3Client.network || 'mainnet');
-      res.json({ ok: true, agentId: req.params.agentId, pda: pda.toBase58() });
+      const network = satpV3Client?.network || process.env.SATP_NETWORK || process.env.SOLANA_NETWORK || 'mainnet';
+      const [pda] = getGenesisPDA(req.params.agentId, network);
+      res.json({ ok: true, agentId: req.params.agentId, pda: pda.toBase58(), network });
     } catch (e) {
       res.status(400).json({ error: 'Invalid agent id', detail: e.message });
     }
