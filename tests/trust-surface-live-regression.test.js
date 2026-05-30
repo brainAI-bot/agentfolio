@@ -23,6 +23,7 @@ describe('trust surface live regression guard', () => {
     assert.notStrictEqual(routeStart, -1, 'expected SATP V3 resolve route');
     assert.ok(route.includes('if (!getGenesisPDA)'));
     assert.ok(!route.includes('if (!satpV3Client)'), 'PDA derivation should not require the RPC client');
+    assert.ok(route.includes("|| 'devnet'"), 'resolver must default to the configured V3 program network');
     assert.ok(route.includes('const [pda] = getGenesisPDA(req.params.agentId, network);'));
   });
 });
