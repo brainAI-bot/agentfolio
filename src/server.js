@@ -358,7 +358,7 @@ function sendWellKnownJson(res, filename) {
   return res
     .type('application/json')
     .set('Cache-Control', 'public, max-age=300')
-    .sendFile(filePath);
+    .sendFile(filePath, { dotfiles: 'allow' });
 }
 
 // Basic middleware

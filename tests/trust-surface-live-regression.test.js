@@ -12,6 +12,7 @@ describe('trust surface live regression guard', () => {
     assert.match(source, /public', '\.well-known', filename/);
     assert.match(source, /frontend', 'public', '\.well-known', filename/);
     assert.match(source, /Cache-Control', 'public, max-age=300'/);
+    assert.match(source, /dotfiles: 'allow'/);
   });
 
   it('keeps SATP V3 resolve independent of the RPC-backed SDK client', () => {
