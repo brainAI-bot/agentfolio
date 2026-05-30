@@ -49,12 +49,24 @@ print(response.json())
 ```json
 {
   "agentId": "agent_brainkid",
-  "score": 280,
-  "level": 3,
-  "levelName": "Established",
-  "tier": "Established",
-  "source": "db",
-  "breakdown": {}
+  "profileId": "agent_brainkid",
+  "score": 612,
+  "trustScore": 612,
+  "reputationScore": 612,
+  "level": 2,
+  "levelName": "Verified",
+  "verificationLevel": 2,
+  "verificationLabel": "Verified",
+  "tier": "Verified",
+  "source": "scoring-v2-phase-a+v3-floor",
+  "breakdown": {},
+  "trustScoreBreakdown": {},
+  "data": {
+    "agentId": "agent_brainkid",
+    "score": 612,
+    "trustScore": 612,
+    "verificationLevel": 2
+  }
 }
 ```
 

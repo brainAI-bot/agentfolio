@@ -7,7 +7,7 @@ const targetPath = path.resolve(__dirname, '../src/server.js');
 const TWITTER_SIG = '4'.repeat(64);
 const GITHUB_SIG = '5'.repeat(64);
 
-function loadServerWithMocks() {
+function loadServerWithMocks(options = {}) {
   const originalLoad = Module._load;
   const routeMap = new Map();
 
@@ -47,6 +47,13 @@ function loadServerWithMocks() {
 
   const fakeDb = {
     prepare(sql) {
+      if (sql.includes('SELECT * FROM profiles WHERE id = ? OR id = ? OR handle = ?')) {
+        return {
+          get(value, prefixed, handle) {
+            return [value, prefixed, handle].includes('agent_alice') || handle === 'alice' ? fakeProfile : null;
+          },
+        };
+      }
       if (sql.includes('SELECT * FROM profiles WHERE id = ?')) {
         return { get(value) { return value === 'agent_alice' ? fakeProfile : null; } };
       }
@@ -105,6 +112,7 @@ function loadServerWithMocks() {
 
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request === 'express') return expressStub;
+    if (request === 'express-rate-limit') return () => (_req, _res, next) => next && next();
     if (request === 'cors') return () => (_req, _res, next) => next && next();
     if (request === './satp-reviews') return { registerRoutes() {} };
     if (request === './routes/satp-api') return { registerSATPRoutes() {} };
@@ -159,7 +167,7 @@ function loadServerWithMocks() {
       };
     }
     if (request === '../v3-score-service' || request === './v3-score-service') {
-      return { getV3Score: async () => null };
+      return { getV3Score: async () => options.v3Score || null };
     }
     if (request === '@x402/express') {
       return {
@@ -320,6 +328,57 @@ describe('explorer agent deep-link parity regression guard', () => {
     assert.strictEqual(paidByPath.get('/api/profile/:id/trust-score').price, '$0.01');
     assert.strictEqual(paidByPath.get('/api/leaderboard/scores').price, '$0.05');
     assert.ok(!freePaths.includes('/api/profile/:id/trust-score'), 'direct trust-score must not appear in free catalog');
+  });
+
+  it('keeps the direct trust-score route on the normalized unified score surface', async () => {
+    const loaded = loadServerWithMocks({
+      v3Score: {
+        reputationScore: 60000,
+        verificationLevel: 2,
+        verificationLabel: 'Verified',
+        isBorn: true,
+      },
+    });
+    cleanup = loaded.restore;
+
+    const route = loaded.routeMap.get('GET /api/profile/:id/trust-score');
+    const handler = getLastRouteHandler(route);
+    assert.ok(handler, 'expected /api/profile/:id/trust-score handler');
+
+    const req = { params: { id: 'agent_alice' } };
+    let statusCode = 200;
+    let jsonBody = null;
+    const res = {
+      status(code) { statusCode = code; return this; },
+      json(payload) { jsonBody = payload; return this; },
+    };
+
+    await handler(req, res);
+
+    assert.strictEqual(statusCode, 200);
+    assert.strictEqual(jsonBody.agentId, 'agent_alice');
+    assert.strictEqual(jsonBody.score, 612);
+    assert.strictEqual(jsonBody.trustScore, 612);
+    assert.notStrictEqual(jsonBody.score, 60000);
+    assert.strictEqual(jsonBody.verificationLevel, 2);
+    assert.strictEqual(jsonBody.verificationLabel, 'Verified');
+    assert.deepStrictEqual(jsonBody.data, {
+      agentId: 'agent_alice',
+      profileId: 'agent_alice',
+      score: 612,
+      trustScore: 612,
+      reputationScore: 612,
+      level: 2,
+      levelName: 'Verified',
+      verificationLevel: 2,
+      verificationLevelName: 'Verified',
+      verificationLabel: 'Verified',
+      tier: 'Verified',
+      isBorn: true,
+      source: 'unified-test',
+      breakdown: { demo: true },
+      trustScoreBreakdown: { demo: true },
+    });
   });
 
   it('preserves public verification/platform shaping for /api/explorer/:agentId', async () => {
