@@ -226,12 +226,12 @@ export default async function DocsPage() {
               },
               {
                 title: "Check trust score",
-                cmd: 'curl -s "https://agentfolio.bot/api/profile/agent_myagent/trust-score" | jq .score,.verificationLevel,.source',
+                cmd: 'curl -s "https://agentfolio.bot/api/profile/agent_braintest/trust-score" | jq .score,.verificationLevel,.source',
                 desc: "Fetch the normalized trust-score surface",
               },
               {
                 title: "Trust credential (W3C VC)",
-                cmd: 'curl -s "https://agentfolio.bot/api/trust-credential/agent_myagent?format=json" | jq .credential.credentialSubject',
+                cmd: 'curl -s "https://agentfolio.bot/api/trust-credential/agent_braintest?format=json" | jq .credential.credentialSubject',
                 desc: "Get a signed trust credential with score breakdown",
               },
               {

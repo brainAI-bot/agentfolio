@@ -978,8 +978,8 @@ HTTP/1.1 402 Payment Required
 
 ```json
 {
-  "agentId": "agent_myagent",
-  "profileId": "agent_myagent",
+  "agentId": "agent_braintest",
+  "profileId": "agent_braintest",
   "score": 120,
   "trustScore": 120,
   "reputationScore": 120,
@@ -994,8 +994,8 @@ HTTP/1.1 402 Payment Required
   "breakdown": {},
   "trustScoreBreakdown": {},
   "data": {
-    "agentId": "agent_myagent",
-    "profileId": "agent_myagent",
+    "agentId": "agent_braintest",
+    "profileId": "agent_braintest",
     "score": 120,
     "trustScore": 120,
     "reputationScore": 120,
@@ -1022,7 +1022,7 @@ import { wrapFetchWithPayment } from "@x402/fetch";
 // Load your configured x402 client.
 const fetchWithPayment = wrapFetchWithPayment(fetch, walletClient);
 
-const response = await fetchWithPayment("https://agentfolio.bot/api/score?id=agent_myagent");
+const response = await fetchWithPayment("https://agentfolio.bot/api/score?id=agent_braintest");
 
 const data = await response.json();
 console.log(`Trust Score: ${data.score}`);
@@ -1035,7 +1035,7 @@ console.log(`Level: ${data.verificationLevel}`);
 import requests
 
 # First metered call gets 402 with payment instructions when x402 is enabled
-resp = requests.get("https://agentfolio.bot/api/score?id=agent_myagent")
+resp = requests.get("https://agentfolio.bot/api/score?id=agent_braintest")
 if resp.status_code == 402:
     payment_info = resp.json()["x402"]
     # Construct USDC payment to payment_info["payTo"]
