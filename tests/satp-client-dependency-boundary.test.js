@@ -14,6 +14,26 @@ test('SATP adapter resolves extracted @brainai/satp-client dependency without em
   assert.equal(typeof satpClient.SATPSDK, 'function');
   assert.equal(typeof satpClient.SATPV3SDK, 'function');
   assert.equal(typeof satpClient.createSATPClient, 'function');
+  assert.equal(typeof satpClient.getV3ProgramIds, 'function');
+  assert.equal(typeof satpClient.hashAgentId, 'function');
+  assert.equal(typeof satpClient.getGenesisPDA, 'function');
+  assert.equal(typeof satpClient.prepareIdentityAttestationRequest, 'function');
+});
+
+test('SATP candidate review subpaths resolve from the extracted package', () => {
+  const walletControlPath = require.resolve('@brainai/satp-client/wallet-control-challenge');
+  const x402DiscoveryPath = require.resolve('@brainai/satp-client/x402-discovery');
+
+  assert.match(walletControlPath, /node_modules[\/]@brainai[\/]satp-client/);
+  assert.match(x402DiscoveryPath, /node_modules[\/]@brainai[\/]satp-client/);
+
+  const walletControl = require('@brainai/satp-client/wallet-control-challenge');
+  const x402Discovery = require('@brainai/satp-client/x402-discovery');
+
+  assert.equal(typeof walletControl.buildWalletControlChallenge, 'function');
+  assert.equal(typeof walletControl.verifyWalletControlChallengeSignature, 'function');
+  assert.equal(typeof x402Discovery.parseX402DiscoveryMetadata, 'function');
+  assert.equal(typeof x402Discovery.buildX402EvidenceLookup, 'function');
 });
 
 test('legacy SATP deep-require shims resolve against extracted package source paths', () => {
@@ -63,4 +83,23 @@ test('embedded SATP source-of-truth directories are not present in AgentFolio', 
 
   walk(legacyShimRoot);
   assert.deepEqual(actualLegacyFiles.sort(), allowedLegacyShimFiles);
+});
+
+test('V3 route modules use the AgentFolio SATP adapter package boundary', () => {
+  const repoRoot = path.resolve(__dirname, '..');
+  const routeFiles = [
+    'src/routes/reputation-v3-routes.js',
+    'src/routes/escrow-v3-routes.js',
+    'src/routes/reviews-v3-routes.js',
+    'src/routes/satp-api.js',
+    'src/routes/satp-auto-identity.js',
+    'src/routes/satp-auto-identity-v3.js',
+  ];
+
+  for (const routeFile of routeFiles) {
+    const source = fs.readFileSync(path.join(repoRoot, routeFile), 'utf8');
+    assert.match(source, /adapters\/satp/, `${routeFile} should use the SATP adapter boundary`);
+    assert.doesNotMatch(source, /require\(['"]\.\.\/\.\.\/satp-client/, `${routeFile} should not deep-require the removed embedded SATP client`);
+    assert.doesNotMatch(source, /require\(['"]satp-client['"]\)/, `${routeFile} should not require the retired satp-client package name`);
+  }
 });

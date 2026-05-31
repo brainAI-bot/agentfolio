@@ -11,7 +11,15 @@ function loadSatpClient() {
 }
 
 function assertRequiredSatpClientExports(satpClient = loadSatpClient()) {
-  const required = ['SATPSDK', 'SATPV3SDK', 'createSATPClient'];
+  const required = [
+    'SATPSDK',
+    'SATPV3SDK',
+    'createSATPClient',
+    'getV3ProgramIds',
+    'hashAgentId',
+    'getGenesisPDA',
+    'prepareIdentityAttestationRequest',
+  ];
   const missing = required.filter((key) => !(key in satpClient));
   if (missing.length) {
     throw new Error(`@brainai/satp-client missing required exports: ${missing.join(', ')}`);
@@ -19,7 +27,25 @@ function assertRequiredSatpClientExports(satpClient = loadSatpClient()) {
   return true;
 }
 
+function getSatpClientExport(exportName, satpClient = loadSatpClient()) {
+  if (!(exportName in satpClient)) {
+    throw new Error(`@brainai/satp-client missing required export: ${exportName}`);
+  }
+  return satpClient[exportName];
+}
+
+function loadSatpV3SDK() {
+  return getSatpClientExport('SATPV3SDK');
+}
+
+function createSatpClient(options) {
+  return getSatpClientExport('createSATPClient')(options);
+}
+
 module.exports = {
   loadSatpClient,
   assertRequiredSatpClientExports,
+  getSatpClientExport,
+  loadSatpV3SDK,
+  createSatpClient,
 };

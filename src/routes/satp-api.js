@@ -6,16 +6,21 @@
 
 const satpIdentity = require('../satp-identity-client');
 const satpReviewsOnchain = require('../satp-reviews-onchain');
-const { getGenesisPDA } = require('../satp-client/src/v3-pda');
+const { client: satpClient } = require('../adapters/satp');
 
 // V3 SDK (using SATPV3SDK directly for all V3 operations)
 let satpV3Client;
 let SATPV3SDK_Class;
+let getGenesisPDA;
+const SATP_NETWORK = process.env.SATP_NETWORK || process.env.SOLANA_NETWORK || 'mainnet';
 try {
-  const { createSATPClient, SATPV3SDK } = require('../satp-client/src');
-  SATPV3SDK_Class = SATPV3SDK;
-  satpV3Client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb' });
-  console.log('[SATP API] V3 SDK loaded (SATPV3SDK + createSATPClient)');
+  SATPV3SDK_Class = satpClient.getSatpClientExport('SATPV3SDK');
+  getGenesisPDA = satpClient.getSatpClientExport('getGenesisPDA');
+  satpV3Client = satpClient.createSatpClient({
+    network: SATP_NETWORK,
+    rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb',
+  });
+  console.log('[SATP API] V3 SDK loaded from @brainai/satp-client (SATPV3SDK + createSATPClient)');
 } catch (e) {
   console.warn('[SATP API] V3 SDK not available:', e.message);
 }
@@ -363,7 +368,7 @@ function registerSATPRoutes(app) {
    * Returns V3 Genesis Record by agent_id (not wallet)
    */
   app.get('/api/satp/v3/agent/:agentId', async (req, res) => {
-    if (!satpV3Client) return res.status(503).json({ error: 'V3 SDK not available' });
+    if (!satpV3Client || !getGenesisPDA) return res.status(503).json({ error: 'V3 SDK not available' });
     try {
       const record = await satpV3Client.getGenesisRecord(req.params.agentId);
       if (!record) return res.status(404).json({ error: 'No Genesis Record', agentId: req.params.agentId });
