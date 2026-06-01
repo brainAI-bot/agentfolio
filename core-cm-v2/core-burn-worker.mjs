@@ -18,9 +18,13 @@ import {
   createNoopSigner,
   none,
 } from '@metaplex-foundation/umi';
+
 import { toWeb3JsTransaction } from '@metaplex-foundation/umi-web3js-adapters';
 import { Connection } from '@solana/web3.js';
 import fs from 'fs';
+import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: core-cm-v2/core-burn-worker.mjs');
 
 const assetAddress = process.argv[2];
 const ownerWallet = process.argv[3];

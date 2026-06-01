@@ -8,6 +8,7 @@ import { createUmi } from '@metaplex-foundation/umi-bundle-defaults';
 import { 
   createNft, verifyCollectionV1, mplTokenMetadata 
 } from '@metaplex-foundation/mpl-token-metadata';
+
 import { 
   generateSigner, keypairIdentity, percentAmount, publicKey, some 
 } from '@metaplex-foundation/umi';
@@ -15,12 +16,12 @@ import { findMetadataPda } from '@metaplex-foundation/mpl-token-metadata';
 import { irysUploader } from '@metaplex-foundation/umi-uploader-irys';
 import fs from 'fs';
 import path from 'path';
+import { assertSolanaIrysWriteEnabled } from '../lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: src/boa-pipeline/mint-nft.mjs');
 
 const CLUSTER = process.env.CLUSTER || 'devnet';
 const RPC = process.env.SOLANA_RPC_URL || (CLUSTER === 'mainnet' ? 'https://api.mainnet-beta.solana.com' : 'https://api.devnet.solana.com');
-
-
-
 
 const TREASURY = 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
 const DEPLOYER_PATH = process.env.HOME + '/.config/solana/mainnet-deployer.json';

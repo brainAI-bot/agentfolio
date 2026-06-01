@@ -13,6 +13,9 @@ import { generateSigner, keypairIdentity, percentAmount, publicKey, some } from 
 import { irysUploader } from '@metaplex-foundation/umi-uploader-irys';
 import fs from 'fs';
 import path from 'path';
+import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: boa-pipeline/boa-mint-worker.mjs');
 
 const nftNum = parseInt(process.argv[2]);
 const recipient = process.argv[3];

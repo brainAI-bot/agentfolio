@@ -7,6 +7,9 @@ import { createNft, mplTokenMetadata } from '@metaplex-foundation/mpl-token-meta
 import { generateSigner, keypairIdentity, percentAmount, publicKey } from '@metaplex-foundation/umi';
 import { irysUploader } from '@metaplex-foundation/umi-uploader-irys';
 import fs from 'fs';
+import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: boa-pipeline/create-collection.mjs');
 
 const CLUSTER = process.env.CLUSTER || 'devnet';
 const RPC = CLUSTER === 'mainnet' 

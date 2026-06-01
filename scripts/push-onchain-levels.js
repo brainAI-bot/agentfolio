@@ -7,6 +7,9 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const { Keypair, PublicKey } = require('@solana/web3.js');
+const { assertSolanaIrysWriteEnabled } = require('../src/lib/write-surface-gate');
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: scripts/push-onchain-levels.js');
 
 // Load SATP V3 SDK
 let satpV3;

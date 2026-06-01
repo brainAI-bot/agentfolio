@@ -73,3 +73,30 @@ test('runtime Solana/Irys write entry points are wired through the gate', () => 
     assert.ok(source.includes(marker), relativeFile + ' is missing ' + marker);
   }
 });
+
+test('executable Solana/Irys write surfaces are covered by the read-only gate', () => {
+  const roots = ['src', 'scripts', 'boa-pipeline', 'core-cm', 'core-cm-v2'];
+  const writePattern = /send(Transaction|RawTransaction)|sendAndConfirm|uploadFolder|uploadJson|\.upload\(|\.fund\(|mintV1|createNft|irysUploader|Irys\(/;
+  const gatePattern = /write-surface-gate|assertSolanaIrysWriteEnabled|sendSolanaIrysWriteGateResponse|AGENTFOLIO_ENABLE_SOLANA_IRYS_WRITES/;
+  const missing = [];
+
+  function walk(dir) {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === 'build' || entry.name === 'coverage') continue;
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath);
+        continue;
+      }
+      if (!/\.(mjs|js|ts|tsx)$/.test(entry.name) || /\.backup/.test(entry.name)) continue;
+      const source = fs.readFileSync(fullPath, 'utf8');
+      if (writePattern.test(source) && !gatePattern.test(source)) {
+        missing.push(path.relative(ROOT, fullPath));
+      }
+    }
+  }
+
+  for (const root of roots) walk(path.join(ROOT, root));
+  assert.deepEqual(missing.sort(), []);
+});
