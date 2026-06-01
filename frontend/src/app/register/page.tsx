@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { Connection } from "@solana/web3.js";
 import { useDemoMode } from "@/lib/demo-mode";
 import { Wallet, ArrowRight, AlertCircle, CheckCircle, X, Link2 } from "lucide-react";
+import { assertFrontendSolanaIrysWriteEnabled } from "@/lib/write-surface-gate";
 import {
   buildRegisterAgentTransaction,
   SOLANA_RPC,
@@ -132,6 +133,7 @@ export default function RegisterPage() {
       // STEP 2: ONE TX — SATP identity creation (user signs = wallet verified)
       let satpTxSig = "";
       try {
+        assertFrontendSolanaIrysWriteEnabled("frontend registration SATP identity creation");
         setChainStatus("signing");
         const connection = new Connection(SOLANA_RPC, "confirmed");
 

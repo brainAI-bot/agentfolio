@@ -66,6 +66,17 @@ test('runtime Solana/Irys write entry points are wired through the gate', () => 
     ['src/lib/satp-reviews.js', 'assertSolanaIrysWriteEnabled'],
     ['src/lib/satp-reviews-onchain.js', 'assertSolanaIrysWriteEnabled'],
     ['src/sync-v3.js', 'assertSolanaIrysWriteEnabled'],
+    ['frontend/src/lib/write-surface-gate.ts', 'assertFrontendSolanaIrysWriteEnabled'],
+    ['frontend/src/lib/v3-escrow.ts', 'assertFrontendSolanaIrysWriteEnabled'],
+    ['frontend/src/lib/satp-identity-v2.ts', 'assertFrontendSolanaIrysWriteEnabled'],
+    ['frontend/src/app/mint/page.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
+    ['frontend/src/app/register/page.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
+    ['frontend/src/app/verify/page.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
+    ['frontend/src/app/profile/[id]/WriteReviewForm.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
+    ['frontend/src/components/BurnToBecome.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
+    ['frontend/src/components/GenesisRecordCard.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
+    ['frontend/src/components/MarketplaceClient.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
+    ['frontend/public/mint/index.html', 'assertFrontendSolanaIrysWriteEnabled'],
   ]);
 
   for (const [relativeFile, marker] of expected) {
@@ -75,9 +86,9 @@ test('runtime Solana/Irys write entry points are wired through the gate', () => 
 });
 
 test('executable Solana/Irys write surfaces are covered by the read-only gate', () => {
-  const roots = ['src', 'scripts', 'boa-pipeline', 'core-cm', 'core-cm-v2'];
-  const writePattern = /send(Transaction|RawTransaction)|sendAndConfirm|uploadFolder|uploadJson|\.upload\(|\.fund\(|mintV1|createNft|irysUploader|Irys\(/;
-  const gatePattern = /write-surface-gate|assertSolanaIrysWriteEnabled|sendSolanaIrysWriteGateResponse|AGENTFOLIO_ENABLE_SOLANA_IRYS_WRITES/;
+  const roots = ['src', 'frontend', 'scripts', 'boa-pipeline', 'core-cm', 'core-cm-v2'];
+  const writePattern = /send(Transaction|RawTransaction)|sendAndConfirm|create(Burn|MintTo|Transfer)Instruction|uploadFolder|uploadJson|\.upload\(|\.fund\(|mintV1|createNft|irysUploader|Irys\(/;
+  const gatePattern = /write-surface-gate|assertSolanaIrysWriteEnabled|sendSolanaIrysWriteGateResponse|assertFrontendSolanaIrysWriteEnabled|AGENTFOLIO_ENABLE_SOLANA_IRYS_WRITES/;
   const missing = [];
 
   function walk(dir) {
@@ -89,7 +100,7 @@ test('executable Solana/Irys write surfaces are covered by the read-only gate', 
         walk(fullPath);
         continue;
       }
-      if (!/\.(mjs|js|ts|tsx)$/.test(entry.name) || /\.backup/.test(entry.name)) continue;
+      if (!/\.(mjs|js|ts|tsx|html)$/.test(entry.name) || /\.backup/.test(entry.name)) continue;
       const source = fs.readFileSync(fullPath, 'utf8');
       if (writePattern.test(source) && !gatePattern.test(source)) {
         missing.push(path.relative(ROOT, fullPath));

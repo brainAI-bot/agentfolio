@@ -8,6 +8,7 @@ import {
   PublicKey,
   Transaction,
 } from "@solana/web3.js";
+import { assertFrontendSolanaIrysWriteEnabled } from "./write-surface-gate";
 
 // SATP v2 Identity Registry — Mainnet
 export const SATP_V2_IDENTITY_PROGRAM = new PublicKey(
@@ -93,6 +94,7 @@ export async function autoCreateSatpIdentity(
   profileId: string,
   sendTransaction: (tx: Transaction, conn: Connection) => Promise<string>,
 ): Promise<{ txSignature: string | null; identityPDA: string; alreadyExists: boolean }> {
+  assertFrontendSolanaIrysWriteEnabled("frontend SATP identity creation");
   const wallet = new PublicKey(walletAddress);
   const [pda] = getSatpIdentityPDA(wallet);
 
