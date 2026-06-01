@@ -4,6 +4,7 @@
 const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { sendSolanaIrysWriteGateResponse } = require('../lib/write-surface-gate');
 
 const ASSETS_DIR = process.env.HOME + '/boa-assets';
 const PIPELINE_DIR = '/home/ubuntu/agentfolio/boa-pipeline';
@@ -31,6 +32,7 @@ function registerBoaMintV2Routes(app) {
   });
 
   app.post('/api/boa/mint-nft/finalize', (req, res) => {
+    if (sendSolanaIrysWriteGateResponse(res, 'BOA mint v2 finalization')) return;
     const { wallet, nft_number } = req.body;
     if (!wallet || !nft_number) return res.status(400).json({ error: 'wallet and nft_number required' });
     

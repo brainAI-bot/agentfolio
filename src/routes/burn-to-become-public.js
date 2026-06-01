@@ -23,6 +23,7 @@ const { findProfileIdByWallet } = require('../lib/profile-wallet-lookup');
 const { buildBurnToBecomeForWallet } = require('./prepare-birth-endpoint');
 const { getRateLimitDelay } = require('../lib/rate-limit-retry');
 const { loadNormalizedTrust } = require('../lib/normalized-trust');
+const { sendSolanaIrysWriteGateResponse } = require('../lib/write-surface-gate');
 
 const DEFAULT_SOLANA_RPC_URL = 'https://api.mainnet-beta.solana.com';
 const RPC_URL = process.env.SOLANA_RPC_URL || process.env.SOLANA_RPC || DEFAULT_SOLANA_RPC_URL;
@@ -871,6 +872,10 @@ function handleBurnToBecome(req, res, url) {
     });
     res.end();
     return true;
+  }
+
+  if (req.method === 'POST' && url.pathname.startsWith('/api/burn-to-become/')) {
+    return sendSolanaIrysWriteGateResponse(res, 'Burn-to-Become ' + url.pathname);
   }
 
   // GET /api/burn-to-become/collections

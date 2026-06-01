@@ -17,6 +17,7 @@
 
 const { Router } = require('express');
 const { PublicKey } = require('@solana/web3.js');
+const { sendSolanaIrysWriteGateResponse } = require('../lib/write-surface-gate');
 
 const router = Router();
 
@@ -89,6 +90,7 @@ function serializeTx(tx) {
  * }
  */
 router.post('/reputation/recompute', requireSDK, async (req, res) => {
+  if (sendSolanaIrysWriteGateResponse(res, 'SATP V3 reputation recompute transaction build')) return;
   try {
     const { callerWallet, agentId, reviewAccounts } = req.body;
 
@@ -140,6 +142,7 @@ router.post('/reputation/recompute', requireSDK, async (req, res) => {
  * }
  */
 router.post('/validation/recompute', requireSDK, async (req, res) => {
+  if (sendSolanaIrysWriteGateResponse(res, 'SATP V3 validation recompute transaction build')) return;
   try {
     const { callerWallet, agentId, attestationAccounts } = req.body;
 

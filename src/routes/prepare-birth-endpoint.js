@@ -14,6 +14,7 @@
 const { Connection, PublicKey, Transaction, TransactionInstruction, ComputeBudgetProgram } = require('@solana/web3.js');
 const crypto = require('crypto');
 const { getGenesisPDA: getCanonicalGenesisPDA, deserializeGenesisRecord } = require('../satp-client/src');
+const { assertSolanaIrysWriteEnabled } = require('../lib/write-surface-gate');
 
 const IDENTITY_V3 = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
@@ -42,6 +43,7 @@ function parseGenesisAuthority(data) {
  * Build unsigned burnToBecome TX
  */
 async function buildBurnToBecomeForWallet(agentId, faceImage, faceMint, faceBurnTx) {
+  assertSolanaIrysWriteEnabled('SATP burn-to-become transaction build');
   const conn = new Connection(RPC_URL, 'confirmed');
   const [genesisPDA] = getGenesisPDA(agentId);
   

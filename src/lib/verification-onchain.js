@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const logger = require('../logger');
+const { assertSolanaIrysWriteEnabled } = require('./write-surface-gate');
 
 // TEMPORARY FIX: Skip on-chain operations for wallet with discriminator mismatch
 const PROBLEMATIC_WALLETS = ['Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc'];
@@ -97,6 +98,7 @@ const VERIFICATION_TYPES = {
 async function postVerificationOnchain(ownerWallet, platform, proofData = {}) {
   if (shouldSkipOnchainOp(ownerWallet)) return { signature: 'skipped-discriminator-fix', explorerUrl: 'https://explorer.solana.com/address/skipped' };
   try {
+    assertSolanaIrysWriteEnabled('legacy verification on-chain post');
     const keypair = getKeypair();
     const connection = getConnection();
     const ownerPk = new PublicKey(ownerWallet);
@@ -161,6 +163,7 @@ async function postVerificationOnchain(ownerWallet, platform, proofData = {}) {
 async function postReputationOnchain(ownerWallet, score) {
   if (shouldSkipOnchainOp(ownerWallet)) return { signature: 'skipped-discriminator-fix', explorerUrl: 'https://explorer.solana.com/address/skipped' };
   try {
+    assertSolanaIrysWriteEnabled('legacy reputation on-chain post');
     const keypair = getKeypair();
     const connection = getConnection();
     const ownerPk = new PublicKey(ownerWallet);
@@ -222,6 +225,7 @@ async function postReputationOnchain(ownerWallet, score) {
  */
 async function registerAgentOnchain(ownerWallet, name, description, twitter, website) {
   try {
+    assertSolanaIrysWriteEnabled('legacy agent on-chain registration');
     const keypair = getKeypair(); // admin/deployer
     const connection = getConnection();
     const ownerPk = new PublicKey(ownerWallet);
