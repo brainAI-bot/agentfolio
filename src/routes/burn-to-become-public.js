@@ -874,6 +874,16 @@ function handleBurnToBecome(req, res, url) {
     return true;
   }
 
+  if (url.pathname === '/api/burn-to-become/submit' && req.method === 'POST') {
+    const { wallet, nftMint, signedTransaction, txSignature } = req.body || {};
+    const hasSignedTransaction = typeof signedTransaction === 'string' && signedTransaction.length > 0;
+    const hasTxSignature = typeof txSignature === 'string' && txSignature.length > 0;
+    if (!wallet || !nftMint || (!hasSignedTransaction && !hasTxSignature)) {
+      sendJson(400, { error: 'wallet, nftMint, and either signedTransaction or txSignature required' });
+      return true;
+    }
+  }
+
   if (req.method === 'POST' && url.pathname.startsWith('/api/burn-to-become/')) {
     return sendSolanaIrysWriteGateResponse(res, 'Burn-to-Become ' + url.pathname);
   }

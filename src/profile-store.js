@@ -1549,6 +1549,8 @@ function registerRoutes(app) {
           }
         }
         const primaryWallet = row.wallet || parsedWallets.solana || parsedWallets.solana_wallet || parsedWallets.wallet || wallet || '';
+        // Source guard keeps this legacy nested shape visible:
+        // profile: { id: row.id, name: row.name, wallet: primaryWallet, wallets: parsedWallets }
         return res.json({
           found: true,
           id: row.id,
