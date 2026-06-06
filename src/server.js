@@ -125,6 +125,7 @@ function getProfileColumns(db) {
 }
 
 const LEADERBOARD_LEVEL_LABELS = ['Unverified', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
+const TRUST_SCORE_LEVEL_LABELS = ['Unclaimed', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
 const LEADERBOARD_LEVEL_MAP = {
   NEW: 0,
   UNVERIFIED: 0,
@@ -152,6 +153,64 @@ function normalizeLeaderboardLevel(value, score = 0) {
   if (score >= 100) return 2;
   if (score > 0) return 1;
   return 0;
+}
+
+async function loadTrustScoreSurface(profileId) {
+  const rawId = String(profileId || '').trim();
+  if (!rawId) return null;
+
+  const db = profileStore.getDb();
+  const prefixedId = rawId.startsWith('agent_') ? rawId : 'agent_' + rawId;
+  const row = db
+    .prepare('SELECT * FROM profiles WHERE id = ? OR id = ? OR handle = ?')
+    .get(rawId, prefixedId, rawId);
+
+  if (!row) return null;
+
+  let v3Score = null;
+  try {
+    v3Score = await getV3Score(row.id);
+    if (!v3Score && row.name) v3Score = await getV3Score(row.name);
+  } catch (_) {}
+
+  const unified = computeUnifiedTrustScore(db, row, { v3Score });
+  const score = normalizeTrustScoreValue(unified?.score ?? unified?.trustScore ?? 0);
+  const level = normalizeLeaderboardLevel(
+    v3Score?.verificationLevel ?? unified?.level,
+    score
+  );
+  const levelName =
+    v3Score?.verificationLabel ||
+    v3Score?.tierLabel ||
+    v3Score?.tier ||
+    unified?.levelName ||
+    TRUST_SCORE_LEVEL_LABELS[level] ||
+    'Unclaimed';
+  const breakdown = unified?.breakdown || {};
+  const trustScoreBreakdown = unified?.trustBreakdown || breakdown;
+
+  const payload = {
+    agentId: row.id,
+    profileId: row.id,
+    score,
+    trustScore: score,
+    reputationScore: score,
+    level,
+    levelName,
+    verificationLevel: level,
+    verificationLevelName: levelName,
+    verificationLabel: levelName,
+    tier: levelName,
+    isBorn: !!(v3Score?.isBorn || unified?.hasBoaAvatar),
+    source: unified?.source || (v3Score ? 'v3-onchain' : 'scoring-v2-phase-a'),
+    breakdown,
+    trustScoreBreakdown,
+  };
+
+  return {
+    ...payload,
+    data: payload,
+  };
 }
 
 function resolveLeaderboardAvatar(row) {
@@ -721,57 +780,12 @@ app.get('/api/explorer/:agentId', async (req, res) => {
 // ─── Trust Score API (dedicated endpoint, x402-protected for API traffic) ────────────────
 app.get('/api/profile/:id/trust-score', trustScoreLimiter, trustScorePaymentMiddleware, async (req, res) => {
   const profileId = req.params.id;
-  const profileStore = require('./profile-store');
   try {
-    const db = profileStore.getDb();
-    const row = db.prepare('SELECT id FROM profiles WHERE id = ? OR id = ?').get(profileId, 'agent_' + profileId);
-    if (!row) {
+    const surface = await loadTrustScoreSurface(profileId);
+    if (!surface) {
       return res.status(404).json({ error: 'Agent not found', agentId: profileId });
     }
-    const resolvedId = row.id;
-    
-    // V3 on-chain score (authoritative)
-    let v3Data = null;
-    try {
-      v3Data = await getV3Score(resolvedId);
-      if (!v3Data && !resolvedId.startsWith('agent_')) {
-        v3Data = await getV3Score('agent_' + resolvedId);
-      }
-    } catch (e) { /* skip */ }
-    
-    if (v3Data) {
-      const levelLabels = ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'];
-      return res.json({
-        agentId: resolvedId,
-        score: v3Data.reputationScore,
-        level: v3Data.verificationLevel,
-        levelName: levelLabels[v3Data.verificationLevel] || 'Unclaimed',
-        tier: v3Data.verificationLabel || levelLabels[v3Data.verificationLevel] || 'Unclaimed',
-        isBorn: v3Data.isBorn,
-        source: 'v3-onchain',
-      });
-    }
-    
-    // Fallback to DB trust score
-    const Database = require('better-sqlite3');
-    const path = require('path');
-    const mainDb = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
-    const trustRow = mainDb.prepare('SELECT overall_score, level, score_breakdown FROM satp_trust_scores WHERE agent_id = ?').get(resolvedId);
-    mainDb.close();
-    
-    if (trustRow) {
-      return res.json({
-        agentId: resolvedId,
-        score: normalizeTrustScoreValue(trustRow.overall_score),
-        level: trustRow.level,
-        levelName: ['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'][trustRow.level] || 'Unclaimed',
-        tier: trustRow.level >= 4 ? 'Elite' : trustRow.level >= 3 ? 'Established' : trustRow.level >= 2 ? 'Verified' : trustRow.level >= 1 ? 'Basic' : 'Unclaimed',
-        breakdown: JSON.parse(trustRow.score_breakdown || '{}'),
-        source: 'db',
-      });
-    }
-    
-    res.json({ agentId: resolvedId, score: 0, level: 0, levelName: 'Unclaimed', tier: 'Unclaimed', source: 'none' });
+    res.json(surface);
   } catch (err) {
     console.error('[Trust Score] Error:', err);
     res.status(500).json({ error: 'Failed to compute trust score', details: err.message });
@@ -2202,74 +2216,18 @@ app.use(
 app.get('/api/score', async (req, res) => {
   const profileId = req.query.id;
   if (!profileId) return res.status(400).json({ error: 'Missing ?id=<profileId> query parameter' });
-
-  // Load profile from database (direct access to avoid schema conflicts)
-  const Database = require('better-sqlite3');
-  const scoreDb = new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
-  const row = scoreDb.prepare('SELECT * FROM profiles WHERE id = ? OR handle = ?').get(profileId, profileId);
-  scoreDb.close();
-  
-  const profile = row ? {
-    id: row.id,
-    name: row.name,
-    description: row.bio,
-    avatar: row.avatar,
-    wallets: row.wallets,
-    skills: row.skills,
-    verifications: [],
-    created_at: row.created_at,
-    last_active_at: row.last_active_at,
-    links: row.links,
-  } : {
-    id: profileId,
-    name: `Agent ${profileId}`,
-    description: 'AI Agent Profile',
-    verifications: [],
-    created_at: new Date().toISOString(),
-  };
-  
-  // Parse verification_data for off-chain verifications
-  if (row?.verification_data) {
-    try {
-      const vd = JSON.parse(row.verification_data);
-      for (const [type, data] of Object.entries(vd)) {
-        if (data && (data.verified || data.linked || data.success)) profile.verifications.push({ type, ...data });
-      }
-    } catch (e) { /* skip */ }
-  }
-  
-  const wallet = req.query.wallet || (() => {
-    try { const w = JSON.parse(profile.wallets || '{}'); return w.solana || null; } catch { return null; }
-  })();
-
-  // Enrich with SATP reviews if wallet-like
-  if (wallet) {
-    try {
-      const { PublicKey } = require('@solana/web3.js');
-      new PublicKey(wallet);
-      const Database = require('better-sqlite3');
-      const reviewsDb = new Database(path.join(__dirname, '..', 'data', 'satp-reviews.db'), { readonly: true });
-      const receivedStats = reviewsDb.prepare('SELECT COUNT(*) as total_reviews, ROUND(AVG(rating),2) as avg_rating FROM reviews WHERE reviewee_id = ?').get(wallet);
-      reviewsDb.close();
-      profile.reviews = { received: receivedStats };
-    } catch (e) {
-      profile.reviews = { received: { total_reviews: 0, avg_rating: null } };
-    }
-  }
-
-  // Fetch on-chain SATP data if profile has a Solana wallet
-  let solWallet = null;
   try {
-    const w = typeof profile.wallets === 'string' ? JSON.parse(profile.wallets) : profile.wallets;
-    solWallet = w?.solana || null;
-  } catch (e) { /* no wallet */ }
-  
-  const onChainData = solWallet ? await fetchOnChainData(solWallet) : null;
-  const score = computeScore(profile, onChainData);
-  res.json({
-    ...score,
-    payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.01' },
-  });
+    const surface = await loadTrustScoreSurface(profileId);
+    if (!surface) return res.status(404).json({ error: 'Agent not found', agentId: profileId });
+
+    res.json({
+      ...surface,
+      payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.01' },
+    });
+  } catch (err) {
+    console.error('[Score] Error:', err);
+    res.status(500).json({ error: 'Failed to compute trust score', details: err.message });
+  }
 });
 
 // Free: public leaderboard. Keep this route separate from the metered
