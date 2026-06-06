@@ -12,12 +12,16 @@ import {
   generateSigner, keypairIdentity, percentAmount, publicKey, some 
 } from '@metaplex-foundation/umi';
 import { irysUploader } from '@metaplex-foundation/umi-uploader-irys';
+import { createRequire } from 'module';
 import fs from 'fs';
 import path from 'path';
 
+const require = createRequire(import.meta.url);
+const { assertSolanaIrysWriteEnabled } = require('../lib/write-surface-gate');
 const TREASURY = 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
 
 export async function mintBoaNft({ nftNumber, cluster, deployerKeypath, assetsDir, collectionMint, recipient }) {
+  assertSolanaIrysWriteEnabled('BOA NFT mint');
   if (!recipient) {
     throw new Error('recipient wallet address is required — refusing to mint to deployer');
   }

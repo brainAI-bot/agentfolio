@@ -7,6 +7,9 @@ import { keypairIdentity, publicKey, transactionBuilder } from "@metaplex-founda
 import { setComputeUnitLimit } from "@metaplex-foundation/mpl-toolbox";
 import fs from "fs";
 import path from "path";
+import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: core-cm-v2/load-items.mjs');
 
 const CM_ADDRESS = "BVso8ZjrV2G16eKZnVVhrfk8hPBgD7wgLKyxVbu489Gz";
 const RPC = "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb";

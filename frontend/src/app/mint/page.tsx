@@ -6,6 +6,7 @@ import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { Flame, Wallet, Shield, AlertTriangle, CheckCircle, ExternalLink, Loader2, Sparkles, ArrowRight, Zap, Plus, FileText, Image as ImageIcon } from "lucide-react";
 import { reconcileMintSelection } from "@/lib/mint-selection";
+import { assertFrontendSolanaIrysWriteEnabled } from "@/lib/write-surface-gate";
 
 const MINTING_PAUSED = false;
 
@@ -114,6 +115,7 @@ export default function MintPage() {
     setStep("minting");
     setError("");
     try {
+      assertFrontendSolanaIrysWriteEnabled("frontend client-signed BOA mint");
       const walletAddr = wallet.publicKey.toBase58();
       const prepRes = await fetch(API + "/api/burn-to-become/prepare-mint", {
         method: "POST",
@@ -159,6 +161,7 @@ export default function MintPage() {
     setStep("minting");
     setError("");
     try {
+      assertFrontendSolanaIrysWriteEnabled("frontend BOA mint");
       const walletAddr = wallet.publicKey.toBase58();
       const isFreeMint = eligibility?.eligible === true;
 
@@ -219,6 +222,7 @@ export default function MintPage() {
     setStep("minting");
     setError("");
     try {
+      assertFrontendSolanaIrysWriteEnabled("frontend BOA mint retry completion");
       const { Connection } = await import("@solana/web3.js");
       const connection = new Connection(SOLANA_RPC_PROXY, "confirmed");
       let mintCompleted = false;
@@ -257,6 +261,7 @@ export default function MintPage() {
     setStep("burning");
     setError("");
     try {
+      assertFrontendSolanaIrysWriteEnabled("frontend burn-to-become");
       const prepRes = await fetch(`${API}/api/burn-to-become/prepare`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

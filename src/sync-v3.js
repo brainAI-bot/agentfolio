@@ -1,8 +1,10 @@
 const { createSATPClient, SATPV3SDK } = require("./satp-client/src/index.js");
 const { Keypair, Connection } = require("@solana/web3.js");
 const fs = require("fs");
+const { assertSolanaIrysWriteEnabled } = require("./lib/write-surface-gate");
 
 async function main() {
+  assertSolanaIrysWriteEnabled("SATP V3 sync script");
   const rpc = process.env.SOLANA_RPC_URL || "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb";
   const client = createSATPClient({ rpcUrl: rpc });
   const connection = new Connection(rpc, "confirmed");

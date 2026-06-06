@@ -3,6 +3,9 @@ import { burnV1, mplTokenMetadata, TokenStandard, findMetadataPda } from "@metap
 import { keypairIdentity, publicKey } from "@metaplex-foundation/umi";
 import { findAssociatedTokenPda } from "@metaplex-foundation/mpl-toolbox";
 import fs from "fs";
+import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: boa-pipeline/burn-dupes2.mjs');
 
 const umi = createUmi("https://api.mainnet-beta.solana.com").use(mplTokenMetadata());
 const raw = JSON.parse(fs.readFileSync("/home/ubuntu/.config/solana/mainnet-deployer.json"));

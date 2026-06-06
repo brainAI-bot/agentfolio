@@ -10,10 +10,14 @@ import {
   addConfigLines,
   fetchCandyMachine,
 } from '@metaplex-foundation/mpl-candy-machine';
+
 import { generateSigner, keypairIdentity, percentAmount, some, publicKey, sol, none } from '@metaplex-foundation/umi';
 import { irysUploader } from '@metaplex-foundation/umi-uploader-irys';
 import fs from 'fs';
 import path from 'path';
+import { assertSolanaIrysWriteEnabled } from '../../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: boa-pipeline/candy-machine/02-create-candy-machine.mjs');
 
 const MAX_SUPPLY = parseInt(process.argv[2]) || 100;
 

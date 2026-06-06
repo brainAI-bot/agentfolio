@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Flame, AlertTriangle, Check, Loader2, X, Image, Skull, Shield, ExternalLink } from "lucide-react";
 import BirthCertificate from "./BirthCertificate";
+import { assertFrontendSolanaIrysWriteEnabled } from "@/lib/write-surface-gate";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot";
 const SOLANA_RPC_PROXY = `${API}/solana-rpc`;
@@ -110,6 +111,7 @@ export default function BurnToBecome({ profileId, walletAddress, apiKey, current
     }));
 
     try {
+      assertFrontendSolanaIrysWriteEnabled("frontend avatar burn-to-become");
       // Step 1: Prepare (server validates + uploads to Arweave)
       const prepRes = await fetch(`${API}/api/avatar/burn-to-become/prepare`, {
         method: "POST",

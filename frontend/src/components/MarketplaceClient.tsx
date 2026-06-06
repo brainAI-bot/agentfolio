@@ -11,6 +11,7 @@ const Connection = SolConnection;
 import type { Job } from "@/lib/types";
 import { Briefcase, Lock, Unlock, CheckCircle, AlertTriangle, Clock, X, Send, DollarSign, UserCheck, Link2, Shield } from "lucide-react";
 import { buildUpdateAgentTransaction, fetchAgentProfile, SOLANA_RPC } from "@/lib/identity-registry";
+import { assertFrontendSolanaIrysWriteEnabled } from "@/lib/write-surface-gate";
 import {
   buildV3EscrowCreate,
   buildV3Release,
@@ -240,6 +241,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     if (!connected || !publicKey || !sendTransaction || !selectedJob) return;
     setLoading(true);
     try {
+      assertFrontendSolanaIrysWriteEnabled("frontend V3 escrow funding");
       const [budgetStr, budgetCurrencyRaw] = selectedJob.budget.split(" ");
       const budgetCurrency = (budgetCurrencyRaw || "SOL").toUpperCase();
       if (budgetCurrency !== "SOL") {
@@ -309,6 +311,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     if (!connected || !publicKey || !sendTransaction || !selectedJob) return;
     setLoading(true);
     try {
+      assertFrontendSolanaIrysWriteEnabled("frontend V3 escrow release");
       const agentId = selectedJob.assignee || selectedJob.assigneeId;
 
       // Check if this job has a V3 escrow PDA — if so, do on-chain release

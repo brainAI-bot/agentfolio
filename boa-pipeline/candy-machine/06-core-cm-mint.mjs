@@ -9,6 +9,7 @@ import {
   fetchCandyMachine,
   mintV1,
 } from '@metaplex-foundation/mpl-core-candy-machine';
+
 import { fetchCollectionV1 } from '@metaplex-foundation/mpl-core';
 import { setComputeUnitLimit } from '@metaplex-foundation/mpl-toolbox';
 import {
@@ -19,6 +20,9 @@ import {
 } from '@metaplex-foundation/umi';
 import fs from 'fs';
 import path from 'path';
+import { assertSolanaIrysWriteEnabled } from '../../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: boa-pipeline/candy-machine/06-core-cm-mint.mjs');
 
 const recipient = process.argv[2];
 if (!recipient) {

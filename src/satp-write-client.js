@@ -8,6 +8,7 @@ const { Connection, PublicKey, Keypair, SystemProgram, Transaction } = require('
 const { Program, AnchorProvider, Wallet, BN } = require('@coral-xyz/anchor');
 const fs = require('fs');
 const path = require('path');
+const { assertSolanaIrysWriteEnabled } = require('./lib/write-surface-gate');
 
 // V3 SDK for Genesis Record operations
 let SATPV3SDK, createSATPClient, hashAgentId, getGenesisPDA;
@@ -152,6 +153,7 @@ function getReputationAuthorityPDA(network) {
  * @returns {object} - { txSignature, identityPDA }
  */
 async function registerIdentity(params, signerKeypair, network = 'mainnet') {
+  assertSolanaIrysWriteEnabled('SATP identity registration');
   const provider = getProvider(network, signerKeypair);
   const program = getIdentityProgram(provider, network);
   
@@ -199,6 +201,7 @@ async function registerIdentity(params, signerKeypair, network = 'mainnet') {
  * @returns {object} - { transaction (base64), identityPDA }
  */
 async function buildRegisterIdentityTx(params, network = 'mainnet') {
+  assertSolanaIrysWriteEnabled('SATP identity registration transaction build');
   const rpcUrl = network === 'devnet' ? DEVNET_RPC : MAINNET_RPC;
   const connection = new Connection(rpcUrl, 'confirmed');
   
@@ -258,6 +261,7 @@ async function buildRegisterIdentityTx(params, network = 'mainnet') {
  * @returns {object} - { txSignature }
  */
 async function recomputeReputation(agentWallet, callerKeypair, network = 'mainnet') {
+  assertSolanaIrysWriteEnabled('SATP reputation recompute');
   const provider = getProvider(network, callerKeypair);
   const repProgram = getReputationProgram(provider, network);
   const ids = getProgramIds(network);
@@ -347,6 +351,7 @@ function getAttestationPDA(agentId, issuerPubkey, attestationType, network) {
  * @param {string} network
  */
 async function createAttestation(params, signerKeypair, network = 'mainnet') {
+  assertSolanaIrysWriteEnabled('SATP attestation creation');
   const provider = getProvider(network, signerKeypair);
   const program = getAttestationsProgram(provider, network);
 
@@ -380,6 +385,7 @@ async function createAttestation(params, signerKeypair, network = 'mainnet') {
  * Uses agent_id string instead of wallet-based PDA derivation
  */
 async function registerIdentityV3(params, signerKeypair, network = 'mainnet') {
+  assertSolanaIrysWriteEnabled('SATP V3 genesis registration');
   if (!SATPV3SDK) throw new Error('V3 SDK not available');
   
   const rpcUrl = network === 'devnet' ? DEVNET_RPC : MAINNET_RPC;
@@ -410,6 +416,7 @@ async function registerIdentityV3(params, signerKeypair, network = 'mainnet') {
  * Build unsigned V3 identity creation TX (for client-side signing)
  */
 async function buildRegisterIdentityV3Tx(params, network = 'mainnet') {
+  assertSolanaIrysWriteEnabled('SATP V3 genesis transaction build');
   if (!SATPV3SDK) throw new Error('V3 SDK not available');
   
   const rpcUrl = network === 'devnet' ? DEVNET_RPC : MAINNET_RPC;

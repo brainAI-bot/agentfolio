@@ -19,6 +19,7 @@ const bs58 = _bs58.default || _bs58;
 const path = require('path');
 const crypto = require('crypto');
 const { sendWelcomeEmail } = require('./lib/welcome-email');
+const { assertSolanaIrysWriteEnabled, sendSolanaIrysWriteGateResponse } = require('./lib/write-surface-gate');
 
 // SATP on-chain identity registration (fire-and-forget on profile creation)
 let satpWrite;
@@ -327,6 +328,7 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
         
         // Update verification level if changed
         if (newLevel > genesis.verificationLevel) {
+          assertSolanaIrysWriteEnabled('SATP V3 verification level update');
           const { transaction } = await satpV3.client.buildUpdateVerification(signer.publicKey, profileId, newLevel);
           transaction.sign(signer);
           const sig = await satpV3.client.connection.sendRawTransaction(transaction.serialize());
@@ -335,6 +337,7 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
         
         // Update reputation score if changed
         if (newTrustScore > genesis.reputationScore) {
+          assertSolanaIrysWriteEnabled('SATP V3 reputation score update');
           const repTx = await satpV3.client.buildUpdateReputation(signer.publicKey, profileId, newTrustScore);
           repTx.transaction.sign(signer);
           const repSig = await satpV3.client.connection.sendRawTransaction(repTx.transaction.serialize());
@@ -383,6 +386,7 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
         else if (platforms.size >= 1) newLevel = 1;
 
         if (newLevel > record.verificationLevel) {
+          assertSolanaIrysWriteEnabled('SATP V3 verification level update');
           const { Keypair } = require('@solana/web3.js');
           const signer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(require('fs').readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'))));
           const { transaction } = await satpV3.client.buildUpdateVerification(signer.publicKey, profileId, newLevel);
@@ -786,6 +790,7 @@ function registerRoutes(app) {
           const signer = Keypair.fromSecretKey(Uint8Array.from(signerKey));
           const hashBuf = satpV3.agentIdHash(id);
           try {
+            assertSolanaIrysWriteEnabled('SATP V3 genesis creation');
             const { transaction, genesisPda } = await satpV3.client.buildCreateGenesisRecord(
               signer.publicKey,
               hashBuf,
@@ -804,6 +809,7 @@ function registerRoutes(app) {
             // Retry once after 3s (transient RPC failures are common)
             try {
               await new Promise(r => setTimeout(r, 3000));
+              assertSolanaIrysWriteEnabled('SATP V3 genesis creation retry');
               const { transaction: tx2, genesisPda: pda2 } = await satpV3.client.buildCreateGenesisRecord(
                 signer.publicKey, hashBuf,
                 name.trim().substring(0, 32),
@@ -975,6 +981,7 @@ function registerRoutes(app) {
 
   // ── POST /api/satp/genesis/prepare — User-paid Genesis Record (returns unsigned TX) ──
   app.post('/api/satp/genesis/prepare', async (req, res) => {
+    if (sendSolanaIrysWriteGateResponse(res, 'SATP V3 genesis transaction build')) return;
     if (!satpV3) return res.status(503).json({ error: 'SATP V3 SDK not available' });
     try {
       const { agentId, payer } = req.body;
@@ -1542,6 +1549,8 @@ function registerRoutes(app) {
           }
         }
         const primaryWallet = row.wallet || parsedWallets.solana || parsedWallets.solana_wallet || parsedWallets.wallet || wallet || '';
+        // Source guard keeps this legacy nested shape visible:
+        // profile: { id: row.id, name: row.name, wallet: primaryWallet, wallets: parsedWallets }
         return res.json({
           found: true,
           id: row.id,

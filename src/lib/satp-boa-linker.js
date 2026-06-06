@@ -9,6 +9,7 @@
 const { Connection, PublicKey, SystemProgram, Transaction, TransactionInstruction, Keypair, ComputeBudgetProgram } = require('@solana/web3.js');
 const crypto = require('crypto');
 const fs = require('fs');
+const { assertSolanaIrysWriteEnabled } = require('./write-surface-gate');
 
 // SATP v2 Identity Registry — Mainnet
 const SATP_IDENTITY_PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq');
@@ -85,6 +86,7 @@ function getAttestationPDA(agentId, issuerPubkey, attestationType) {
  * @returns {object} - { updateTx, attestationTx }
  */
 async function linkBoaToSatpIdentity(walletAddress, soulboundMint, burnTx, artworkUri) {
+  assertSolanaIrysWriteEnabled('SATP BOA link attestation');
   let deployerKeypair;
   try {
     const keyData = JSON.parse(fs.readFileSync(DEPLOYER_KEY_PATH));

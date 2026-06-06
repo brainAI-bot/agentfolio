@@ -6,6 +6,7 @@
 
 const { Connection, PublicKey, TransactionMessage, VersionedTransaction, SystemProgram } = require('@solana/web3.js');
 const { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } = require('@solana/spl-token');
+const { assertSolanaIrysWriteEnabled } = require('./write-surface-gate');
 
 const ESCROW_PROGRAM_ID = new PublicKey('4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a');
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
@@ -70,6 +71,7 @@ async function getConnection() {
  * @param {number} deadlineUnix - Unix timestamp for deadline
  */
 async function buildCreateEscrowTx(clientWallet, jobId, amountUSDC, deadlineUnix) {
+  assertSolanaIrysWriteEnabled('Solana escrow create transaction build');
   const connection = await getConnection();
   const client = new PublicKey(clientWallet);
   const [escrowPDA] = deriveEscrowPDA(jobId);
@@ -120,6 +122,7 @@ async function buildCreateEscrowTx(clientWallet, jobId, amountUSDC, deadlineUnix
  * Build release transaction (client releases funds to agent)
  */
 async function buildReleaseTx(clientWallet, agentWallet, jobId) {
+  assertSolanaIrysWriteEnabled('Solana escrow release transaction build');
   const connection = await getConnection();
   const client = new PublicKey(clientWallet);
   const agent = new PublicKey(agentWallet);
@@ -160,6 +163,7 @@ async function buildReleaseTx(clientWallet, agentWallet, jobId) {
  * Build refund transaction (client refunds if no agent or past deadline)
  */
 async function buildRefundTx(clientWallet, jobId) {
+  assertSolanaIrysWriteEnabled('Solana escrow refund transaction build');
   const connection = await getConnection();
   const client = new PublicKey(clientWallet);
   const [escrowPDA] = deriveEscrowPDA(jobId);
@@ -197,6 +201,7 @@ async function buildRefundTx(clientWallet, jobId) {
  * Build accept_job transaction (agent accepts)
  */
 async function buildAcceptJobTx(agentWallet, jobId) {
+  assertSolanaIrysWriteEnabled('Solana escrow accept transaction build');
   const connection = await getConnection();
   const agent = new PublicKey(agentWallet);
   const [escrowPDA] = deriveEscrowPDA(jobId);
@@ -229,6 +234,7 @@ async function buildAcceptJobTx(agentWallet, jobId) {
  * Build submit_work transaction (agent submits, starts 24h timer)
  */
 async function buildSubmitWorkTx(agentWallet, jobId) {
+  assertSolanaIrysWriteEnabled('Solana escrow submit-work transaction build');
   const connection = await getConnection();
   const agent = new PublicKey(agentWallet);
   const [escrowPDA] = deriveEscrowPDA(jobId);
@@ -261,6 +267,7 @@ async function buildSubmitWorkTx(agentWallet, jobId) {
  * Confirm a signed transaction on-chain
  */
 async function confirmTransaction(signedTxBase64) {
+  assertSolanaIrysWriteEnabled('Solana escrow signed transaction confirmation');
   const connection = await getConnection();
   const txBytes = Buffer.from(signedTxBase64, 'base64');
   const sig = await connection.sendRawTransaction(txBytes, { skipPreflight: false });

@@ -5,6 +5,9 @@ import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
 import { mplCore, burnV1, fetchAssetV1 } from "@metaplex-foundation/mpl-core";
 import { keypairIdentity, publicKey } from "@metaplex-foundation/umi";
 import fs from "fs";
+import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: boa-pipeline/burn-old-test-mints.mjs');
 
 const RPC = 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
 const umi = createUmi(RPC).use(mplCore());

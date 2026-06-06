@@ -11,6 +11,9 @@
  */
 
 const { Connection, Keypair, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction, ComputeBudgetProgram } = require("@solana/web3.js");
+const { assertSolanaIrysWriteEnabled } = require('../src/lib/write-surface-gate');
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: scripts/burn-team-1of1.js');
 const { createMint, getOrCreateAssociatedTokenAccount, mintTo, burn, createBurnInstruction, getAssociatedTokenAddress,
   TOKEN_2022_PROGRAM_ID, createInitializeNonTransferableMintInstruction, createInitializeMetadataPointerInstruction,
   createInitializeMintInstruction, getMintLen, ExtensionType, createAssociatedTokenAccountInstruction,

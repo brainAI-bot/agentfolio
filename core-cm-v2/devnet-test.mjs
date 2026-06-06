@@ -10,6 +10,7 @@ import {
   fetchCandyMachine,
   mintV1,
 } from '@metaplex-foundation/mpl-core-candy-machine';
+
 import { createCollectionV1 } from '@metaplex-foundation/mpl-core';
 import { setComputeUnitLimit } from '@metaplex-foundation/mpl-toolbox';
 import {
@@ -20,6 +21,9 @@ import {
   transactionBuilder,
 } from '@metaplex-foundation/umi';
 import fs from 'fs';
+import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: core-cm-v2/devnet-test.mjs');
 
 const RPC = 'https://api.devnet.solana.com';
 

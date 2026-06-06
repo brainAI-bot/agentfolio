@@ -6,6 +6,7 @@
 const { Connection, Keypair, Transaction, TransactionInstruction, PublicKey } = require('@solana/web3.js');
 const fs = require('fs');
 const logger = require('../logger');
+const { assertSolanaIrysWriteEnabled } = require('./write-surface-gate');
 
 const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 const KEYPAIR_PATH = '/home/ubuntu/.config/solana/devnet-deployer.json';
@@ -29,6 +30,7 @@ function getKeypair() {
  */
 async function postTrustScoreMemo(agentId, score, breakdown = {}) {
   try {
+    assertSolanaIrysWriteEnabled('trust score memo attestation');
     const keypair = getKeypair();
     const connection = new Connection(RPC_URL, 'confirmed');
     

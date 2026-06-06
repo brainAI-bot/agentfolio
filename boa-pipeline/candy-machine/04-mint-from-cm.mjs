@@ -13,11 +13,15 @@ import {
   mintFromCandyMachineV2,
   fetchCandyGuard,
 } from '@metaplex-foundation/mpl-candy-machine';
+
 import { generateSigner, keypairIdentity, publicKey, some, transactionBuilder } from '@metaplex-foundation/umi';
 import { setComputeUnitLimit } from '@metaplex-foundation/mpl-toolbox';
 import { transferV1, TokenStandard } from '@metaplex-foundation/mpl-token-metadata';
 import fs from 'fs';
 import path from 'path';
+import { assertSolanaIrysWriteEnabled } from '../../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: boa-pipeline/candy-machine/04-mint-from-cm.mjs');
 
 const recipient = process.argv[2];
 if (!recipient) {

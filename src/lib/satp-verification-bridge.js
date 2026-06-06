@@ -14,6 +14,7 @@ const { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionI
 const crypto = require('crypto');
 const fs = require('fs');
 const { getV3AttestationPDA, getGenesisPDA: getCanonicalGenesisPDA, getV3ValidationAuthorityPDA, getV3ProgramIds } = require('../satp-client/src/v3-pda');
+const { assertSolanaIrysWriteEnabled } = require('./write-surface-gate');
 
 // V3 Program IDs (mainnet)
 const ATTESTATIONS_PROGRAM = new PublicKey('6Xd1dAQJPvQRJ4Ntr6LtPTjDjPUZ8nfnmYLZaZ2DtrdD');
@@ -147,6 +148,7 @@ function logBridgeError(context, error) {
  * @returns {Promise<{txSignature: string}|null>}
  */
 async function postVerificationAttestation(agentId, platform, proofObj) {
+  assertSolanaIrysWriteEnabled('SATP verification attestation');
   const keypair = getKeypair();
   if (!keypair) {
     console.warn('[SATP Bridge] No keypair — skipping');
@@ -281,6 +283,7 @@ async function getAgentAttestations(agentId, conn) {
  * Create attestation only (no genesis → can't recompute)
  */
 async function createAttestationOnly(agentId, attestationType, proofData, attPDA, keypair, conn) {
+  assertSolanaIrysWriteEnabled('SATP create attestation only');
   console.log(`[SATP Bridge] createAttestationOnly start for ${agentId}/${attestationType} (proofBytes=${Buffer.byteLength(proofData, 'utf8')}, attPDA=${attPDA.toBase58()})`);
   const tx = new Transaction();
   tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 150000 }));
@@ -334,6 +337,7 @@ async function createAttestationOnly(agentId, attestationType, proofData, attPDA
  * Verify an existing attestation account, then recompute score if genesis exists.
  */
 async function verifyExistingAttestation(agentId, platform, attestationType, attPDA, genesisPDA, hasGenesis, keypair, conn) {
+  assertSolanaIrysWriteEnabled('SATP verify existing attestation');
   let alreadyVerified = false;
   try {
     const existing = await conn.getAccountInfo(attPDA);
@@ -419,6 +423,7 @@ async function verifyExistingAttestation(agentId, platform, attestationType, att
  * Recompute only (attestation already exists)
  */
 async function triggerRecomputeOnly(agentId, keypair, conn) {
+  assertSolanaIrysWriteEnabled('SATP recompute only');
   const [genesisPDA] = getGenesisPDA(agentId);
   const genesisAcct = await conn.getAccountInfo(genesisPDA);
   if (!genesisAcct) {
@@ -464,4 +469,3 @@ module.exports = {
   getAgentAttestations,
   triggerRecomputeOnly,
 };
-

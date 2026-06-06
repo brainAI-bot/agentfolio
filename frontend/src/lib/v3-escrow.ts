@@ -12,6 +12,7 @@
 
 import { Buffer } from 'buffer';
 import { Transaction, VersionedTransaction, Connection, PublicKey } from '@solana/web3.js';
+import { assertFrontendSolanaIrysWriteEnabled } from './write-surface-gate';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333';
 
@@ -195,6 +196,7 @@ export async function signAndSendV3Tx(
   publicKey: PublicKey,
   sendTransaction: (tx: Transaction | VersionedTransaction, connection: Connection) => Promise<string>,
 ): Promise<string> {
+  assertFrontendSolanaIrysWriteEnabled('frontend V3 escrow transaction send');
   if (tx instanceof Transaction) {
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
     tx.recentBlockhash = blockhash;

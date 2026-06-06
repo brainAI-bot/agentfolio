@@ -10,6 +10,7 @@ const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
+const { sendSolanaIrysWriteGateResponse } = require('../lib/write-surface-gate');
 
 const PIPELINE_DIR = path.join(__dirname, '..', 'boa-pipeline');
 const DB_PATH = '/home/ubuntu/agentfolio/data/agentfolio.db';
@@ -42,6 +43,7 @@ function registerBoaMintFinalizeRoutes(app) {
   
   // POST /api/boa/mint/finalize — after payment TX confirmed, mint the actual NFT
   app.post('/api/boa/mint/finalize', async (req, res) => {
+    if (sendSolanaIrysWriteGateResponse(res, 'BOA mint finalization')) return;
     const { wallet, payment_tx, nft_number } = req.body;
     
     if (!wallet || !nft_number) {

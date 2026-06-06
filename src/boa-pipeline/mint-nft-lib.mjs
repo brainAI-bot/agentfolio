@@ -13,12 +13,15 @@ import { irysUploader } from '@metaplex-foundation/umi-uploader-irys';
 import { transferSol } from '@metaplex-foundation/umi';
 import fs from 'fs';
 import path from 'path';
+import { assertSolanaIrysWriteEnabled } from '../lib/write-surface-gate.mjs';
 
 const TREASURY = 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
 const DEPLOYER_PATH = process.env.HOME + '/.config/solana/mainnet-deployer.json';
 const ASSETS_DIR = process.env.HOME + '/boa-assets';
 
 export async function mintBoaNft(cluster, nftNumber, recipientWallet) {
+  assertSolanaIrysWriteEnabled('BOA NFT mint finalization');
+
   const RPC = cluster === 'mainnet' 
     ? 'https://api.mainnet-beta.solana.com'
     : 'https://api.devnet.solana.com';

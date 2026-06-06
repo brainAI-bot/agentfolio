@@ -11,6 +11,9 @@ import Irys from '@irys/upload';
 import Solana from '@irys/upload-solana';
 import fs from 'fs';
 import path from 'path';
+import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: boa-pipeline/upload-boa-folder.mjs');
 
 const ASSETS_DIR = process.env.HOME + '/boa-assets';
 const DATA_DIR = process.env.HOME + '/agentfolio/boa-pipeline/candy-machine-data';

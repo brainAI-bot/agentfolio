@@ -19,6 +19,7 @@ import {
   hasSatpIdentity,
   getSatpIdentityPDA,
 } from "@/lib/satp-identity-v2";
+import { assertFrontendSolanaIrysWriteEnabled } from "@/lib/write-surface-gate";
 
 interface VerificationState {
   loading: boolean;
@@ -409,6 +410,7 @@ export default function VerifyPage() {
     setAuthorityStatus("Checking for pending authority transfers...");
     setAuthorityError("");
     try {
+      assertFrontendSolanaIrysWriteEnabled("frontend SATP authority transfer acceptance");
       const res = await fetch("/api/satp/authority/check-pending", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -502,6 +504,7 @@ export default function VerifyPage() {
 
     setSatpAutoStatus("Checking SATP identity...");
     try {
+      assertFrontendSolanaIrysWriteEnabled("frontend SATP identity auto-create");
       const connection = new Connection(SOLANA_RPC, "confirmed");
       
       // Check if already has SATP V3 identity
@@ -598,6 +601,7 @@ export default function VerifyPage() {
   const sendOnChainAttestation = async () => {
     if (!connected || !publicKey || !sendTransaction) return;
     try {
+      assertFrontendSolanaIrysWriteEnabled("frontend verification on-chain attestation");
       const connection = new Connection(SOLANA_RPC, "confirmed");
       // Check if agent has on-chain profile
       const profile = await fetchAgentProfile(connection, publicKey);
@@ -617,6 +621,7 @@ export default function VerifyPage() {
     if (!connected || !publicKey || !sendTransaction || !profileId) return;
     setSatpState({ loading: true, success: false, error: "", result: null });
     try {
+      assertFrontendSolanaIrysWriteEnabled("frontend manual SATP identity registration");
       const connection = new Connection(SOLANA_RPC, "confirmed");
       
       // Use SATP V3 auto-create flow
