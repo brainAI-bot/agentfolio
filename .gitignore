@@ -37,6 +37,10 @@ archived/
 keys/
 *.keypair
 *keypair*.json
+*deployer*.json
+brainforge-personal.json
+satp-mainnet-platform.json
+satp-platform*.json
 
 # Temp / backup artifacts
 *.bak
