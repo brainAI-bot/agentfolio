@@ -11,6 +11,7 @@ const {
   sendAndConfirmTransaction,
 } = require('@solana/web3.js');
 const fs = require('fs');
+const { assertSolanaIrysWriteEnabled } = require('./write-surface-gate');
 
 const RPC_URL = process.env.SATP_RPC_URL || 'https://api.devnet.solana.com';
 const WALLET_PATH = process.env.SATP_WALLET_PATH || '/home/ubuntu/.config/solana/brainchain-personal.json';
@@ -74,6 +75,7 @@ function getReviewPDA(escrowPubkey, reviewerIdentityPDA) {
 }
 
 async function submitReview({ reviewer_id, reviewee_id, job_id, rating, comment }) {
+  assertSolanaIrysWriteEnabled('SATP review submission');
   if (!reviewer_id || !reviewee_id || !job_id) return { error: 'Missing required fields: reviewer_id, reviewee_id, job_id', status: 400 };
   if (!rating || rating < 1 || rating > 5) return { error: 'Rating must be between 1 and 5', status: 400 };
   if (!comment || comment.trim().length === 0) return { error: 'Comment is required', status: 400 };

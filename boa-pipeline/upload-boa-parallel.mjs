@@ -10,6 +10,9 @@ import { irysUploader } from '@metaplex-foundation/umi-uploader-irys';
 import { keypairIdentity } from '@metaplex-foundation/umi';
 import fs from 'fs';
 import path from 'path';
+import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: boa-pipeline/upload-boa-parallel.mjs');
 
 const RPC = 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
 const DEPLOYER_PATH = process.env.HOME + '/.config/solana/mainnet-deployer.json';

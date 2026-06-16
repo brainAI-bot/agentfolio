@@ -30,6 +30,7 @@
 const { Connection, PublicKey, SystemProgram, Transaction, TransactionInstruction, Keypair, ComputeBudgetProgram } = require('@solana/web3.js');
 const crypto = require('crypto');
 const fs = require('fs');
+const { assertSolanaIrysWriteEnabled } = require('../lib/write-surface-gate');
 
 // ─────────────────────────────────────────────
 //  PROGRAM IDs
@@ -230,6 +231,7 @@ function parseGenesisRecordPartial(data) {
  * @returns {object} { transaction (base64), genesisPDA, status, ... }
  */
 async function buildBurnToBecomeTx(agentId, walletAddress, faceImage, faceMint, faceBurnTx) {
+  assertSolanaIrysWriteEnabled('SATP V3 burn-to-become transaction build');
   const wallet = new PublicKey(walletAddress);
   const [genesisPDA] = getV3GenesisRecordPDA(agentId);
   const agentIdHash = computeAgentIdHash(agentId);
@@ -349,6 +351,7 @@ async function buildBurnToBecomeTx(agentId, walletAddress, faceImage, faceMint, 
  * @returns {object} { attestationTx, attestationPDA, ... }
  */
 async function createBoaAttestation(agentId, walletAddress, soulboundMint, burnTx, artworkUri) {
+  assertSolanaIrysWriteEnabled('SATP BOA attestation creation');
   let deployerKeypair;
   try {
     const keyData = JSON.parse(fs.readFileSync(DEPLOYER_KEY_PATH));

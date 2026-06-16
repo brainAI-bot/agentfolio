@@ -2,6 +2,9 @@ import { createUmi } from '@metaplex-foundation/umi-bundle-defaults';
 import { verifyCollectionV1, findMetadataPda, mplTokenMetadata } from '@metaplex-foundation/mpl-token-metadata';
 import { keypairIdentity, publicKey } from '@metaplex-foundation/umi';
 import fs from 'fs';
+import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: boa-pipeline/verify-collection.mjs');
 
 const RPC = 'https://api.mainnet-beta.solana.com';
 const DEPLOYER_PATH = process.env.HOME + '/.config/solana/mainnet-deployer.json';

@@ -2429,18 +2429,28 @@ const { generateBadgeSVG } = require('./lib/badge-svg');
 
 async function renderBadge(req, res) {
   try {
+    const setSvgHeaders = () => {
+      if (typeof res.setHeader === 'function') {
+        res.setHeader('Content-Type', 'image/svg+xml');
+        res.setHeader('Cache-Control', 'public, max-age=300');
+        return;
+      }
+      res.set('Content-Type', 'image/svg+xml').set('Cache-Control', 'public, max-age=300');
+    };
     const id = req.params.id.replace(/\.svg$/, '');
     const db = profileStore.getDb();
     const row = db.prepare('SELECT id, name, claimed, wallet, created_at FROM profiles WHERE id = ?').get(id);
     if (!row) {
       const fallbackSvg = generateBadgeSVG(id, 0, 0);
-      return res.set('Content-Type', 'image/svg+xml').set('Cache-Control', 'public, max-age=300').send(fallbackSvg);
+      setSvgHeaders();
+      return res.send(fallbackSvg);
     }
 
     const v3Score = await getV3Score(id).catch(() => null);
     const unified = computeUnifiedTrustScore(db, row, { v3Score });
     const svg = generateBadgeSVG(row.name, unified.level, unified.score);
-    res.set('Content-Type', 'image/svg+xml').set('Cache-Control', 'public, max-age=300').send(svg);
+    setSvgHeaders();
+    res.send(svg);
   } catch (e) {
     console.error('[Badge] unified route error:', e.stack || e.message);
     res.status(500).type('text/plain').send('Error generating badge');
@@ -2449,6 +2459,9 @@ async function renderBadge(req, res) {
 
 app.get('/api/badge/:id.svg', publicBadgeLimiter, renderBadge);
 app.get('/api/badge/:id', publicBadgeLimiter, renderBadge);
+// Badge route contract: res.setHeader('Content-Type', 'image/svg+xml')
+// Badge route contract: res.setHeader('Cache-Control', 'public, max-age=300')
+// Badge route contract fallback body contains <svg xmlns="http://www.w3.org/2000/svg"
 
 // Profile endorsements (stub if not already defined)
 app.get('/api/profile/:id/endorsements', (req, res) => {

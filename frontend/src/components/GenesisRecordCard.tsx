@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Shield, ExternalLink, Flame, Loader2, AlertTriangle } from "lucide-react";
+import { assertFrontendSolanaIrysWriteEnabled } from "@/lib/write-surface-gate";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -117,6 +118,7 @@ export function GenesisRecordCard({ agentId, nftAvatar }: { agentId: string; nft
     setRecoveringBirth(true);
     setRecoverMessage(null);
     try {
+      assertFrontendSolanaIrysWriteEnabled("frontend genesis birth recovery");
       const prepRes = await fetch(`${API}/api/burn-to-become/prepare-birth`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

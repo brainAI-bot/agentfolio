@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { Transaction } from '@solana/web3.js';
+import { assertFrontendSolanaIrysWriteEnabled } from '@/lib/write-surface-gate';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333';
 
@@ -87,6 +88,7 @@ export function WriteReviewForm({ targetProfileId }: WriteReviewFormProps) {
     setStatus(null);
 
     try {
+      assertFrontendSolanaIrysWriteEnabled('frontend V3 on-chain review');
       // Step 1: Build unsigned TX via V3 API (self-review prevention built in)
       const buildRes = await fetch(`${API_BASE}/api/v3/reviews/create-safe`, {
         method: 'POST',

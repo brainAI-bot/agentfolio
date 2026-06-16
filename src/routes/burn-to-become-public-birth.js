@@ -4,6 +4,7 @@
  */
 const { buildBurnToBecomeForWallet, parseGenesisAuthority, getGenesisPDA } = require('./prepare-birth-endpoint');
 const { Connection } = require('@solana/web3.js');
+const { sendSolanaIrysWriteGateResponse } = require('../lib/write-surface-gate');
 
 function handleBirthEndpoints(req, res, url) {
   const sendJson = (code, data) => {
@@ -13,6 +14,7 @@ function handleBirthEndpoints(req, res, url) {
 
   // POST /api/burn-to-become/prepare-birth — build unsigned burnToBecome TX
   if (url.pathname === '/api/burn-to-become/prepare-birth' && req.method === 'POST') {
+    if (sendSolanaIrysWriteGateResponse(res, 'SATP burn-to-become transaction build')) return true;
     if (!req.body) {
       let bodyStr = '';
       req.on('data', chunk => bodyStr += chunk);
@@ -42,6 +44,7 @@ function handleBirthEndpoints(req, res, url) {
 
   // POST /api/burn-to-become/submit-birth — submit signed burnToBecome TX
   if (url.pathname === '/api/burn-to-become/submit-birth' && req.method === 'POST') {
+    if (sendSolanaIrysWriteGateResponse(res, 'SATP burn-to-become signed transaction submission')) return true;
     if (!req.body) {
       let bodyStr = '';
       req.on('data', chunk => bodyStr += chunk);

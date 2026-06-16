@@ -21,6 +21,7 @@ const {
   TransactionInstruction,
 } = require("@solana/web3.js");
 const fs = require("fs");
+const { assertSolanaIrysWriteEnabled } = require('./write-surface-gate');
 
 const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 const RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
@@ -55,6 +56,7 @@ async function registerFaceOnChain({
   burnTx,
   originalMint,
 }) {
+  assertSolanaIrysWriteEnabled('SATP face memo registration');
   const deployer = getDeployer();
   const connection = getConnection();
 

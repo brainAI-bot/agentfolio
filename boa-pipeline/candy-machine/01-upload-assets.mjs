@@ -9,6 +9,9 @@ import { mplTokenMetadata } from '@metaplex-foundation/mpl-token-metadata';
 import { keypairIdentity } from '@metaplex-foundation/umi';
 import fs from 'fs';
 import path from 'path';
+import { assertSolanaIrysWriteEnabled } from '../../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: boa-pipeline/candy-machine/01-upload-assets.mjs');
 
 const START = parseInt(process.argv[2]) || 1;
 const END = parseInt(process.argv[3]) || 100;
