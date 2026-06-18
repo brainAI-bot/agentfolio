@@ -131,28 +131,12 @@ export default function SATPExplorerPage() {
           }
         } catch {}
 
-        // Step 3: Enrich each on-chain agent with scores, reputation, and NFT data
+        // Step 3: Build cards from the already-enriched explorer payload.
         const cards: AgentCard[] = await Promise.all(
           onChainAgents.map(async (agent: any) => {
             const wallet = agent.authority;
             const agentProfileId = agent.profileId || null;
             const profile = (agentProfileId ? profilesById[agentProfileId] : null) || profilesByWallet[wallet] || null;
-            
-            // Fetch trust score + verification level
-            let scores: any = {};
-            let reputation: any = {};
-            let reviewData: any = {};
-
-            try {
-              const [scoresRes, repRes, revRes] = await Promise.all([
-                fetch(`/api/satp/scores/${wallet}`).catch(() => null),
-                fetch(`/api/satp/reputation/${wallet}`).catch(() => null),
-                fetch(`/api/satp/reviews/${wallet}`).catch(() => null),
-              ]);
-              if (scoresRes?.ok) scores = await scoresRes.json();
-              if (repRes?.ok) reputation = await repRes.json();
-              if (revRes?.ok) reviewData = await revRes.json();
-            } catch {}
 
             // NFT avatar from profile cross-reference
             const nftAvatar = profile?.nftAvatar;
@@ -165,9 +149,7 @@ export default function SATPExplorerPage() {
             const platforms = [...new Set([...onChainPlatforms, ...profilePlatforms])];
 
             // Use profile name if available (more human-readable), else on-chain name
-            const scoreProfileId = scores?.data?.profileId ?? scores?.profileId ?? null;
-            const profileId = agentProfileId ?? profile?.id ?? scoreProfileId ?? null;
-            const scoreMatchesProfile = Boolean(scoreProfileId && profileId && scoreProfileId === profileId);
+            const profileId = agentProfileId ?? profile?.id ?? null;
             const displayName = profile?.name || agent.matchedProfileName || agent.name || "Unknown Agent";
 
             return {
@@ -181,13 +163,13 @@ export default function SATPExplorerPage() {
                 agent.computedTrustScore ??
                 agent.trustScore ??
                 agent.reputationScore ??
-                (scoreMatchesProfile ? (scores?.data?.trustScore ?? scores?.trustScore) : null) ??
+                agent.score ??
                 0,
-              tier: ((scoreMatchesProfile ? (scores?.data?.tier ?? scores?.tier) : null) ?? agent.tier ?? "unverified").toLowerCase(),
-              verificationLevel: (scoreMatchesProfile ? (scores?.data?.verificationLevel ?? scores?.verificationLevel) : null) ?? agent.verificationLevel ?? 0,
+              tier: (agent.tier ?? agent.levelName ?? agent.verificationLabel ?? "unverified").toLowerCase(),
+              verificationLevel: agent.verificationLevel ?? agent.level ?? 0,
               platforms,
-              reviewCount: reviewData?.data?.stats?.total || reviewData?.stats?.total || 0,
-              reviewAvg: reviewData?.data?.stats?.avg_rating || reviewData?.stats?.avg_rating || 0,
+              reviewCount: Number(agent.reviewCount ?? 0),
+              reviewAvg: Number(agent.reviewAvg ?? 0),
               jobCount: profile?.stats?.jobsCompleted || 0,
               totalEarned: profile?.stats?.totalEarned || 0,
               onChainAttestations: agent.onChainAttestations || 0,

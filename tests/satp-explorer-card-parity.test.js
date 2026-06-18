@@ -9,6 +9,7 @@ const GITHUB_SIG = '5'.repeat(64);
 
 function loadWithMocks(options = {}) {
   const originalLoad = Module._load;
+  let nftLookupCalls = 0;
 
   class PublicKey {
     constructor(value) {
@@ -31,6 +32,11 @@ function loadWithMocks(options = {}) {
           account: { data: Buffer.alloc(96, 2) },
         },
       ];
+    }
+
+    async getParsedTokenAccountsByOwner() {
+      nftLookupCalls += 1;
+      return { value: [] };
     }
   }
 
@@ -186,6 +192,9 @@ function loadWithMocks(options = {}) {
 
   return {
     mod,
+    getNftLookupCalls() {
+      return nftLookupCalls;
+    },
     restore() {
       Module._load = originalLoad;
       delete require.cache[targetPath];
@@ -228,6 +237,7 @@ describe('satp explorer card parity regression guard', () => {
     assert.strictEqual(agent.attestationMemos[0].memo, 'GitHub verified');
     assert.strictEqual(agent.verifications[0].platform, 'x');
     assert.strictEqual(agent.verifications[0].txSignature, TWITTER_SIG);
+    assert.strictEqual(loaded.getNftLookupCalls(), 0);
   });
 
   it('keeps the SATP explorer nonempty when the legacy direct parser yields no rows but the canonical V3 explorer has agents', async () => {
@@ -258,5 +268,6 @@ describe('satp explorer card parity regression guard', () => {
     assert.strictEqual(result.agents[0].name, 'Bob');
     assert.strictEqual(result.agents[0].reputationScore, 42);
     assert.strictEqual(result.agents[0].verificationLevel, 1);
+    assert.strictEqual(loaded.getNftLookupCalls(), 0);
   });
 });
