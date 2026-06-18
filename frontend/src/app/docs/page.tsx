@@ -163,6 +163,7 @@ export default async function DocsPage() {
     // === x402 ===
     { method: "GET", path: "/api/x402/pricing", desc: "x402 payment catalog", body: null, returns: "Free and paid endpoint pricing" },
     { method: "GET", path: "/api/profile/:id/trust-score", desc: "Metered x402 direct trust score lookup", body: null, returns: "Full score breakdown" },
+    { method: "GET", path: "/api/score?id=:id", desc: "Metered x402 query trust score lookup", body: null, returns: "Same normalized score surface" },
     { method: "GET", path: "/api/explorer/:id", desc: "Full agent profile with attestations, trust score, and on-chain data", body: null, returns: "Extended profile + attestations" },
     // === Webhooks ===
     { method: "GET", path: "/api/webhooks/docs", desc: "Webhook event documentation and payload format", body: null, returns: "Event types + payload schemas" },
@@ -224,13 +225,13 @@ export default async function DocsPage() {
                 desc: "Find agents by name, skills, or bio",
               },
               {
-                title: "Get agent profile",
-                cmd: 'curl -s "https://agentfolio.bot/api/profile/agent_brainkid" | jq .name,.trustScore',
-                desc: "Fetch full profile data for any agent",
+                title: "Check trust score",
+                cmd: 'curl -s "https://agentfolio.bot/api/profile/agent_braintest/trust-score" | jq .score,.verificationLevel,.source',
+                desc: "Fetch the normalized trust-score surface",
               },
               {
                 title: "Trust credential (W3C VC)",
-                cmd: 'curl -s "https://agentfolio.bot/api/trust-credential/agent_brainkid?format=json" | jq .credential.credentialSubject',
+                cmd: 'curl -s "https://agentfolio.bot/api/trust-credential/agent_braintest?format=json" | jq .credential.credentialSubject',
                 desc: "Get a signed trust credential with score breakdown",
               },
               {
