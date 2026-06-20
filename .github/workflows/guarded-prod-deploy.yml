@@ -93,6 +93,23 @@ jobs:
           fi
           ssh-keyscan -p "${AWS_PROD_PORT}" "${AWS_PROD_HOST}" >> ~/.ssh/known_hosts
 
+      - name: Stage checkout on production host
+        env:
+          AWS_PROD_HOST: ${{ secrets.AWS_PROD_HOST }}
+          AWS_PROD_USER: ${{ secrets.AWS_PROD_USER || 'ubuntu' }}
+          AWS_PROD_PORT: ${{ secrets.AWS_PROD_PORT || '22' }}
+          DEPLOY_SHA: ${{ steps.deploy-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          stage_path="/tmp/agentfolio-guarded-deploy-${DEPLOY_SHA}"
+          remote_stage_path="$(printf '%q' "${stage_path}")"
+          ssh -i ~/.ssh/agentfolio-prod -p "${AWS_PROD_PORT}" "${AWS_PROD_USER}@${AWS_PROD_HOST}" \
+            "rm -rf ${remote_stage_path} && mkdir -p ${remote_stage_path}"
+          rsync -az --delete \
+            --exclude='.git' \
+            -e "ssh -i ~/.ssh/agentfolio-prod -p ${AWS_PROD_PORT}" \
+            ./ "${AWS_PROD_USER}@${AWS_PROD_HOST}:${stage_path}/"
+
       - name: Run guarded deploy bridge
         env:
           AWS_PROD_HOST: ${{ secrets.AWS_PROD_HOST }}
@@ -104,6 +121,32 @@ jobs:
           DEPLOY_SHA: ${{ steps.deploy-ref.outputs.sha }}
         run: |
           set -euo pipefail
+          stage_path="/tmp/agentfolio-guarded-deploy-${DEPLOY_SHA}"
+          remote_env="$(
+            printf 'PROD_LOCKED_PATH=%q STAGED_RELEASE_PATH=%q DRY_RUN=%q KEYPAIR_DECISION_CLOSED=%q DEPLOY_REF=%q' \
+              "${PROD_LOCKED_PATH}" \
+              "${stage_path}" \
+              "${DRY_RUN}" \
+              "${KEYPAIR_DECISION_CLOSED}" \
+              "${DEPLOY_SHA}"
+          )"
           ssh -i ~/.ssh/agentfolio-prod -p "${AWS_PROD_PORT}" "${AWS_PROD_USER}@${AWS_PROD_HOST}" \
-            "PROD_LOCKED_PATH='${PROD_LOCKED_PATH}' DRY_RUN='${DRY_RUN}' KEYPAIR_DECISION_CLOSED='${KEYPAIR_DECISION_CLOSED}' DEPLOY_REF='${DEPLOY_SHA}' bash -s" \
+            "${remote_env} bash -s" \
             < scripts/guarded-prod-deploy.sh
+
+      - name: Clean staged checkout
+        if: always()
+        env:
+          AWS_PROD_HOST: ${{ secrets.AWS_PROD_HOST }}
+          AWS_PROD_USER: ${{ secrets.AWS_PROD_USER || 'ubuntu' }}
+          AWS_PROD_PORT: ${{ secrets.AWS_PROD_PORT || '22' }}
+          DEPLOY_SHA: ${{ steps.deploy-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${AWS_PROD_HOST}" || -z "${DEPLOY_SHA}" || ! -f ~/.ssh/agentfolio-prod ]]; then
+            exit 0
+          fi
+          stage_path="/tmp/agentfolio-guarded-deploy-${DEPLOY_SHA}"
+          remote_stage_path="$(printf '%q' "${stage_path}")"
+          ssh -i ~/.ssh/agentfolio-prod -p "${AWS_PROD_PORT}" "${AWS_PROD_USER}@${AWS_PROD_HOST}" \
+            "rm -rf ${remote_stage_path}" || true
