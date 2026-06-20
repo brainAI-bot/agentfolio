@@ -14,7 +14,10 @@ let SATPV3SDK_Class;
 try {
   const { createSATPClient, SATPV3SDK } = require('../satp-client/src');
   SATPV3SDK_Class = SATPV3SDK;
-  satpV3Client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb' });
+  satpV3Client = createSATPClient({
+    network: process.env.SATP_NETWORK_EFFECTIVE || 'devnet',
+    rpcUrl: process.env.SATP_RPC_URL || 'https://api.devnet.solana.com',
+  });
   console.log('[SATP API] V3 SDK loaded (SATPV3SDK + createSATPClient)');
 } catch (e) {
   console.warn('[SATP API] V3 SDK not available:', e.message);
