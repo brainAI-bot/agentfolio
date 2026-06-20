@@ -2088,7 +2088,7 @@ try {
 app.get('/api/satp/explorer/agents', async (req, res) => {
   try {
     const { getSatpAgents } = require('./routes/satp-explorer-api');
-    const data = await getSatpAgents();
+    const data = await getSatpAgents({ limit: req.query.limit });
     const allAgents = Array.isArray(data?.agents) ? data.agents : [];
     const total = Number.isFinite(data?.total) ? data.total : allAgents.length;
     const limit = Number.parseInt(req.query.limit, 10);
