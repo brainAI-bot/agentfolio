@@ -1186,7 +1186,7 @@ export default function VerifyPage() {
       onVerify: websiteToken ? confirmWebsite : requestWebsiteChallenge,
       canVerify: !!profileId && !!websiteUrl,
     },
-  ];
+  ].filter(({ type }) => ["solana", "github", "domain", "website"].includes(type));
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

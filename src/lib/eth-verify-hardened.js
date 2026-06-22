@@ -3,8 +3,9 @@
  * Challenge-response: sign a message to prove wallet ownership
  */
 
-const { generateChallenge, storeChallenge, getChallenge, completeChallenge } = require('./verification-challenges');
+const { generateChallenge: createChallenge, storeChallenge, getChallenge, completeChallenge } = require('./verification-challenges');
 const crypto = require('crypto');
+const ethersPackage = require('ethers');
 
 function isValidEthAddress(address) {
   return /^0x[a-fA-F0-9]{40}$/.test(address);
@@ -17,7 +18,7 @@ async function initiateEthVerification(profileId, walletAddress) {
     }
 
     const nonce = crypto.randomBytes(16).toString('hex');
-    const challenge = generateChallenge(profileId, 'ethereum', walletAddress);
+    const challenge = createChallenge(profileId, 'ethereum', walletAddress);
     challenge.nonce = nonce;
     challenge.message = `AgentFolio ETH Verification\nProfile: ${profileId}\nWallet: ${walletAddress}\nNonce: ${nonce}\nTimestamp: ${new Date().toISOString()}`;
     
@@ -35,6 +36,19 @@ async function initiateEthVerification(profileId, walletAddress) {
   }
 }
 
+function recoverSignedAddress(message, signature) {
+  if (typeof ethersPackage.verifyMessage === 'function') {
+    return ethersPackage.verifyMessage(message, signature);
+  }
+  if (typeof ethersPackage.ethers?.verifyMessage === 'function') {
+    return ethersPackage.ethers.verifyMessage(message, signature);
+  }
+  if (typeof ethersPackage.ethers?.utils?.verifyMessage === 'function') {
+    return ethersPackage.ethers.utils.verifyMessage(message, signature);
+  }
+  throw new Error('ethers.verifyMessage unavailable');
+}
+
 async function verifyEthSignature(challengeId, signature) {
   try {
     const challenge = await getChallenge(challengeId);
@@ -42,15 +56,20 @@ async function verifyEthSignature(challengeId, signature) {
       return { verified: false, error: 'Challenge not found or expired' };
     }
 
-    // For MVP: accept the signature and verify format
-    // Full EIP-191 recovery requires ethers.js — add if needed
     if (!signature || typeof signature !== 'string' || signature.length < 130) {
       return { verified: false, error: 'Invalid signature format' };
     }
 
+    const walletAddress = challenge.challengeData.identifier;
+    const recoveredAddress = recoverSignedAddress(challenge.message, signature);
+    if (recoveredAddress.toLowerCase() !== walletAddress.toLowerCase()) {
+      return { verified: false, error: 'Signature does not match challenge wallet' };
+    }
+
     const proof = {
       type: 'eth_signature',
-      walletAddress: challenge.challengeData.identifier,
+      walletAddress,
+      recoveredAddress,
       signature,
       message: challenge.message,
       verifiedAt: new Date().toISOString(),
@@ -61,7 +80,8 @@ async function verifyEthSignature(challengeId, signature) {
     
     return {
       verified: true,
-      walletAddress: challenge.challengeData.identifier,
+      profileId: challenge.profileId || challenge.challengeData.profileId,
+      walletAddress,
       proof,
       verificationMethod: 'eth_personal_sign',
       verifiedAt: proof.verifiedAt
@@ -71,4 +91,10 @@ async function verifyEthSignature(challengeId, signature) {
   }
 }
 
-module.exports = { initiateEthVerification, verifyEthSignature, isValidEthAddress };
+module.exports = {
+  initiateEthVerification,
+  verifyEthSignature,
+  generateChallenge: initiateEthVerification,
+  verifySignature: verifyEthSignature,
+  isValidEthAddress,
+};
