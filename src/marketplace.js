@@ -446,121 +446,27 @@ function registerRoutes(app) {
 
   // POST /api/marketplace/escrow/:id/refund — Refund escrow
   app.post('/api/marketplace/escrow/:id/refund', (req, res) => {
-    const escrowPath = path.join(DATA_DIR, 'escrow', `${req.params.id}.json`);
-    const escrow = readJSON(escrowPath);
-    if (!escrow) return res.status(404).json({ error: 'Escrow not found' });
-    if (escrow.status !== 'funded') return res.status(400).json({ error: 'Escrow not in funded state' });
-
-    const jobPath = path.join(DATA_DIR, 'jobs', `${escrow.jobId}.json`);
-    const job = readJSON(jobPath);
-    if (!job) return res.status(404).json({ error: 'Job not found' });
-    if (job.status === 'completed' || job.fundsReleased) {
-      return res.status(400).json({ error: 'Cannot refund a completed or released job' });
-    }
-
-    const { refundedBy, clientId, reason } = req.body || {};
-    const actor = refundedBy || clientId;
-    if (!actor) return res.status(400).json({ error: 'refundedBy or clientId required' });
-    if (actor !== escrow.fundedBy && !isJobClient(actor, job)) {
-      return res.status(403).json({ error: 'Only the escrow funder or job client can refund escrow' });
-    }
-
-    escrow.status = 'refunded';
-    escrow.refundedBy = actor;
-    escrow.refundReason = reason || 'No reason provided';
-    escrow.refundedAt = new Date().toISOString();
-    writeJSON(escrowPath, escrow);
-
-    job.status = 'closed';
-    job.updatedAt = new Date().toISOString();
-    writeJSON(jobPath, job);
-
-    res.json({ message: 'Escrow refunded', escrow });
+    res.status(403).json({
+      error: 'Marketplace escrow refunds are disabled until authenticated on-chain refund rights are enforced',
+      disabled: true,
+    });
   });
 
   
   // POST /api/marketplace/jobs/:id/complete — Approve work and release payment
   app.post('/api/marketplace/jobs/:id/complete', (req, res) => {
-    const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
-    const job = readJSON(jobPath);
-    if (!job) return res.status(404).json({ error: 'Job not found' });
-    if (job.status === 'completed') return res.status(400).json({ error: 'Job is already completed' });
-    if (job.status !== 'in_progress') {
-      return res.status(400).json({ error: `Cannot complete a job with status: ${job.status}` });
-    }
-
-    const { approvedBy, clientId, completionNote, releaseTxSignature, releaseTxHash, txSignature, v3Release } = req.body || {};
-    const actor = approvedBy || clientId;
-    if (!actor) return res.status(400).json({ error: 'approvedBy or clientId required' });
-    if (!isJobClient(actor, job)) return res.status(403).json({ error: 'Only the job client can complete the job' });
-    if (!hasReleaseProof(req.body)) return res.status(400).json({ error: 'Release proof required' });
-
-    const escrowPath = job.escrowId ? path.join(DATA_DIR, 'escrow', `${job.escrowId}.json`) : null;
-    const escrow = escrowPath ? readJSON(escrowPath) : null;
-    if (!escrow) return res.status(400).json({ error: 'Funded escrow required before completion' });
-    if (escrow.jobId !== job.id) return res.status(400).json({ error: 'Escrow does not belong to job' });
-    if (escrow.status !== 'funded') return res.status(400).json({ error: 'Escrow not in funded state' });
-
-    const now = new Date().toISOString();
-    const proof = releaseTxSignature || releaseTxHash || txSignature || req.body.releaseProof;
-    escrow.status = 'released';
-    escrow.releasedBy = actor;
-    escrow.releaseTxHash = proof;
-    escrow.releasedAt = now;
-    writeJSON(escrowPath, escrow);
-
-    job.status = 'completed';
-    job.completedAt = now;
-    job.approvedBy = actor;
-    job.completionNote = completionNote || '';
-    job.fundsReleased = true;
-    job.releaseProof = proof;
-    if (v3Release) {
-      job.v3ReleaseTx = proof;
-      job.v3ReleasedAt = now;
-    }
-    job.updatedAt = now;
-    writeJSON(jobPath, job);
-
-    if (job.deliverableId) {
-      const dlvPath = path.join(DATA_DIR, 'deliverables', `${job.deliverableId}.json`);
-      const dlv = readJSON(dlvPath);
-      if (dlv) {
-        dlv.status = 'approved';
-        writeJSON(dlvPath, dlv);
-      }
-    }
-
-    res.json({ success: true, message: 'Work approved! Payment released.', job });
+    res.status(403).json({
+      error: 'Marketplace job completion is disabled until authenticated on-chain release rights are enforced',
+      disabled: true,
+    });
   });
 
   // POST /api/marketplace/jobs/:id/request-changes — Request revisions
   app.post('/api/marketplace/jobs/:id/request-changes', (req, res) => {
-    const jobPath = path.join(DATA_DIR, 'jobs', req.params.id + '.json');
-    const job = readJSON(jobPath);
-    if (!job) return res.status(404).json({ error: 'Job not found' });
-    if (job.status !== 'in_progress') {
-      return res.status(400).json({ error: `Cannot request changes for a job with status: ${job.status}` });
-    }
-
-    const { requestedBy, clientId, note } = req.body || {};
-    const actor = requestedBy || clientId;
-    if (!actor) return res.status(400).json({ error: 'requestedBy or clientId required' });
-    if (!isJobClient(actor, job)) return res.status(403).json({ error: 'Only the job client can request changes' });
-    if (!note) return res.status(400).json({ error: 'Change note required' });
-
-    if (!job.changeRequests) job.changeRequests = [];
-    job.changeRequests.push({
-      requestedBy: actor,
-      note,
-      requestedAt: new Date().toISOString(),
+    res.status(403).json({
+      error: 'Marketplace change requests are disabled until authenticated job-client rights are enforced',
+      disabled: true,
     });
-    job.status = 'in_progress';
-    job.deliverableId = null;
-    job.updatedAt = new Date().toISOString();
-    writeJSON(jobPath, job);
-
-    res.json({ success: true, message: 'Changes requested', changeRequests: job.changeRequests });
   });
 
   // POST /api/marketplace/jobs/:id/confirm-deposit — Confirm on-chain escrow deposit

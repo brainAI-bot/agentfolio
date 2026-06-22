@@ -86,50 +86,33 @@ describe('P1-F5 disabled write surfaces', () => {
     assert.equal(Object.prototype.hasOwnProperty.call(readRes.body, 'reviewPDA'), false);
   });
 
-  it('enforces marketplace refund authorization and state before mutation', () => {
+  it('keeps marketplace refunds disabled without mutating escrow or job state', () => {
     const { dataDir, routes } = loadMarketplaceWithData();
     const handler = routes.get('POST /api/marketplace/escrow/:id/refund');
     assert.ok(handler, 'expected refund route to be registered');
 
-    writeFixture(dataDir, 'jobs', 'job_refund_reject', {
-      id: 'job_refund_reject',
+    writeFixture(dataDir, 'jobs', 'job_refund_disabled', {
+      id: 'job_refund_disabled',
       postedBy: 'client_1',
       clientId: 'client_1',
       status: 'in_progress',
     });
-    writeFixture(dataDir, 'escrow', 'esc_reject', {
-      id: 'esc_reject',
-      jobId: 'job_refund_reject',
+    writeFixture(dataDir, 'escrow', 'esc_disabled', {
+      id: 'esc_disabled',
+      jobId: 'job_refund_disabled',
       fundedBy: 'client_1',
       status: 'funded',
     });
 
-    const rejected = createResponse();
-    handler({ params: { id: 'esc_reject' }, body: { refundedBy: 'intruder' } }, rejected);
-    assert.equal(rejected.statusCode, 403);
-    assert.equal(readFixture(dataDir, 'escrow', 'esc_reject').status, 'funded');
-
-    writeFixture(dataDir, 'jobs', 'job_refund_allowed', {
-      id: 'job_refund_allowed',
-      postedBy: 'client_1',
-      clientId: 'client_1',
-      status: 'in_progress',
-    });
-    writeFixture(dataDir, 'escrow', 'esc_allowed', {
-      id: 'esc_allowed',
-      jobId: 'job_refund_allowed',
-      fundedBy: 'client_1',
-      status: 'funded',
-    });
-
-    const allowed = createResponse();
-    handler({ params: { id: 'esc_allowed' }, body: { refundedBy: 'client_1', reason: 'cancelled' } }, allowed);
-    assert.equal(allowed.statusCode, 200);
-    assert.equal(readFixture(dataDir, 'escrow', 'esc_allowed').status, 'refunded');
-    assert.equal(readFixture(dataDir, 'jobs', 'job_refund_allowed').status, 'closed');
+    const res = createResponse();
+    handler({ params: { id: 'esc_disabled' }, body: { refundedBy: 'client_1', reason: 'cancelled' } }, res);
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.body.disabled, true);
+    assert.equal(readFixture(dataDir, 'escrow', 'esc_disabled').status, 'funded');
+    assert.equal(readFixture(dataDir, 'jobs', 'job_refund_disabled').status, 'in_progress');
   });
 
-  it('enforces marketplace complete authorization, escrow state, and release proof', () => {
+  it('keeps marketplace completion disabled without releasing escrow', () => {
     const { dataDir, routes } = loadMarketplaceWithData();
     const handler = routes.get('POST /api/marketplace/jobs/:id/complete');
     assert.ok(handler, 'expected complete route to be registered');
@@ -148,25 +131,16 @@ describe('P1-F5 disabled write surfaces', () => {
       status: 'funded',
     });
 
-    const unauthorized = createResponse();
-    handler({ params: { id: 'job_complete' }, body: { approvedBy: 'intruder', releaseTxSignature: 'tx_1' } }, unauthorized);
-    assert.equal(unauthorized.statusCode, 403);
+    const res = createResponse();
+    handler({ params: { id: 'job_complete' }, body: { approvedBy: 'client_1', releaseTxSignature: 'tx_release_1' } }, res);
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.body.disabled, true);
     assert.equal(readFixture(dataDir, 'jobs', 'job_complete').status, 'in_progress');
-
-    const missingProof = createResponse();
-    handler({ params: { id: 'job_complete' }, body: { approvedBy: 'client_1' } }, missingProof);
-    assert.equal(missingProof.statusCode, 400);
     assert.equal(readFixture(dataDir, 'escrow', 'esc_complete').status, 'funded');
-
-    const allowed = createResponse();
-    handler({ params: { id: 'job_complete' }, body: { approvedBy: 'client_1', releaseTxSignature: 'tx_release_1' } }, allowed);
-    assert.equal(allowed.statusCode, 200);
-    assert.equal(readFixture(dataDir, 'jobs', 'job_complete').status, 'completed');
-    assert.equal(readFixture(dataDir, 'jobs', 'job_complete').fundsReleased, true);
-    assert.equal(readFixture(dataDir, 'escrow', 'esc_complete').status, 'released');
+    assert.equal(readFixture(dataDir, 'jobs', 'job_complete').fundsReleased, undefined);
   });
 
-  it('enforces marketplace request-changes requester authorization', () => {
+  it('keeps marketplace request-changes disabled without clearing deliverables', () => {
     const { dataDir, routes } = loadMarketplaceWithData();
     const handler = routes.get('POST /api/marketplace/jobs/:id/request-changes');
     assert.ok(handler, 'expected request-changes route to be registered');
@@ -179,17 +153,12 @@ describe('P1-F5 disabled write surfaces', () => {
       deliverableId: 'deliverable_1',
     });
 
-    const unauthorized = createResponse();
-    handler({ params: { id: 'job_changes' }, body: { requestedBy: 'intruder', note: 'revise' } }, unauthorized);
-    assert.equal(unauthorized.statusCode, 403);
-    assert.equal(readFixture(dataDir, 'jobs', 'job_changes').deliverableId, 'deliverable_1');
-
-    const allowed = createResponse();
-    handler({ params: { id: 'job_changes' }, body: { requestedBy: 'client_1', note: 'revise' } }, allowed);
-    assert.equal(allowed.statusCode, 200);
+    const res = createResponse();
+    handler({ params: { id: 'job_changes' }, body: { requestedBy: 'client_1', note: 'revise' } }, res);
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.body.disabled, true);
     const job = readFixture(dataDir, 'jobs', 'job_changes');
-    assert.equal(job.changeRequests.length, 1);
-    assert.equal(job.changeRequests[0].requestedBy, 'client_1');
-    assert.equal(job.deliverableId, null);
+    assert.equal(job.changeRequests, undefined);
+    assert.equal(job.deliverableId, 'deliverable_1');
   });
 });

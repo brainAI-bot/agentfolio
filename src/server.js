@@ -166,6 +166,77 @@ function hasClaimedProfile(row) {
   return Object.values(verificationData || {}).some((v) => v && (v.verified === true || v.linked === true || v.success === true));
 }
 
+function buildLeaderboardRows(limit) {
+  const db = profileStore.getDb();
+  const hasTrustTable = !!db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'satp_trust_scores'").get();
+  const trustCols = new Set(hasTrustTable
+    ? db.prepare("PRAGMA table_info(satp_trust_scores)").all().map((col) => col.name)
+    : []
+  );
+  const scoreExpr = trustCols.has('overall_score') ? 'COALESCE(t.overall_score, 0)' : '0';
+  const levelExpr = trustCols.has('level') ? 't.level' : 'NULL';
+  const breakdownExpr = trustCols.has('score_breakdown') ? 't.score_breakdown' : 'NULL';
+  const trustJoin = hasTrustTable ? 'LEFT JOIN satp_trust_scores t ON t.agent_id = p.id' : '';
+  const rows = db.prepare(`
+    SELECT p.*,
+           ${scoreExpr} AS leaderboard_score,
+           ${levelExpr} AS leaderboard_level,
+           ${breakdownExpr} AS leaderboard_breakdown
+    FROM profiles p
+    ${trustJoin}
+    WHERE COALESCE(p.hidden, 0) = 0
+      AND COALESCE(p.status, 'active') = 'active'
+    ORDER BY leaderboard_score DESC, p.created_at DESC
+  `).all();
+
+  const leaderboard = rows.map((row) => {
+    const verification = parseJsonFieldSafe(row.verification, {});
+    const nft = parseJsonFieldSafe(row.nft_avatar, {});
+    let score = normalizeTrustScoreValue(row.leaderboard_score);
+    let source = score > 0 ? 'satp_trust_scores' : 'computed';
+
+    if (score <= 0) {
+      try {
+        const unified = computeUnifiedTrustScore(db, row, {});
+        score = normalizeTrustScoreValue(unified?.score || unified?.trustScore || 0);
+        source = unified?.source || source;
+      } catch (_) {
+        score = 0;
+      }
+    }
+
+    const level = normalizeLeaderboardLevel(
+      row.leaderboard_level ?? verification?.level ?? verification?.verificationLevel,
+      score
+    );
+    const levelName = LEADERBOARD_LEVEL_LABELS[level] || 'Unverified';
+
+    return {
+      agentId: row.id,
+      id: row.id,
+      name: row.name,
+      handle: row.handle || row.id,
+      avatar: resolveLeaderboardAvatar(row),
+      score,
+      reputationScore: score,
+      level,
+      levelName,
+      verificationLevel: level,
+      verificationLabel: levelName,
+      source,
+      isBorn: Boolean(nft?.permanent || nft?.soulboundMint || verification?.isBorn),
+      claimed: hasClaimedProfile(row),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }).sort((a, b) => (b.score - a.score) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+
+  return {
+    leaderboard: leaderboard.slice(0, limit),
+    total: leaderboard.length,
+  };
+}
+
 const publicLeaderboardLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
@@ -2255,76 +2326,14 @@ app.get('/api/score', async (req, res) => {
 app.get('/api/leaderboard', publicLeaderboardLimiter, (req, res) => {
   try {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
-    const db = profileStore.getDb();
-    const hasTrustTable = !!db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'satp_trust_scores'").get();
-    const trustCols = new Set(hasTrustTable
-      ? db.prepare("PRAGMA table_info(satp_trust_scores)").all().map((col) => col.name)
-      : []
-    );
-    const scoreExpr = trustCols.has('overall_score') ? 'COALESCE(t.overall_score, 0)' : '0';
-    const levelExpr = trustCols.has('level') ? 't.level' : 'NULL';
-    const breakdownExpr = trustCols.has('score_breakdown') ? 't.score_breakdown' : 'NULL';
-    const trustJoin = hasTrustTable ? 'LEFT JOIN satp_trust_scores t ON t.agent_id = p.id' : '';
-    const rows = db.prepare(`
-      SELECT p.*,
-             ${scoreExpr} AS leaderboard_score,
-             ${levelExpr} AS leaderboard_level,
-             ${breakdownExpr} AS leaderboard_breakdown
-      FROM profiles p
-      ${trustJoin}
-      WHERE COALESCE(p.hidden, 0) = 0
-        AND COALESCE(p.status, 'active') = 'active'
-      ORDER BY leaderboard_score DESC, p.created_at DESC
-    `).all();
-
-    const leaderboard = rows.map((row) => {
-      const verification = parseJsonFieldSafe(row.verification, {});
-      const nft = parseJsonFieldSafe(row.nft_avatar, {});
-      let score = normalizeTrustScoreValue(row.leaderboard_score);
-      let source = score > 0 ? 'satp_trust_scores' : 'computed';
-
-      if (score <= 0) {
-        try {
-          const unified = computeUnifiedTrustScore(db, row, {});
-          score = normalizeTrustScoreValue(unified?.score || unified?.trustScore || 0);
-          source = unified?.source || source;
-        } catch (_) {
-          score = 0;
-        }
-      }
-
-      const level = normalizeLeaderboardLevel(
-        row.leaderboard_level ?? verification?.level ?? verification?.verificationLevel,
-        score
-      );
-      const levelName = LEADERBOARD_LEVEL_LABELS[level] || 'Unverified';
-
-      return {
-        agentId: row.id,
-        id: row.id,
-        name: row.name,
-        handle: row.handle || row.id,
-        avatar: resolveLeaderboardAvatar(row),
-        score,
-        reputationScore: score,
-        level,
-        levelName,
-        verificationLevel: level,
-        verificationLabel: levelName,
-        source,
-        isBorn: Boolean(nft?.permanent || nft?.soulboundMint || verification?.isBorn),
-        claimed: hasClaimedProfile(row),
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      };
-    }).sort((a, b) => (b.score - a.score) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+    const { leaderboard, total } = buildLeaderboardRows(limit);
 
     res.json({
       ok: true,
       count: Math.min(limit, leaderboard.length),
-      total: leaderboard.length,
+      total,
       limit,
-      leaderboard: leaderboard.slice(0, limit),
+      leaderboard,
       payment: { required: false, paidEndpoint: '/api/leaderboard/scores' },
     });
   } catch (err) {
@@ -2335,20 +2344,23 @@ app.get('/api/leaderboard', publicLeaderboardLimiter, (req, res) => {
 
 // Paid: Leaderboard with scores
 app.get('/api/leaderboard/scores', (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
+    const { leaderboard, total } = buildLeaderboardRows(limit);
 
-  // For now, return computed scores for known profiles
-  // In production this would query a real profile database
-  const profiles = [];
-  const leaderboard = computeLeaderboard(profiles, limit);
-
-  res.json({
-    leaderboard,
-    total: leaderboard.length,
-    limit,
-    computedAt: new Date().toISOString(),
-    payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.05' },
-  });
+    res.json({
+      ok: true,
+      leaderboard,
+      total,
+      count: leaderboard.length,
+      limit,
+      computedAt: new Date().toISOString(),
+      payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.05' },
+    });
+  } catch (err) {
+    console.error('[Leaderboard] Failed to build paid leaderboard:', err.message);
+    res.status(500).json({ ok: false, error: 'Failed to build leaderboard scores' });
+  }
 });
 
 // Free: x402 pricing info endpoint
