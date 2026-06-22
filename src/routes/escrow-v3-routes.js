@@ -34,25 +34,26 @@ const { PublicKey } = require('@solana/web3.js');
 const crypto = require('crypto');
 
 const router = Router();
+const ESCROW_V3_PROGRAM_ID = new PublicKey('HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
 
 // ── SDK Setup ──────────────────────────────────────────────────────────────────
 let SATPV3SDK;
 let sdkInstance = null;
 
 try {
-  const mod = require('../../satp-client/src/index');
+  const mod = require('../satp-client/src/index');
   SATPV3SDK = mod.SATPV3SDK;
   if (!SATPV3SDK) throw new Error('SATPV3SDK not exported');
   console.log('[Escrow V3 Routes] V3 SDK loaded (SATPV3SDK)');
 } catch (e1) {
   try {
-    const mod = require('satp-client');
+    const mod = require('@brainai/satp-client');
     SATPV3SDK = mod.SATPV3SDK;
-    if (!SATPV3SDK) throw new Error('SATPV3SDK not exported from satp-client');
+    if (!SATPV3SDK) throw new Error('SATPV3SDK not exported from @brainai/satp-client');
     console.log('[Escrow V3 Routes] V3 SDK loaded from npm (SATPV3SDK)');
   } catch (e2) {
     console.warn('[Escrow V3 Routes] SATP V3 SDK not found. Escrow V3 endpoints disabled.');
-    console.warn('  Tried: ../../satp-client/src/index, satp-client');
+    console.warn('  Tried: ../satp-client/src/index, @brainai/satp-client');
   }
 }
 
@@ -73,7 +74,7 @@ function requireSDK(req, res, next) {
   if (!sdk) {
     return res.status(503).json({
       error: 'Escrow V3 SDK not available',
-      hint: 'satp-client package or source not found on this server',
+      hint: '@brainai/satp-client package or source shim not found on this server',
     });
   }
   req.sdk = sdk;
@@ -103,6 +104,22 @@ function hashIfNeeded(input) {
   return crypto.createHash('sha256')
     .update(typeof input === 'string' ? input : Buffer.from(input))
     .digest();
+}
+
+function deriveEscrowPDAOffline(client, description, nonce = 0) {
+  const clientKey = new PublicKey(client);
+  const descriptionHash = hashIfNeeded(description);
+  const nonceBuf = Buffer.alloc(8);
+  nonceBuf.writeBigUInt64LE(BigInt(nonce));
+  const [pda, bump] = PublicKey.findProgramAddressSync(
+    [Buffer.from('escrow_v3'), clientKey.toBuffer(), descriptionHash, nonceBuf],
+    ESCROW_V3_PROGRAM_ID,
+  );
+  return {
+    escrowPDA: pda.toBase58(),
+    bump,
+    descriptionHash: descriptionHash.toString('hex'),
+  };
 }
 
 // ── POST /create ───────────────────────────────────────────────────────────────
@@ -617,19 +634,20 @@ router.get('/:pda', requireSDK, async (req, res) => {
  * No RPC call needed — pure PDA derivation.
  *
  * Query: {
- *   client: string,         // Client wallet address
+ *   client: string,         // Client wallet address (clientWallet alias also accepted)
  *   description: string,    // Job description (will be hashed)
  *   nonce?: number          // Nonce for multiple escrows (default: 0)
  * }
  */
-router.get('/pda/derive', requireSDK, async (req, res) => {
+router.get('/pda/derive', async (req, res) => {
   try {
-    const { client, description, nonce } = req.query;
+    const { description, nonce } = req.query;
+    const client = req.query.client || req.query.clientWallet;
 
     if (!client || !description) {
       return res.status(400).json({
         error: 'Missing required query params',
-        required: ['client', 'description'],
+        required: ['client or clientWallet', 'description'],
         optional: ['nonce'],
       });
     }
@@ -637,14 +655,24 @@ router.get('/pda/derive', requireSDK, async (req, res) => {
       return res.status(400).json({ error: 'Invalid client wallet address' });
     }
 
-    const result = req.sdk.getEscrowPDA(client, description, Number(nonce) || 0);
+    const nonceValue = Number(nonce) || 0;
+    let result;
+    try {
+      const sdk = getSDK();
+      result = sdk ? sdk.getEscrowPDA(client, description, nonceValue) : null;
+    } catch (e) {
+      result = null;
+    }
+    if (!result) {
+      result = deriveEscrowPDAOffline(client, description, nonceValue);
+    }
 
     res.json({
       escrowPDA: result.escrowPDA,
       descriptionHash: result.descriptionHash,
       bump: result.bump,
       client,
-      nonce: Number(nonce) || 0,
+      nonce: nonceValue,
       network: NETWORK,
     });
   } catch (err) {
@@ -655,7 +683,6 @@ router.get('/pda/derive', requireSDK, async (req, res) => {
 
 
 // ── Constants for query routes ─────────────────────────────────────────────────
-const ESCROW_V3_PROGRAM_ID = new PublicKey('HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
 const ESCROW_V3_ACCOUNT_SIZE = 339; // 8 discriminator + 331 data
 
 // ── GET /by-client/:wallet ─────────────────────────────────────────────────────
