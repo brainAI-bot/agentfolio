@@ -203,10 +203,10 @@ export default async function DocsPage() {
     { method: "GET", path: "/api/v3/reviews/count/:agentId", desc: "Get review count for agent", body: null, returns: "{ count }" },
     // Reputation V3
     { method: "POST", path: "/api/v3/reputation/recompute", desc: "Trigger permissionless reputation recompute", body: '{ "agentId", "signerWallet" }', returns: "{ transaction (base64) }" },
-    { method: "GET", path: "/api/v3/reputation/:agentId", desc: "Get on-chain reputation score", body: null, returns: "{ reputationScore, level, lastUpdated }" },
+    { method: "GET", path: "/api/v3/reputation/:agentId", desc: "Get on-chain reputation score", body: null, returns: "{ reputationScore, verificationLevel, evidence[] }" },
     // Validation V3
     { method: "POST", path: "/api/v3/validation/recompute", desc: "Trigger permissionless validation recompute", body: '{ "agentId", "signerWallet" }', returns: "{ transaction (base64) }" },
-    { method: "GET", path: "/api/v3/validation/:agentId", desc: "Get on-chain validation status", body: null, returns: "{ validationScore, level, lastUpdated }" },
+    { method: "GET", path: "/api/v3/validation/:agentId", desc: "Get on-chain validation status", body: null, returns: "{ verificationLevel, levelLabel, evidence[] }" },
   ];
 
   return (

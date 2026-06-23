@@ -78,6 +78,50 @@ function serializeTx(tx) {
   return Buffer.from(serialized).toString('base64');
 }
 
+function buildTrustEvidenceLinks(agentId, identity = {}) {
+  const encodedAgentId = encodeURIComponent(agentId);
+  const links = [
+    {
+      type: 'satp_explorer',
+      label: 'SATP Explorer',
+      href: `/satp/explorer?agent=${encodedAgentId}`,
+      source: 'agentfolio',
+    },
+    {
+      type: 'satp_genesis_resolver',
+      label: 'SATP Genesis Resolver',
+      href: `/api/satp/v3/resolve/${encodedAgentId}`,
+      source: 'satp_v3',
+    },
+    {
+      type: 'trust_credential',
+      label: 'Trust Credential',
+      href: `/api/trust-credential/${encodedAgentId}`,
+      source: 'agentfolio',
+    },
+  ];
+
+  if (identity.pda) {
+    links.push({
+      type: 'solana_genesis_pda',
+      label: 'Solana Genesis PDA',
+      href: `https://explorer.solana.com/address/${identity.pda}`,
+      source: 'solana',
+    });
+  }
+
+  if (identity.authority) {
+    links.push({
+      type: 'solana_authority',
+      label: 'Solana Authority',
+      href: `https://explorer.solana.com/address/${identity.authority}`,
+      source: 'solana',
+    });
+  }
+
+  return links;
+}
+
 // ── POST /reputation/recompute ─────────────────────────────────────────────────
 /**
  * Build an unsigned recomputeReputation transaction.
@@ -208,6 +252,7 @@ router.get('/reputation/:agentId', requireSDK, async (req, res) => {
       authority: identity.authority,
       isBorn: identity.isBorn || false,
       network: NETWORK,
+      evidence: buildTrustEvidenceLinks(agentId, identity),
     });
   } catch (err) {
     console.error('[Reputation V3] get error:', err.message);
@@ -242,11 +287,14 @@ router.get('/validation/:agentId', requireSDK, async (req, res) => {
       isBorn: identity.isBorn || false,
       authority: identity.authority,
       network: NETWORK,
+      evidence: buildTrustEvidenceLinks(agentId, identity),
     });
   } catch (err) {
     console.error('[Validation V3] get error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
+router.__test = { buildTrustEvidenceLinks };
 
 module.exports = router;
