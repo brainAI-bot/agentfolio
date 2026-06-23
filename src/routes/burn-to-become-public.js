@@ -1894,7 +1894,7 @@ function handleBurnToBecome(req, res, url) {
 // SATP V3 SDK for Genesis Record updates
 let satpV3Client;
 try {
-  const { createSATPClient } = require("../satp-client/src");
+  const { createSATPClient } = require("@brainai/satp-client");
   satpV3Client = createSATPClient({ rpcUrl: RPC_URL });
   console.log("[BurnToBecome] SATP V3 SDK loaded");
 } catch (e) {

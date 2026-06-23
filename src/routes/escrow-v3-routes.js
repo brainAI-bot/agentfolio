@@ -32,31 +32,32 @@
 const { Router } = require('express');
 const { PublicKey } = require('@solana/web3.js');
 const crypto = require('crypto');
+const satpClient = require('@brainai/satp-client');
 
 const router = Router();
 
 // ── SDK Setup ──────────────────────────────────────────────────────────────────
 let SATPV3SDK;
 let sdkInstance = null;
+const getV3ProgramIds = satpClient.getV3ProgramIds;
+const getV3EscrowPDA = satpClient.getV3EscrowPDA;
 
-try {
-  const mod = require('../../satp-client/src/index');
-  SATPV3SDK = mod.SATPV3SDK;
-  if (!SATPV3SDK) throw new Error('SATPV3SDK not exported');
-  console.log('[Escrow V3 Routes] V3 SDK loaded (SATPV3SDK)');
-} catch (e1) {
-  try {
-    const mod = require('satp-client');
-    SATPV3SDK = mod.SATPV3SDK;
-    if (!SATPV3SDK) throw new Error('SATPV3SDK not exported from satp-client');
-    console.log('[Escrow V3 Routes] V3 SDK loaded from npm (SATPV3SDK)');
-  } catch (e2) {
-    console.warn('[Escrow V3 Routes] SATP V3 SDK not found. Escrow V3 endpoints disabled.');
-    console.warn('  Tried: ../../satp-client/src/index, satp-client');
-  }
+function normalizeNetwork(value) {
+  return String(value || '').toLowerCase().includes('devnet') ? 'devnet' : 'mainnet';
 }
 
-const NETWORK = process.env.SATP_NETWORK || process.env.SOLANA_NETWORK || 'mainnet';
+try {
+  SATPV3SDK = satpClient.SATPV3SDK;
+  if (!SATPV3SDK) {
+    throw new Error('@brainai/satp-client missing required export: SATPV3SDK');
+  }
+  console.log('[Escrow V3 Routes] V3 SDK loaded from @brainai/satp-client (SATPV3SDK)');
+} catch (err) {
+  console.warn('[Escrow V3 Routes] SATP V3 SDK not found. Escrow V3 endpoints disabled.');
+  console.warn(`  @brainai/satp-client boundary error: ${err.message}`);
+}
+
+const NETWORK = normalizeNetwork(process.env.SATP_NETWORK || process.env.SOLANA_NETWORK || 'mainnet');
 const RPC_URL = process.env.SOLANA_RPC_URL || null;
 
 function getSDK() {
@@ -73,7 +74,7 @@ function requireSDK(req, res, next) {
   if (!sdk) {
     return res.status(503).json({
       error: 'Escrow V3 SDK not available',
-      hint: 'satp-client package or source not found on this server',
+      hint: '@brainai/satp-client package or SATPV3SDK export not found on this server',
     });
   }
   req.sdk = sdk;
@@ -103,6 +104,19 @@ function hashIfNeeded(input) {
   return crypto.createHash('sha256')
     .update(typeof input === 'string' ? input : Buffer.from(input))
     .digest();
+}
+
+function deriveEscrowPDA(client, descriptionOrHash, nonce) {
+  if (typeof getV3EscrowPDA !== 'function') {
+    throw new Error('@brainai/satp-client missing required export: getV3EscrowPDA');
+  }
+  const descriptionHash = hashIfNeeded(descriptionOrHash);
+  const [escrowPDA, bump] = getV3EscrowPDA(client, descriptionHash, nonce, NETWORK);
+  return {
+    escrowPDA: escrowPDA.toBase58(),
+    descriptionHash: descriptionHash.toString('hex'),
+    bump,
+  };
 }
 
 // ── POST /create ───────────────────────────────────────────────────────────────
@@ -617,34 +631,40 @@ router.get('/:pda', requireSDK, async (req, res) => {
  * No RPC call needed — pure PDA derivation.
  *
  * Query: {
- *   client: string,         // Client wallet address
+ *   clientWallet: string,   // Client wallet address
+ *   client?: string,        // Backward-compatible alias
  *   description: string,    // Job description (will be hashed)
  *   nonce?: number          // Nonce for multiple escrows (default: 0)
  * }
  */
-router.get('/pda/derive', requireSDK, async (req, res) => {
+router.get('/pda/derive', async (req, res) => {
   try {
-    const { client, description, nonce } = req.query;
+    const { description, nonce } = req.query;
+    const client = req.query.clientWallet || req.query.client;
+    const normalizedNonce = nonce == null || nonce === '' ? 0 : Number(nonce);
 
     if (!client || !description) {
       return res.status(400).json({
         error: 'Missing required query params',
-        required: ['client', 'description'],
-        optional: ['nonce'],
+        required: ['clientWallet', 'description'],
+        optional: ['client', 'nonce'],
       });
     }
     if (!validatePublicKey(client)) {
       return res.status(400).json({ error: 'Invalid client wallet address' });
     }
+    if (!Number.isSafeInteger(normalizedNonce) || normalizedNonce < 0) {
+      return res.status(400).json({ error: 'nonce must be a non-negative safe integer' });
+    }
 
-    const result = req.sdk.getEscrowPDA(client, description, Number(nonce) || 0);
+    const result = deriveEscrowPDA(client, description, normalizedNonce);
 
     res.json({
       escrowPDA: result.escrowPDA,
       descriptionHash: result.descriptionHash,
       bump: result.bump,
       client,
-      nonce: Number(nonce) || 0,
+      nonce: normalizedNonce,
       network: NETWORK,
     });
   } catch (err) {
@@ -655,7 +675,9 @@ router.get('/pda/derive', requireSDK, async (req, res) => {
 
 
 // ── Constants for query routes ─────────────────────────────────────────────────
-const ESCROW_V3_PROGRAM_ID = new PublicKey('HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
+const ESCROW_V3_PROGRAM_ID = getV3ProgramIds
+  ? getV3ProgramIds(NETWORK).ESCROW
+  : new PublicKey('HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
 const ESCROW_V3_ACCOUNT_SIZE = 339; // 8 discriminator + 331 data
 
 // ── GET /by-client/:wallet ─────────────────────────────────────────────────────

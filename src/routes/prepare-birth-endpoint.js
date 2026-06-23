@@ -13,7 +13,7 @@
 
 const { Connection, PublicKey, Transaction, TransactionInstruction, ComputeBudgetProgram } = require('@solana/web3.js');
 const crypto = require('crypto');
-const { getGenesisPDA: getCanonicalGenesisPDA, deserializeGenesisRecord } = require('../satp-client/src');
+const { getGenesisPDA: getCanonicalGenesisPDA, deserializeGenesisRecord } = require('@brainai/satp-client');
 const { assertSolanaIrysWriteEnabled } = require('../lib/write-surface-gate');
 
 const IDENTITY_V3 = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
