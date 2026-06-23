@@ -32,7 +32,7 @@
 const { Router } = require('express');
 const { PublicKey } = require('@solana/web3.js');
 const crypto = require('crypto');
-const { client: satpClient } = require('../adapters/satp');
+const satpClient = require('@brainai/satp-client');
 
 const router = Router();
 
@@ -41,7 +41,10 @@ let SATPV3SDK;
 let sdkInstance = null;
 
 try {
-  SATPV3SDK = satpClient.loadSatpV3SDK();
+  SATPV3SDK = satpClient.SATPV3SDK;
+  if (!SATPV3SDK) {
+    throw new Error('@brainai/satp-client missing required export: SATPV3SDK');
+  }
   console.log('[Escrow V3 Routes] V3 SDK loaded from @brainai/satp-client (SATPV3SDK)');
 } catch (err) {
   console.warn('[Escrow V3 Routes] SATP V3 SDK not found. Escrow V3 endpoints disabled.');
@@ -609,20 +612,22 @@ router.get('/:pda', requireSDK, async (req, res) => {
  * No RPC call needed — pure PDA derivation.
  *
  * Query: {
- *   client: string,         // Client wallet address
+ *   clientWallet: string,   // Client wallet address
+ *   client?: string,        // Backward-compatible alias
  *   description: string,    // Job description (will be hashed)
  *   nonce?: number          // Nonce for multiple escrows (default: 0)
  * }
  */
 router.get('/pda/derive', requireSDK, async (req, res) => {
   try {
-    const { client, description, nonce } = req.query;
+    const { description, nonce } = req.query;
+    const client = req.query.clientWallet || req.query.client;
 
     if (!client || !description) {
       return res.status(400).json({
         error: 'Missing required query params',
-        required: ['client', 'description'],
-        optional: ['nonce'],
+        required: ['clientWallet', 'description'],
+        optional: ['client', 'nonce'],
       });
     }
     if (!validatePublicKey(client)) {

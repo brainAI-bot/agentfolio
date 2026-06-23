@@ -13,9 +13,10 @@ const fs = require('fs');
 // Initialize SATP v3 client (same as in profile-store.js)
 let satpV3;
 try {
-  const { createSATPClient, agentIdHash } = require("../src/satp-client/src");
+  const { createSATPClient, agentIdHash } = require("@brainai/satp-client");
   satpV3 = { 
     client: createSATPClient({ 
+      network: process.env.SATP_NETWORK || 'mainnet',
       rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
     }), 
     agentIdHash 
