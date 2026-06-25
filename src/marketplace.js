@@ -11,7 +11,7 @@ const crypto = require('crypto');
 let addActivity;
 try { addActivity = require('./profile-store').addActivity; } catch { addActivity = () => {}; }
 
-const DATA_DIR = path.join(__dirname, '..', 'data', 'marketplace');
+const DATA_DIR = process.env.MARKETPLACE_DATA_DIR || path.join(__dirname, '..', 'data', 'marketplace');
 
 
 function normalizeTrustScoreValue(score) {
@@ -132,6 +132,23 @@ function readJob(filepath) {
 
 function writeJSON(filepath, data) {
   fs.writeFileSync(filepath, JSON.stringify(data, null, 2));
+}
+
+function getJobClientIds(job) {
+  return [job && job.postedBy, job && job.clientId].filter(Boolean);
+}
+
+function isJobClient(actor, job) {
+  return Boolean(actor && getJobClientIds(job).includes(actor));
+}
+
+function hasReleaseProof(body = {}) {
+  return Boolean(
+    body.releaseTxSignature ||
+    body.releaseTxHash ||
+    body.txSignature ||
+    body.releaseProof
+  );
 }
 
 function getAllFiles(dir) {
@@ -429,75 +446,27 @@ function registerRoutes(app) {
 
   // POST /api/marketplace/escrow/:id/refund — Refund escrow
   app.post('/api/marketplace/escrow/:id/refund', (req, res) => {
-    const escrowPath = path.join(DATA_DIR, 'escrow', `${req.params.id}.json`);
-    const escrow = readJSON(escrowPath);
-    if (!escrow) return res.status(404).json({ error: 'Escrow not found' });
-    if (escrow.status !== 'funded') return res.status(400).json({ error: 'Escrow not in funded state' });
-
-    const { refundedBy, reason } = req.body;
-    escrow.status = 'refunded';
-    escrow.refundedBy = refundedBy;
-    escrow.refundReason = reason || 'No reason provided';
-    escrow.refundedAt = new Date().toISOString();
-    writeJSON(escrowPath, escrow);
-
-    const jobPath = path.join(DATA_DIR, 'jobs', `${escrow.jobId}.json`);
-    const job = readJSON(jobPath);
-    if (job) {
-      job.status = 'closed';
-      job.updatedAt = new Date().toISOString();
-      writeJSON(jobPath, job);
-    }
-
-    res.json({ message: 'Escrow refunded', escrow });
+    res.status(403).json({
+      error: 'Marketplace escrow refunds are disabled until authenticated on-chain refund rights are enforced',
+      disabled: true,
+    });
   });
 
   
   // POST /api/marketplace/jobs/:id/complete — Approve work and release payment
   app.post('/api/marketplace/jobs/:id/complete', (req, res) => {
-    const jobPath = path.join(DATA_DIR, 'jobs', req.params.id + '.json');
-    const job = readJSON(jobPath);
-    if (!job) return res.status(404).json({ error: 'Job not found' });
-    if (job.status === 'completed') return res.json({ message: 'Already completed', job });
-    
-    const { approvedBy, completionNote, clientId, releaseTxSignature, v3Release } = req.body;
-    
-    // Mark as completed
-    job.status = 'completed';
-    job.completedAt = new Date().toISOString();
-    job.approvedBy = approvedBy || clientId || 'unknown';
-    job.completionNote = completionNote || '';
-    job.fundsReleased = true;
-    if (v3Release && releaseTxSignature) {
-      job.v3ReleaseTx = releaseTxSignature;
-      job.v3ReleasedAt = new Date().toISOString();
-    }
-    writeJSON(jobPath, job);
-    
-    res.json({ success: true, message: 'Work approved! Payment released.', job });
+    res.status(403).json({
+      error: 'Marketplace job completion is disabled until authenticated on-chain release rights are enforced',
+      disabled: true,
+    });
   });
 
   // POST /api/marketplace/jobs/:id/request-changes — Request revisions
   app.post('/api/marketplace/jobs/:id/request-changes', (req, res) => {
-    const jobPath = path.join(DATA_DIR, 'jobs', req.params.id + '.json');
-    const job = readJSON(jobPath);
-    if (!job) return res.status(404).json({ error: 'Job not found' });
-    
-    const { requestedBy, note } = req.body;
-    if (!note) return res.status(400).json({ error: 'Change note required' });
-    
-    // Add change request to job history
-    if (!job.changeRequests) job.changeRequests = [];
-    job.changeRequests.push({
-      requestedBy: requestedBy || 'unknown',
-      note,
-      requestedAt: new Date().toISOString(),
+    res.status(403).json({
+      error: 'Marketplace change requests are disabled until authenticated job-client rights are enforced',
+      disabled: true,
     });
-    job.status = 'in_progress'; // Back to in_progress for revisions
-    job.deliverableId = null; // Clear deliverable so worker can resubmit
-    writeJSON(jobPath, job);
-    
-    res.json({ success: true, message: 'Changes requested', changeRequests: job.changeRequests });
   });
 
   // POST /api/marketplace/jobs/:id/confirm-deposit — Confirm on-chain escrow deposit

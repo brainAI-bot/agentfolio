@@ -225,6 +225,77 @@ function hasClaimedProfile(row) {
   return Object.values(verificationData || {}).some((v) => v && (v.verified === true || v.linked === true || v.success === true));
 }
 
+function buildLeaderboardRows(limit) {
+  const db = profileStore.getDb();
+  const hasTrustTable = !!db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'satp_trust_scores'").get();
+  const trustCols = new Set(hasTrustTable
+    ? db.prepare("PRAGMA table_info(satp_trust_scores)").all().map((col) => col.name)
+    : []
+  );
+  const scoreExpr = trustCols.has('overall_score') ? 'COALESCE(t.overall_score, 0)' : '0';
+  const levelExpr = trustCols.has('level') ? 't.level' : 'NULL';
+  const breakdownExpr = trustCols.has('score_breakdown') ? 't.score_breakdown' : 'NULL';
+  const trustJoin = hasTrustTable ? 'LEFT JOIN satp_trust_scores t ON t.agent_id = p.id' : '';
+  const rows = db.prepare(`
+    SELECT p.*,
+           ${scoreExpr} AS leaderboard_score,
+           ${levelExpr} AS leaderboard_level,
+           ${breakdownExpr} AS leaderboard_breakdown
+    FROM profiles p
+    ${trustJoin}
+    WHERE COALESCE(p.hidden, 0) = 0
+      AND COALESCE(p.status, 'active') = 'active'
+    ORDER BY leaderboard_score DESC, p.created_at DESC
+  `).all();
+
+  const leaderboard = rows.map((row) => {
+    const verification = parseJsonFieldSafe(row.verification, {});
+    const nft = parseJsonFieldSafe(row.nft_avatar, {});
+    let score = normalizeTrustScoreValue(row.leaderboard_score);
+    let source = score > 0 ? 'satp_trust_scores' : 'computed';
+
+    if (score <= 0) {
+      try {
+        const unified = computeUnifiedTrustScore(db, row, {});
+        score = normalizeTrustScoreValue(unified?.score || unified?.trustScore || 0);
+        source = unified?.source || source;
+      } catch (_) {
+        score = 0;
+      }
+    }
+
+    const level = normalizeLeaderboardLevel(
+      row.leaderboard_level ?? verification?.level ?? verification?.verificationLevel,
+      score
+    );
+    const levelName = LEADERBOARD_LEVEL_LABELS[level] || 'Unverified';
+
+    return {
+      agentId: row.id,
+      id: row.id,
+      name: row.name,
+      handle: row.handle || row.id,
+      avatar: resolveLeaderboardAvatar(row),
+      score,
+      reputationScore: score,
+      level,
+      levelName,
+      verificationLevel: level,
+      verificationLabel: levelName,
+      source,
+      isBorn: Boolean(nft?.permanent || nft?.soulboundMint || verification?.isBorn),
+      claimed: hasClaimedProfile(row),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }).sort((a, b) => (b.score - a.score) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+
+  return {
+    leaderboard: leaderboard.slice(0, limit),
+    total: leaderboard.length,
+  };
+}
+
 const publicLeaderboardLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
@@ -249,6 +320,13 @@ const didDirectoryLimiter = rateLimit({
 const publicBadgeLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const ethVerificationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -334,8 +412,10 @@ try {
 
 // Domain verification provider
 let domainVerify;
+let domainVerifyLoaded = false;
 try {
   domainVerify = require('./domain-verify');
+  domainVerifyLoaded = true;
   console.log('✓ Domain verification loaded successfully');
 } catch (error) {
   console.log('⚠️  Domain verification not found, using fallback');
@@ -348,8 +428,10 @@ try {
 
 // Website verification provider
 let websiteVerify;
+let websiteVerifyLoaded = false;
 try {
   websiteVerify = require('./website-verify');
+  websiteVerifyLoaded = true;
   console.log('✓ Website verification loaded successfully');
 } catch (error) {
   console.log('⚠️  Website verification not found, using fallback');
@@ -1006,21 +1088,15 @@ app.get('/docs', (req, res) => {
       </div>
       <div class="endpoint">
         <span class="method post">POST</span>
-        <span class="path">/api/verify/x/challenge</span>
+        <span class="path">/api/verification/domain/initiate</span>
         <span class="tag tag-free">FREE</span>
-        <p class="desc">Initiate X (Twitter) verification.</p>
+        <p class="desc">Initiate domain ownership verification.</p>
       </div>
       <div class="endpoint">
         <span class="method post">POST</span>
-        <span class="path">/api/verify/agentmail/challenge</span>
+        <span class="path">/api/verification/website/initiate</span>
         <span class="tag tag-free">FREE</span>
-        <p class="desc">Initiate AgentMail email verification.</p>
-      </div>
-      <div class="endpoint">
-        <span class="method post">POST</span>
-        <span class="path">/api/verification/discord/initiate</span>
-        <span class="tag tag-free">FREE</span>
-        <p class="desc">Initiate Discord verification (hardened).</p>
+        <p class="desc">Initiate website .well-known verification.</p>
       </div>
     </div>
 
@@ -1228,35 +1304,30 @@ app.get('/api/wallet/lookup/:address', (req, res) => {
 });
 
 app.get('/api/health', (req, res) => {
+  const providers = ['solana', 'github'];
+  if (domainVerifyLoaded) providers.push('domain');
+  if (websiteVerifyLoaded) providers.push('website');
+
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
     version: '1.0.0',
     environment: NODE_ENV,
-    discord_verification: discordVerify ? 'hardened' : 'fallback',
-    telegram_verification: telegramVerify ? 'active' : 'fallback',
-    domain_verification: domainVerify ? 'active' : 'fallback',
-    website_verification: websiteVerify ? 'active' : 'fallback',
+    domain_verification: domainVerifyLoaded ? 'active' : 'unavailable',
+    website_verification: websiteVerifyLoaded ? 'active' : 'unavailable',
+    github_verification: 'active',
+    solana_verification: 'active',
     fix_status: 'SERVER_IMPORT_FIXED',
-    eth_verification: ethVerify ? 'active' : 'fallback',
-    ens_verification: ensVerify ? 'active' : 'fallback',
-    farcaster_verification: farcasterVerify ? 'active' : 'fallback',
-    providers: ['discord', 'telegram', 'domain', 'website', 'eth', 'ens', 'farcaster']
+    providers
   });
 });
 
 // Discord verification endpoints
 app.get('/api/verification/discord/status', (req, res) => {
-  res.json({
-    status: 'hardened_version_active',
-    import_fixed: true,
-    line_68_status: 'UPDATED_TO_HARDENED_VERSION',
-    security_features: [
-      'challenge_response_flow',
-      'cryptographic_verification', 
-      'rate_limiting',
-      'time_limited_challenges'
-    ]
+  res.status(410).json({
+    disabled: true,
+    error: 'Discord verification disabled',
+    reason: 'Discord verification requires OAuth flow before it can be trusted',
   });
 });
 
@@ -1271,48 +1342,27 @@ app.post('/api/verification/discord/initiate', async (req, res) => {
 
 // Telegram verification endpoints
 app.get('/api/verification/telegram/status', async (req, res) => {
-  const { challengeId } = req.query;
-  
-  if (!challengeId) {
-    return res.status(400).json({ error: 'Missing challengeId parameter' });
-  }
-  
-  try {
-    const status = await telegramVerify.getTelegramVerificationStatus(challengeId);
-    res.json(status);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  return res.status(410).json({
+    disabled: true,
+    error: 'Telegram verification disabled',
+    reason: 'Telegram verification needs a real Bot API ownership check before it can be trusted',
+  });
 });
 
 app.post('/api/verification/telegram/initiate', async (req, res) => {
-  const { profileId, telegramUsername } = req.body;
-  
-  if (!profileId || !telegramUsername) {
-    return res.status(400).json({ error: 'Missing profileId or telegramUsername' });
-  }
-
-  try {
-    const result = await telegramVerify.initiateTelegramVerification(profileId, telegramUsername);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  return res.status(410).json({
+    disabled: true,
+    error: 'Telegram verification disabled',
+    reason: 'Telegram verification needs a real Bot API ownership check before it can be trusted',
+  });
 });
 
 app.post('/api/verification/telegram/verify', async (req, res) => {
-  const { challengeId, messageUrl } = req.body;
-  
-  if (!challengeId || !messageUrl) {
-    return res.status(400).json({ error: 'Missing challengeId or messageUrl' });
-  }
-
-  try {
-    const result = await telegramVerify.verifyTelegramChallenge(challengeId, messageUrl);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  return res.status(410).json({
+    disabled: true,
+    error: 'Telegram verification disabled',
+    reason: 'Telegram verification needs a real Bot API ownership check before it can be trusted',
+  });
 });
 
 // Domain verification endpoints
@@ -1408,69 +1458,78 @@ app.post('/api/verification/website/verify', async (req, res) => {
 });
 
 // ========== ETH WALLET VERIFICATION ==========
-app.post('/api/verification/eth/initiate', (req, res) => {
+async function handleEthVerificationInitiate(req, res) {
   try {
     const { profileId, walletAddress } = req.body;
     if (!profileId || !walletAddress) return res.status(400).json({ error: 'profileId and walletAddress required' });
     if (!/^0x[0-9a-fA-F]{40}$/.test(walletAddress)) return res.status(400).json({ error: 'Invalid ETH address' });
-    const challenge = ethVerify.generateChallenge(profileId, walletAddress);
+    const challenge = await ethVerify.generateChallenge(profileId, walletAddress);
     res.json({ success: true, ...challenge, instructions: 'Sign the message with your ETH wallet, then POST signature to /api/verification/eth/verify' });
   } catch (error) { res.status(500).json({ error: error.message }); }
-});
+}
 
-app.post('/api/verification/eth/verify', (req, res) => {
+async function handleEthVerificationVerify(req, res) {
   try {
     const { challengeId, signature } = req.body;
     if (!challengeId || !signature) return res.status(400).json({ error: 'challengeId and signature required' });
-    const result = ethVerify.verifySignature(challengeId, signature);
+    const result = await ethVerify.verifySignature(challengeId, signature);
+    if (result?.verified) {
+      const proof = result.proof || {};
+      profileStore.addVerification(result.profileId, 'ethereum', result.walletAddress, {
+        ...proof,
+        challengeId,
+        verifiedAt: new Date().toISOString(),
+      });
+    }
     res.json(result);
   } catch (error) { res.status(500).json({ error: error.message }); }
-});
+}
+
+app.post('/api/verification/eth/initiate', ethVerificationLimiter, handleEthVerificationInitiate);
+app.post('/api/verification/eth/verify', ethVerificationLimiter, handleEthVerificationVerify);
+app.post('/api/verify/eth/initiate', ethVerificationLimiter, handleEthVerificationInitiate);
+app.post('/api/verify/eth/verify', ethVerificationLimiter, handleEthVerificationVerify);
 
 // ========== ENS VERIFICATION ==========
 app.post('/api/verification/ens/initiate', (req, res) => {
-  try {
-    const { profileId, ensName } = req.body;
-    if (!profileId || !ensName) return res.status(400).json({ error: 'profileId and ensName required' });
-    if (!ensName.endsWith('.eth')) return res.status(400).json({ error: 'ENS name must end with .eth' });
-    const challenge = ensVerify.generateChallenge(profileId, ensName);
-    res.json({ success: true, ...challenge, instructions: 'Sign the message with the wallet that owns this ENS name, then POST to /api/verification/ens/verify' });
-  } catch (error) { res.status(500).json({ error: error.message }); }
+  return res.status(410).json({
+    disabled: true,
+    error: 'ENS verification disabled',
+    reason: 'ENS verification is not backed by a loaded ownership verifier in this runtime',
+  });
 });
 
 app.post('/api/verification/ens/verify', async (req, res) => {
-  try {
-    const { challengeId, signature } = req.body;
-    if (!challengeId || !signature) return res.status(400).json({ error: 'challengeId and signature required' });
-    const result = await ensVerify.verifyENSOwnership(challengeId, signature);
-    res.json(result);
-  } catch (error) { res.status(500).json({ error: error.message }); }
+  return res.status(410).json({
+    disabled: true,
+    error: 'ENS verification disabled',
+    reason: 'ENS verification is not backed by a loaded ownership verifier in this runtime',
+  });
 });
 
 app.get('/api/verification/ens/resolve/:name', async (req, res) => {
-  try {
-    const result = await ensVerify.resolveENS(req.params.name);
-    res.json(result);
-  } catch (error) { res.status(500).json({ error: error.message }); }
+  return res.status(410).json({
+    disabled: true,
+    error: 'ENS verification disabled',
+    reason: 'ENS verification is not backed by a loaded ownership verifier in this runtime',
+  });
 });
 
 // ========== FARCASTER VERIFICATION ==========
 app.post('/api/verification/farcaster/initiate', (req, res) => {
-  try {
-    const { profileId, fid } = req.body;
-    if (!profileId || !fid) return res.status(400).json({ error: 'profileId and fid required' });
-    const challenge = farcasterVerify.generateChallenge(profileId, fid);
-    res.json({ success: true, ...challenge });
-  } catch (error) { res.status(500).json({ error: error.message }); }
+  return res.status(410).json({
+    disabled: true,
+    error: 'Farcaster verification disabled',
+    reason: 'Farcaster verification is not backed by a loaded cast verifier in this runtime',
+  });
 });
 
 app.post('/api/verification/farcaster/verify', async (req, res) => {
-  try {
-    const { challengeId, castHash } = req.body;
-    if (!challengeId || !castHash) return res.status(400).json({ error: 'challengeId and castHash required' });
-    const result = await farcasterVerify.verifyCast(challengeId, castHash);
-    res.json(result);
-  } catch (error) { res.status(500).json({ error: error.message }); }
+  return res.status(410).json({
+    disabled: true,
+    error: 'Farcaster verification disabled',
+    reason: 'Farcaster verification is not backed by a loaded cast verifier in this runtime',
+  });
 });
 
 // ── Profile Store routes (register, profiles, endorsements, reviews) ──
@@ -1828,30 +1887,19 @@ app.post('/api/verify/solana/confirm', async (req, res) => {
 
 // AgentMail: challenge → sends code to email → confirm
 app.post('/api/verify/agentmail/challenge', async (req, res) => {
-  try {
-    const { profileId, email } = req.body;
-    if (!profileId || !email) return res.status(400).json({ error: 'profileId and email required' });
-    if (!email.endsWith('@agentmail.to')) return res.status(400).json({ error: 'Only @agentmail.to addresses supported' });
-    const challenge = verificationChallenges.generateChallenge(profileId, 'agentmail', email);
-    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-    challenge.challengeData.code = code;
-    challenge.challengeData.instructions = `Check your ${email} inbox for verification code: ${code}`;
-    await verificationChallenges.storeChallenge(challenge);
-    // In production: send email with code via AgentMail API
-    res.json({ challengeId: challenge.id, instructions: `Enter the verification code sent to ${email}`, expiresAt: challenge.challengeData.expiresAt });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  return res.status(410).json({
+    disabled: true,
+    error: 'AgentMail verification disabled',
+    reason: 'AgentMail challenge delivery is not wired to a real mailbox delivery check',
+  });
 });
 
 app.post('/api/verify/agentmail/confirm', async (req, res) => {
-  try {
-    const { challengeId, code } = req.body;
-    if (!challengeId || !code) return res.status(400).json({ error: 'challengeId and code required' });
-    const challenge = await verificationChallenges.getChallenge(challengeId);
-    if (!challenge) return res.status(404).json({ error: 'Challenge not found or expired' });
-    if (code.toUpperCase() !== challenge.challengeData.code) return res.status(400).json({ error: 'Invalid verification code' });
-    await verificationChallenges.completeChallenge(challengeId, { email: challenge.challengeData.identifier, verifiedAt: new Date().toISOString() });
-    res.json({ verified: true, platform: 'agentmail', identifier: challenge.challengeData.identifier, proof: { challengeId } });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  return res.status(410).json({
+    disabled: true,
+    error: 'AgentMail verification disabled',
+    reason: 'AgentMail challenge delivery is not wired to a real mailbox delivery check',
+  });
 });
 
 // ===== END HARDENED VERIFICATION ENDPOINTS =====
@@ -2088,7 +2136,7 @@ try {
 app.get('/api/satp/explorer/agents', async (req, res) => {
   try {
     const { getSatpAgents } = require('./routes/satp-explorer-api');
-    const data = await getSatpAgents();
+    const data = await getSatpAgents({ limit: req.query.limit });
     const allAgents = Array.isArray(data?.agents) ? data.agents : [];
     const total = Number.isFinite(data?.total) ? data.total : allAgents.length;
     const limit = Number.parseInt(req.query.limit, 10);
@@ -2236,76 +2284,14 @@ app.get('/api/score', async (req, res) => {
 app.get('/api/leaderboard', publicLeaderboardLimiter, (req, res) => {
   try {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
-    const db = profileStore.getDb();
-    const hasTrustTable = !!db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'satp_trust_scores'").get();
-    const trustCols = new Set(hasTrustTable
-      ? db.prepare("PRAGMA table_info(satp_trust_scores)").all().map((col) => col.name)
-      : []
-    );
-    const scoreExpr = trustCols.has('overall_score') ? 'COALESCE(t.overall_score, 0)' : '0';
-    const levelExpr = trustCols.has('level') ? 't.level' : 'NULL';
-    const breakdownExpr = trustCols.has('score_breakdown') ? 't.score_breakdown' : 'NULL';
-    const trustJoin = hasTrustTable ? 'LEFT JOIN satp_trust_scores t ON t.agent_id = p.id' : '';
-    const rows = db.prepare(`
-      SELECT p.*,
-             ${scoreExpr} AS leaderboard_score,
-             ${levelExpr} AS leaderboard_level,
-             ${breakdownExpr} AS leaderboard_breakdown
-      FROM profiles p
-      ${trustJoin}
-      WHERE COALESCE(p.hidden, 0) = 0
-        AND COALESCE(p.status, 'active') = 'active'
-      ORDER BY leaderboard_score DESC, p.created_at DESC
-    `).all();
-
-    const leaderboard = rows.map((row) => {
-      const verification = parseJsonFieldSafe(row.verification, {});
-      const nft = parseJsonFieldSafe(row.nft_avatar, {});
-      let score = normalizeTrustScoreValue(row.leaderboard_score);
-      let source = score > 0 ? 'satp_trust_scores' : 'computed';
-
-      if (score <= 0) {
-        try {
-          const unified = computeUnifiedTrustScore(db, row, {});
-          score = normalizeTrustScoreValue(unified?.score || unified?.trustScore || 0);
-          source = unified?.source || source;
-        } catch (_) {
-          score = 0;
-        }
-      }
-
-      const level = normalizeLeaderboardLevel(
-        row.leaderboard_level ?? verification?.level ?? verification?.verificationLevel,
-        score
-      );
-      const levelName = LEADERBOARD_LEVEL_LABELS[level] || 'Unverified';
-
-      return {
-        agentId: row.id,
-        id: row.id,
-        name: row.name,
-        handle: row.handle || row.id,
-        avatar: resolveLeaderboardAvatar(row),
-        score,
-        reputationScore: score,
-        level,
-        levelName,
-        verificationLevel: level,
-        verificationLabel: levelName,
-        source,
-        isBorn: Boolean(nft?.permanent || nft?.soulboundMint || verification?.isBorn),
-        claimed: hasClaimedProfile(row),
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      };
-    }).sort((a, b) => (b.score - a.score) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+    const { leaderboard, total } = buildLeaderboardRows(limit);
 
     res.json({
       ok: true,
       count: Math.min(limit, leaderboard.length),
-      total: leaderboard.length,
+      total,
       limit,
-      leaderboard: leaderboard.slice(0, limit),
+      leaderboard,
       payment: { required: false, paidEndpoint: '/api/leaderboard/scores' },
     });
   } catch (err) {
@@ -2316,20 +2302,23 @@ app.get('/api/leaderboard', publicLeaderboardLimiter, (req, res) => {
 
 // Paid: Leaderboard with scores
 app.get('/api/leaderboard/scores', (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
+    const { leaderboard, total } = buildLeaderboardRows(limit);
 
-  // For now, return computed scores for known profiles
-  // In production this would query a real profile database
-  const profiles = [];
-  const leaderboard = computeLeaderboard(profiles, limit);
-
-  res.json({
-    leaderboard,
-    total: leaderboard.length,
-    limit,
-    computedAt: new Date().toISOString(),
-    payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.05' },
-  });
+    res.json({
+      ok: true,
+      leaderboard,
+      total,
+      count: leaderboard.length,
+      limit,
+      computedAt: new Date().toISOString(),
+      payment: { protocol: 'x402', network: X402_NETWORK, price: '$0.05' },
+    });
+  } catch (err) {
+    console.error('[Leaderboard] Failed to build paid leaderboard:', err.message);
+    res.status(500).json({ ok: false, error: 'Failed to build leaderboard scores' });
+  }
 });
 
 // Free: x402 pricing info endpoint
@@ -2410,11 +2399,6 @@ app.get('/api/reviews/v2', (req, res) => {
 // Profile heatmap - returns empty heatmap until activity tracking wired
 app.get('/api/profile/:id/heatmap', (req, res) => {
   res.json({ profileId: req.params.id, heatmap: {}, period: '90d' });
-});
-
-// Token stats - returns zeros until token launch
-app.get('/api/tokens/stats', (req, res) => {
-  res.json({ totalSupply: 0, circulatingSupply: 0, holders: 0, price: null, marketCap: null });
 });
 
 // GitHub verification stats

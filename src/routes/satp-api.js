@@ -6,19 +6,20 @@
 
 const satpIdentity = require('../satp-identity-client');
 const satpReviewsOnchain = require('../satp-reviews-onchain');
-const { getGenesisPDA } = require('../satp-client/src/v3-pda');
+const { client: satpClient } = require('../adapters/satp');
 
 // V3 SDK (using SATPV3SDK directly for all V3 operations)
 let satpV3Client;
 let SATPV3SDK_Class;
+let getGenesisPDA;
 try {
-  const { createSATPClient, SATPV3SDK } = require('../satp-client/src');
-  SATPV3SDK_Class = SATPV3SDK;
-  satpV3Client = createSATPClient({
+  SATPV3SDK_Class = satpClient.getSatpClientExport('SATPV3SDK');
+  getGenesisPDA = satpClient.getSatpClientExport('getGenesisPDA');
+  satpV3Client = satpClient.createSatpClient({
     network: process.env.SATP_NETWORK_EFFECTIVE || 'devnet',
     rpcUrl: process.env.SATP_RPC_URL || 'https://api.devnet.solana.com',
   });
-  console.log('[SATP API] V3 SDK loaded (SATPV3SDK + createSATPClient)');
+  console.log('[SATP API] V3 SDK loaded from @brainai/satp-client (SATPV3SDK + createSATPClient)');
 } catch (e) {
   console.warn('[SATP API] V3 SDK not available:', e.message);
 }
@@ -366,7 +367,7 @@ function registerSATPRoutes(app) {
    * Returns V3 Genesis Record by agent_id (not wallet)
    */
   app.get('/api/satp/v3/agent/:agentId', async (req, res) => {
-    if (!satpV3Client) return res.status(503).json({ error: 'V3 SDK not available' });
+    if (!satpV3Client || !getGenesisPDA) return res.status(503).json({ error: 'V3 SDK not available' });
     try {
       const record = await satpV3Client.getGenesisRecord(req.params.agentId);
       if (!record) return res.status(404).json({ error: 'No Genesis Record', agentId: req.params.agentId });

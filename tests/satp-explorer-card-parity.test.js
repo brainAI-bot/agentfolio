@@ -10,6 +10,8 @@ const GITHUB_SIG = '5'.repeat(64);
 function loadWithMocks(options = {}) {
   const originalLoad = Module._load;
   let nftLookupCalls = 0;
+  let unifiedScoreCalls = 0;
+  let chainCacheLookups = 0;
 
   class PublicKey {
     constructor(value) {
@@ -64,6 +66,42 @@ function loadWithMocks(options = {}) {
                 created_at: '2026-01-01T00:00:00.000Z',
                 updated_at: '2026-01-02T00:00:00.000Z',
               },
+              {
+                id: 'agent_bob',
+                name: 'Bob',
+                handle: 'bob',
+                wallet: 'AuthBob11111111111111111111111111111111111111',
+                claimed_by: null,
+                wallets: JSON.stringify({ solana: 'AuthBob11111111111111111111111111111111111111' }),
+                tags: '[]',
+                skills: '[]',
+                portfolio: '[]',
+                links: '{}',
+                metadata: '{}',
+                verification_data: '{}',
+                nft_avatar: null,
+                avatar: null,
+                created_at: '2026-01-01T00:00:00.000Z',
+                updated_at: '2026-01-02T00:00:00.000Z',
+              },
+              {
+                id: 'agent_carol',
+                name: 'Carol',
+                handle: 'carol',
+                wallet: 'AuthCarol1111111111111111111111111111111111111',
+                claimed_by: null,
+                wallets: JSON.stringify({ solana: 'AuthCarol1111111111111111111111111111111111111' }),
+                tags: '[]',
+                skills: '[]',
+                portfolio: '[]',
+                links: '{}',
+                metadata: '{}',
+                verification_data: '{}',
+                nft_avatar: null,
+                avatar: null,
+                created_at: '2026-01-01T00:00:00.000Z',
+                updated_at: '2026-01-02T00:00:00.000Z',
+              },
             ];
           },
         };
@@ -96,6 +134,7 @@ function loadWithMocks(options = {}) {
     if (request === '../lib/unified-trust-score') {
       return {
         computeUnifiedTrustScore() {
+          unifiedScoreCalls += 1;
           return {
             score: 612,
             breakdown: { demo: true },
@@ -173,6 +212,7 @@ function loadWithMocks(options = {}) {
     if (request === '../lib/chain-cache') {
       return {
         getVerifications() {
+          chainCacheLookups += 1;
           return [
             {
               platform: 'github',
@@ -194,6 +234,12 @@ function loadWithMocks(options = {}) {
     mod,
     getNftLookupCalls() {
       return nftLookupCalls;
+    },
+    getUnifiedScoreCalls() {
+      return unifiedScoreCalls;
+    },
+    getChainCacheLookups() {
+      return chainCacheLookups;
     },
     restore() {
       Module._load = originalLoad;
@@ -269,5 +315,53 @@ describe('satp explorer card parity regression guard', () => {
     assert.strictEqual(result.agents[0].reputationScore, 42);
     assert.strictEqual(result.agents[0].verificationLevel, 1);
     assert.strictEqual(loaded.getNftLookupCalls(), 0);
+  });
+
+  it('applies limit before expensive enrichment while preserving total', async () => {
+    const loaded = loadWithMocks({
+      explorerAgents: [
+        {
+          pda: 'PDA11111111111111111111111111111111111111111',
+          agentName: 'Alice',
+          authority: 'Auth11111111111111111111111111111111111111111',
+          reputationScore: 130000,
+          verificationLevel: 3,
+          tier: 'Established',
+          tierLabel: 'Established',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          pda: 'PDABob111111111111111111111111111111111111111',
+          agentName: 'Bob',
+          authority: 'AuthBob11111111111111111111111111111111111111',
+          reputationScore: 90000,
+          verificationLevel: 2,
+          tier: 'Verified',
+          tierLabel: 'Verified',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          pda: 'PDACarol1111111111111111111111111111111111111',
+          agentName: 'Carol',
+          authority: 'AuthCarol1111111111111111111111111111111111111',
+          reputationScore: 80000,
+          verificationLevel: 2,
+          tier: 'Verified',
+          tierLabel: 'Verified',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+    cleanup = loaded.restore;
+
+    loaded.mod.clearSatpExplorerCache();
+    const result = await loaded.mod.getSatpAgents({ limit: 1 });
+
+    assert.strictEqual(result.count, 1);
+    assert.strictEqual(result.total, 3);
+    assert.strictEqual(result.limit, 1);
+    assert.deepStrictEqual(result.agents.map((agent) => agent.profileId), ['agent_alice']);
+    assert.strictEqual(loaded.getUnifiedScoreCalls(), 1);
+    assert.strictEqual(loaded.getChainCacheLookups(), 1);
   });
 });

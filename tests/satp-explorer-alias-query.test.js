@@ -16,7 +16,7 @@ describe('satp explorer alias query regression guard', () => {
 
     assert.ok(source.includes("app.get('/api/satp/explorer/agents'"));
     assert.ok(source.includes("const { getSatpAgents } = require('./routes/satp-explorer-api');"));
-    assert.ok(source.includes('const data = await getSatpAgents();'));
+    assert.match(source, /const data = await getSatpAgents\(\{\s*limit:\s*req\.query\.limit\s*\}\);/);
     assert.ok(source.includes('allAgents.slice(0, limit)'));
     assert.ok(!source.includes('fetch(`http://localhost:3333/api/explorer/agents${query}`)'));
   });

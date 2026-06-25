@@ -28,7 +28,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '..', 'ag
 const fs = require('fs');
 const path = require('path');
 const { Keypair } = require('@solana/web3.js');
-const { createSATPClient, agentIdHash } = require('/home/ubuntu/agentfolio/src/satp-client/src');
+const { createSATPClient, agentIdHash } = require('@brainai/satp-client');
 const { assertSolanaIrysWriteEnabled } = require('../src/lib/write-surface-gate');
 
 assertSolanaIrysWriteEnabled('Solana/Irys script write surface: scripts/sync-scores-onchain.js');

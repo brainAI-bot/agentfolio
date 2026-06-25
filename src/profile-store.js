@@ -32,8 +32,14 @@ try {
 // SATP V3 SDK — Genesis Record creation + V3 identity reads
 let satpV3;
 try {
-  const { createSATPClient, SATPV3SDK, hashAgentId, getGenesisPDA } = require('./satp-client/src');
-  const v3Client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb' });
+  const { createSATPClient, SATPV3SDK, hashAgentId, getGenesisPDA } = require('@brainai/satp-client');
+  if ((process.env.SATP_NETWORK || 'mainnet') === 'mainnet' && !process.env.SOLANA_RPC_URL) {
+    throw new Error('SOLANA_RPC_URL must be set to a managed mainnet provider endpoint for SATP V3');
+  }
+  const v3Client = createSATPClient({
+    network: process.env.SATP_NETWORK || 'mainnet',
+    ...(process.env.SOLANA_RPC_URL ? { rpcUrl: process.env.SOLANA_RPC_URL } : {}),
+  });
   satpV3 = { client: v3Client, SATPV3SDK, hashAgentId, getGenesisPDA };
   console.log('[SATP V3] SDK loaded successfully (SATPV3SDK + createSATPClient + PDA helpers)');
 } catch (e) {
@@ -1365,30 +1371,10 @@ function registerRoutes(app) {
 
   // ── POST /api/profile/:id/endorsements ─────────────────────────
   app.post('/api/profile/:id/endorsements', (req, res) => {
-    const { endorser_id, endorser_name, skill, comment, weight } = req.body;
-    if (!endorser_id || !skill) return res.status(400).json({ error: 'endorser_id and skill are required' });
-
-    const d = getDb();
-    const profile = d.prepare('SELECT id FROM profiles WHERE id = ?').get(req.params.id);
-    if (!profile) return res.status(404).json({ error: 'Profile not found' });
-    if (endorser_id === req.params.id) return res.status(400).json({ error: 'Cannot self-endorse' });
-
-    const id = genId('end');
-    try {
-      d.prepare(`
-        INSERT INTO endorsements (id, profile_id, endorser_id, endorser_name, skill, comment, weight)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(id, req.params.id, endorser_id, endorser_name || '', skill, comment || '', weight || 1);
-      addActivity(req.params.id, 'endorsement', { endorser_id, endorser_name, skill });
-      // Fire-and-forget: send welcome email if agent provided an email
-      if (resolvedEmail) {
-        sendWelcomeEmail(resolvedEmail, { id, name: name.trim(), handle: h });
-      }
-      res.status(201).json({ id, message: 'Endorsement added' });
-    } catch (e) {
-      if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Duplicate endorsement (same endorser + skill)' });
-      res.status(500).json({ error: e.message });
-    }
+    res.status(403).json({
+      error: 'Profile endorsements are disabled until authenticated escrow-gated social proof is available',
+      disabled: true,
+    });
   });
 
   // ── GET /api/profile/:id/endorsements ──────────────────────────
@@ -1400,28 +1386,10 @@ function registerRoutes(app) {
 
   // ── POST /api/profile/:id/reviews ──────────────────────────────
   app.post('/api/profile/:id/reviews', (req, res) => {
-    const { reviewer_id, reviewer_name, rating, title, comment, job_id } = req.body;
-    if (!reviewer_id || !rating) return res.status(400).json({ error: 'reviewer_id and rating (1-5) are required' });
-    const r = parseInt(rating);
-    if (r < 1 || r > 5) return res.status(400).json({ error: 'rating must be 1-5' });
-
-    const d = getDb();
-    const profile = d.prepare('SELECT id FROM profiles WHERE id = ?').get(req.params.id);
-    if (!profile) return res.status(404).json({ error: 'Profile not found' });
-    if (reviewer_id === req.params.id) return res.status(400).json({ error: 'Cannot self-review' });
-
-    const id = genId('rev');
-    d.prepare(`
-      INSERT INTO reviews (id, profile_id, reviewer_id, reviewer_name, rating, title, comment, job_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, req.params.id, reviewer_id, reviewer_name || '', r, title || '', comment || '', job_id || '');
-    addActivity(req.params.id, 'review', { reviewer_id, reviewer_name, rating: r, title });
-
-      // Fire-and-forget: send welcome email if agent provided an email
-      if (resolvedEmail) {
-        sendWelcomeEmail(resolvedEmail, { id, name: name.trim(), handle: h });
-      }
-    res.status(201).json({ id, rating: r, title: title || '', comment: comment || '', reviewer_id, reviewer_name: reviewer_name || '', job_id: job_id || '', message: 'Review added' });
+    res.status(403).json({
+      error: 'Profile reviews are disabled until completed escrow review rights are enforced',
+      disabled: true,
+    });
   });
 
   // ── GET /api/profile/:id/reviews ───────────────────────────────

@@ -21,7 +21,7 @@ const PROGRAM_IDS = {
 // V3 Program IDs
 let V3_PROGRAM_IDS;
 try {
-  const { getV3ProgramIds } = require('./satp-client/src/v3-pda');
+  const { getV3ProgramIds } = require('@brainai/satp-client');
   V3_PROGRAM_IDS = getV3ProgramIds('mainnet');
   console.log('[SATP Reviews] V3 program IDs loaded');
 } catch (e) {
@@ -104,51 +104,10 @@ function getReviewPDA(reviewerId, revieweeId, jobId) {
 function registerRoutes(app) {
   // Submit a review
   app.post('/api/satp/reviews', (req, res) => {
-    try {
-      const { reviewer_id, reviewee_id, job_id, rating, comment, tx_signature } = req.body;
-
-      if (!reviewer_id || !reviewee_id || !rating) {
-        return res.status(400).json({ error: 'reviewer_id, reviewee_id, and rating are required' });
-      }
-      if (rating < 1 || rating > 5 || !Number.isInteger(rating)) {
-        return res.status(400).json({ error: 'rating must be integer 1-5' });
-      }
-      if (reviewer_id === reviewee_id) {
-        return res.status(400).json({ error: 'Cannot review yourself' });
-      }
-
-      // Validate wallet addresses
-      try {
-        new PublicKey(reviewer_id);
-        new PublicKey(reviewee_id);
-      } catch {
-        return res.status(400).json({ error: 'reviewer_id and reviewee_id must be valid Solana addresses' });
-      }
-
-      const id = crypto.randomUUID();
-      insertReview.run({
-        id,
-        reviewer_id,
-        reviewee_id,
-        job_id: job_id || null,
-        rating,
-        comment: comment || null,
-        tx_signature: tx_signature || null,
-      });
-
-      // Compute PDAs for reference
-      const reviewPDA = getReviewPDA(reviewer_id, reviewee_id, job_id);
-      const reputationPDA = getReputationPDA(reviewee_id);
-
-      res.status(201).json({
-        id,
-        reviewPDA: reviewPDA.toBase58(),
-        reputationPDA: reputationPDA.toBase58(),
-        message: 'Review submitted',
-      });
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to submit review', detail: err.message });
-    }
+    res.status(403).json({
+      error: 'SATP review writes are disabled until completed on-chain escrow review rights are enforced',
+      disabled: true,
+    });
   });
 
   // Get reviews for an agent
@@ -172,11 +131,8 @@ function registerRoutes(app) {
         source = 'sqlite-fallback';
       }
 
-      const identityPDA = getIdentityPDA(agent);
-
       res.json({
         agent,
-        identityPDA: identityPDA.toBase58(),
         reviews,
         total: reviews.length,
         source,

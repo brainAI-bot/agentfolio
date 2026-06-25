@@ -22,6 +22,24 @@ try { v3Explorer = require('../v3-explorer'); } catch (_) { v3Explorer = null; }
 let agentCache = null;
 const CACHE_TTL = 5 * 60 * 1000;
 
+function normalizeExplorerLimit(value) {
+  const limit = Number.parseInt(String(value || ''), 10);
+  return Number.isFinite(limit) && limit > 0 ? limit : null;
+}
+
+function sliceExplorerResult(data, limit) {
+  if (!limit) return data;
+  const agents = Array.isArray(data?.agents) ? data.agents.slice(0, limit) : [];
+  const total = Number.isFinite(data?.total) ? data.total : (Array.isArray(data?.agents) ? data.agents.length : agents.length);
+  return {
+    ...data,
+    agents,
+    count: agents.length,
+    total,
+    limit,
+  };
+}
+
 function hasIncompleteExplorerCache(data) {
   const agents = Array.isArray(data?.agents) ? data.agents : [];
   return agents.some((agent) => {
@@ -155,9 +173,10 @@ async function fetchJsonWithRetries(url, attempts = 3, delayMs = 400) {
   return null;
 }
 
-async function getSatpAgents() {
+async function getSatpAgents(options = {}) {
+  const requestedLimit = normalizeExplorerLimit(options.limit);
   if (agentCache && (Date.now() - agentCache.timestamp < CACHE_TTL) && !hasIncompleteExplorerCache(agentCache.data)) {
-    return agentCache.data;
+    return sliceExplorerResult(agentCache.data, requestedLimit);
   }
   if (agentCache && hasIncompleteExplorerCache(agentCache.data)) {
     agentCache = null;
@@ -292,7 +311,7 @@ const pickBestProfileForAgent = (parsedAgent) => {
     .sort((a, b) => b.score - a.score || b.updatedTs - a.updatedTs || String(a.profile.id).localeCompare(String(b.profile.id)));
   return ranked[0] || { profile: null, score: 0 };
 };
-const filteredAgents = agents.map((v3) => {
+const allFilteredAgents = agents.map((v3) => {
   if (!v3 || !v3.name) return null;
   const matched = pickBestProfileForAgent(v3);
   const profile = matched.profile;
@@ -322,6 +341,11 @@ const filteredAgents = agents.map((v3) => {
   };
 }).filter(Boolean);
 
+const totalAgents = allFilteredAgents.length;
+const filteredAgents = requestedLimit
+  ? allFilteredAgents.slice(0, requestedLimit)
+  : allFilteredAgents;
+
 const matchedProfileIds = [...new Set(filteredAgents.map((agent) => agent.profileId).filter(Boolean))];
 let canonicalV3ByProfileId = new Map();
 if (matchedProfileIds.length > 0 && typeof v3ScoreService.getV3Scores === 'function') {
@@ -333,32 +357,30 @@ if (matchedProfileIds.length > 0 && typeof v3ScoreService.getV3Scores === 'funct
 }
 
 const matchedExplorerV3ByProfileId = new Map();
-if (typeof v3Explorer?.fetchAllV3Agents === 'function') {
-  try {
-    const explorerAgents = await v3Explorer.fetchAllV3Agents();
-    for (const explorerAgent of Array.isArray(explorerAgents) ? explorerAgents : []) {
-      const matched = pickBestProfileForAgent(explorerAgent);
-      const profileId = matched.profile?.id;
-      if (!profileId) continue;
-      const candidate = {
-        authority: String(explorerAgent.authority || ''),
-        rawReputationScore: Number(explorerAgent.reputationScore || 0),
-        reputationScore: normalizeExplorerReputationScore(explorerAgent.reputationScore || 0),
-        verificationLevel: Number(explorerAgent.verificationLevel || 0),
-        verificationLabel: explorerAgent.verificationLabel || explorerAgent.tierLabel || explorerAgent.tier || levelLabels[Number(explorerAgent.verificationLevel || 0)] || 'Unknown',
-        createdAt: explorerAgent.createdAt || explorerAgent.updatedAt || explorerAgent.bornAt || null,
-        profileMatchScore: Number(matched.score || 0),
-      };
-      const existing = matchedExplorerV3ByProfileId.get(profileId);
-      const existingMatchScore = Number(existing?.profileMatchScore || 0);
-      const candidateMatchScore = Number(candidate.profileMatchScore || 0);
-      if (!existing || candidateMatchScore > existingMatchScore || (candidateMatchScore === existingMatchScore && Number(candidate.rawReputationScore || 0) > Number(existing.rawReputationScore || 0))) {
-        matchedExplorerV3ByProfileId.set(profileId, candidate);
-      }
+try {
+  for (const explorerAgent of filteredAgents) {
+    const matched = pickBestProfileForAgent(explorerAgent);
+    const profileId = matched.profile?.id;
+    if (!profileId) continue;
+    const rawReputationScore = Number(explorerAgent.rawReputationScore || explorerAgent.reputationScore || 0);
+    const candidate = {
+      authority: String(explorerAgent.authority || ''),
+      rawReputationScore,
+      reputationScore: normalizeExplorerReputationScore(explorerAgent.reputationScore || rawReputationScore || 0),
+      verificationLevel: Number(explorerAgent.verificationLevel || 0),
+      verificationLabel: explorerAgent.verificationLabel || explorerAgent.tierLabel || explorerAgent.tier || levelLabels[Number(explorerAgent.verificationLevel || 0)] || 'Unknown',
+      createdAt: explorerAgent.createdAt || explorerAgent.updatedAt || explorerAgent.bornAt || null,
+      profileMatchScore: Number(matched.score || 0),
+    };
+    const existing = matchedExplorerV3ByProfileId.get(profileId);
+    const existingMatchScore = Number(existing?.profileMatchScore || 0);
+    const candidateMatchScore = Number(candidate.profileMatchScore || 0);
+    if (!existing || candidateMatchScore > existingMatchScore || (candidateMatchScore === existingMatchScore && Number(candidate.rawReputationScore || 0) > Number(existing.rawReputationScore || 0))) {
+      matchedExplorerV3ByProfileId.set(profileId, candidate);
     }
-  } catch (e) {
-    console.warn('[SATP Explorer] explorer V3 match fetch failed:', e.message);
   }
+} catch (e) {
+  console.warn('[SATP Explorer] explorer V3 match failed:', e.message);
 }
 
 for (const agent of filteredAgents) {
@@ -580,8 +602,14 @@ for (const agent of filteredAgents) {
       if (dedupeKey) seenAgentKeys.add(dedupeKey);
       dedupedAgents.push(agent);
     }
-    const result = { agents: dedupedAgents, count: dedupedAgents.length, source: "solana-mainnet-v3" };
-    if (!hasIncompleteExplorerCache(result)) {
+    const result = {
+      agents: dedupedAgents,
+      count: dedupedAgents.length,
+      total: totalAgents,
+      ...(requestedLimit ? { limit: requestedLimit } : {}),
+      source: "solana-mainnet-v3",
+    };
+    if (!requestedLimit && !hasIncompleteExplorerCache(result)) {
       agentCache = { data: result, timestamp: Date.now() };
     } else {
       agentCache = null;
@@ -591,8 +619,15 @@ for (const agent of filteredAgents) {
     console.warn('[SATP Explorer] DB filter/overlay failed:', e.message);
   }
 
-  const result = { agents, count: agents.length, source: "solana-mainnet-v3" };
-  agentCache = { data: result, timestamp: Date.now() };
+  const limitedAgents = requestedLimit ? agents.slice(0, requestedLimit) : agents;
+  const result = {
+    agents: limitedAgents,
+    count: limitedAgents.length,
+    total: agents.length,
+    ...(requestedLimit ? { limit: requestedLimit } : {}),
+    source: "solana-mainnet-v3",
+  };
+  if (!requestedLimit) agentCache = { data: result, timestamp: Date.now() };
   return result;
 }
 

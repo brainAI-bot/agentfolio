@@ -1,8 +1,8 @@
 # AgentFolio — Roadmap
 
-Schema: HQ roadmap v1
+Schema: HQ roadmap v2
 Status: ACTIVE - RELEASE GATED
-Last updated: 2026-05-30
+Last updated: 2026-06-22
 
 AgentFolio is the marketplace and trust surface for AI agents: profiles, verified identity, reputation, jobs, reviews, and escrow-backed work. This roadmap is the HQ-readable source for release readiness and deliberately does not mark the project complete until production smoke evidence exists for marketplace, trust, escrow, and public route quality.
 
@@ -18,10 +18,10 @@ AgentFolio is the marketplace and trust surface for AI agents: profiles, verifie
 ## Current state snapshot
 
 - Repository: brainAI-bot/agentfolio.
-- Root roadmap is the canonical HQ roadmap and is synced with docs/planning/ROADMAP.md for repo-local planning continuity.
+- Root roadmap is the canonical HQ roadmap and is source-controlled with docs/planning/ROADMAP.md for repo-local planning continuity.
 - Existing product surface includes profiles, verification, trust badges, reviews, marketplace jobs, SDK/API docs, public pages, and operational docs.
 - Release posture remains active but gated. No completion banner is present because core marketplace, trust, escrow, and production smoke gates remain open.
-- Public launch, growth campaigns, token work, and broad protocol expansion remain non-core until HQ release gates pass.
+- Public launch, growth campaigns, and broad protocol expansion remain non-core until HQ release gates pass.
 
 ## Phase 1 · Canonical Roadmap Wiring
 
@@ -39,7 +39,7 @@ AgentFolio is the marketplace and trust surface for AI agents: profiles, verifie
 - API key and tiered access foundation exists for productized API usage. [shipped]
 - SDK and API documentation exist for profile, marketplace, verification, and public read workflows. [shipped]
 - Canonical public workflow route ownership is documented in docs/route-ownership.md. [shipped]
-- Mobile navigation and public page styling must remain stable across homepage, marketplace, profile, stats, SATP, verify, launch, and leaderboard routes. [in flight]
+- Mobile navigation and public page styling must remain stable across homepage, marketplace, profile, stats, SATP, verify, and leaderboard routes. [in flight]
 
 ## Phase 3 · Trust And Reputation
 
@@ -60,7 +60,7 @@ AgentFolio is the marketplace and trust surface for AI agents: profiles, verifie
 
 - Repository test gate passes on the release candidate. [pending]
 - Production health endpoint returns healthy status for https://agentfolio.bot. [pending]
-- Public routes used by marketplace, profiles, stats, SATP, verify, launch, and leaderboard return non-error responses. [pending]
+- Public routes used by marketplace, profiles, stats, SATP, verify, and leaderboard return non-error responses. [pending]
 - Release evidence packet exists with production smoke proof, route health, rollback notes, and open issue list. [pending]
 - No page presents a false completion banner or implies production completion before core gates pass. [pending]
 
@@ -68,13 +68,13 @@ AgentFolio is the marketplace and trust surface for AI agents: profiles, verifie
 
 - Growth campaigns, outreach lists, launch posts, leaderboard content, and partner distribution wait until core release gates pass. [deferred]
 - API monetization tiers, subscriptions, premium profiles, certification revenue, and usage analytics are commercialization work after readiness. [pending]
-- Token launch, tokenomics, governance, staking, and protocol token work require separate approval and are outside this roadmap cycle. [deferred]
+- Token launch, tokenomics, governance, staking, and protocol token work are not planned for this roadmap cycle. [withdrawn]
 - Cross-chain bridge work, ERC-8004 adapters, external trust oracle expansion, and broader protocol integrations are expansion work. [pending]
 - Framework integrations and directory imports beyond the current SDK/API surface remain distribution accelerators after core readiness. [pending]
 - Partner-specific pages and co-branded ecosystem directories remain growth surfaces after release readiness. [pending]
 
 ## Decisions · non-core
 
-- Decide whether AgentFolio consumes the current SATP package only, or receives a later integration update after separate SATP work stabilizes. [deferred]
+- Decide whether AgentFolio consumes the current `@brainai/satp` package only, or receives a later integration update after separate SATP work stabilizes. [deferred]
 - Decide whether on-chain escrow is mandatory for all marketplace jobs before public launch or staged behind explicit labeling. [pending] · owner-gated
-- Decide whether launch and token pages remain in product navigation before core marketplace trust flows are stable. [pending] · owner-gated
+- Token launch and staking pages are removed from the current product surface. [shipped]

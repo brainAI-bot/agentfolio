@@ -14,6 +14,7 @@
 const { Connection, PublicKey, SystemProgram, Transaction, TransactionInstruction, ComputeBudgetProgram } = require('@solana/web3.js');
 const crypto = require('crypto');
 const path = require('path');
+const { client: satpClient } = require('../adapters/satp');
 
 // SATP v2 Identity Registry — MAINNET (kept for backward compat)
 const SATP_IDENTITY_PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq');
@@ -21,11 +22,12 @@ const SATP_IDENTITY_PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6n
 // V3 SDK for Genesis Record creation
 let SATPV3SDK, hashAgentId, getGenesisPDA;
 try {
-  const idx = require('../../satp-client/src/index');
+  const idx = satpClient.loadSatpClient();
+  satpClient.assertRequiredSatpClientExports(idx);
   SATPV3SDK = idx.SATPV3SDK;
   hashAgentId = idx.hashAgentId;
   getGenesisPDA = idx.getGenesisPDA;
-  console.log('[SATP AutoID] V3 SDK loaded — Genesis Record creation available');
+  console.log('[SATP AutoID] V3 SDK loaded from @brainai/satp-client — Genesis Record creation available');
 } catch (e) {
   console.warn('[SATP AutoID] V3 SDK not available:', e.message);
 }
