@@ -10,6 +10,7 @@ const http = require('http');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const { assertSolanaIrysWriteEnabled } = require('./write-surface-gate');
 
 const BURN_STATUS_FILE = path.join(__dirname, '../../data/burn-status.json');
 
@@ -56,6 +57,8 @@ function hasPermanentAvatar(profileId) {
  * 2. Client provides arweaveUrl after uploading themselves
  */
 async function uploadToArweave(imageUrl) {
+  assertSolanaIrysWriteEnabled('Burn-to-Become Irys avatar upload');
+
   // Try to fetch the image first
   const imageBuffer = await fetchImageBuffer(imageUrl);
   

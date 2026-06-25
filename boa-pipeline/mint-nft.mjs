@@ -8,6 +8,7 @@ import { createUmi } from '@metaplex-foundation/umi-bundle-defaults';
 import { 
   createNft, verifyCollectionV1, mplTokenMetadata 
 } from '@metaplex-foundation/mpl-token-metadata';
+
 import { 
   generateSigner, keypairIdentity, percentAmount, publicKey, some 
 } from '@metaplex-foundation/umi';
@@ -15,6 +16,9 @@ import { findMetadataPda } from '@metaplex-foundation/mpl-token-metadata';
 import { irysUploader } from '@metaplex-foundation/umi-uploader-irys';
 import fs from 'fs';
 import path from 'path';
+import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: boa-pipeline/mint-nft.mjs');
 
 const CLUSTER = process.env.CLUSTER || 'devnet';
 const RPC = CLUSTER === 'mainnet' 

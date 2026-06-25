@@ -11,6 +11,9 @@ const { Connection, Keypair } = require('@solana/web3.js');
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
+const { assertSolanaIrysWriteEnabled } = require('../../src/lib/write-surface-gate');
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: scripts/one-off/backfill-v3-verifications.js');
 
 // Config
 const DEPLOYER_KEY_PATH = '/home/ubuntu/.config/solana/mainnet-deployer.json';

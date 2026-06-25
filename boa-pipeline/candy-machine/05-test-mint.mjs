@@ -4,6 +4,9 @@ import { mplCandyMachine, fetchCandyMachine, mintV2 } from '@metaplex-foundation
 import { generateSigner, keypairIdentity, publicKey, transactionBuilder, none } from '@metaplex-foundation/umi';
 import { setComputeUnitLimit } from '@metaplex-foundation/mpl-toolbox';
 import fs from 'fs';
+import { assertSolanaIrysWriteEnabled } from '../../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: boa-pipeline/candy-machine/05-test-mint.mjs');
 
 const RPC = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
 const DEPLOYER_PATH = process.env.HOME + '/.config/solana/mainnet-deployer.json';

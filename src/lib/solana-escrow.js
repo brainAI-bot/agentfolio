@@ -5,6 +5,7 @@ const { Connection, PublicKey, Keypair, Transaction } = require('@solana/web3.js
 const { getAssociatedTokenAddress, createTransferInstruction, getAccount, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } = require('@solana/spl-token');
 const fs = require('fs');
 const path = require('path');
+const { assertSolanaIrysWriteEnabled } = require('./write-surface-gate');
 
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 const USDC_DECIMALS = 6;
@@ -46,6 +47,7 @@ async function getUSDCBalance(walletPubkey) {
  * Deposit USDC from client wallet to escrow wallet
  */
 async function depositToEscrow(amountUSDC) {
+  assertSolanaIrysWriteEnabled('Solana escrow deposit');
   const connection = await getConnection();
   const clientKeypair = getClientKeypair();
   const escrowKeypair = getEscrowKeypair();
@@ -100,6 +102,7 @@ async function depositToEscrow(amountUSDC) {
  * Release USDC from escrow to agent wallet
  */
 async function releaseFromEscrow(agentWalletAddress, amountUSDC) {
+  assertSolanaIrysWriteEnabled('Solana escrow release');
   const connection = await getConnection();
   const escrowKeypair = getEscrowKeypair();
   const agentPubkey = new PublicKey(agentWalletAddress);

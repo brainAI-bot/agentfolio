@@ -12,6 +12,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
+const { assertSolanaIrysWriteEnabled } = require('./write-surface-gate');
 
 const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 const KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/brainforge-personal.json';
@@ -71,6 +72,7 @@ function getAttestationsDb() {
  */
 async function postVerificationMemo(agentId, platform, proofData = {}) {
   try {
+    assertSolanaIrysWriteEnabled('verification memo attestation');
     const keypair = getKeypair();
     const connection = getConnection();
 

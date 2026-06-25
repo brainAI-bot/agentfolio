@@ -10,6 +10,7 @@ import {
   fetchCandyMachine,
   mintV1,
 } from '@metaplex-foundation/mpl-core-candy-machine';
+
 import { createCollectionV1 } from '@metaplex-foundation/mpl-core';
 import { setComputeUnitLimit } from '@metaplex-foundation/mpl-toolbox';
 import {
@@ -20,6 +21,9 @@ import {
 } from '@metaplex-foundation/umi';
 import fs from 'fs';
 import path from 'path';
+import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: core-cm-v2/mainnet-deploy.mjs');
 
 const MAX_SUPPLY = parseInt(process.argv[2]) || 100;
 const RPC = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';

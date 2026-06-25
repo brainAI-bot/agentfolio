@@ -6,12 +6,16 @@ import { createUmi } from '@metaplex-foundation/umi-bundle-defaults';
 import { 
   createNft, verifyCollectionV1, findMetadataPda, mplTokenMetadata 
 } from '@metaplex-foundation/mpl-token-metadata';
+
 import { 
   generateSigner, keypairIdentity, percentAmount, publicKey, some 
 } from '@metaplex-foundation/umi';
 import { irysUploader } from '@metaplex-foundation/umi-uploader-irys';
 import fs from 'fs';
 import path from 'path';
+import { assertSolanaIrysWriteEnabled } from '../../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: scripts/tests/test-boa-mint.mjs');
 
 const TREASURY = 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
 const COLLECTION_MINT = 'xNQmPj1Tcx3PyNNN1RLPeNkaMsZMRthAgWZ7Tbn6RHY';

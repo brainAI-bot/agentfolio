@@ -37,6 +37,7 @@ function DemoWalletInner({ children }: { children: ReactNode }) {
     select: () => {},
     connect: async () => {},
     disconnect: async () => {},
+    // write-surface-gate excluded: demo wallet returns synthetic signatures only.
     sendTransaction: async () => "DEMO_TX_" + Date.now().toString(36),
     signTransaction: async (tx: Transaction) => tx,
     signAllTransactions: async (txs: Transaction[]) => txs,

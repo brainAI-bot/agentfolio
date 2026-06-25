@@ -10,6 +10,9 @@ const Database = require("better-sqlite3");
 const path = require("path");
 const { Keypair } = require('@solana/web3.js');
 const fs = require('fs');
+const { assertSolanaIrysWriteEnabled } = require('../src/lib/write-surface-gate');
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: scripts/backfill-satp-scores.js');
 // Initialize SATP v3 client (same as in profile-store.js)
 let satpV3;
 try {

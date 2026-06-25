@@ -179,11 +179,25 @@
 </div>
 
 <script>
-  let wallet = null;
-  let selectedNft = null;
-  let walletAdapter = null;
-  
-  function setStatus(msg) { document.getElementById('status').textContent = msg; }
+	  let wallet = null;
+	  let selectedNft = null;
+	  let walletAdapter = null;
+	  const SOLANA_IRYS_WRITE_READ_ONLY_CODE = 'SOLANA_IRYS_WRITES_READ_ONLY';
+
+	  function isSolanaIrysWriteEnabled() {
+	    return /^(1|true|yes|on)$/i.test(String(window.NEXT_PUBLIC_AGENTFOLIO_ENABLE_SOLANA_IRYS_WRITES || window.AGENTFOLIO_ENABLE_SOLANA_IRYS_WRITES || '').trim());
+	  }
+
+	  function assertFrontendSolanaIrysWriteEnabled(operation) {
+	    if (!isSolanaIrysWriteEnabled()) {
+	      const err = new Error('Solana/Irys writes are disabled in this environment.');
+	      err.code = SOLANA_IRYS_WRITE_READ_ONLY_CODE;
+	      err.operation = operation || 'legacy frontend burn-to-become';
+	      throw err;
+	    }
+	  }
+
+	  function setStatus(msg) { document.getElementById('status').textContent = msg; }
   function setStep(n) {
     for (let i = 1; i <= 4; i++) {
       const el = document.getElementById('step' + i);
@@ -277,14 +291,15 @@
     document.getElementById('burnBtn').disabled = !document.getElementById('confirmCheck').checked;
   }
   
-  async function executeBurn() {
-    if (!selectedNft || !wallet) return;
+	  async function executeBurn() {
+	    if (!selectedNft || !wallet) return;
     
     document.getElementById('burnSection').classList.add('hidden');
     document.getElementById('progressSection').classList.remove('hidden');
     
-    try {
-      // Step 1: Call backend to prepare burn + soulbound transaction
+	    try {
+	      assertFrontendSolanaIrysWriteEnabled('legacy static mint burn-to-become');
+	      // Step 1: Call backend to prepare burn + soulbound transaction
       updateProgress('prog-burn', 'active');
       setStatus('Preparing burn transaction...');
       

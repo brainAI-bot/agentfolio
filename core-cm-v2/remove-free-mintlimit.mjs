@@ -18,8 +18,12 @@ import {
   fetchCandyGuard,
   updateCandyGuard,
 } from '@metaplex-foundation/mpl-core-candy-machine';
+
 import { publicKey, keypairIdentity, some, none, sol } from '@metaplex-foundation/umi';
 import fs from 'fs';
+import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: core-cm-v2/remove-free-mintlimit.mjs');
 
 const RPC = 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
 const CM_ADDRESS = 'BVso8ZjrV2G16eKZnVVhrfk8hPBgD7wgLKyxVbu489Gz';

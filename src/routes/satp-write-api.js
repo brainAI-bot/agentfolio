@@ -5,6 +5,7 @@
 
 const satpWrite = require('../satp-write-client');
 const path = require('path');
+const { sendSolanaIrysWriteGateResponse } = require('../lib/write-surface-gate');
 
 // Platform keypair for server-signed operations
 const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || 
@@ -20,6 +21,7 @@ function registerSATPWriteRoutes(app) {
    */
   app.post('/api/satp/register', async (req, res) => {
     try {
+      if (sendSolanaIrysWriteGateResponse(res, 'SATP identity registration')) return;
       const { name, description, category, capabilities, metadataUri } = req.body;
       
       if (!name || !description || !category) {
@@ -78,6 +80,7 @@ function registerSATPWriteRoutes(app) {
    */
   app.post('/api/satp/register/build', async (req, res) => {
     try {
+      if (sendSolanaIrysWriteGateResponse(res, 'SATP identity registration transaction build')) return;
       const { walletAddress, name, description, category, capabilities, metadataUri } = req.body;
       
       if (!walletAddress || !name || !description || !category) {
@@ -106,6 +109,7 @@ function registerSATPWriteRoutes(app) {
    */
   app.post('/api/satp/reputation/submit', async (req, res) => {
     try {
+      if (sendSolanaIrysWriteGateResponse(res, 'SATP reputation recompute')) return;
       const { agentWallet } = req.body;
       
       if (!agentWallet) {

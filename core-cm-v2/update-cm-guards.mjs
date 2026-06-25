@@ -14,8 +14,12 @@ import {
   fetchCandyGuard,
   updateCandyGuard,
 } from '@metaplex-foundation/mpl-core-candy-machine';
+
 import { publicKey, keypairIdentity, some, none, sol } from '@metaplex-foundation/umi';
 import fs from 'fs';
+import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: core-cm-v2/update-cm-guards.mjs');
 
 const isDevnet = process.argv.includes('--devnet');
 const RPC = isDevnet 

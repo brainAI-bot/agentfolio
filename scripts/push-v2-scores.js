@@ -10,6 +10,9 @@ const { Keypair } = require('@solana/web3.js');
 
 const { createSATPClient, agentIdHash } = require('@brainai/satp-client');
 const scoringV2 = require('../src/lib/scoring-engine-v2');
+const { assertSolanaIrysWriteEnabled } = require('../src/lib/write-surface-gate');
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: scripts/push-v2-scores.js');
 
 const satpClient = createSATPClient({
   network: process.env.SATP_NETWORK || 'mainnet',

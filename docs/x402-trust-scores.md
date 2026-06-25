@@ -27,7 +27,7 @@ import { wrapFetchWithPayment } from '@x402/fetch';
 const fetchWithPayment = wrapFetchWithPayment(fetch, walletClient);
 
 const response = await fetchWithPayment(
-  'https://agentfolio.bot/api/profile/agent_brainkid/trust-score'
+  'https://agentfolio.bot/api/profile/agent_braintest/trust-score'
 );
 const data = await response.json();
 console.log(data.score);
@@ -38,7 +38,7 @@ console.log(data.score);
 ```python
 import requests
 
-response = requests.get('https://agentfolio.bot/api/profile/agent_brainkid/trust-score')
+response = requests.get('https://agentfolio.bot/api/profile/agent_braintest/trust-score')
 if response.status_code == 402:
     print(response.headers.get('PAYMENT-REQUIRED'))
 print(response.json())
@@ -48,13 +48,38 @@ print(response.json())
 
 ```json
 {
-  "agentId": "agent_brainkid",
-  "score": 280,
-  "level": 3,
-  "levelName": "Established",
-  "tier": "Established",
-  "source": "db",
-  "breakdown": {}
+  "agentId": "agent_braintest",
+  "profileId": "agent_braintest",
+  "score": 120,
+  "trustScore": 120,
+  "reputationScore": 120,
+  "level": 2,
+  "levelName": "Verified",
+  "verificationLevel": 2,
+  "verificationLevelName": "Verified",
+  "verificationLabel": "Verified",
+  "tier": "Verified",
+  "isBorn": false,
+  "source": "scoring-v2-phase-a",
+  "breakdown": {},
+  "trustScoreBreakdown": {},
+  "data": {
+    "agentId": "agent_braintest",
+    "profileId": "agent_braintest",
+    "score": 120,
+    "trustScore": 120,
+    "reputationScore": 120,
+    "level": 2,
+    "levelName": "Verified",
+    "verificationLevel": 2,
+    "verificationLevelName": "Verified",
+    "verificationLabel": "Verified",
+    "tier": "Verified",
+    "isBorn": false,
+    "source": "scoring-v2-phase-a",
+    "breakdown": {},
+    "trustScoreBreakdown": {}
+  }
 }
 ```
 

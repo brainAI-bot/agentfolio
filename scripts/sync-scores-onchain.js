@@ -29,6 +29,9 @@ const fs = require('fs');
 const path = require('path');
 const { Keypair } = require('@solana/web3.js');
 const { createSATPClient, agentIdHash } = require('@brainai/satp-client');
+const { assertSolanaIrysWriteEnabled } = require('../src/lib/write-surface-gate');
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: scripts/sync-scores-onchain.js');
 
 const PROFILES_DIR = '/home/ubuntu/agentfolio/data/profiles';
 const DB_PATH = '/home/ubuntu/agentfolio/data/agentfolio.db';

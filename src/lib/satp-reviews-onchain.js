@@ -4,6 +4,7 @@
  */
 const crypto = require('crypto');
 const { Connection, Keypair, PublicKey, Transaction, TransactionInstruction, SystemProgram, sendAndConfirmTransaction } = require('@solana/web3.js');
+const { assertSolanaIrysWriteEnabled } = require('./write-surface-gate');
 
 const RPC_URL = process.env.RPC_URL || 'https://api.mainnet-beta.solana.com';
 const WALLET_PATH = process.env.REVIEWS_WALLET_PATH || '/home/ubuntu/.config/solana/devnet-deployer.json';
@@ -46,6 +47,7 @@ function getReviewPDA(escrowPubkey, reviewerIdentityPDA) {
 }
 
 async function submitOnChain(reviewerWallet, escrowPubkey, reviewedWallet, rating, comment) {
+  assertSolanaIrysWriteEnabled('SATP on-chain review submission');
   init();
   if (!signer) return { success: false, error: 'No signer wallet configured' };
 

@@ -18,6 +18,7 @@ import {
   fetchCandyMachine,
   mintV1,
 } from '@metaplex-foundation/mpl-core-candy-machine';
+
 import { setComputeUnitLimit, setComputeUnitPrice } from '@metaplex-foundation/mpl-toolbox';
 import {
   generateSigner,
@@ -26,10 +27,14 @@ import {
   transactionBuilder,
   createNoopSigner,
   some,
+} from '@metaplex-foundation/umi';
 import { toWeb3JsTransaction } from '@metaplex-foundation/umi-web3js-adapters';
 import { Keypair, VersionedTransaction } from '@solana/web3.js';
 import fs from 'fs';
 import path from 'path';
+import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: core-cm-v2/core-cm-prepare-worker.mjs');
 
 const recipient = process.argv[2];
 const flow = process.argv[3] || 'paid';

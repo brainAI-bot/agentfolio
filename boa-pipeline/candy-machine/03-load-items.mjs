@@ -10,9 +10,13 @@ import {
   addConfigLines,
   fetchCandyMachine,
 } from '@metaplex-foundation/mpl-candy-machine';
+
 import { keypairIdentity, publicKey } from '@metaplex-foundation/umi';
 import fs from 'fs';
 import path from 'path';
+import { assertSolanaIrysWriteEnabled } from '../../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: boa-pipeline/candy-machine/03-load-items.mjs');
 
 const BATCH_SIZE = 10; // Items per TX (Candy Machine limit is ~10-14 per TX)
 

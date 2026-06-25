@@ -10,6 +10,7 @@ import {
   findCandyGuardPda,
   mintV1,
 } from '@metaplex-foundation/mpl-core-candy-machine';
+
 import {
   generateSigner,
   keypairIdentity,
@@ -20,6 +21,9 @@ import {
 } from '@metaplex-foundation/umi';
 import { setComputeUnitLimit } from '@metaplex-foundation/mpl-toolbox';
 import fs from 'fs';
+import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs';
+
+assertSolanaIrysWriteEnabled('Solana/Irys script write surface: core-cm-v2/debug-cm-guards.mjs');
 
 const RPC = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
 const DEPLOYER_PATH = process.env.HOME + '/.config/solana/mainnet-deployer.json';
