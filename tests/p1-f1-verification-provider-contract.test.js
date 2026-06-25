@@ -47,7 +47,8 @@ describe('P1-F1 verification provider contract', () => {
     assert.match(handler, /const result = await ethVerify\.verifySignature\(challengeId, signature\)/);
     assert.match(handler, /if \(result\?\.verified\)/);
     assert.match(handler, /profileStore\.addVerification\(result\.profileId, 'ethereum', result\.walletAddress/);
-    assert.match(source, /app\.post\('\/api\/verify\/eth\/verify', handleEthVerificationVerify\)/);
+    assert.match(source, /const ethVerificationLimiter = rateLimit\(/);
+    assert.match(source, /app\.post\('\/api\/verify\/eth\/verify', ethVerificationLimiter, handleEthVerificationVerify\)/);
     assert.match(ethSource, /recoverSignedAddress\(challenge\.message, signature\)/);
     assert.match(ethSource, /recoveredAddress\.toLowerCase\(\) !== walletAddress\.toLowerCase\(\)/);
     assert.doesNotMatch(ethSource, /For MVP: accept the signature/);

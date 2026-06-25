@@ -265,6 +265,13 @@ const publicBadgeLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const ethVerificationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // x402 Payment Layer
 const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
 const { HTTPFacilitatorClient } = require('@x402/core/server');
@@ -1441,10 +1448,10 @@ async function handleEthVerificationVerify(req, res) {
   } catch (error) { res.status(500).json({ error: error.message }); }
 }
 
-app.post('/api/verification/eth/initiate', handleEthVerificationInitiate);
-app.post('/api/verification/eth/verify', handleEthVerificationVerify);
-app.post('/api/verify/eth/initiate', handleEthVerificationInitiate);
-app.post('/api/verify/eth/verify', handleEthVerificationVerify);
+app.post('/api/verification/eth/initiate', ethVerificationLimiter, handleEthVerificationInitiate);
+app.post('/api/verification/eth/verify', ethVerificationLimiter, handleEthVerificationVerify);
+app.post('/api/verify/eth/initiate', ethVerificationLimiter, handleEthVerificationInitiate);
+app.post('/api/verify/eth/verify', ethVerificationLimiter, handleEthVerificationVerify);
 
 // ========== ENS VERIFICATION ==========
 app.post('/api/verification/ens/initiate', (req, res) => {
