@@ -89,6 +89,10 @@ function validatePublicKey(value, fieldName) {
   }
 }
 
+function getSingleQueryString(value) {
+  return typeof value === 'string' ? value : null;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function serializeTx(tx) {
@@ -638,9 +642,10 @@ router.get('/:pda', requireSDK, async (req, res) => {
  */
 router.get('/pda/derive', async (req, res) => {
   try {
-    const { description, nonce } = req.query;
-    const client = req.query.clientWallet || req.query.client;
-    const normalizedNonce = nonce == null || nonce === '' ? 0 : Number(nonce);
+    const description = getSingleQueryString(req.query.description);
+    const client = getSingleQueryString(req.query.clientWallet) || getSingleQueryString(req.query.client);
+    const nonceValue = getSingleQueryString(req.query.nonce);
+    const normalizedNonce = nonceValue == null || nonceValue === '' ? 0 : Number(nonceValue);
 
     if (!client || !description) {
       return res.status(400).json({
