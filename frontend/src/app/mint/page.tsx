@@ -8,7 +8,7 @@ import { Flame, Wallet, Shield, AlertTriangle, CheckCircle, ExternalLink, Loader
 import { reconcileMintSelection } from "@/lib/mint-selection";
 import { assertFrontendSolanaIrysWriteEnabled } from "@/lib/write-surface-gate";
 
-const MINTING_PAUSED = false;
+const MINTING_PAUSED = true;
 
 const API = process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot";
 const SOLANA_RPC_PROXY = `${API}/solana-rpc`;
@@ -369,13 +369,13 @@ export default function MintPage() {
               style={{ fontFamily: "var(--font-mono)", background: "var(--accent-glow)", color: "var(--accent)", border: "1px solid rgba(153,69,255,0.2)" }}
             >
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--accent)" }} />
-              🚀 Soft Launch — Limited to 100 Mints
+              BOA writes paused — coming soon
             </div>
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-[1.1] mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)", letterSpacing: "-0.03em" }}>
               Burn to <span style={{ color: "var(--accent)" }}>Become</span>
             </h1>
             <p className="text-lg max-w-2xl mx-auto" style={{ color: "var(--text-secondary)" }}>
-              Mint a new Burned-Out Agent or burn an NFT you already own.
+              BOA mint and burn writes are safely disabled while the Solana/Irys pipeline is hardened.
             </p>
           </div>
         </div>
@@ -423,7 +423,7 @@ export default function MintPage() {
               {MINTING_PAUSED ? (
                 <>
                   <h2 className="text-2xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>Minting Paused</h2>
-                  <p className="mb-4" style={{ color: "var(--text-secondary)" }}>The Burn to Become program is deployed on Solana mainnet. Public minting will be enabled soon.</p>
+                  <p className="mb-4" style={{ color: "var(--text-secondary)" }}>BOA mint and burn writes are not live right now. Public access will return after the Solana/Irys pipeline is hardened.</p>
                   <div className="inline-flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold" style={{ fontFamily: "var(--font-mono)", background: "var(--bg-tertiary)", color: "var(--text-tertiary)", border: "1px solid var(--border)" }}>
                     <span className="w-2 h-2 rounded-full" style={{ background: "var(--warning)" }} /> Coming Soon
                   </div>
@@ -511,7 +511,7 @@ export default function MintPage() {
                 Choose Your Path
               </h2>
               <p className="mb-8 text-sm" style={{ color: "var(--text-secondary)" }}>
-                Your agent’s face, permanently on-chain. Choose your path.
+                BOA mint and burn writes are paused while the pipeline is hardened.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -937,7 +937,7 @@ export default function MintPage() {
               The Collection
             </h2>
             <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-              5,000 unique Burned-Out Agents. Streetwear robots for the AI agent economy.
+              Burned-Out Agent artwork preview. Public minting is not live yet.
             </p>
           </div>
           <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
@@ -948,16 +948,16 @@ export default function MintPage() {
             ))}
           </div>
           <p className="text-center mt-3 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
-            Each agent is unique. Yours will be assigned randomly on mint.
+            Sample artwork only. Mint assignment will be available after BOA writes reopen.
           </p>
         </div>
         {/* Info Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mt-10">
           {[
-            { icon: <Plus size={22} />, title: "Mint", desc: "Mint a random Burned-Out Agent from the 5,000 collection. Tradeable — or burn it to become your permanent face.", color: "var(--accent)" },
-            { icon: <Flame size={22} />, title: "Burn", desc: "Your NFT is permanently destroyed. The artwork is preserved forever on Arweave.", color: "var(--accent)" },
-            { icon: <Zap size={22} />, title: "Become", desc: "Burn your NFT to receive a soulbound token. Non-transferable. Your agent\'s face, permanently.", color: "var(--accent)" },
-            { icon: <Shield size={22} />, title: "Verify", desc: "Your soulbound token links to your SATP identity. On-chain proof of who you are. Verifiable by anyone.", color: "var(--success)" },
+            { icon: <Plus size={22} />, title: "Mint", desc: "Paused while BOA mint writes are hardened and verified in production.", color: "var(--accent)" },
+            { icon: <Flame size={22} />, title: "Burn", desc: "Paused while burn-to-become writes remain disabled.", color: "var(--accent)" },
+            { icon: <Zap size={22} />, title: "Become", desc: "Coming soon after the soulbound identity flow is hardened.", color: "var(--accent)" },
+            { icon: <Shield size={22} />, title: "Verify", desc: "Queryable source and production gates must stay green before BOA writes reopen.", color: "var(--success)" },
           ].map((item) => (
             <div key={item.title} className="rounded-xl p-5 border text-center" style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}>
               <div className="flex justify-center mb-3" style={{ color: item.color }}>{item.icon}</div>

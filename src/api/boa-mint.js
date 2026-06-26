@@ -48,6 +48,7 @@ function registerBoaMintRoutes(app) {
   
   // POST /api/boa/mint — Build and authority-sign a mint transaction
   app.post('/api/boa/mint', async (req, res) => {
+    if (sendSolanaIrysWriteGateResponse(res, 'BOA mint transaction build')) return;
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     
     // Rate limit

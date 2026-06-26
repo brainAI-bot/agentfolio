@@ -1653,6 +1653,7 @@ function handleBurnToBecome(req, res, url) {
 
   // POST /api/burn-to-become/prepare-mint — build unsigned TX for client-side signing
   if (url.pathname === "/api/burn-to-become/prepare-mint" && req.method === "POST") {
+    if (sendSolanaIrysWriteGateResponse(res, 'BOA client mint transaction build')) return true;
     const wallet = req.body && req.body.wallet;
     const flow = req.body && req.body.flow;
     if (!wallet) return sendJson(400, { error: "wallet required" });
@@ -1707,6 +1708,7 @@ function handleBurnToBecome(req, res, url) {
   
   // POST /api/burn-to-become/mint-boa — Metaplex pipeline mint (server-side)
   if (url.pathname === "/api/burn-to-become/mint-boa" && req.method === "POST") {
+    if (sendSolanaIrysWriteGateResponse(res, 'BOA Metaplex mint')) return true;
     const wallet = req.body && req.body.wallet;
     const paymentTx = req.body && req.body.paymentTx; // SOL payment TX for paid mints
     if (!wallet) return sendJson(400, { error: "wallet required" });
@@ -2003,6 +2005,7 @@ try {
 
   // POST /api/burn-to-become/confirm-mint — record a client-signed mint after TX confirms
   if (url.pathname === '/api/burn-to-become/confirm-mint' && req.method === 'POST') {
+    if (sendSolanaIrysWriteGateResponse(res, 'BOA mint confirmation')) return true;
     const { wallet, signature, asset, boaId, flow } = req.body || {};
     if (!wallet || !signature) return sendJson(400, { error: 'wallet and signature required' });
     
