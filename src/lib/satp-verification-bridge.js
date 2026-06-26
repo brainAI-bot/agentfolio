@@ -13,7 +13,7 @@
 const { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction, ComputeBudgetProgram } = require('@solana/web3.js');
 const crypto = require('crypto');
 const fs = require('fs');
-const { getV3AttestationPDA, getGenesisPDA: getCanonicalGenesisPDA, getV3ValidationAuthorityPDA, getV3ProgramIds } = require('../satp-client/src/v3-pda');
+const { getV3AttestationPDA, getGenesisPDA: getCanonicalGenesisPDA, getV3ValidationAuthorityPDA, getV3ProgramIds } = require('@brainai/satp-client');
 const { assertSolanaIrysWriteEnabled } = require('./write-surface-gate');
 
 // V3 Program IDs (mainnet)

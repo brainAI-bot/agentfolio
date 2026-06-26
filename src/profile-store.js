@@ -32,7 +32,7 @@ try {
 // SATP V3 SDK — Genesis Record creation + V3 identity reads
 let satpV3;
 try {
-  const { createSATPClient, SATPV3SDK, hashAgentId, getGenesisPDA } = require('./satp-client/src');
+  const { createSATPClient, SATPV3SDK, hashAgentId, getGenesisPDA } = require('@brainai/satp-client');
   const v3Client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb' });
   satpV3 = { client: v3Client, SATPV3SDK, hashAgentId, getGenesisPDA };
   console.log('[SATP V3] SDK loaded successfully (SATPV3SDK + createSATPClient + PDA helpers)');
