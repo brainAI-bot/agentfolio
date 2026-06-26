@@ -26,20 +26,13 @@ let SATPV3SDK;
 let sdkInstance = null;
 
 try {
-  const mod = require('../../satp-client/src/index');
+  const mod = require('@brainai/satp-client');
   SATPV3SDK = mod.SATPV3SDK;
-  if (!SATPV3SDK) throw new Error('SATPV3SDK not exported');
-  console.log('[Rep/Val V3 Routes] V3 SDK loaded (SATPV3SDK)');
-} catch (e1) {
-  try {
-    const mod = require('satp-client');
-    SATPV3SDK = mod.SATPV3SDK;
-    if (!SATPV3SDK) throw new Error('SATPV3SDK not exported from satp-client');
-    console.log('[Rep/Val V3 Routes] V3 SDK loaded from npm (SATPV3SDK)');
-  } catch (e2) {
-    console.warn('[Rep/Val V3 Routes] SATP V3 SDK not found. Endpoints disabled.');
-    console.warn('  Tried: ../../satp-client/src/index, satp-client');
-  }
+  if (!SATPV3SDK) throw new Error('SATPV3SDK not exported from @brainai/satp-client');
+  console.log('[Rep/Val V3 Routes] V3 SDK loaded from @brainai/satp-client (SATPV3SDK)');
+} catch (e) {
+  console.warn('[Rep/Val V3 Routes] SATP V3 SDK not found. Endpoints disabled.');
+  console.warn(`  @brainai/satp-client boundary error: ${e.message}`);
 }
 
 const NETWORK = process.env.SATP_NETWORK || process.env.SOLANA_NETWORK || 'mainnet';
@@ -57,7 +50,7 @@ function requireSDK(req, res, next) {
   if (!sdk) {
     return res.status(503).json({
       error: 'SATP V3 SDK not available',
-      hint: 'satp-client package or source not found on this server',
+      hint: '@brainai/satp-client package or SATPV3SDK export not found on this server',
     });
   }
   req.sdk = sdk;

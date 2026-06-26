@@ -20,10 +20,13 @@ const { Router } = require('express');
 const { PublicKey } = require('@solana/web3.js');
 const crypto = require('crypto');
 
-// Import SATP SDK (adjust path for prod deployment)
+// Import SATP SDK from the pinned package boundary.
 let SATPSDK;
+let getEscrowPDA;
 try {
-  SATPSDK = require('../../satp-client/src/index').SATPSDK || require('../../satp-client/src/index');
+  const satpClient = require('@brainai/satp-client');
+  SATPSDK = satpClient.SATPSDK || satpClient;
+  getEscrowPDA = satpClient.getEscrowPDA;
 } catch (e) {
   console.warn('[Escrow Routes] SATP SDK not found, escrow endpoints disabled:', e.message);
 }
@@ -367,7 +370,6 @@ router.get('/pda/derive', requireSDK, async (req, res) => {
     }
 
     const descHash = crypto.createHash('sha256').update(description).digest();
-    const { getEscrowPDA } = require('../../satp-client/src/pda');
     const [escrowPDA] = getEscrowPDA(clientKey, descHash, NETWORK);
 
     res.json({

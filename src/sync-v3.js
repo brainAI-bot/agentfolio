@@ -1,4 +1,4 @@
-const { createSATPClient, SATPV3SDK } = require("./satp-client/src/index.js");
+const { createSATPClient, SATPV3SDK } = require("@brainai/satp-client");
 const { Keypair, Connection } = require("@solana/web3.js");
 const fs = require("fs");
 const { assertSolanaIrysWriteEnabled } = require("./lib/write-surface-gate");

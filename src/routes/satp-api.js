@@ -6,13 +6,13 @@
 
 const satpIdentity = require('../satp-identity-client');
 const satpReviewsOnchain = require('../satp-reviews-onchain');
-const { getGenesisPDA } = require('../satp-client/src/v3-pda');
+const { getGenesisPDA } = require('@brainai/satp-client');
 
 // V3 SDK (using SATPV3SDK directly for all V3 operations)
 let satpV3Client;
 let SATPV3SDK_Class;
 try {
-  const { createSATPClient, SATPV3SDK } = require('../satp-client/src');
+  const { createSATPClient, SATPV3SDK } = require('@brainai/satp-client');
   SATPV3SDK_Class = SATPV3SDK;
   satpV3Client = createSATPClient({
     network: process.env.SATP_NETWORK_EFFECTIVE || 'devnet',

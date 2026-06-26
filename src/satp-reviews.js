@@ -21,7 +21,7 @@ const PROGRAM_IDS = {
 // V3 Program IDs
 let V3_PROGRAM_IDS;
 try {
-  const { getV3ProgramIds } = require('./satp-client/src/v3-pda');
+  const { getV3ProgramIds } = require('@brainai/satp-client');
   V3_PROGRAM_IDS = getV3ProgramIds('mainnet');
   console.log('[SATP Reviews] V3 program IDs loaded');
 } catch (e) {
