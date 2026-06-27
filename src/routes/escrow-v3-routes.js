@@ -89,6 +89,10 @@ function validatePublicKey(value, fieldName) {
   }
 }
 
+function getSingleQueryString(value) {
+  return typeof value === 'string' ? value : undefined;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function serializeTx(tx) {
@@ -100,6 +104,9 @@ function hashIfNeeded(input) {
   if (Buffer.isBuffer(input) && input.length === 32) return input;
   if (typeof input === 'string' && /^[0-9a-f]{64}$/i.test(input)) {
     return Buffer.from(input, 'hex');
+  }
+  if (typeof input !== 'string' && !Buffer.isBuffer(input)) {
+    throw new TypeError('description must be a string or 32-byte Buffer');
   }
   return crypto.createHash('sha256')
     .update(typeof input === 'string' ? input : Buffer.from(input))
@@ -639,8 +646,9 @@ router.get('/:pda', requireSDK, async (req, res) => {
  */
 router.get('/pda/derive', async (req, res) => {
   try {
-    const { description, nonce } = req.query;
-    const client = req.query.clientWallet || req.query.client;
+    const description = getSingleQueryString(req.query.description);
+    const nonce = getSingleQueryString(req.query.nonce);
+    const client = getSingleQueryString(req.query.clientWallet) || getSingleQueryString(req.query.client);
     const normalizedNonce = nonce == null || nonce === '' ? 0 : Number(nonce);
 
     if (!client || !description) {
