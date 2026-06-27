@@ -31,6 +31,12 @@ Metered x402 endpoint. Returns the profile's current SATP trust score, level, ti
 ### GET /api/score?id=:id
 Metered x402 endpoint. Computes the same trust-score surface with payment metadata when x402 middleware is enabled.
 
+### GET /api/v3/reputation/:agentId
+Returns the SATP V3 on-chain reputation score plus `evidence` links for the SATP explorer, Genesis resolver, trust credential, and Solana PDA/authority addresses when available.
+
+### GET /api/v3/validation/:agentId
+Returns the SATP V3 validation level plus the same `evidence` link surface as the reputation endpoint.
+
 ---
 
 ## Verification Challenge Flows
