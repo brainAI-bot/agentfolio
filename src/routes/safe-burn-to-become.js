@@ -41,7 +41,7 @@ function getDeployerPubkey() {
 async function safeBurnToBecome(agentId, faceImageUri, soulboundMint, burnTx) {
   try {
     assertSolanaIrysWriteEnabled('SATP safe burn-to-become');
-    const { createSATPClient, getGenesisPDA } = require('../satp-client/src');
+    const { createSATPClient, getGenesisPDA } = require('@brainai/satp-client');
     const client = createSATPClient({ rpcUrl: RPC_URL });
     
     // Read genesis record to check authority

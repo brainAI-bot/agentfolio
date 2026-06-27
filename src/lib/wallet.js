@@ -106,7 +106,7 @@ function formatWalletAddress(address, chars = 4) {
  */
 async function checkOnChainIdentity(walletAddress) {
   try {
-    const { SATPSDK } = require('../../satp-client/src');
+    const { SATPSDK } = require('@brainai/satp-client');
     const sdk = new SATPSDK({ rpcUrl: RPC_ENDPOINT });
     
     const identity = await sdk.getIdentity(walletAddress);

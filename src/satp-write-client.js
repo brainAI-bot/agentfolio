@@ -13,7 +13,7 @@ const { assertSolanaIrysWriteEnabled } = require('./lib/write-surface-gate');
 // V3 SDK for Genesis Record operations
 let SATPV3SDK, createSATPClient, hashAgentId, getGenesisPDA;
 try {
-  const idx = require('./satp-client/src/index');
+  const idx = require('@brainai/satp-client');
   SATPV3SDK = idx.SATPV3SDK;
   createSATPClient = idx.createSATPClient;
   hashAgentId = idx.hashAgentId;

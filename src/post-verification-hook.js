@@ -24,7 +24,7 @@ function getSATPWriteClient() {
 
 function getV3SDK() {
   if (!v3sdk) {
-    const { SATPV3SDK } = require('./satp-client/src/v3-sdk');
+    const { SATPV3SDK } = require('@brainai/satp-client');
     const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
     v3sdk = new SATPV3SDK({ rpcUrl: RPC_URL });
   }

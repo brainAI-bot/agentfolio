@@ -290,7 +290,8 @@ async function getV3IdentityStatus(agentId) {
     let verificationLevel = null;
     let reputationScore = null;
     try {
-      const { SATPV3SDK } = require('../satp-client/src/v3-sdk');
+      const { client: satpAdapter } = require('../adapters/satp');
+      const { SATPV3SDK } = satpAdapter.loadSatpClient();
       const sdk = new SATPV3SDK({ rpcUrl: RPC_URL });
       const record = await sdk.getGenesisRecord(agentId);
       active = !!(record && !record.error && record.isActive !== false && record.active !== false);
