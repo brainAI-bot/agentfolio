@@ -10,12 +10,7 @@ const borsh = require('borsh');
 // V3 SDK: borsh-reader for Genesis Record deserialization + V3 PDA derivation
 let deserializeGenesisRecord, hashAgentId, getGenesisPDA, getV3ProgramIds;
 try {
-  const borshReader = require('./satp-client/src/borsh-reader');
-  const v3pda = require('./satp-client/src/v3-pda');
-  deserializeGenesisRecord = borshReader.deserializeGenesisRecord;
-  hashAgentId = v3pda.hashAgentId;
-  getGenesisPDA = v3pda.getGenesisPDA;
-  getV3ProgramIds = v3pda.getV3ProgramIds;
+  ({ deserializeGenesisRecord, hashAgentId, getGenesisPDA, getV3ProgramIds } = require('@brainai/satp-client'));
   console.log('[SATP Identity] V3 borsh-reader loaded — Genesis Record deserialization enabled');
 } catch (e) {
   console.warn('[SATP Identity] V3 SDK not available:', e.message);
