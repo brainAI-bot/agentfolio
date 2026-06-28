@@ -148,10 +148,10 @@ export default async function DocsPage() {
     { method: "GET", path: "/api/did/directory", desc: "List AgentFolio DIDs", body: null, returns: "DID directory" },
     { method: "GET", path: "/api/did/method", desc: "AgentFolio DID method metadata", body: null, returns: "DID method metadata" },
     // === Burn-to-Become ===
-    { method: "GET", path: "/api/burn-to-become/eligibility?wallet=X&profileId=Y", desc: "Check BOA mint eligibility", body: null, returns: "Eligibility status" },
-    { method: "POST", path: "/api/burn-to-become/prepare", desc: "Prepare Burn-to-Become TX", body: '{ "wallet", "nftMint" }', returns: "Unsigned transaction" },
+    { method: "GET", path: "/api/burn-to-become/eligibility?wallet=X&profileId=Y", desc: "Check BOA eligibility while writes are paused", body: null, returns: "Eligibility status" },
+    { method: "POST", path: "/api/burn-to-become/prepare", desc: "Burn-to-Become write endpoint paused", body: '{ "wallet", "nftMint" }', returns: "423 read-only gate while Solana/Irys writes are disabled" },
     // === NFT (Headless Agent API) ===
-    { method: "POST", path: "/api/nft/build-mint-tx", desc: "Build unsigned BOA mint TX", body: '{ "wallet", "profileId" }', returns: "transaction (base64)" },
+    { method: "POST", path: "/api/nft/build-mint-tx", desc: "BOA mint write endpoint paused", body: '{ "wallet", "profileId" }', returns: "423 read-only gate while Solana/Irys writes are disabled" },
     { method: "GET", path: "/api/nft/eligibility?wallet=X&profileId=Y", desc: "Check mint eligibility", body: null, returns: "Eligibility status" },
     // === SATP Explorer ===
     { method: "GET", path: "/api/satp/explorer", desc: "Redirect to SATP explorer agents API", body: null, returns: "301 to /api/satp/explorer/agents" },

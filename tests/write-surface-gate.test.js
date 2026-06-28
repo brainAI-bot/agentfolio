@@ -44,16 +44,16 @@ test('runtime Solana/Irys write entry points are wired through the gate', () => 
   const expected = new Map([
     ['src/routes/satp-write-api.js', 'sendSolanaIrysWriteGateResponse'],
     ['src/satp-write-client.js', 'assertSolanaIrysWriteEnabled'],
-    ['src/routes/burn-to-become-public.js', 'sendSolanaIrysWriteGateResponse'],
+    ['src/routes/burn-to-become-public.js', 'sendBoaWriteGateResponse'],
     ['src/routes/burn-to-become-public-birth.js', 'sendSolanaIrysWriteGateResponse'],
     ['src/routes/prepare-birth-endpoint.js', 'assertSolanaIrysWriteEnabled'],
     ['src/routes/satp-boa-linker-v3.js', 'assertSolanaIrysWriteEnabled'],
     ['src/routes/safe-burn-to-become.js', 'assertSolanaIrysWriteEnabled'],
     ['src/routes/reputation-v3-routes.js', 'sendSolanaIrysWriteGateResponse'],
     ['src/profile-store.js', 'write-surface-gate'],
-    ['src/api/boa-mint.js', 'sendSolanaIrysWriteGateResponse'],
-    ['src/api/boa-mint-v2.js', 'sendSolanaIrysWriteGateResponse'],
-    ['src/api/boa-mint-finalize.js', 'sendSolanaIrysWriteGateResponse'],
+    ['src/api/boa-mint.js', 'sendBoaWriteGateResponse'],
+    ['src/api/boa-mint-v2.js', 'sendBoaWriteGateResponse'],
+    ['src/api/boa-mint-finalize.js', 'sendBoaWriteGateResponse'],
     ['src/api/boa-nft-minter.mjs', 'assertSolanaIrysWriteEnabled'],
     ['src/lib/satp-boa-linker.js', 'assertSolanaIrysWriteEnabled'],
     ['src/lib/satp-face-registry.js', 'assertSolanaIrysWriteEnabled'],
@@ -88,7 +88,7 @@ test('runtime Solana/Irys write entry points are wired through the gate', () => 
 test('executable Solana/Irys write surfaces are covered by the read-only gate', () => {
   const roots = ['src', 'frontend', 'scripts', 'boa-pipeline', 'core-cm', 'core-cm-v2'];
   const writePattern = /send(Transaction|RawTransaction)|sendAndConfirm|create(Burn|MintTo|Transfer)Instruction|uploadFolder|uploadJson|\.upload\(|\.fund\(|mintV1|createNft|irysUploader|Irys\(/;
-  const gatePattern = /write-surface-gate|assertSolanaIrysWriteEnabled|sendSolanaIrysWriteGateResponse|assertFrontendSolanaIrysWriteEnabled|AGENTFOLIO_ENABLE_SOLANA_IRYS_WRITES/;
+  const gatePattern = /write-surface-gate|assertSolanaIrysWriteEnabled|sendSolanaIrysWriteGateResponse|sendBoaWriteGateResponse|assertFrontendSolanaIrysWriteEnabled|AGENTFOLIO_ENABLE_SOLANA_IRYS_WRITES/;
   const missing = [];
 
   function walk(dir) {

@@ -23,7 +23,7 @@ const { findProfileIdByWallet } = require('../lib/profile-wallet-lookup');
 const { buildBurnToBecomeForWallet } = require('./prepare-birth-endpoint');
 const { getRateLimitDelay } = require('../lib/rate-limit-retry');
 const { loadNormalizedTrust } = require('../lib/normalized-trust');
-const { sendSolanaIrysWriteGateResponse } = require('../lib/write-surface-gate');
+const { sendBoaWriteGateResponse } = require('../lib/write-surface-gate');
 
 const DEFAULT_SOLANA_RPC_URL = 'https://api.mainnet-beta.solana.com';
 const RPC_URL = process.env.SOLANA_RPC_URL || process.env.SOLANA_RPC || DEFAULT_SOLANA_RPC_URL;
@@ -885,7 +885,7 @@ function handleBurnToBecome(req, res, url) {
   }
 
   if (req.method === 'POST' && url.pathname.startsWith('/api/burn-to-become/')) {
-    return sendSolanaIrysWriteGateResponse(res, 'Burn-to-Become ' + url.pathname);
+    return sendBoaWriteGateResponse(res, 'Burn-to-Become ' + url.pathname);
   }
 
   // GET /api/burn-to-become/collections
@@ -1136,9 +1136,9 @@ function handleBurnToBecome(req, res, url) {
               const nftData = JSON.parse(existing.nft_avatar);
               if (nftData.permanent === true) {
                 checkDb.close();
-                console.log('[BurnPublic] BLOCKED: Agent', profileId, 'already has permanent face');
+                console.log('[BurnPublic] BLOCKED: Agent', profileId, 'already has BOA identity record');
                 return sendJson(403, { 
-                  error: 'This agent already has a permanent soulbound face. Burn to Become is a one-time, irreversible process.',
+                  error: 'This agent already has a BOA identity record. Burn to Become remains unavailable while writes are paused.',
                   existingSoulbound: nftData.soulboundMint,
                   existingImage: nftData.image,
                 });
@@ -1653,7 +1653,7 @@ function handleBurnToBecome(req, res, url) {
 
   // POST /api/burn-to-become/prepare-mint — build unsigned TX for client-side signing
   if (url.pathname === "/api/burn-to-become/prepare-mint" && req.method === "POST") {
-    if (sendSolanaIrysWriteGateResponse(res, 'BOA client mint transaction build')) return true;
+    if (sendBoaWriteGateResponse(res, 'BOA client mint transaction build')) return true;
     const wallet = req.body && req.body.wallet;
     const flow = req.body && req.body.flow;
     if (!wallet) return sendJson(400, { error: "wallet required" });
@@ -1708,7 +1708,7 @@ function handleBurnToBecome(req, res, url) {
   
   // POST /api/burn-to-become/mint-boa — Metaplex pipeline mint (server-side)
   if (url.pathname === "/api/burn-to-become/mint-boa" && req.method === "POST") {
-    if (sendSolanaIrysWriteGateResponse(res, 'BOA Metaplex mint')) return true;
+    if (sendBoaWriteGateResponse(res, 'BOA Metaplex mint')) return true;
     const wallet = req.body && req.body.wallet;
     const paymentTx = req.body && req.body.paymentTx; // SOL payment TX for paid mints
     if (!wallet) return sendJson(400, { error: "wallet required" });
@@ -2005,7 +2005,7 @@ try {
 
   // POST /api/burn-to-become/confirm-mint — record a client-signed mint after TX confirms
   if (url.pathname === '/api/burn-to-become/confirm-mint' && req.method === 'POST') {
-    if (sendSolanaIrysWriteGateResponse(res, 'BOA mint confirmation')) return true;
+    if (sendBoaWriteGateResponse(res, 'BOA mint confirmation')) return true;
     const { wallet, signature, asset, boaId, flow } = req.body || {};
     if (!wallet || !signature) return sendJson(400, { error: 'wallet and signature required' });
     
