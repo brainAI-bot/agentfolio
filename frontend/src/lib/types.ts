@@ -34,6 +34,7 @@ export interface Agent {
   status: "online" | "offline" | "busy" | "unclaimed";
   jobsCompleted: number;
   rating: number;
+  reviewCount: number;
   registeredAt: string;
   createdAt: string;
   activity: Array<{ type: string; createdAt: string }>;

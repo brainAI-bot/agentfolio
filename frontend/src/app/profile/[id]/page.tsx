@@ -21,6 +21,7 @@ import { SATPOnChainSection } from "@/components/SATPOnChainSection";
 import { SATPTrustEvidenceCallout } from "@/components/SATPTrustEvidenceCallout";
 import { V3ReputationCard } from "@/components/V3ReputationCard";
 import { shouldFetchV3Reputation } from "@/lib/profile-v3";
+import { getTrustSurface } from "@/lib/trust-surface";
 import Link from "next/link";
 import { ClaimButton } from "@/components/ClaimButton";
 import { WriteReviewForm } from "./WriteReviewForm";
@@ -210,6 +211,14 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
   const displayRating = avgRating > 0 ? avgRating : agent.rating;
   const onChainReviewCount = reviews.filter((r: any) => r.tx_signature || r.source === "satp-onchain").length;
   const satpDid = (v as any)?.satp?.did || satpIdentity?.data?.did || satpIdentity?.did || null;
+  const trust = getTrustSurface(agent, {
+    trustScore: genesis ? genesis.reputationScore : agent.trustScore,
+    verificationLevel: genesis?.verificationLevel ?? agent.verificationLevel,
+    verificationLevelName: genesis?.verificationLabel || agent.verificationLevelName,
+    reputationRank: genesis?.verificationLabel || agent.reputationRank,
+    reviewCount: reviews.length || agent.reviewCount,
+    rating: displayRating,
+  });
 
   // JSON-LD Structured Data for SEO
   const jsonLd = {
@@ -223,10 +232,10 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     "operatingSystem": "Blockchain",
     "aggregateRating": {
       "@type": "AggregateRating",
-      "ratingValue": genesis ? String(Math.min(5, genesis.reputationScore / 200)) : String(Math.min(5, agent.trustScore / 20)),
+      "ratingValue": trust.reviewCount > 0 ? String(Math.min(5, trust.rating)) : String(Math.min(5, trust.trustScore / 160)),
       "bestRating": "5",
       "worstRating": "0",
-      "ratingCount": String(Math.max(1, Object.values(agent.verifications || {}).filter(v => v?.verified).length)),
+      "ratingCount": String(Math.max(1, trust.reviewCount)),
     },
     "author": {
       "@type": "Organization",
@@ -266,7 +275,15 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
               <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
                 {agent.name}
               </h1>
-              <TrustBadge tier={agent.tier} score={genesis ? genesis.reputationScore : agent.trustScore} verificationLevel={agent.verificationLevel} verificationBadge={agent.verificationBadge} verificationLevelName={agent.verificationLevelName} reputationScore={genesis ? genesis.reputationScore : agent.reputationScore} reputationRank={genesis?.verificationLabel || agent.reputationRank} />
+              <TrustBadge
+                tier={trust.verificationLevel}
+                score={trust.trustScore}
+                verificationLevel={trust.verificationLevel}
+                verificationBadge={trust.verificationBadge}
+                verificationLevelName={trust.verificationLevelName}
+                reputationScore={trust.trustScore}
+                reputationRank={trust.reputationRank}
+              />
             </div>
             <div className="text-sm mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
               {agent.handle}
@@ -342,8 +359,8 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
           {/* Stats bar */}
           <div className="flex flex-wrap gap-x-6 gap-y-2 pt-2 border-t border-white/5">
             {[
-              { label: "Jobs", value: agent.jobsCompleted.toString() },
-              { label: "Rating", value: `${displayRating.toFixed(1)}★` },
+              { label: "Jobs", value: trust.jobHistory },
+              { label: "Reviews", value: trust.reviewSummary },
               { label: "Status", value: agent.unclaimed ? "UNCLAIMED" : agent.status.toUpperCase() },
             ].map(({ label, value }) => (
               <div key={label} className="flex items-center gap-1.5">

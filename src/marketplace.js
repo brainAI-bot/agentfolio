@@ -20,6 +20,22 @@ function normalizeTrustScoreValue(score) {
   return numeric > 800 ? Math.min(Math.round(numeric / 10000), 800) : Math.max(0, numeric);
 }
 
+function safeCount(db, sql, params) {
+  try {
+    return Number(db.prepare(sql).get(...params)?.c || 0);
+  } catch {
+    return 0;
+  }
+}
+
+function safeAverage(db, sql, params) {
+  try {
+    return Number(db.prepare(sql).get(...params)?.avg || 0);
+  } catch {
+    return 0;
+  }
+}
+
 // Helper: resolve wallet address to profile ID
 function resolveApplicantId(applicantId) {
   if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(applicantId)) {
@@ -118,6 +134,11 @@ function enrichApplication(app) {
       app.verificationLevel = verificationLevel;
       app.verificationLevelName = verificationLevelName;
       app.verificationBadges = badges;
+      app.jobsCompleted = safeCount(db, "SELECT COUNT(*) as c FROM jobs WHERE selected_agent_id = ? AND status = 'completed'", [row.id]);
+      app.reviewCount = safeCount(db, 'SELECT COUNT(*) as c FROM reviews WHERE reviewee_id = ?', [row.id])
+        || safeCount(db, 'SELECT COUNT(*) as c FROM reviews WHERE profile_id = ?', [row.id]);
+      app.rating = safeAverage(db, 'SELECT AVG(rating) as avg FROM reviews WHERE reviewee_id = ?', [row.id])
+        || safeAverage(db, 'SELECT AVG(rating) as avg FROM reviews WHERE profile_id = ?', [row.id]);
     }
   } catch (e) { console.error('[Marketplace] enrichApplication error:', e.message); }
   return app;

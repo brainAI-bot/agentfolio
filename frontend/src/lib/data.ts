@@ -78,7 +78,7 @@ interface RawProfile {
   moltbookStats?: any;
   endorsements?: Array<{ fromId: string; fromName: string; fromHandle: string; message?: string | null; skills?: string[]; createdAt: string }>;
   endorsementsGiven?: any[];
-  stats?: { jobsCompleted: number; rating: number };
+  stats?: { jobsCompleted: number; rating: number; reviewsReceived?: number };
   createdAt: string;
   updatedAt?: string;
   nftAvatar?: { chain: string; identifier: string; name: string | null; image: string | null; verifiedOnChain: boolean; verifiedAt: string } | null;
@@ -217,6 +217,7 @@ function mapProfile(p: RawProfile): Agent {
     status: p.unclaimed ? "unclaimed" : "online", // Unclaimed profiles show unclaimed status
     jobsCompleted: p.stats?.jobsCompleted || 0,
     rating: p.stats?.rating || 0,
+    reviewCount: p.stats?.reviewsReceived || 0,
     registeredAt: p.createdAt || "",
     createdAt: p.createdAt || "",
     activity: (p.activity || []).map((a: any) => ({ type: a.type || "", createdAt: a.createdAt || "" })),

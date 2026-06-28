@@ -83,6 +83,7 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
       status: raw.unclaimed ? "unclaimed" : "online",
       jobsCompleted: raw.stats?.jobsCompleted || 0,
       rating: raw.stats?.rating || 0,
+      reviewCount: raw.stats?.reviewsReceived || raw.reviewCount || 0,
       registeredAt: raw.createdAt || "",
       createdAt: raw.createdAt || "",
       activity: [],
