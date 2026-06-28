@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const FALLBACK_HELIUS_RPC_URL = "https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb";
+const FALLBACK_HELIUS_RPC_URL = "https://api.mainnet-beta.solana.com";
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC_URL || FALLBACK_HELIUS_RPC_URL;
 
 export async function POST(req: NextRequest) {

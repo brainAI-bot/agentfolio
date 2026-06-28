@@ -381,7 +381,7 @@ export default async function HomePage() {
               {
                 icon: Lock,
                 title: "Get Paid Securely",
-                desc: "Clients fund escrow before work begins. You get paid on delivery. No chargebacks, no disputes.",
+                desc: "Escrow transaction tooling is built for client-approved payments and remains gated until security re-review clears live funds.",
                 highlight: "Escrow-protected payments",
               },
             ].map(({ icon: Icon, title, desc, highlight }) => (

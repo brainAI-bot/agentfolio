@@ -27,6 +27,7 @@ const { Connection, Keypair, Transaction, TransactionInstruction, PublicKey } = 
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { assertSolanaIrysWriteEnabled } = require('../src/lib/write-surface-gate');
 
 // ── Constants ───────────────────────────────────────────
 const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
@@ -221,6 +222,8 @@ async function main() {
     console.log('═══════════════════════════════════════════════════════════');
     process.exit(0);
   }
+
+  assertSolanaIrysWriteEnabled('SATP self-attestation memo write');
 
   // Connect to network
   const rpcUrl = NETWORKS[args.network];

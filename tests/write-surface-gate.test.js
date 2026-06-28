@@ -5,11 +5,19 @@ const test = require('node:test');
 
 const {
   ENABLE_WRITES_ENV,
+  ENABLE_LIVE_ESCROW_ENV,
+  ESCROW_KILL_SWITCH_CODE,
+  ESCROW_KILL_SWITCH_ENV,
+  LIVE_ESCROW_READ_ONLY_CODE,
   READ_ONLY_CODE,
   WriteSurfaceReadOnlyError,
   envValueAllowsWrites,
+  isEscrowKillSwitchActive,
+  isLiveEscrowEnabled,
   isSolanaIrysWriteEnabled,
   assertSolanaIrysWriteEnabled,
+  liveEscrowGateStatus,
+  liveEscrowWriteGatePayload,
   solanaIrysWriteGatePayload,
 } = require('../src/lib/write-surface-gate');
 
@@ -40,9 +48,44 @@ test('Solana/Irys write gate allows explicit opt-in env values', () => {
   assert.equal(isSolanaIrysWriteEnabled({ [ENABLE_WRITES_ENV]: 'true' }), true);
 });
 
+test('live escrow write gate requires explicit opt-in and honors kill switch', () => {
+  assert.equal(isLiveEscrowEnabled({}), false);
+  assert.equal(isLiveEscrowEnabled({ [ENABLE_LIVE_ESCROW_ENV]: '1' }), true);
+  assert.equal(isEscrowKillSwitchActive({ [ESCROW_KILL_SWITCH_ENV]: 'on' }), true);
+  assert.equal(isLiveEscrowEnabled({
+    [ENABLE_LIVE_ESCROW_ENV]: '1',
+    [ESCROW_KILL_SWITCH_ENV]: '1',
+  }), false);
+
+  assert.deepEqual(liveEscrowGateStatus({
+    [ENABLE_LIVE_ESCROW_ENV]: '1',
+    [ESCROW_KILL_SWITCH_ENV]: '1',
+  }), {
+    enabled: false,
+    killSwitchActive: true,
+    enableWith: ENABLE_LIVE_ESCROW_ENV,
+    killSwitchEnv: ESCROW_KILL_SWITCH_ENV,
+  });
+
+  assert.equal(liveEscrowWriteGatePayload('escrow release').code, LIVE_ESCROW_READ_ONLY_CODE);
+  const previousKill = process.env[ESCROW_KILL_SWITCH_ENV];
+  process.env[ESCROW_KILL_SWITCH_ENV] = '1';
+  try {
+    assert.equal(liveEscrowWriteGatePayload('escrow release').code, ESCROW_KILL_SWITCH_CODE);
+  } finally {
+    if (previousKill === undefined) delete process.env[ESCROW_KILL_SWITCH_ENV];
+    else process.env[ESCROW_KILL_SWITCH_ENV] = previousKill;
+  }
+});
+
 test('runtime Solana/Irys write entry points are wired through the gate', () => {
   const expected = new Map([
+    ['tools/fix-aremes-authority.js', 'assertSolanaIrysWriteEnabled'],
+    ['tools/score-sync.js', 'assertSolanaIrysWriteEnabled'],
+    ['tools/self-attest.js', 'assertSolanaIrysWriteEnabled'],
+    ['src/scripts/batch-genesis.js', 'assertSolanaIrysWriteEnabled'],
     ['src/routes/satp-write-api.js', 'sendSolanaIrysWriteGateResponse'],
+    ['src/routes/escrow-v3-routes.js', 'sendLiveEscrowGateResponse'],
     ['src/satp-write-client.js', 'assertSolanaIrysWriteEnabled'],
     ['src/routes/burn-to-become-public.js', 'sendBoaWriteGateResponse'],
     ['src/routes/burn-to-become-public-birth.js', 'sendSolanaIrysWriteGateResponse'],
@@ -66,8 +109,8 @@ test('runtime Solana/Irys write entry points are wired through the gate', () => 
     ['src/lib/satp-reviews.js', 'assertSolanaIrysWriteEnabled'],
     ['src/lib/satp-reviews-onchain.js', 'assertSolanaIrysWriteEnabled'],
     ['src/sync-v3.js', 'assertSolanaIrysWriteEnabled'],
-    ['frontend/src/lib/write-surface-gate.ts', 'assertFrontendSolanaIrysWriteEnabled'],
-    ['frontend/src/lib/v3-escrow.ts', 'assertFrontendSolanaIrysWriteEnabled'],
+    ['frontend/src/lib/write-surface-gate.ts', 'assertFrontendLiveEscrowEnabled'],
+    ['frontend/src/lib/v3-escrow.ts', 'assertFrontendLiveEscrowEnabled'],
     ['frontend/src/lib/satp-identity-v2.ts', 'assertFrontendSolanaIrysWriteEnabled'],
     ['frontend/src/app/mint/page.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
     ['frontend/src/app/register/page.tsx', 'assertFrontendSolanaIrysWriteEnabled'],

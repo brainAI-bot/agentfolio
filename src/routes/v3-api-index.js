@@ -25,6 +25,7 @@
  */
 
 const { Router } = require('express');
+const { liveEscrowGateStatus } = require('../lib/write-surface-gate');
 const router = Router();
 
 // ── Health check ───────────────────────────────────────────────────────────────
@@ -41,6 +42,7 @@ router.get('/health', (req, res) => {
       validation: 2,
       total: 26,
     },
+    liveEscrow: liveEscrowGateStatus(),
     programs: {
       identity_v3: 'GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG',
       reviews_v3: 'r9XX4frcqxxAZ6Au9V5PA3EAxs1zoNckqLLmoSRcNr4',
@@ -101,6 +103,7 @@ router.get('/', (req, res) => {
         nameAvailability: 'GET /api/v3/identity/name/:name',
       },
       escrow: {
+        health: 'GET /api/v3/escrow/health',
         create: 'POST /api/v3/escrow/create',
         submitWork: 'POST /api/v3/escrow/submit-work',
         release: 'POST /api/v3/escrow/release',

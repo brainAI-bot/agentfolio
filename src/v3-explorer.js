@@ -11,7 +11,7 @@ const crypto = require('crypto');
 const bs58 = require('bs58').default || require('bs58');
 
 const V3_PROGRAM = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
-const RPC = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+const RPC = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 
 let _cache = null;
 let _cacheTime = 0;

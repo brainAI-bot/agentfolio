@@ -1,8 +1,8 @@
 /**
- * SATP Escrow V3 API Routes — Identity-Verified On-Chain Escrow
+ * SATP Escrow V3 API Routes — gated on-chain escrow transaction builders
  *
  * Endpoints:
- *   POST /api/v3/escrow/create          — Build unsigned createEscrow TX (identity-verified)
+ *   POST /api/v3/escrow/create          — Build unsigned createEscrow TX (identity-gated)
  *   POST /api/v3/escrow/submit-work     — Build unsigned submitWork TX
  *   POST /api/v3/escrow/release         — Build unsigned release TX (full remaining)
  *   POST /api/v3/escrow/partial-release — Build unsigned partialRelease TX (milestone)
@@ -23,7 +23,8 @@
  *   - Dispute tracking with reason hash
  *   - Nonce-based PDAs (multiple escrows between same parties)
  *
- * All POST endpoints return unsigned transactions (base64) for client-side wallet signing.
+ * POST endpoints are live-funds gated. When explicitly enabled after re-review,
+ * they return unsigned transactions (base64) for client-side wallet signing.
  * Server is stateless — no private keys.
  *
  * brainChain — 2026-03-28
@@ -33,6 +34,10 @@ const { Router } = require('express');
 const { PublicKey } = require('@solana/web3.js');
 const crypto = require('crypto');
 const satpClient = require('@brainai/satp-client');
+const {
+  liveEscrowGateStatus,
+  sendLiveEscrowGateResponse,
+} = require('../lib/write-surface-gate');
 
 const router = Router();
 
@@ -81,6 +86,11 @@ function requireSDK(req, res, next) {
   next();
 }
 
+function requireLiveEscrowWrites(req, res, next) {
+  if (sendLiveEscrowGateResponse(res, `SATP V3 escrow ${req.method} ${req.path}`)) return;
+  next();
+}
+
 function validatePublicKey(value, fieldName) {
   try {
     return new PublicKey(value);
@@ -126,9 +136,24 @@ function deriveEscrowPDA(client, descriptionOrHash, nonce) {
   };
 }
 
+router.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    network: NETWORK,
+    sdkAvailable: Boolean(SATPV3SDK),
+    liveEscrow: liveEscrowGateStatus(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+router.use((req, res, next) => {
+  if (req.method !== 'POST') return next();
+  return requireLiveEscrowWrites(req, res, next);
+});
+
 // ── POST /create ───────────────────────────────────────────────────────────────
 /**
- * Build an unsigned createEscrow transaction with SATP V3 identity verification.
+ * Build an unsigned createEscrow transaction with SATP V3 identity requirements.
  *
  * Body: {
  *   clientWallet: string,           // Client's wallet (payer + signer)
@@ -207,8 +232,8 @@ router.post('/create', requireSDK, async (req, res) => {
       descriptionHash: result.descriptionHash.toString('hex'),
       network: NETWORK,
       nonce: nonce || 0,
-      identityVerified: true,
-      message: 'Sign and submit to create identity-verified escrow',
+      identityGateIncluded: true,
+      message: 'Sign and submit to create an identity-gated escrow after live-funds release gates are enabled',
     });
   } catch (err) {
     console.error('[Escrow V3] create error:', err.message);

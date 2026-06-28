@@ -14,10 +14,11 @@
 const { Connection, PublicKey, Transaction, TransactionInstruction, Keypair } = require('@solana/web3.js');
 const crypto = require('crypto');
 const fs = require('fs');
+const { assertSolanaIrysWriteEnabled } = require('../src/lib/write-surface-gate');
 
 const IDENTITY_V3 = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
-const RPC = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
-const DEPLOYER_KEY_PATH = '/home/ubuntu/.config/solana/mainnet-deployer.json';
+const RPC = process.env.SOLANA_RPC_URL;
+const DEPLOYER_KEY_PATH = process.env.AREME_AUTHORITY_DEPLOYER_KEY_PATH;
 
 const AGENT_ID = 'agent_aremes';
 const CORRECT_WALLET = 'Ewhn1YZdvZTkLnbgQBkLDcEJaRb2nFiQLLks8xdMDZFC';
@@ -27,6 +28,10 @@ function agentIdHash(agentId) {
 }
 
 async function main() {
+  assertSolanaIrysWriteEnabled('AREMES authority transfer repair');
+  if (!RPC) throw new Error('SOLANA_RPC_URL is required');
+  if (!DEPLOYER_KEY_PATH) throw new Error('AREME_AUTHORITY_DEPLOYER_KEY_PATH is required');
+
   const conn = new Connection(RPC, 'confirmed');
 
   // Load deployer key

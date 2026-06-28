@@ -2,7 +2,7 @@
  * V3 Escrow Helpers — Frontend integration for SATP V3 Escrow
  * 
  * These functions integrate with the /api/v3/escrow/* endpoints to:
- * 1. Create identity-verified escrows (unsigned TX → wallet sign)
+ * 1. Build identity-gated escrow transactions (unsigned TX -> wallet sign)
  * 2. Submit work
  * 3. Release funds (full or partial)
  * 4. Dispute handling
@@ -12,7 +12,7 @@
 
 import { Buffer } from 'buffer';
 import { Transaction, VersionedTransaction, Connection, PublicKey } from '@solana/web3.js';
-import { assertFrontendSolanaIrysWriteEnabled } from './write-surface-gate';
+import { assertFrontendLiveEscrowEnabled, assertFrontendSolanaIrysWriteEnabled } from './write-surface-gate';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333';
 
@@ -64,6 +64,7 @@ function deserializeEscrowTransaction(base64Tx: string): Transaction | Versioned
  * Returns a Transaction object ready for wallet signing.
  */
 export async function buildV3EscrowCreate(params: V3EscrowCreateParams): Promise<{ tx: Transaction | VersionedTransaction; escrowPDA: string }> {
+  assertFrontendLiveEscrowEnabled('frontend V3 escrow create transaction build');
   const res = await fetch(`${API_BASE}/api/v3/escrow/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -85,6 +86,7 @@ export async function buildV3SubmitWork(params: {
   agentWallet: string;
   workProof: string;
 }): Promise<Transaction | VersionedTransaction> {
+  assertFrontendLiveEscrowEnabled('frontend V3 escrow submit-work transaction build');
   const res = await fetch(`${API_BASE}/api/v3/escrow/submit-work`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -103,6 +105,7 @@ export async function buildV3Release(params: {
   clientWallet: string;
   agentWallet: string;
 }): Promise<Transaction | VersionedTransaction> {
+  assertFrontendLiveEscrowEnabled('frontend V3 escrow release transaction build');
   const res = await fetch(`${API_BASE}/api/v3/escrow/release`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -122,6 +125,7 @@ export async function buildV3PartialRelease(params: {
   agentWallet: string;
   amountLamports: number;
 }): Promise<Transaction | VersionedTransaction> {
+  assertFrontendLiveEscrowEnabled('frontend V3 escrow partial-release transaction build');
   const res = await fetch(`${API_BASE}/api/v3/escrow/partial-release`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -140,6 +144,7 @@ export async function buildV3Dispute(params: {
   signerWallet: string;
   reason: string;
 }): Promise<Transaction | VersionedTransaction> {
+  assertFrontendLiveEscrowEnabled('frontend V3 escrow dispute transaction build');
   const res = await fetch(`${API_BASE}/api/v3/escrow/dispute`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -197,6 +202,7 @@ export async function signAndSendV3Tx(
   sendTransaction: (tx: Transaction | VersionedTransaction, connection: Connection) => Promise<string>,
 ): Promise<string> {
   assertFrontendSolanaIrysWriteEnabled('frontend V3 escrow transaction send');
+  assertFrontendLiveEscrowEnabled('frontend V3 escrow transaction send');
   if (tx instanceof Transaction) {
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
     tx.recentBlockhash = blockhash;

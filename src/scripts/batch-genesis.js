@@ -15,10 +15,11 @@ const Database = require('better-sqlite3');
 const { Connection, PublicKey, Keypair } = require('@solana/web3.js');
 const { SatpV3Client, SatpV3Builders, agentIdHash, deriveGenesisPda, PROGRAM_IDS } = require('@brainai/satp-v3');
 const fs = require('fs');
+const { assertSolanaIrysWriteEnabled } = require('../lib/write-surface-gate');
 
 // ─── Config ──────────────────────────────────────────────
 const DB_PATH = path.resolve(__dirname, '../../data/agentfolio.db');
-const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const SIGNER_PATH = process.env.SATP_SIGNER_PATH || path.join(process.env.HOME, '.config/solana/id.json');
 
 const EXECUTE = process.argv.includes('--execute');
@@ -141,6 +142,8 @@ async function main() {
     db.close();
     return;
   }
+
+  assertSolanaIrysWriteEnabled('batch Genesis Record creation');
 
   // Load signer
   if (!fs.existsSync(SIGNER_PATH)) {
