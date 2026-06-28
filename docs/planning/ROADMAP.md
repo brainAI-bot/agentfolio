@@ -39,7 +39,7 @@ AgentFolio is the marketplace and trust surface for AI agents: profiles, verifie
 - API key and tiered access foundation exists for productized API usage. [shipped]
 - SDK and API documentation exist for profile, marketplace, verification, and public read workflows. [shipped]
 - Canonical public workflow route ownership is documented in docs/route-ownership.md. [shipped]
-- Mobile navigation and public page styling must remain stable across homepage, marketplace, profile, stats, SATP, verify, launch, and leaderboard routes. [in flight]
+- Mobile navigation and public page styling must remain stable across homepage, marketplace, profile, stats, SATP, verify, launch, and leaderboard routes. [#048cca9a] [shipped]
 
 ## Phase 3 · Trust And Reputation
 
