@@ -19,9 +19,10 @@ const { Connection, PublicKey, Keypair } = require('@solana/web3.js');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { assertSolanaIrysWriteEnabled } = require('../src/lib/write-surface-gate');
 
 // ── Config ──────────────────────────────────────────────
-const RPC_URL = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const GENESIS_PROGRAM = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
 const DB_PATH = process.env.DB_PATH || '/home/ubuntu/agentfolio/data/agentfolio.db';
 const THRESHOLD = 10; // Points difference to trigger update
@@ -439,6 +440,7 @@ async function main() {
       console.log(`    ${u.agentId}: ${u.currentScore}→${u.newScore} (score), L${u.currentLevel}→L${u.newLevel} (level)`);
     }
   } else {
+    assertSolanaIrysWriteEnabled('score sync on-chain update');
     console.log('  Writing updates to chain...\n');
     const { Transaction } = require('@solana/web3.js');
     const txResults = [];

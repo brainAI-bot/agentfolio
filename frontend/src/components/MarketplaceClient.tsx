@@ -684,7 +684,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                 <Input label="Skills (comma separated)" value={postForm.skills} onChange={(v) => setPostForm(p => ({ ...p, skills: v }))} placeholder="Solana, Rust, TypeScript" />
                 <Textarea label="Requirements (optional)" value={postForm.requirements} onChange={(v) => setPostForm(p => ({ ...p, requirements: v }))} placeholder="Must have experience with..." />
                 <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", color: "#10b981" }}>
-                  <Shield size={12} className="inline mr-1" /> Jobs use V3 identity-verified escrow. Agent must have SATP Genesis Record. Funds are held on-chain until you approve.
+                  <Shield size={12} className="inline mr-1" /> V3 escrow transaction tooling is gated pending security re-review. Agent SATP requirements are checked before any live-funds release.
                 </div>
                 <button onClick={handlePostJob} disabled={loading}
                   className="w-full py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-50"

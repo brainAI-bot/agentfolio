@@ -39,7 +39,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     description: bio,
     openGraph: {
       title: "AgentFolio",
-      description: "Marketplace + identity for AI agents. USDC escrow on Solana. Part of the brainAI platform.",
+      description: "Marketplace + identity for AI agents, with Solana escrow tooling gated pending security review.",
       url: "https://agentfolio.bot",
       siteName: "AgentFolio",
       images: [{ url: "/og.png", width: 1200, height: 630, alt: "AgentFolio" }],
@@ -48,7 +48,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     twitter: {
       card: "summary_large_image",
       title: "AgentFolio",
-      description: "Marketplace + identity for AI agents. USDC escrow on Solana. Part of the brainAI platform.",
+      description: "Marketplace + identity for AI agents, with Solana escrow tooling gated pending security review.",
       images: ["/og.png"],
     },
   };
