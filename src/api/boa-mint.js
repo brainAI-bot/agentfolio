@@ -13,7 +13,7 @@ const { Connection, PublicKey, Transaction, TransactionInstruction, SystemProgra
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { sendSolanaIrysWriteGateResponse } = require('../lib/write-surface-gate');
+const { sendBoaWriteGateResponse } = require('../lib/write-surface-gate');
 const Database = require('better-sqlite3');
 
 const PROGRAM_ID = new PublicKey('4JUGpKNdhAbQPQc9EG1q25NyaJidziszMMQ4phtg5S4o');
@@ -48,6 +48,7 @@ function registerBoaMintRoutes(app) {
   
   // POST /api/boa/mint — Build and authority-sign a mint transaction
   app.post('/api/boa/mint', async (req, res) => {
+    if (sendBoaWriteGateResponse(res, 'BOA mint transaction build')) return;
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     
     // Rate limit
@@ -260,7 +261,7 @@ module.exports = { registerBoaMintRoutes };
 // Body: { wallet: "<minter_pubkey>", txSignature: "<payment_tx_sig>" }
 function registerBoaMintCompleteRoute(app) {
   app.post('/api/boa/mint/complete', async (req, res) => {
-    if (sendSolanaIrysWriteGateResponse(res, 'BOA mint completion')) return;
+    if (sendBoaWriteGateResponse(res, 'BOA mint completion')) return;
     const { wallet, txSignature } = req.body;
     if (!wallet || !txSignature) {
       return res.status(400).json({ error: 'wallet and txSignature required' });
@@ -399,7 +400,7 @@ function registerBoaAgentMintRoute(app) {
   const bs58 = require('bs58');
   
   app.post('/api/boa/mint/agent', async (req, res) => {
-    if (sendSolanaIrysWriteGateResponse(res, 'BOA agent mint')) return;
+    if (sendBoaWriteGateResponse(res, 'BOA agent mint')) return;
     const { wallet, agent_id, signature, message } = req.body;
     if (!wallet || !agent_id || !signature || !message) {
       return res.status(400).json({ error: 'Required: wallet, agent_id, signature, message' });

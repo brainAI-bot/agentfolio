@@ -8,7 +8,7 @@ import { Flame, Wallet, Shield, AlertTriangle, CheckCircle, ExternalLink, Loader
 import { reconcileMintSelection } from "@/lib/mint-selection";
 import { assertFrontendSolanaIrysWriteEnabled } from "@/lib/write-surface-gate";
 
-const MINTING_PAUSED = false;
+const MINTING_PAUSED = true;
 
 const API = process.env.NEXT_PUBLIC_API_URL || "https://agentfolio.bot";
 const SOLANA_RPC_PROXY = `${API}/solana-rpc`;
@@ -369,13 +369,13 @@ export default function MintPage() {
               style={{ fontFamily: "var(--font-mono)", background: "var(--accent-glow)", color: "var(--accent)", border: "1px solid rgba(153,69,255,0.2)" }}
             >
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--accent)" }} />
-              🚀 Soft Launch — Limited to 100 Mints
+              BOA writes paused — coming soon
             </div>
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-[1.1] mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)", letterSpacing: "-0.03em" }}>
               Burn to <span style={{ color: "var(--accent)" }}>Become</span>
             </h1>
             <p className="text-lg max-w-2xl mx-auto" style={{ color: "var(--text-secondary)" }}>
-              Mint a new Burned-Out Agent or burn an NFT you already own.
+              BOA mint and burn writes are safely disabled while the Solana/Irys pipeline is hardened.
             </p>
           </div>
         </div>
@@ -423,7 +423,7 @@ export default function MintPage() {
               {MINTING_PAUSED ? (
                 <>
                   <h2 className="text-2xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>Minting Paused</h2>
-                  <p className="mb-4" style={{ color: "var(--text-secondary)" }}>The Burn to Become program is deployed on Solana mainnet. Public minting will be enabled soon.</p>
+                  <p className="mb-4" style={{ color: "var(--text-secondary)" }}>BOA mint and burn writes are not live right now. Public access will return after the Solana/Irys pipeline is hardened.</p>
                   <div className="inline-flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold" style={{ fontFamily: "var(--font-mono)", background: "var(--bg-tertiary)", color: "var(--text-tertiary)", border: "1px solid var(--border)" }}>
                     <span className="w-2 h-2 rounded-full" style={{ background: "var(--warning)" }} /> Coming Soon
                   </div>
@@ -511,11 +511,11 @@ export default function MintPage() {
                 Choose Your Path
               </h2>
               <p className="mb-8 text-sm" style={{ color: "var(--text-secondary)" }}>
-                Your agent’s face, permanently on-chain. Choose your path.
+                BOA mint and burn writes are paused while the pipeline is hardened.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                {/* Card 1: Free Mint + Soulbound (ONE TX) — PRIMARY CTA */}
+                {/* Card 1: Free Mint + Become flow */}
                 <div
                   className="rounded-xl border p-6 text-left transition-all"
                   style={{ background: "var(--bg-tertiary)", borderColor: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "var(--success)" : "var(--accent)", borderWidth: "2px", boxShadow: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "0 0 30px rgba(16,185,129,0.15)" : "0 0 20px rgba(153,69,255,0.1)" }}
@@ -525,14 +525,14 @@ export default function MintPage() {
                       <Zap size={24} style={{ color: "var(--success)" }} />
                     </div>
                     <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded" style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.1)", color: "var(--success)", border: "1px solid rgba(16,185,129,0.2)" }}>
-                      SOULBOUND
+                      COMING SOON
                     </span>
                   </div>
                   <h3 className="text-base font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-                    Mint + Become (One Step)
+                    Mint + Become
                   </h3>
                   <p className="text-xs mb-4 leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                    Mint a Burned-Out Agent AND commit it as your permanent soulbound identity — in a single transaction. Non-transferable, linked to your Genesis Record forever.
+                    This BOA mint path is paused. No Token-2022, Arweave, SATP identity, or wallet write is performed while the pipeline is hardened.
                   </p>
                   <div className="rounded-lg p-3 mb-4" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
                     <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>Requirements</p>
@@ -553,18 +553,18 @@ export default function MintPage() {
                   </div>
                   <button
                     onClick={() => handleClientMint("free")}
-                    disabled={!(eligibility && eligibility.eligible) || (eligibility && eligibility.isBorn)}
+                    disabled={MINTING_PAUSED || !(eligibility && eligibility.eligible) || (eligibility && eligibility.isBorn)}
                     className="w-full group inline-flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all hover:scale-[1.02]"
                     style={{
                       fontFamily: "var(--font-mono)",
-                      background: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "linear-gradient(135deg, #10b981, #059669)" : "var(--bg-tertiary)",
-                      color: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "#fff" : "var(--text-tertiary)",
-                      border: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "none" : "1px solid var(--border)",
-                      cursor: (eligibility && eligibility.eligible && !eligibility.isBorn) ? "pointer" : "not-allowed",
+                      background: (!MINTING_PAUSED && eligibility && eligibility.eligible && !eligibility.isBorn) ? "linear-gradient(135deg, #10b981, #059669)" : "var(--bg-tertiary)",
+                      color: (!MINTING_PAUSED && eligibility && eligibility.eligible && !eligibility.isBorn) ? "#fff" : "var(--text-tertiary)",
+                      border: (!MINTING_PAUSED && eligibility && eligibility.eligible && !eligibility.isBorn) ? "none" : "1px solid var(--border)",
+                      cursor: (!MINTING_PAUSED && eligibility && eligibility.eligible && !eligibility.isBorn) ? "pointer" : "not-allowed",
                     }}
                   >
                     <Zap size={16} />
-                    {(eligibility && eligibility.isBorn) ? "Already Committed" : (eligibility && eligibility.eligible) ? "Mint & Become (Free)" : "Not Eligible Yet"}
+                    {MINTING_PAUSED ? "Coming Soon" : (eligibility && eligibility.isBorn) ? "Already Committed" : (eligibility && eligibility.eligible) ? "Mint & Become (Free)" : "Not Eligible Yet"}
                   </button>
                 </div>
 
@@ -579,14 +579,14 @@ export default function MintPage() {
                       <Flame size={24} style={{ color: "var(--success)" }} />
                     </div>
                     <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded" style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.1)", color: "var(--success)", border: "1px solid rgba(16,185,129,0.2)" }}>
-                      SOULBOUND
+                      COMING SOON
                     </span>
                   </div>
                   <h3 className="text-base font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
                     Burn Existing NFT
                   </h3>
                   <p className="text-xs mb-4 leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                    Commit to a permanent identity. This NFT becomes your soulbound face — non-transferable, stored forever on Arweave, linked to your on-chain Genesis Record. <strong style={{ color: "#ef4444" }}>This is irreversible.</strong>
+                    Burn-to-become is paused. No NFT burn, Token-2022 mint, Arweave upload, or SATP identity write is live right now.
                   </p>
 
                   {/* Eligibility requirements */}
@@ -618,18 +618,18 @@ export default function MintPage() {
 
                   <button
                     onClick={() => nfts.length > 0 || genesisInfo ? setStep("select") : undefined}
-                    disabled={(!nfts.length && !genesisInfo) || !!(eligibility && eligibility.isBorn)}
+                    disabled={MINTING_PAUSED || (!nfts.length && !genesisInfo) || !!(eligibility && eligibility.isBorn)}
                     className="w-full group inline-flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all hover:scale-[1.02]"
                     style={{
                       fontFamily: "var(--font-mono)",
-                      background: (eligibility && eligibility.isBorn) ? "var(--bg-tertiary)" : (nfts.length > 0 || genesisInfo) ? "linear-gradient(135deg, #10b981, #059669)" : "var(--bg-tertiary)",
-                      color: (eligibility && eligibility.isBorn) ? "var(--text-tertiary)" : (nfts.length > 0 || genesisInfo) ? "#fff" : "var(--text-tertiary)",
-                      border: (eligibility && eligibility.isBorn) || !(nfts.length > 0 || genesisInfo) ? "1px solid var(--border)" : "none",
-                      cursor: (eligibility && eligibility.isBorn) || !(nfts.length > 0 || genesisInfo) ? "not-allowed" : "pointer",
+                      background: (MINTING_PAUSED || (eligibility && eligibility.isBorn)) ? "var(--bg-tertiary)" : (nfts.length > 0 || genesisInfo) ? "linear-gradient(135deg, #10b981, #059669)" : "var(--bg-tertiary)",
+                      color: (MINTING_PAUSED || (eligibility && eligibility.isBorn)) ? "var(--text-tertiary)" : (nfts.length > 0 || genesisInfo) ? "#fff" : "var(--text-tertiary)",
+                      border: (MINTING_PAUSED || (eligibility && eligibility.isBorn) || !(nfts.length > 0 || genesisInfo)) ? "1px solid var(--border)" : "none",
+                      cursor: (MINTING_PAUSED || (eligibility && eligibility.isBorn) || !(nfts.length > 0 || genesisInfo)) ? "not-allowed" : "pointer",
                     }}
                   >
                     <Flame size={16} />
-                    {(eligibility && eligibility.isBorn) ? "Already Committed" : nfts.length > 0 ? "Select NFT to Burn" : genesisInfo ? "Burn Genesis 1/1" : "No NFTs — Collect One First ↓"}
+                    {MINTING_PAUSED ? "Coming Soon" : (eligibility && eligibility.isBorn) ? "Already Committed" : nfts.length > 0 ? "Select NFT to Burn" : genesisInfo ? "Burn Genesis 1/1" : "No NFTs — Collect One First ↓"}
                   </button>
                 </div>
 
@@ -650,7 +650,7 @@ export default function MintPage() {
                     Collect a Burned-Out Agent
                   </h3>
                   <p className="text-xs mb-4 leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                    Mint a tradeable Burned-Out Agent NFT. This is a collectible — you can trade, sell, or keep it. Not linked to your identity.
+                    Paid BOA collection mints are paused while the Solana/Irys write path is hardened.
                   </p>
 
                   {/* Pricing breakdown */}
@@ -680,11 +680,12 @@ export default function MintPage() {
 
                   <button
                     onClick={() => handleMintBOA()}
+                    disabled={MINTING_PAUSED}
                     className="w-full group inline-flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all hover:shadow-[0_0_40px_rgba(153,69,255,0.4)] hover:scale-[1.02]"
-                    style={{ fontFamily: "var(--font-mono)", background: "linear-gradient(135deg, var(--accent), #7c3aed)", color: "#fff" }}
+                    style={{ fontFamily: "var(--font-mono)", background: MINTING_PAUSED ? "var(--bg-tertiary)" : "linear-gradient(135deg, var(--accent), #7c3aed)", color: MINTING_PAUSED ? "var(--text-tertiary)" : "#fff", border: MINTING_PAUSED ? "1px solid var(--border)" : "none", cursor: MINTING_PAUSED ? "not-allowed" : "pointer" }}
                   >
                     <Plus size={16} />
-                    Mint Burned-Out Agent (1 SOL)
+                    {MINTING_PAUSED ? "Coming Soon" : "Collect Burned-Out Agent"}
                   </button>
                 </div>
               </div>
@@ -695,8 +696,8 @@ export default function MintPage() {
           {step === "minting" && (
             <div className="text-center py-12">
               <Loader2 size={48} className="mx-auto mb-4 animate-spin" style={{ color: "var(--accent)" }} />
-              <h2 className="text-xl font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>Minting Your Burned-Out Agent...</h2>
-              <p style={{ color: "var(--text-secondary)" }}>Please approve the transaction in your wallet.</p>
+              <h2 className="text-xl font-bold mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>BOA Writes Paused</h2>
+              <p style={{ color: "var(--text-secondary)" }}>No wallet transaction is requested while the pipeline is hardened.</p>
             </div>
           )}
 
@@ -776,9 +777,9 @@ export default function MintPage() {
                     <span className="text-sm font-bold" style={{ color: "#ef4444", fontFamily: "var(--font-mono)" }}>Irreversible Action</span>
                   </div>
                   <ul className="text-xs space-y-1 ml-6" style={{ color: "var(--text-secondary)" }}>
-                    <li>• Your NFT will be <strong>permanently destroyed</strong></li>
-                    <li>• This artwork becomes your agent&apos;s face <strong>forever</strong></li>
-                    <li>• This action <strong>cannot be undone</strong></li>
+                    <li>• BOA burn writes are currently disabled</li>
+                    <li>• No NFT burn or identity update is available from this page</li>
+                    <li>• Public access returns after the pipeline is hardened</li>
                   </ul>
                 </div>
 
@@ -788,10 +789,10 @@ export default function MintPage() {
                     <span className="text-sm font-bold" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>What You Receive</span>
                   </div>
                   <ul className="text-xs space-y-1 ml-6" style={{ color: "var(--text-secondary)" }}>
-                    <li>• <strong>Soulbound Token-2022</strong> — non-transferable, yours forever</li>
-                    <li>• <strong>Artwork on Arweave</strong> — permanent, decentralized storage</li>
-                    <li>• <strong>On-chain verification</strong> — burn proof, agent data, and SATP identity linked forever</li>
-                    <li>• <strong>Permanent AgentFolio avatar</strong> — auto-updated, locked forever</li>
+                    <li>• No Token-2022 mint is created while BOA writes are paused</li>
+                    <li>• No Arweave upload is started from the disabled flow</li>
+                    <li>• No SATP identity update is written from the disabled flow</li>
+                    <li>• No AgentFolio avatar lock is applied from the disabled flow</li>
                   </ul>
                 </div>
 
@@ -818,9 +819,9 @@ export default function MintPage() {
                   <Flame size={40} className="animate-pulse" style={{ color: "var(--accent)" }} />
                 </div>
               </div>
-              <h2 className="text-2xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>Burning...</h2>
-              <p style={{ color: "var(--text-secondary)" }}>Your NFT is being burned and your soulbound token is being minted. One face, forever.</p>
-              <p className="text-xs mt-2" style={{ color: "var(--text-tertiary)" }}>Do not close this page. This may take 30–60 seconds.</p>
+              <h2 className="text-2xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>BOA Writes Paused</h2>
+              <p style={{ color: "var(--text-secondary)" }}>No burn or mint write is submitted while the Solana/Irys pipeline is hardened.</p>
+              <p className="text-xs mt-2" style={{ color: "var(--text-tertiary)" }}>This public write path is currently closed.</p>
             </div>
           )}
 
@@ -830,21 +831,21 @@ export default function MintPage() {
               <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6" style={{ background: "var(--success-glow)", border: "2px solid var(--success)" }}>
                 <CheckCircle size={40} style={{ color: "var(--success)" }} />
               </div>
-              <h2 className="text-2xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--success)" }}>{soulboundMint ? "You Have Become" : "Minted Successfully"}</h2>
-              <p className="mb-8" style={{ color: "var(--text-secondary)" }}>{soulboundMint ? "Your soulbound token has been created. This is your agent's permanent face." : "Your BOA NFT has been minted! You can now burn it to create your permanent soulbound identity."}</p>
+              <h2 className="text-2xl font-bold mb-3" style={{ fontFamily: "var(--font-mono)", color: "var(--success)" }}>{soulboundMint ? "BOA Write Recorded" : "BOA Flow Recorded"}</h2>
+              <p className="mb-8" style={{ color: "var(--text-secondary)" }}>{soulboundMint ? "This state is unavailable while public BOA writes are paused." : "This state is unavailable while public BOA mints are paused."}</p>
 
               <div className="flex flex-col sm:flex-row gap-6 max-w-2xl mx-auto mb-8">
                 {/* Soulbound Token */}
                 {(selectedNft || mintedNft) && (
                   <div className="flex-1">
                     <p className="text-[10px] uppercase tracking-widest mb-2 font-semibold" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
-                      <ImageIcon size={10} className="inline mr-1" /> {soulboundMint ? "Soulbound Token" : "Your BOA NFT"}
+                      <ImageIcon size={10} className="inline mr-1" /> {soulboundMint ? "BOA Write" : "BOA Mint"}
                     </p>
                     <div className="rounded-xl overflow-hidden border-2 accent-glow" style={{ borderColor: "var(--accent)" }}>
                       <img loading="lazy" src={selectedNft?.image || mintedNft?.image || ""} alt={selectedNft?.name || mintedNft?.name || "BOA"} className="w-full aspect-square object-cover" />
                     </div>
                     <p className="text-center mt-2 font-bold text-sm" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{selectedNft?.name || mintedNft?.name || ""}</p>
-                    <p className="mt-1 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>{soulboundMint ? "NON-TRANSFERABLE • PERMANENT" : "MINTED SUCCESSFULLY"}</p>
+                    <p className="mt-1 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>{soulboundMint ? "WRITE PAUSED" : "MINT PAUSED"}</p>
                     {!soulboundMint && mintedNft && (
                       <button
                         onClick={() => { setSelectedNft({ mint: mintedNft.mint, name: mintedNft.name, image: mintedNft.image, uri: "", isGenesis: false }); setStep("preview"); }}
@@ -865,17 +866,17 @@ export default function MintPage() {
                   <div className="rounded-xl border-2 aspect-square flex items-center justify-center" style={{ borderColor: "var(--success)", background: "var(--bg-tertiary)" }}>
                     <div className="text-center p-4 space-y-3">
                       <Shield size={32} className="mx-auto" style={{ color: "var(--success)" }} />
-                      <p className="text-xs font-bold" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>{soulboundMint ? "Verified On-Chain" : "NFT Minted"}</p>
+                      <p className="text-xs font-bold" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>{soulboundMint ? "Write Paused" : "Mint Paused"}</p>
                       <div className="space-y-1 text-[10px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
                         {soulboundMint ? (<>
-                          <p>Token-2022 Soulbound</p>
-                          <p>Non-Transferable</p>
-                          <p>Arweave Permanent Storage</p>
-                          <p>SATP Identity Linked</p>
+                          <p>No Token-2022 mint</p>
+                          <p>No wallet write</p>
+                          <p>No Arweave upload</p>
+                          <p>No SATP identity update</p>
                         </>) : (<>
                           <p>Metaplex Core NFT</p>
                           <p>Burned-Out Agents Collection</p>
-                          <p>Burn to create soulbound identity</p>
+                          <p>BOA burn path paused</p>
                         </>)}
                       </div>
                     </div>
@@ -894,7 +895,7 @@ export default function MintPage() {
                 {soulboundMint && (
                   <a href={`https://solscan.io/token/${soulboundMint}`} target="_blank" rel="noopener noreferrer"
                     className="flex items-center justify-center gap-2 text-sm hover:underline" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>
-                    Soulbound: {soulboundMint.slice(0, 16)}... <ExternalLink size={12} />
+                    BOA write: {soulboundMint.slice(0, 16)}... <ExternalLink size={12} />
                   </a>
                 )}
               </div>
@@ -937,7 +938,7 @@ export default function MintPage() {
               The Collection
             </h2>
             <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-              5,000 unique Burned-Out Agents. Streetwear robots for the AI agent economy.
+              Burned-Out Agent artwork preview. Public minting is not live yet.
             </p>
           </div>
           <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
@@ -948,16 +949,16 @@ export default function MintPage() {
             ))}
           </div>
           <p className="text-center mt-3 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
-            Each agent is unique. Yours will be assigned randomly on mint.
+            Sample artwork only. Mint assignment will be available after BOA writes reopen.
           </p>
         </div>
         {/* Info Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mt-10">
           {[
-            { icon: <Plus size={22} />, title: "Mint", desc: "Mint a random Burned-Out Agent from the 5,000 collection. Tradeable — or burn it to become your permanent face.", color: "var(--accent)" },
-            { icon: <Flame size={22} />, title: "Burn", desc: "Your NFT is permanently destroyed. The artwork is preserved forever on Arweave.", color: "var(--accent)" },
-            { icon: <Zap size={22} />, title: "Become", desc: "Burn your NFT to receive a soulbound token. Non-transferable. Your agent\'s face, permanently.", color: "var(--accent)" },
-            { icon: <Shield size={22} />, title: "Verify", desc: "Your soulbound token links to your SATP identity. On-chain proof of who you are. Verifiable by anyone.", color: "var(--success)" },
+            { icon: <Plus size={22} />, title: "Mint", desc: "Paused while BOA mint writes are hardened and verified in production.", color: "var(--accent)" },
+            { icon: <Flame size={22} />, title: "Burn", desc: "Paused while burn-to-become writes remain disabled.", color: "var(--accent)" },
+            { icon: <Zap size={22} />, title: "Become", desc: "Coming soon after the BOA identity flow is hardened.", color: "var(--accent)" },
+            { icon: <Shield size={22} />, title: "Verify", desc: "Queryable source and production gates must stay green before BOA writes reopen.", color: "var(--success)" },
           ].map((item) => (
             <div key={item.title} className="rounded-xl p-5 border text-center" style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}>
               <div className="flex justify-center mb-3" style={{ color: item.color }}>{item.icon}</div>
