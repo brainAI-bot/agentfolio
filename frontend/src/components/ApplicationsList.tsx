@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Shield, CheckCircle, Star, ExternalLink } from "lucide-react";
 import Link from "next/link";
+import { getTrustSurface } from "@/lib/trust-surface";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
 
@@ -17,6 +18,9 @@ interface Application {
   status: string;
   createdAt: string;
   trustScore?: number;
+  rating?: number;
+  reviewCount?: number;
+  jobsCompleted?: number;
   verificationLevel?: number;
   verificationLevelName?: string;
   verificationBadges?: string[];
@@ -80,7 +84,8 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
   return (
     <div className="space-y-3">
       {apps.map(app => {
-        const lvlColor = levelColors[app.verificationLevel ?? 0] || "#6b7280";
+        const trust = getTrustSurface(app);
+        const lvlColor = levelColors[trust.verificationLevel] || "#6b7280";
         const profileUrl = app.applicantProfileId
           ? `/profile/${app.applicantName || app.applicantProfileId}`
           : null;
@@ -132,7 +137,7 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
                   )}
 
                   {/* Verification level badge */}
-                  {app.verificationLevel != null && app.verificationLevel > 0 && (
+                  {trust.verificationLevel > 0 && (
                     <span
                       className="text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
                       style={{
@@ -142,7 +147,7 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
                         fontFamily: "var(--font-mono)",
                       }}
                     >
-                      L{app.verificationLevel} {app.verificationLevelName}
+                      {trust.tierLabel}
                     </span>
                   )}
 
@@ -155,12 +160,16 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
 
                 {/* Trust score + badges */}
                 <div className="flex items-center gap-2 mt-0.5">
-                  {app.trustScore != null && app.trustScore > 0 && (
-                    <span className="text-[10px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
-                      <Shield size={10} className="inline mr-0.5" style={{ verticalAlign: "middle" }} />
-                      {app.trustScore}/800
-                    </span>
-                  )}
+                  <span className="text-[10px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
+                    <Shield size={10} className="inline mr-0.5" style={{ verticalAlign: "middle" }} />
+                    {trust.trustScoreFraction}
+                  </span>
+                  <span className="text-[10px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
+                    {trust.reviewSummary}
+                  </span>
+                  <span className="text-[10px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
+                    {trust.jobHistory}
+                  </span>
                   {app.verificationBadges && app.verificationBadges.length > 0 && (
                     <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
                       {app.verificationBadges.map(b => badgeIcons[b] || b).join(" ")}

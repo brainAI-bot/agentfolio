@@ -64,6 +64,7 @@ export async function GET(req: NextRequest) {
     reputationRank: a.reputationRank,
     jobsCompleted: a.jobsCompleted,
     rating: a.rating,
+    reviewCount: a.reviewCount,
     registeredAt: a.registeredAt,
     status: a.status,
     unclaimed: a.unclaimed,

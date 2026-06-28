@@ -1,5 +1,6 @@
 export const revalidate = 120;
 import { getAllAgents, getAllJobs } from "@/lib/data";
+import { getTrustSurface } from "@/lib/trust-surface";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || "";
@@ -15,12 +16,14 @@ const DEPLOYER_WALLET = "Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const PLATFORM_FEE_RATE = 0.05;
 
-const TIER_NAMES: Record<number, string> = { 0: "Iron", 1: "Bronze", 2: "Silver", 3: "Gold" };
+const TIER_NAMES: Record<number, string> = { 0: "Unclaimed", 1: "Registered", 2: "Verified", 3: "Established", 4: "Trusted", 5: "Sovereign" };
 const TIER_COLORS: Record<number, string> = {
   0: "#6b7280",
-  1: "#cd7f32",
-  2: "#c0c0c0",
-  3: "#ffd700",
+  1: "#eab308",
+  2: "#3b82f6",
+  3: "#10b981",
+  4: "#f97316",
+  5: "#8b5cf6",
 };
 
 const FEE_TIERS = [
@@ -147,11 +150,11 @@ export default async function StatsPage() {
   const maxVerCount = Math.max(...verificationCounts.map((v) => v.count), 1);
 
   // === Trust Tier Distribution ===
-  const tierCounts = [0, 1, 2, 3].map((t) => ({
+  const tierCounts = [0, 1, 2, 3, 4, 5].map((t) => ({
     tier: t,
     name: TIER_NAMES[t],
     color: TIER_COLORS[t],
-    count: agents.filter((a) => a.tier === t).length,
+    count: agents.filter((a) => getTrustSurface(a).verificationLevel === t).length,
   }));
   const maxTierCount = Math.max(...tierCounts.map((t) => t.count), 1);
 
@@ -426,11 +429,14 @@ export default async function StatsPage() {
                 <th className="text-left py-2 pr-3">Agent</th>
                 <th className="text-right py-2 pr-3">Score</th>
                 <th className="text-left py-2 pr-3">Tier</th>
+                <th className="text-left py-2 pr-3">Reviews</th>
+                <th className="text-left py-2 pr-3">Jobs</th>
                 <th className="text-right py-2">Verifications</th>
               </tr>
             </thead>
             <tbody>
               {top10.map((a, i) => {
+                const trust = getTrustSurface(a);
                 const verCount = Object.values(a.verifications).filter(
                   (v) => v && typeof v === "object" && "verified" in v && v.verified
                 ).length;
@@ -442,10 +448,12 @@ export default async function StatsPage() {
                         {a.name}
                       </a>
                     </td>
-                    <td className="py-2 pr-3 text-right" style={{ color: "var(--text-primary)" }}>{a.trustScore}</td>
+                    <td className="py-2 pr-3 text-right" style={{ color: "var(--text-primary)" }}>{trust.trustScoreFraction}</td>
                     <td className="py-2 pr-3">
-                      <span style={{ color: TIER_COLORS[a.tier] || "#6b7280" }}>{TIER_NAMES[a.tier] || "Iron"}</span>
+                      <span style={{ color: TIER_COLORS[trust.verificationLevel] || "#6b7280" }}>{trust.tierLabel}</span>
                     </td>
+                    <td className="py-2 pr-3" style={{ color: "var(--text-secondary)" }}>{trust.reviewSummary}</td>
+                    <td className="py-2 pr-3" style={{ color: "var(--text-secondary)" }}>{trust.jobHistory}</td>
                     <td className="py-2 text-right" style={{ color: "var(--text-secondary)" }}>{verCount}</td>
                   </tr>
                 );

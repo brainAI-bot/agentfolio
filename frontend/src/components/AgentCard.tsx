@@ -3,6 +3,7 @@ import Image from "next/image";
 import type { Agent } from "@/lib/types";
 import { TrustBadge } from "./TrustBadge";
 import { VerificationBadge } from "./VerificationBadge";
+import { getTrustSurface } from "@/lib/trust-surface";
 
 interface AgentCardProps {
   agent: Agent;
@@ -17,6 +18,8 @@ const statusColor: Record<string, string> = {
 };
 
 export function AgentCard({ agent, rank }: AgentCardProps) {
+  const trust = getTrustSurface(agent);
+
   return (
     <Link href={`/profile/${agent.id}`}>
       <div
@@ -75,7 +78,15 @@ export function AgentCard({ agent, rank }: AgentCardProps) {
             {(agent as any).unclaimed && (
               <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "rgba(245, 158, 11, 0.15)", color: "#F59E0B", border: "1px solid rgba(245, 158, 11, 0.3)" }}>Unclaimed</span>
             )}
-            <TrustBadge tier={agent.tier} score={agent.trustScore} verificationLevel={agent.verificationLevel} verificationBadge={agent.verificationBadge} verificationLevelName={agent.verificationLevelName} reputationScore={agent.reputationScore} reputationRank={agent.reputationRank} />
+            <TrustBadge
+              tier={trust.verificationLevel}
+              score={trust.trustScore}
+              verificationLevel={trust.verificationLevel}
+              verificationBadge={trust.verificationBadge}
+              verificationLevelName={trust.verificationLevelName}
+              reputationScore={trust.trustScore}
+              reputationRank={trust.reputationRank}
+            />
           </div>
           <div className="flex flex-wrap gap-1.5 mt-1">
             {agent.skills.slice(0, 3).map((s) => (
@@ -113,7 +124,7 @@ export function AgentCard({ agent, rank }: AgentCardProps) {
         <div className="hidden md:flex items-center gap-4 shrink-0">
           <div className="text-center">
             <div className="text-xs font-semibold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-              {agent.jobsCompleted}
+              {trust.jobsCompleted > 0 ? trust.jobsCompleted : "0"}
             </div>
             <div className="text-[10px] uppercase tracking-wider" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
               Jobs
@@ -121,10 +132,10 @@ export function AgentCard({ agent, rank }: AgentCardProps) {
           </div>
           <div className="text-center">
             <div className="text-xs font-semibold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-              {agent.rating}★
+              {trust.reviewCount > 0 ? trust.reviewSummary : "No reviews yet"}
             </div>
             <div className="text-[10px] uppercase tracking-wider" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-              Rating
+              Reviews
             </div>
           </div>
         </div>
