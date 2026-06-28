@@ -4,6 +4,12 @@
 
 Organic only. No paid spend, cold DMs, cold email, public-launch claims, partnership claims, legal handling, complaint handling, money handling, credential handling, Solana writes, keypair handling, or unsupported numbers.
 
+## Binding Rules
+
+- Never cold-tag or @-mention accounts that are not already in-thread; this sits alongside the no-cold-DM and no-cold-email rule.
+- One reply per thread, with no follow-on pile-on.
+- Add value or stay silent. Skip when there is no on-board, evidence-led point to make.
+
 ## Rate Caps
 
 | Channel family | Daily cap | Notes |
