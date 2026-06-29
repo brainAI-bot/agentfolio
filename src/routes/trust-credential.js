@@ -78,7 +78,7 @@ function scoreTier(score) {
 function registerTrustCredentialRoutes(app) {
   const profileStore = require('../profile-store');
   const { computeScoreWithOnChain } = require('../scoring');
-  const { getV3Score } = require('../../v3-score-service');
+  const { getV3Score } = require('../v3-score-service');
 
   // ── Verify route MUST come before :agentId to avoid parameter capture ──
 
