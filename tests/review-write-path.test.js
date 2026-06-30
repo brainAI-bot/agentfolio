@@ -1,9 +1,54 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { registerReviewChallengeRoutes } = require('../src/api/review-challenge');
 
 const ROOT = path.join(__dirname, '..');
+
+function makeMarketplaceFixture(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-review-gate-'));
+  const marketplaceDir = path.join(dir, 'marketplace');
+  for (const subdir of ['jobs', 'applications', 'escrow']) {
+    fs.mkdirSync(path.join(marketplaceDir, subdir), { recursive: true });
+  }
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return marketplaceDir;
+}
+
+function writeFixtureJSON(marketplaceDir, subdir, id, value) {
+  fs.writeFileSync(
+    path.join(marketplaceDir, subdir, `${id}.json`),
+    JSON.stringify(value, null, 2),
+  );
+}
+
+async function postReviewChallenge(marketplaceDir, body) {
+  const routes = new Map();
+  const app = {
+    post(route, handler) {
+      routes.set(route, handler);
+    },
+  };
+  registerReviewChallengeRoutes(app, { marketplaceDir });
+
+  let status = 200;
+  let responseBody;
+  const res = {
+    status(code) {
+      status = code;
+      return this;
+    },
+    json(value) {
+      responseBody = value;
+      return this;
+    },
+  };
+
+  await routes.get('/api/reviews/challenge')({ body }, res);
+  return { status, body: responseBody };
+}
 
 test('production server mounts signed review write routes before the fallback read stub', () => {
   const source = fs.readFileSync(path.join(ROOT, 'src', 'server.js'), 'utf8');
@@ -63,4 +108,71 @@ test('profile review form falls back to signed reviews when live Solana writes a
   );
   assert.match(source, /\{v3Available && v3WritesEnabled && \(/);
   assert.match(source, /setEscrowCheck\(\{ checking: false, hasEscrow: true, checked: true \}\);/);
+});
+
+test('signed review challenge fails closed without a completed released escrow job', async (t) => {
+  const marketplaceDir = makeMarketplaceFixture(t);
+
+  const result = await postReviewChallenge(marketplaceDir, {
+    reviewerId: 'client_agent',
+    revieweeId: 'worker_agent',
+    rating: 5,
+    chain: 'ethereum',
+  });
+
+  assert.equal(result.status, 403);
+  assert.equal(result.body.success, false);
+  assert.match(result.body.error, /completed job with released escrow/);
+});
+
+test('signed review challenge rejects completed jobs that have no released escrow evidence', async (t) => {
+  const marketplaceDir = makeMarketplaceFixture(t);
+  writeFixtureJSON(marketplaceDir, 'jobs', 'job_no_escrow', {
+    id: 'job_no_escrow',
+    status: 'completed',
+    clientId: 'client_agent',
+    acceptedApplicant: 'worker_agent',
+  });
+
+  const result = await postReviewChallenge(marketplaceDir, {
+    reviewerId: 'client_agent',
+    revieweeId: 'worker_agent',
+    rating: 5,
+    chain: 'ethereum',
+  });
+
+  assert.equal(result.status, 403);
+  assert.equal(result.body.success, false);
+});
+
+test('signed review challenge is allowed after released escrow for the completed job', async (t) => {
+  const marketplaceDir = makeMarketplaceFixture(t);
+  writeFixtureJSON(marketplaceDir, 'applications', 'app_worker', {
+    id: 'app_worker',
+    applicantId: 'worker_agent',
+    status: 'accepted',
+  });
+  writeFixtureJSON(marketplaceDir, 'jobs', 'job_released', {
+    id: 'job_released',
+    status: 'completed',
+    clientId: 'client_agent',
+    applications: ['app_worker'],
+    escrowId: 'escrow_released',
+  });
+  writeFixtureJSON(marketplaceDir, 'escrow', 'escrow_released', {
+    id: 'escrow_released',
+    jobId: 'job_released',
+    status: 'released',
+  });
+
+  const result = await postReviewChallenge(marketplaceDir, {
+    reviewerId: 'client_agent',
+    revieweeId: 'worker_agent',
+    rating: 5,
+    chain: 'ethereum',
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.success, true);
+  assert.match(result.body.challengeId, /^rc_/);
 });
