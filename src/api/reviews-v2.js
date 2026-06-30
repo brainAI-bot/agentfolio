@@ -6,12 +6,14 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 
-function getDb(readonly = true) {
-  return new Database('/home/ubuntu/agentfolio/data/agentfolio.db', { readonly });
+const DEFAULT_DB_PATH = path.join(__dirname, '..', '..', 'data', 'agentfolio.db');
+
+function getDb(readonly = true, dbPath = DEFAULT_DB_PATH) {
+  return new Database(dbPath, { readonly });
 }
 
-function migrateReviewsV2() {
-  const db = new Database('/home/ubuntu/agentfolio/data/agentfolio.db');
+function migrateReviewsV2(dbPath = DEFAULT_DB_PATH) {
+  const db = new Database(dbPath);
   const cols = db.prepare("PRAGMA table_info(reviews)").all().map(c => c.name);
   
   const additions = [
@@ -34,9 +36,11 @@ function migrateReviewsV2() {
   db.close();
 }
 
-function registerReviewsV2Routes(app) {
+function registerReviewsV2Routes(app, options = {}) {
+  const dbPath = options.dbPath || DEFAULT_DB_PATH;
+
   // Run migration on load
-  try { migrateReviewsV2(); } catch (e) { console.error('[Reviews v2] Migration error:', e.message); }
+  try { migrateReviewsV2(dbPath); } catch (e) { console.error('[Reviews v2] Migration error:', e.message); }
 
   // POST /api/reviews/v2 — submit review with categories
   app.post('/api/reviews/v2', (req, res) => {
@@ -59,7 +63,7 @@ function registerReviewsV2Routes(app) {
     const cc = Math.min(5, Math.max(0, parseInt(category_communication || 0)));
     
     try {
-      const db = getDb(false);
+      const db = getDb(false, dbPath);
       const id = 'rev_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
       
       db.prepare(`INSERT INTO reviews (id, job_id, reviewer_id, reviewee_id, rating, comment, type, created_at, 
@@ -91,7 +95,7 @@ function registerReviewsV2Routes(app) {
     }
     
     try {
-      const db = getDb(false);
+      const db = getDb(false, dbPath);
       const review = db.prepare('SELECT * FROM reviews WHERE id = ?').get(id);
       if (!review) { db.close(); return res.status(404).json({ error: 'Review not found' }); }
       if (review.reviewee_id !== responder_id) {
@@ -119,7 +123,7 @@ function registerReviewsV2Routes(app) {
     if (!agent) return res.status(400).json({ error: 'agent query param required' });
     
     try {
-      const db = getDb();
+      const db = getDb(true, dbPath);
       const reviews = db.prepare('SELECT * FROM reviews WHERE reviewee_id = ? ORDER BY created_at DESC').all(agent);
       db.close();
       
@@ -178,4 +182,4 @@ function registerReviewsV2Routes(app) {
   });
 }
 
-module.exports = { registerReviewsV2Routes };
+module.exports = { registerReviewsV2Routes, migrateReviewsV2 };
