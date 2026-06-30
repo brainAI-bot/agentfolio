@@ -12,6 +12,35 @@ let addActivity;
 try { addActivity = require('./profile-store').addActivity; } catch { addActivity = () => {}; }
 
 const DATA_DIR = path.join(__dirname, '..', 'data', 'marketplace');
+const SAFE_JOB_ID_RE = /^job_[A-Za-z0-9_-]{1,80}$/;
+
+function validateJobId(jobId) {
+  return typeof jobId === 'string' && SAFE_JOB_ID_RE.test(jobId);
+}
+
+function safeMarketplacePath(kind, id) {
+  const filename = `${id}.json`;
+  const target = path.resolve(DATA_DIR, kind, filename);
+  const base = path.resolve(DATA_DIR, kind) + path.sep;
+  if (!target.startsWith(base)) {
+    throw new Error(`Invalid ${kind} path`);
+  }
+  return target;
+}
+
+function safeJobPath(jobId) {
+  if (!validateJobId(jobId)) {
+    throw new Error('Invalid job id');
+  }
+  return safeMarketplacePath('jobs', jobId);
+}
+
+function safeJobReviewPath(jobId) {
+  if (!validateJobId(jobId)) {
+    throw new Error('Invalid job id');
+  }
+  return safeMarketplacePath('reviews', jobId);
+}
 
 
 function normalizeTrustScoreValue(score) {
@@ -162,11 +191,11 @@ function getAllFiles(dir) {
 }
 
 function readJobReviews(jobId) {
-  return readJSON(path.join(DATA_DIR, 'reviews', `${jobId}.json`)) || [];
+  return readJSON(safeJobReviewPath(jobId)) || [];
 }
 
 function writeJobReviews(jobId, reviews) {
-  writeJSON(path.join(DATA_DIR, 'reviews', `${jobId}.json`), reviews);
+  writeJSON(safeJobReviewPath(jobId), reviews);
 }
 
 // ===== ROUTES =====
@@ -509,7 +538,8 @@ function registerRoutes(app) {
   // POST /api/marketplace/jobs/:id/review — Leave a review after release/completion
   app.post('/api/marketplace/jobs/:id/review', (req, res) => {
     const jobId = req.params.id;
-    const jobPath = path.join(DATA_DIR, 'jobs', `${jobId}.json`);
+    if (!validateJobId(jobId)) return res.status(400).json({ error: 'Invalid job id' });
+    const jobPath = safeJobPath(jobId);
     const job = readJSON(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
 
@@ -558,7 +588,8 @@ function registerRoutes(app) {
   // GET /api/marketplace/jobs/:id/reviews — Read job-scoped marketplace reviews
   app.get('/api/marketplace/jobs/:id/reviews', (req, res) => {
     const jobId = req.params.id;
-    const job = readJSON(path.join(DATA_DIR, 'jobs', `${jobId}.json`));
+    if (!validateJobId(jobId)) return res.status(400).json({ error: 'Invalid job id' });
+    const job = readJSON(safeJobPath(jobId));
     if (!job) return res.status(404).json({ error: 'Job not found' });
     const reviews = readJobReviews(jobId);
     res.json({ jobId, reviews, total: reviews.length });

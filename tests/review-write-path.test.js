@@ -80,6 +80,8 @@ test('profile review writes support the deployed reviewee_id schema', () => {
   const route = source.slice(routeStart, routeEnd);
 
   assert.notEqual(routeStart, -1, 'missing profile review write route');
+  assert.match(source, /const profileReviewWriteLimiter = rateLimit\(/);
+  assert.match(route, /profileReviewWriteLimiter/);
   assert.match(route, /reviewFk === 'reviewee_id'/);
   assert.match(route, /INSERT INTO reviews \(id, job_id, reviewer_id, reviewee_id, rating, comment, type, created_at\)/);
   assert.doesNotMatch(route, /resolvedEmail/, 'review POST must not reference registration-only email variables');
@@ -92,6 +94,24 @@ test('marketplace exposes job-scoped review write and read routes', () => {
   assert.match(source, /app\.post\('\/api\/marketplace\/jobs\/:id\/review'/);
   assert.match(source, /app\.get\('\/api\/marketplace\/jobs\/:id\/reviews'/);
   assert.match(source, /'release_complete'/);
+});
+
+test('marketplace review paths validate job ids before filesystem access', () => {
+  const source = fs.readFileSync(path.join(ROOT, 'src', 'marketplace.js'), 'utf8');
+  const postStart = source.indexOf("app.post('/api/marketplace/jobs/:id/review'");
+  const getStart = source.indexOf("app.get('/api/marketplace/jobs/:id/reviews'");
+  const requestChangesStart = source.indexOf("app.post('/api/marketplace/jobs/:id/request-changes'", getStart);
+  const postRoute = source.slice(postStart, getStart);
+  const getRoute = source.slice(getStart, requestChangesStart);
+
+  assert.match(source, /const SAFE_JOB_ID_RE = \/\^job_\[A-Za-z0-9_-\]\{1,80\}\$\/;/);
+  assert.match(source, /function safeJobReviewPath\(jobId\)/);
+  assert.match(source, /readJSON\(safeJobReviewPath\(jobId\)\)/);
+  assert.match(source, /writeJSON\(safeJobReviewPath\(jobId\), reviews\)/);
+  assert.match(postRoute, /validateJobId\(jobId\)/);
+  assert.match(postRoute, /safeJobPath\(jobId\)/);
+  assert.match(getRoute, /validateJobId\(jobId\)/);
+  assert.match(getRoute, /safeJobPath\(jobId\)/);
 });
 
 test('profile review form falls back to signed reviews when live Solana writes are closed', () => {

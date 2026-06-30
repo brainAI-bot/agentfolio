@@ -18,6 +18,7 @@ const _bs58 = require('bs58');
 const bs58 = _bs58.default || _bs58;
 const path = require('path');
 const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
 const { sendWelcomeEmail } = require('./lib/welcome-email');
 const { assertSolanaIrysWriteEnabled, sendSolanaIrysWriteGateResponse } = require('./lib/write-surface-gate');
 
@@ -84,6 +85,14 @@ const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR ||
 const SATP_NETWORK = process.env.SATP_NETWORK || 'mainnet';
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'agentfolio.db');
+
+const profileReviewWriteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many review submissions, please retry later' },
+});
 
 let db;
 
@@ -1405,7 +1414,7 @@ function registerRoutes(app) {
   });
 
   // ── POST /api/profile/:id/reviews ──────────────────────────────
-  app.post('/api/profile/:id/reviews', (req, res) => {
+  app.post('/api/profile/:id/reviews', profileReviewWriteLimiter, (req, res) => {
     const { reviewer_id, reviewer_name, rating, title, comment, job_id } = req.body;
     if (!reviewer_id || !rating) return res.status(400).json({ error: 'reviewer_id and rating (1-5) are required' });
     const r = parseInt(rating);
