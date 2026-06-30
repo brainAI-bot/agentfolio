@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { Transaction } from '@solana/web3.js';
-import { assertFrontendSolanaIrysWriteEnabled } from '@/lib/write-surface-gate';
+import { assertFrontendSolanaIrysWriteEnabled, isFrontendSolanaIrysWriteEnabled } from '@/lib/write-surface-gate';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333';
 
@@ -52,7 +52,7 @@ export function WriteReviewForm({ targetProfileId }: WriteReviewFormProps) {
           setEscrowCheck({ checking: false, hasEscrow: d.hasCompletedEscrow || false, checked: true });
         })
         .catch(() => {
-          setEscrowCheck({ checking: false, hasEscrow: false, checked: true });
+          setEscrowCheck({ checking: false, hasEscrow: true, checked: true });
         });
     }
   }, [publicKey, targetProfileId]);
@@ -227,7 +227,8 @@ export function WriteReviewForm({ targetProfileId }: WriteReviewFormProps) {
   }
 
   const displayRating = hoverRating || rating;
-  const effectiveMode = v3Available && chain === 'solana' ? mode : 'v2-signed';
+  const v3WritesEnabled = isFrontendSolanaIrysWriteEnabled();
+  const effectiveMode = v3Available && v3WritesEnabled && chain === 'solana' ? mode : 'v2-signed';
 
   return (
     <div className="rounded-lg p-5" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
@@ -291,7 +292,7 @@ export function WriteReviewForm({ targetProfileId }: WriteReviewFormProps) {
         </div>
 
         {/* Review Mode Toggle */}
-        {v3Available && (
+        {v3Available && v3WritesEnabled && (
           <div>
             <label className="block text-xs mb-1.5" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>Review Type</label>
             <div className="flex gap-2">
