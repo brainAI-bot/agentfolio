@@ -216,6 +216,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
     verificationLevel: genesis?.verificationLevel ?? agent.verificationLevel,
     verificationLevelName: genesis?.verificationLabel || agent.verificationLevelName,
     reputationRank: genesis?.verificationLabel || agent.reputationRank,
+    trustEvidenceBacked: !!(genesis || v3Reputation),
     reviewCount: reviews.length || agent.reviewCount,
     rating: displayRating,
   });
@@ -283,6 +284,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                 verificationLevelName={trust.verificationLevelName}
                 reputationScore={trust.trustScore}
                 reputationRank={trust.reputationRank}
+                trustEvidenceBacked={trust.trustEvidenceBacked}
               />
             </div>
             <div className="text-sm mb-2" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>

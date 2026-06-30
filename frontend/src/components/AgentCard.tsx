@@ -86,6 +86,7 @@ export function AgentCard({ agent, rank }: AgentCardProps) {
               verificationLevelName={trust.verificationLevelName}
               reputationScore={trust.trustScore}
               reputationRank={trust.reputationRank}
+              trustEvidenceBacked={trust.trustEvidenceBacked}
             />
           </div>
           <div className="flex flex-wrap gap-1.5 mt-1">
@@ -127,7 +128,7 @@ export function AgentCard({ agent, rank }: AgentCardProps) {
               {trust.jobsCompleted > 0 ? trust.jobsCompleted : "0"}
             </div>
             <div className="text-[10px] uppercase tracking-wider" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-              Jobs
+              {trust.jobsCompleted > 0 ? "Jobs" : "No jobs"}
             </div>
           </div>
           <div className="text-center">

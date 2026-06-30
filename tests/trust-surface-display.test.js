@@ -37,7 +37,7 @@ test('trust surface uses shared fallback copy for unavailable review and job his
   });
 
   assert.equal(trust.trustScoreFraction, '0/800');
-  assert.equal(trust.tierLabel, 'L0 · Unclaimed');
+  assert.equal(trust.tierLabel, 'L0 · Unverified');
   assert.equal(trust.reviewSummary, 'No reviews yet');
   assert.equal(trust.jobHistory, 'No completed jobs yet');
 });
