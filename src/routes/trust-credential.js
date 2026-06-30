@@ -167,7 +167,9 @@ function registerTrustCredentialRoutes(app) {
       try { const t = JSON.parse(profile.tags || '[]'); parsed.tags = Array.isArray(t) ? t : []; } catch (_) {}
       try { const s = JSON.parse(profile.skills || '[]'); parsed.skills = Array.isArray(s) ? s : []; } catch (_) {}
 
-      // 3. Compute trust score — prefer V3 on-chain Genesis Record, fallback to V2
+      // 3. Compute trust score — V3 on-chain Genesis Record is the only
+      // public reputation evidence. V2 remains available for internal
+      // breakdown context, but it must not be issued as verified reputation.
       const scoreResult = await computeScoreWithOnChain(parsed);
       let v3Data = null;
       try {
@@ -175,6 +177,7 @@ function registerTrustCredentialRoutes(app) {
       } catch (e) {
         console.warn('[TrustCredential] V3 score fetch failed for', agentId, e.message);
       }
+      const hasV3Evidence = !!v3Data;
 
       // 4. Build W3C Verifiable Credential payload
       const now = new Date();
@@ -184,10 +187,12 @@ function registerTrustCredentialRoutes(app) {
         id: `did:agentfolio:${agentId}`,
         agentId,
         name: profile.name,
-        trustScore: v3Data ? v3Data.reputationScore : scoreResult.score,
-        maxScore: v3Data ? 800 : scoreResult.maxScore,
-        tier: v3Data ? v3Data.verificationLabel.toUpperCase() : (scoreResult.level || scoreTier(scoreResult.score)),
-        scoreVersion: v3Data ? 'v3' : 'v2',
+        trustScore: hasV3Evidence ? v3Data.reputationScore : 0,
+        maxScore: 800,
+        tier: hasV3Evidence ? v3Data.verificationLabel.toUpperCase() : 'PENDING_EVIDENCE',
+        scoreVersion: hasV3Evidence ? 'v3' : 'pending-v3-evidence',
+        trustEvidenceBacked: hasV3Evidence,
+        reputationStatus: hasV3Evidence ? 'evidence-backed' : 'pending on-chain evidence',
         verificationCount: (() => {
           // Merge DB verifications with chain-cache verifications for full count
           const dbCount = parsed.verifications.filter(v => v.verified !== false).length;
@@ -202,17 +207,17 @@ function registerTrustCredentialRoutes(app) {
             return Math.max(dbCount, allPlatforms.size);
           } catch { return dbCount; }
         })(),
-        onChainRegistered: v3Data ? true : (scoreResult.onChainRegistered || parsed.metadata?.registeredOnChain || parsed.verifications?.some(v => v.platform === 'satp' && v.verified) || false),
+        onChainRegistered: hasV3Evidence ? true : (scoreResult.onChainRegistered || parsed.metadata?.registeredOnChain || parsed.verifications?.some(v => v.platform === 'satp' && v.verified) || false),
         breakdown: (() => {
           // V3 scoring uses different category structure than V2
           const cats = scoreResult.breakdown?.trustScore?.categories || {};
           const verCount = scoreResult.verificationCount || scoreResult.breakdown?.verificationLevel?.count || 0;
-          const finalTotal = v3Data ? v3Data.reputationScore : (scoreResult.trustScore || scoreResult.score || 0);
+          const finalTotal = hasV3Evidence ? v3Data.reputationScore : 0;
 
           // When V3 Genesis Record overrides, the difference is on-chain reputation premium
           const v2Total = (cats.profileCompleteness || 0) + (cats.socialProof || 0) +
                           (cats.marketplace || 0) + (cats.onchain || 0) + (cats.tenure || 0);
-          const onChainPremium = v3Data ? Math.max(finalTotal - v2Total, 0) : 0;
+          const onChainPremium = hasV3Evidence ? Math.max(finalTotal - v2Total, 0) : 0;
 
           // Compute raw (uncapped) component scores
           const raw = {

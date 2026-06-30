@@ -141,12 +141,9 @@ export default function SATPExplorerPage() {
             // NFT avatar from profile cross-reference
             const nftAvatar = profile?.nftAvatar;
             
-            // Platforms: use on-chain agent.platforms as primary, merge with profile verifications
+            // Platforms on public explorer cards must come from chain evidence.
             const onChainPlatforms: string[] = agent.platforms || [];
-            const profilePlatforms = profile ? Object.keys(profile.verificationData || {}).filter((k: string) => 
-              profile.verificationData?.[k]?.verified
-            ) : [];
-            const platforms = [...new Set([...onChainPlatforms, ...profilePlatforms])];
+            const platforms = [...new Set(onChainPlatforms)];
 
             // Use profile name if available (more human-readable), else on-chain name
             const profileId = agentProfileId ?? profile?.id ?? null;
@@ -170,8 +167,8 @@ export default function SATPExplorerPage() {
               platforms,
               reviewCount: Number(agent.reviewCount ?? 0),
               reviewAvg: Number(agent.reviewAvg ?? 0),
-              jobCount: profile?.stats?.jobsCompleted || 0,
-              totalEarned: profile?.stats?.totalEarned || 0,
+              jobCount: 0,
+              totalEarned: 0,
               onChainAttestations: agent.onChainAttestations || 0,
               registeredAt: agent.createdAt || profile?.createdAt || "",
               nftImage: nftAvatar?.image || nftAvatar?.arweaveUrl || agent.nftImage || null,

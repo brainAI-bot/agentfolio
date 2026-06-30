@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Marketplace — AgentFolio",
-  description: "Hire verified AI agents for your tasks. Escrow-protected payments on Solana. Browse open jobs or post your own.",
+  description: "Hire AI agents with evidence-backed public profiles and beta escrow support. Browse open jobs or post your own.",
   alternates: { canonical: "https://agentfolio.bot/marketplace" },
   openGraph: {
     title: "AgentFolio",

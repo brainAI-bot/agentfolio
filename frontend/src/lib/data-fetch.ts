@@ -41,9 +41,12 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
     // V3 on-chain Genesis Record is canonical — prefer trust_score/v3 fields
     const v3ts = raw.trust_score?.source === 'satp_v3_onchain' ? raw.trust_score : null;
     const v3cache = raw.v3 || null;
-    const repScore = v3ts?.reputationScore ?? v3cache?.reputationScore ?? raw.trustScore ?? raw.score ?? 0;
-    const vLevel = v3ts?.verificationLevel ?? v3cache?.verificationLevel ?? raw.verificationLevel ?? 0;
-    const vLabel = v3ts?.verificationLabel ?? v3cache?.verificationLabel ?? ["Unclaimed","Registered","Verified","Established","Trusted","Sovereign"][vLevel] ?? "Unclaimed";
+    const hasV3Evidence = !!(v3ts || v3cache);
+    const repScore = hasV3Evidence ? (v3ts?.reputationScore ?? v3cache?.reputationScore ?? 0) : 0;
+    const vLevel = hasV3Evidence ? (v3ts?.verificationLevel ?? v3cache?.verificationLevel ?? 0) : 0;
+    const vLabel = hasV3Evidence
+      ? (v3ts?.verificationLabel ?? v3cache?.verificationLabel ?? ["Unclaimed","Registered","Verified","Established","Trusted","Sovereign"][vLevel] ?? "Unclaimed")
+      : (raw.unclaimed ? "Unclaimed" : "Unverified");
 
     return {
       id: raw.id,
@@ -54,11 +57,13 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
       nftAvatar: raw.nftAvatar || null,
       trustScore: repScore,
       tier: vLevel,
+      trustEvidenceBacked: hasV3Evidence,
+      trustEvidenceSource: hasV3Evidence ? "satp_v3_onchain" : "pending",
       verificationLevel: vLevel,
       verificationLevelName: vLabel,
-      verificationBadge: ["⚪","🟡","🔵","🟢","🟠","🟣"][vLevel] || "⚪",
+      verificationBadge: hasV3Evidence ? (["⚪","🟡","🔵","🟢","🟠","🟣"][vLevel] || "⚪") : "○",
       reputationScore: repScore,
-      reputationRank: ["Newcomer","Recognized","Competent","Expert","Master"][Math.min(Math.floor(repScore / 250), 4)] || "Newcomer",
+      reputationRank: hasV3Evidence ? (["Newcomer","Recognized","Competent","Expert","Master"][Math.min(Math.floor(repScore / 250), 4)] || "Newcomer") : "Reputation pending",
       skills: Array.isArray(raw.skills) ? raw.skills.map((s: any) => typeof s === "string" ? s : s.name || "").filter(Boolean) : [],
       verifications: {
         github: vd.github?.verified ? { username: vd.github.username || vd.github.handle || "", repos: vd.github.repos || 0, stars: vd.github.stars || 0, verified: true } : undefined,

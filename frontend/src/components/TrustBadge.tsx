@@ -9,6 +9,7 @@ interface TrustBadgeProps {
   verificationLevelName?: string;
   reputationScore?: number;
   reputationRank?: string;
+  trustEvidenceBacked?: boolean;
 }
 
 const levelColors: Record<number, { bg: string; color: string }> = {
@@ -38,7 +39,7 @@ const levelDescriptions: Record<number, string> = {
   5: 'Sovereign — human-verified + soulbound avatar',
 };
 
-export function TrustBadge({ tier, score, verificationLevel, verificationBadge, verificationLevelName, reputationScore, reputationRank }: TrustBadgeProps) {
+export function TrustBadge({ tier, score, verificationLevel, verificationBadge, verificationLevelName, reputationScore, reputationRank, trustEvidenceBacked }: TrustBadgeProps) {
   const [showTooltip, setShowTooltip] = useState(false);
   const [tooltipPos, setTooltipPos] = useState<'bottom' | 'top'>('bottom');
   const badgeRef = useRef<HTMLDivElement>(null);
@@ -56,6 +57,12 @@ export function TrustBadge({ tier, score, verificationLevel, verificationBadge, 
     const trustScore = reputationScore ?? 0;
     const trustPercent = Math.min((trustScore / 800) * 100, 100);
     const displayName = verificationLevelName || levelNames[verificationLevel] || 'Unknown';
+    const evidenceBacked = trustEvidenceBacked !== false;
+    const trustDisplay = evidenceBacked ? `${trustScore} Trust` : 'Pending evidence';
+    const scoreDetail = evidenceBacked ? `${trustScore}/800` : 'No on-chain score';
+    const levelDescription = !evidenceBacked && verificationLevel === 0
+      ? 'No evidence-backed verification level has been found yet'
+      : (levelDescriptions[verificationLevel] || '');
 
     return (
       <div
@@ -75,7 +82,7 @@ export function TrustBadge({ tier, score, verificationLevel, verificationBadge, 
           className="text-sm font-semibold"
           style={{ fontFamily: 'var(--font-mono)', color: lc.color }}
         >
-          {trustScore} Trust
+          {trustDisplay}
         </span>
 
         {showTooltip && (
@@ -114,7 +121,7 @@ export function TrustBadge({ tier, score, verificationLevel, verificationBadge, 
                 ))}
               </div>
               <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
-                {levelDescriptions[verificationLevel] || ''}
+                {levelDescription}
               </p>
             </div>
 
@@ -125,7 +132,7 @@ export function TrustBadge({ tier, score, verificationLevel, verificationBadge, 
                   Trust Score
                 </span>
                 <span className="text-xs font-bold" style={{ color: lc.color }}>
-                  {trustScore}/800
+                  {scoreDetail}
                 </span>
               </div>
               <div className="h-1.5 rounded-full" style={{ background: 'var(--bg-tertiary)' }}>
@@ -135,7 +142,7 @@ export function TrustBadge({ tier, score, verificationLevel, verificationBadge, 
                 />
               </div>
               <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                Earned through platform engagement
+                {evidenceBacked ? 'Earned through on-chain SATP evidence' : 'No on-chain reputation score has been found yet'}
               </p>
             </div>
 

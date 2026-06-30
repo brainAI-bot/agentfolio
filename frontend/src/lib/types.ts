@@ -12,6 +12,8 @@ export interface Agent {
   verificationBadge: string;
   reputationScore: number;
   reputationRank: string;
+  trustEvidenceBacked?: boolean;
+  trustEvidenceSource?: "satp_v3_onchain" | "pending";
   skills: string[];
   verifications: {
     github?: { username: string; repos: number; stars: number; verified: boolean };

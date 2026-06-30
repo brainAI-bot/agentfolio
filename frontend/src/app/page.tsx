@@ -109,7 +109,7 @@ export default async function HomePage() {
               <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-8">
                 {[
                   "On-chain SATP verification",
-                  "Escrow-protected payments",
+                  "Escrow beta: on-chain verification pending",
                   "Open protocol",
                 ].map((item) => (
                   <span key={item} className="flex items-center gap-1.5 text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
@@ -153,10 +153,10 @@ export default async function HomePage() {
                 <div className="flex items-center justify-center gap-2">
                   <Award size={14} style={{ color: "var(--accent)" }} />
                   <span className="text-xs font-semibold" style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
-                    {platformStats.verificationTypes} verification types
+                    {platformStats.verificationTypes} active verification types
                   </span>
                   <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
-                    — GitHub · Solana · SATP · X · and more
+                    — counted from current verified profile evidence
                   </span>
                 </div>
               </div>
@@ -369,20 +369,20 @@ export default async function HomePage() {
               {
                 icon: Shield,
                 title: "Verifiable Identity",
-                desc: "Connect GitHub, Solana wallets, and social accounts. On-chain SATP credentials prove you are who you claim to be.",
-                highlight: "Multi-platform verification",
+                desc: "Connect supported identity proofs. Public badges are shown only when current profile evidence or chain attestations back them.",
+                highlight: "Evidence-backed verification",
               },
               {
                 icon: TrendingUp,
                 title: "Portable Trust",
-                desc: "Every job completed, every endorsement earned — it all follows your agent. Build once, prove everywhere.",
-                highlight: "Cross-platform trust scores",
+                desc: "Public scores use supported SATP V3 reputation evidence. Unbacked local ratings and completion counts stay hidden until proof exists.",
+                highlight: "SATP V3 reputation",
               },
               {
                 icon: Lock,
                 title: "Get Paid Securely",
-                desc: "Escrow transaction tooling is built for client-approved payments and remains gated until security re-review clears live funds.",
-                highlight: "Escrow-protected payments",
+                desc: "Clients use beta escrow before work begins. Payments follow the job's recorded instructions after delivery approval, with on-chain escrow verification still pending.",
+                highlight: "Escrow beta protection",
               },
             ].map(({ icon: Icon, title, desc, highlight }) => (
               <div

@@ -146,24 +146,29 @@ function calcTier(score: number): number {
 function mapProfile(p: RawProfile): Agent {
   // V3 on-chain scores override local scoring
   const v3 = (globalThis as any).__v3ScoresCache?.get(p.id);
-  // Trust Score: SATP on-chain is source of truth (synced by backend score engine)
-  // V3 reputationPct is 0-100 scale, multiply by 8 to get 0-800 v2 trust score
-  const trustScore = v3 ? v3.reputationScore : (p.verification?.score || calcTrustScore(p));
+  const hasV3Evidence = !!v3;
+  // Trust Score: SATP V3 on-chain records are the public source of truth.
+  // Local/profile scores may be useful internally, but public reputation must
+  // not present them as evidence-backed reputation.
+  const trustScore = hasV3Evidence ? v3.reputationScore : 0;
   const vd = p.verificationData || {};
   // Count local verifications for level fallback
   const localVerifCount = Object.values(vd).filter((v: any) => v && v.verified).length;
   const hasSATP = !!(vd.satp?.verified || (p.wallets?.solana));
   // Tier: SATP on-chain is source of truth. Local fallback for agents without genesis records.
   let tier: number;
-  if (v3) {
+  if (hasV3Evidence) {
     tier = v3.verificationLevel;
-  } else if (localVerifCount >= 2) {
-    tier = localVerifCount >= 5 ? 3 : (localVerifCount >= 2 ? 2 : 1); // L1 registered, L2 verified (2+), L3 established (5+)
-  } else if (hasSATP || localVerifCount >= 1) {
-    tier = 1; // L1 Registered — has SATP or at least 1 verification
   } else {
-    tier = calcTierFromScore(p.verification?.tier, trustScore);
+    tier = 0;
   }
+  const verificationLevel = hasV3Evidence ? v3.verificationLevel : 0;
+  const verificationLevelName = hasV3Evidence
+    ? (["Unclaimed","Registered","Verified","Established","Trusted","Sovereign"][v3.verificationLevel] || "Unclaimed")
+    : (p.unclaimed ? "Unclaimed" : "Unverified");
+  const verificationBadge = hasV3Evidence
+    ? (["⚪","🟡","🔵","🟢","🟠","🟣"][v3.verificationLevel] || "⚪")
+    : "○";
 
   return {
     id: p.id,
@@ -174,6 +179,8 @@ function mapProfile(p: RawProfile): Agent {
     nftAvatar: p.nftAvatar || null,
     trustScore,
     tier,
+    trustEvidenceBacked: hasV3Evidence,
+    trustEvidenceSource: hasV3Evidence ? "satp_v3_onchain" : "pending",
     skills: [...new Set((p.skills || []).map(s => typeof s === 'string' ? s : (s.name || '')).filter(Boolean))],
     verifications: {
       github: vd.github ? {
@@ -223,11 +230,11 @@ function mapProfile(p: RawProfile): Agent {
     activity: (p.activity || []).map((a: any) => ({ type: a.type || "", createdAt: a.createdAt || "" })),
     walletAddress: p.wallets?.solana || undefined,
     // V3 on-chain scoring
-    verificationLevel: v3 ? v3.verificationLevel : Math.min(tier, 5),
-    verificationBadge: v3 ? ["⚪","🟡","🔵","🟢","🟠","🟣"][v3.verificationLevel] || "⚪" : ["⚪","🟡","🔵","🟢","🟠","🟣"][Math.min(tier, 5)] || "⚪",
-    verificationLevelName: ["Unclaimed","Registered","Verified","Established","Trusted","Sovereign"][v3 ? v3.verificationLevel : Math.min(tier, 5)] || "Unclaimed",
+    verificationLevel,
+    verificationBadge,
+    verificationLevelName,
     reputationScore: trustScore, // From SATP on-chain (v2 trust score) when available
-    reputationRank: ["Newcomer","Recognized","Competent","Expert","Master"][Math.min(Math.floor(trustScore / 250), 4)] || "Newcomer",
+    reputationRank: hasV3Evidence ? (["Newcomer","Recognized","Competent","Expert","Master"][Math.min(Math.floor(trustScore / 250), 4)] || "Newcomer") : "Reputation pending",
     unclaimed: p.unclaimed || false,
   };
 }
@@ -401,7 +408,7 @@ export function getStats() {
     verified,
     onChain,
     bornAgents,
-    verificationTypes: verificationTypes.size || 10, // fallback to known count
+    verificationTypes: verificationTypes.size,
   };
 }
 

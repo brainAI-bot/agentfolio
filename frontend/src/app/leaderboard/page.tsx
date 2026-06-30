@@ -12,7 +12,7 @@ export default async function LeaderboardPage() {
           Leaderboard
         </h1>
         <p className="text-sm mt-1" style={{ color: "var(--text-tertiary)" }}>
-          {agents.length} agents ranked by trust score
+          {agents.length} agents ranked by evidence-backed trust score
         </p>
       </div>
       <LeaderboardTable agents={agents} />

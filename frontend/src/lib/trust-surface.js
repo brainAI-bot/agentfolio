@@ -2,6 +2,7 @@ const TRUST_LEVEL_NAMES = ['Unclaimed', 'Registered', 'Verified', 'Established',
 const TRUST_LEVEL_BADGES = ['⚪', '🟡', '🔵', '🟢', '🟠', '🟣'];
 const UNAVAILABLE_REVIEW_COPY = 'No reviews yet';
 const UNAVAILABLE_JOB_COPY = 'No completed jobs yet';
+const PENDING_REPUTATION_COPY = 'Pending evidence';
 
 function finiteNumber(value, fallback = 0) {
   const numeric = Number(value);
@@ -47,6 +48,12 @@ function formatJobHistory(jobsCompleted) {
 }
 
 function getTrustSurface(agent = {}, overrides = {}) {
+  const evidenceBacked = Boolean(
+    overrides.trustEvidenceBacked
+      ?? overrides.evidenceBacked
+      ?? agent.trustEvidenceBacked
+      ?? (agent.trustEvidenceSource === 'satp_v3_onchain')
+  );
   const trustScore = normalizeTrustScore(
     overrides.trustScore ?? overrides.reputationScore ?? agent.reputationScore ?? agent.trustScore
   );
@@ -55,7 +62,7 @@ function getTrustSurface(agent = {}, overrides = {}) {
   );
   const verificationLevelName = overrides.verificationLevelName
     || agent.verificationLevelName
-    || TRUST_LEVEL_NAMES[verificationLevel]
+    || (!evidenceBacked && verificationLevel === 0 ? 'Unverified' : TRUST_LEVEL_NAMES[verificationLevel])
     || TRUST_LEVEL_NAMES[0];
   const verificationBadge = overrides.verificationBadge
     || TRUST_LEVEL_BADGES[verificationLevel]
@@ -75,11 +82,14 @@ function getTrustSurface(agent = {}, overrides = {}) {
     trustScore,
     trustScoreLabel: formatTrustScore(trustScore),
     trustScoreFraction: formatTrustScoreFraction(trustScore),
+    trustEvidenceBacked: evidenceBacked,
+    trustEvidenceSource: evidenceBacked ? 'satp_v3_onchain' : 'pending',
+    reputationEvidenceLabel: evidenceBacked ? 'Evidence-backed reputation' : PENDING_REPUTATION_COPY,
     verificationLevel,
     verificationLevelName,
     verificationBadge,
     tierLabel: formatTrustTier(verificationLevel, verificationLevelName),
-    reputationRank: overrides.reputationRank || agent.reputationRank || verificationLevelName,
+    reputationRank: overrides.reputationRank || agent.reputationRank || (evidenceBacked ? verificationLevelName : 'Reputation pending'),
     reviewCount,
     rating,
     reviewSummary: formatReviewSummary(reviewCount, rating),
@@ -93,6 +103,7 @@ module.exports = {
   TRUST_LEVEL_BADGES,
   UNAVAILABLE_REVIEW_COPY,
   UNAVAILABLE_JOB_COPY,
+  PENDING_REPUTATION_COPY,
   formatTrustScore,
   formatTrustScoreFraction,
   formatTrustTier,

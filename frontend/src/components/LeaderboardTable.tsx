@@ -88,7 +88,7 @@ export function LeaderboardTable({ agents: initialAgents, totalAgents: initialTo
                 color: "var(--text-secondary)",
               }}
             >
-              <option value="trustScore">Trust Score</option>
+              <option value="trustScore">Evidence Trust</option>
               <option value="newest">Newest</option>
               <option value="jobs">Most Jobs</option>
               <option value="rating">Top Rated</option>

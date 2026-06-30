@@ -56,6 +56,8 @@ export async function GET(req: NextRequest) {
     nftAvatar: a.nftAvatar,
     trustScore: a.trustScore,
     tier: a.tier,
+    trustEvidenceBacked: a.trustEvidenceBacked,
+    trustEvidenceSource: a.trustEvidenceSource,
     skills: a.skills.slice(0, 5),
     verificationLevel: a.verificationLevel,
     verificationBadge: a.verificationBadge,
@@ -69,12 +71,12 @@ export async function GET(req: NextRequest) {
     status: a.status,
     unclaimed: a.unclaimed,
     verifications: {
-      solana: a.verifications?.solana ? { verified: true } : undefined,
-      github: a.verifications?.github ? { verified: true } : undefined,
-      x: a.verifications?.x ? { verified: true } : undefined,
-      satp: a.verifications?.satp ? { verified: true } : undefined,
-      ethereum: a.verifications?.ethereum ? { verified: true } : undefined,
-      agentmail: a.verifications?.agentmail ? { verified: true } : undefined,
+      solana: a.verifications?.solana ? { verified: !!a.verifications.solana.verified } : undefined,
+      github: a.verifications?.github ? { verified: !!a.verifications.github.verified } : undefined,
+      x: a.verifications?.x ? { verified: !!a.verifications.x.verified } : undefined,
+      satp: a.verifications?.satp ? { verified: !!a.verifications.satp.verified } : undefined,
+      ethereum: a.verifications?.ethereum ? { verified: !!a.verifications.ethereum.verified } : undefined,
+      agentmail: a.verifications?.agentmail ? { verified: !!a.verifications.agentmail.verified } : undefined,
     },
   }));
 
