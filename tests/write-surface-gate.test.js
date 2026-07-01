@@ -63,11 +63,23 @@ test('live escrow write gate requires explicit opt-in and honors kill switch', (
   }), {
     enabled: false,
     killSwitchActive: true,
+    status: 'live_funds_blocked_by_kill_switch',
+    liveFundsCleared: false,
+    verifiedRuntime: {
+      network: 'devnet',
+      pdaDerive: 'verified',
+    },
+    runtimeNetwork: 'devnet',
+    mainnetLiveFundsCleared: false,
+    publicCopy: 'Devnet-safe escrow runtime smoke is verified; mainnet/live-funds escrow remains gated pending security re-review.',
     enableWith: ENABLE_LIVE_ESCROW_ENV,
     killSwitchEnv: ESCROW_KILL_SWITCH_ENV,
   });
 
-  assert.equal(liveEscrowWriteGatePayload('escrow release').code, LIVE_ESCROW_READ_ONLY_CODE);
+  const gatedPayload = liveEscrowWriteGatePayload('escrow release');
+  assert.equal(gatedPayload.code, LIVE_ESCROW_READ_ONLY_CODE);
+  assert.equal(gatedPayload.liveEscrow.runtimeNetwork, 'devnet');
+  assert.equal(gatedPayload.liveEscrow.mainnetLiveFundsCleared, false);
   const previousKill = process.env[ESCROW_KILL_SWITCH_ENV];
   process.env[ESCROW_KILL_SWITCH_ENV] = '1';
   try {

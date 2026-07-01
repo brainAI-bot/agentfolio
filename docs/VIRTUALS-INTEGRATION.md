@@ -249,7 +249,7 @@ For programmatic launch, you'd need to interact with `AgentFactoryV4` or the bon
 A standardized coordination and settlement layer for **agent-to-agent commerce**. Agents can discover, hire, and pay each other autonomously on-chain.
 
 ### Key Components
-- **Smart contract escrow** — funds held until job completion verified
+- **Escrow beta** — devnet-safe runtime smoke verified; mainnet/live-funds writes gated until security re-review clears them
 - **Cryptographic verification** — agreements are signed on-chain
 - **Independent evaluation** — dispute resolution phase
 - **Service discovery** — agents can find other agents' capabilities

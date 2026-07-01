@@ -11,7 +11,7 @@ const Connection = SolConnection;
 import type { Job } from "@/lib/types";
 import { Briefcase, Lock, Unlock, CheckCircle, AlertTriangle, Clock, X, Send, DollarSign, UserCheck, Link2, Shield } from "lucide-react";
 import { buildUpdateAgentTransaction, fetchAgentProfile, SOLANA_RPC } from "@/lib/identity-registry";
-import { assertFrontendSolanaIrysWriteEnabled } from "@/lib/write-surface-gate";
+import { assertFrontendLiveEscrowEnabled, assertFrontendSolanaIrysWriteEnabled } from "@/lib/write-surface-gate";
 import {
   buildV3EscrowCreate,
   buildV3Release,
@@ -30,9 +30,9 @@ const statusConfig: Record<string, { label: string; color: string; icon: React.E
 };
 
 const escrowConfig: Record<string, { label: string; icon: React.ElementType }> = {
-  ready: { label: "Escrow Ready", icon: Unlock },
-  locked: { label: "V3 Escrow Locked 🔒", icon: Lock },
-  funded: { label: "V3 Escrow Funded 🔒", icon: Shield },
+  ready: { label: "Escrow Beta Ready (gated)", icon: Unlock },
+  locked: { label: "Escrow Funding Recorded", icon: Lock },
+  funded: { label: "Escrow Funding Recorded", icon: Shield },
   released: { label: "Escrow Released", icon: CheckCircle },
   disputed: { label: "Escrow Disputed", icon: AlertTriangle },
 };
@@ -242,6 +242,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     setLoading(true);
     try {
       assertFrontendSolanaIrysWriteEnabled("frontend V3 escrow funding");
+      assertFrontendLiveEscrowEnabled("frontend V3 escrow funding");
       const [budgetStr, budgetCurrencyRaw] = selectedJob.budget.split(" ");
       const budgetCurrency = (budgetCurrencyRaw || "SOL").toUpperCase();
       if (budgetCurrency !== "SOL") {
@@ -312,6 +313,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     setLoading(true);
     try {
       assertFrontendSolanaIrysWriteEnabled("frontend V3 escrow release");
+      assertFrontendLiveEscrowEnabled("frontend V3 escrow release");
       const agentId = selectedJob.assignee || selectedJob.assigneeId;
 
       // Check if this job has a V3 escrow PDA — if so, do on-chain release
@@ -426,7 +428,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
             Marketplace
           </h1>
           <p className="text-sm mt-1" style={{ color: "var(--text-tertiary)" }}>
-            {jobs.length} jobs · V3 Identity-Verified Escrow
+            {jobs.length} jobs · Escrow beta, devnet smoke verified
           </p>
         </div>
         <button
@@ -512,7 +514,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                     </span>
                     {hasV3Escrow && (
                       <span className="text-[10px] px-2 py-0.5 rounded" style={{ background: "rgba(16,185,129,0.15)", color: "var(--success)", fontFamily: "var(--font-mono)" }}>
-                        <Shield size={10} className="inline mr-0.5" /> V3 ESCROW
+                        <Shield size={10} className="inline mr-0.5" /> ESCROW RECORDED
                       </span>
                     )}
                     {isMyJob && (
@@ -607,14 +609,14 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                     <button onClick={() => openJobAction(job, "fund-escrow")}
                       className="px-3 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wider"
                       style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.15)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}>
-                      <Shield size={12} className="inline mr-1" /> Fund V3 Escrow
+                      <Shield size={12} className="inline mr-1" /> Escrow Funding Gated
                     </button>
                   )}
                   {isMyJob && job.status === "open" && job.escrowStatus === "ready" && (
                     <button onClick={() => openJobAction(job, "fund-escrow")}
                       className="px-3 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wider"
                       style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.15)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}>
-                      <Shield size={12} className="inline mr-1" /> Fund V3 Escrow
+                      <Shield size={12} className="inline mr-1" /> Escrow Funding Gated
                     </button>
                   )}
                   {isMyJob && (hasV3Escrow || job.escrowStatus === "locked" || job.escrowStatus === "funded") && job.status === "in_progress" && (
@@ -648,7 +650,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
               <h2 className="text-lg font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
                 {modal === "post-job" && "Post a Job"}
                 {modal === "apply" && `Apply: ${selectedJob?.title}`}
-                {modal === "fund-escrow" && `Fund V3 Escrow: ${selectedJob?.title}`}
+                {modal === "fund-escrow" && `Escrow Funding Gated: ${selectedJob?.title}`}
                 {modal === "release" && `Release Funds: ${selectedJob?.title}`}
               </h2>
               <button onClick={() => !loading && setModal(null)} style={{ color: "var(--text-tertiary)" }}>
@@ -731,17 +733,17 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                   )}
                 </div>
                 <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", color: "#10b981" }}>
-                  <Shield size={12} className="inline mr-1" /> <strong>V3 Identity-Verified Escrow</strong>
+                  <Shield size={12} className="inline mr-1" /> <strong>Escrow beta runtime</strong>
                   <br />
-                  Your funds are locked in a SOL-denominated on-chain escrow program with SATP identity verification. The agent must have a verified Genesis Record. You control release.
+                  Devnet-safe escrow PDA derivation is verified. Mainnet/live-funds escrow remains gated pending security re-review.
                 </div>
                 <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)", color: "#f59e0b" }}>
-                  ⚠️ This will open your wallet (Phantom) to sign a Solana transaction. The funds go to the escrow program — not directly to the agent.
+                  ⚠️ Live-funds transaction signing is blocked unless the deployment explicitly enables the escrow write gate.
                 </div>
                 <button onClick={handleFundEscrow} disabled={loading || !selectedJob.assignee}
                   className="w-full py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-50"
                   style={{ fontFamily: "var(--font-mono)", background: "#10b981", color: "#fff" }}>
-                  {loading ? "Signing Transaction..." : `Fund V3 Escrow — ${selectedJob.budget}`}
+                  {loading ? "Checking Gate..." : `Check Escrow Gate — ${selectedJob.budget}`}
                 </button>
               </div>
             )}
@@ -759,15 +761,15 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                 </div>
                 {selectedJob.v3EscrowPDA ? (
                   <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", color: "#10b981" }}>
-                    <Shield size={12} className="inline mr-1" /> <strong>V3 On-Chain Release</strong>
+                    <Shield size={12} className="inline mr-1" /> <strong>Escrow release gated</strong>
                     <br />
-                    This will release the escrowed funds directly to the agent's wallet via the SATP V3 escrow program. You'll sign the release transaction in your wallet.
+                    Mainnet/live-funds release remains blocked unless the deployment explicitly enables the escrow write gate.
                     <br />
                     <span className="opacity-70">Escrow: {selectedJob.v3EscrowPDA.slice(0, 12)}...</span>
                   </div>
                 ) : (
                   <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.2)", color: "#3b82f6" }}>
-                    This will mark the job as completed and release escrowed funds to the agent.
+                    This records job completion after the escrow gate permits a verified release path.
                   </div>
                 )}
                 <button onClick={handleRelease} disabled={loading}

@@ -25,7 +25,7 @@ Version: 1.0 | February 2026 | agentfolio.bot
 
 $FOLIO is the native token of AgentFolio — the trust, reputation, and identity layer for AI agents. It powers fee reduction, staking, governance, and verification across the protocol.
 
-**Core thesis:** As AI agents proliferate, the bottleneck becomes *trust*. $FOLIO captures value from every trust transaction — verifications, escrow payments, agent launches, and premium access.
+**Core thesis:** As AI agents proliferate, the bottleneck becomes *trust*. $FOLIO captures value from every trust transaction — verifications, gated escrow records, agent launches, and premium access.
 
 ### Value Accrual Flywheel
 

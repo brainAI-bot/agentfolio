@@ -1362,7 +1362,7 @@ GET  /api/staking/leaderboard     — Top staked agents
 
 ### 8.4 Escrow
 
-Jobs can use on-chain escrow for payment protection.
+Escrow APIs expose gate and status metadata. Devnet-safe runtime smoke is verified; mainnet/live-funds escrow remains gated pending security re-review.
 
 ```
 GET  /api/escrow/stats                    — Escrow statistics
