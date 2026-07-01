@@ -44,10 +44,11 @@ const statusConfig: Record<string, { label: string; color: string }> = {
 };
 
 const escrowLabels: Record<string, string> = {
-  ready: "Escrow Ready",
-  locked: "Escrow Locked 🔒",
-  released: "Escrow Released ✅",
-  disputed: "Escrow Disputed ⚠️",
+  ready: "Escrow beta ready (gated)",
+  locked: "Escrow funding recorded",
+  funded: "Escrow funding recorded",
+  released: "Escrow release recorded",
+  disputed: "Escrow disputed",
 };
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -68,7 +69,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             description: job.description,
             datePosted: job.createdAt,
             hiringOrganization: { "@type": "Organization", name: job.poster, url: "https://agentfolio.bot" },
-            baseSalary: { "@type": "MonetaryAmount", currency: "USDC", value: job.budget },
+            baseSalary: { "@type": "MonetaryAmount", currency: "SOL", value: job.budget },
             jobLocation: { "@type": "Place", address: { "@type": "PostalAddress", addressLocality: "Remote" } },
             employmentType: "CONTRACT",
             url: `https://agentfolio.bot/marketplace/job/${id}`,

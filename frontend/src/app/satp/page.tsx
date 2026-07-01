@@ -11,9 +11,9 @@ const programs = [
     desc: "Agent DID registration and profile management on-chain",
   },
   {
-    name: "Escrow Program",
+    name: "Escrow Program (gated)",
     id: ESCROW_PROGRAM,
-    desc: "Job payment escrow, release, and dispute resolution",
+    desc: "Devnet-safe runtime smoke verified; mainnet/live-funds escrow remains pending security re-review",
   },
 ];
 
@@ -49,7 +49,7 @@ export default async function SATPPage() {
           SATP Explorer
         </h1>
         <p className="text-sm mt-1" style={{ color: "var(--text-tertiary)" }}>
-          Solana Agent Trust Protocol — On-chain identity and reputation
+          Solana Agent Trust Protocol — on-chain identity and reputation; escrow live-funds writes are gated pending security review
         </p>
       </div>
 

@@ -39,6 +39,11 @@ function explorerUrl(address: string) {
   return `https://explorer.solana.com/address/${address}`;
 }
 
+function parseBudgetAmount(budget: string): number {
+  const match = budget.match(/([\d.]+)/);
+  return match ? parseFloat(match[1]) : 0;
+}
+
 async function getSolBalance(address: string): Promise<number> {
   try {
     const res = await fetch('https://api.mainnet-beta.solana.com', {
@@ -89,31 +94,24 @@ export default async function StatsPage() {
   const onChainIdentities = agents.filter((a) => a.verifications.satp?.verified).length;
   const jobsPosted = jobs.length;
 
-  // Escrow volume
-  const escrowVolume = jobs.reduce((sum, j) => {
-    const match = j.budget.match(/([\d.]+)/);
-    return sum + (match ? parseFloat(match[1]) : 0);
-  }, 0);
+  const escrowBackedJobs = jobs.filter((j) =>
+    ["locked", "funded", "released", "disputed"].includes(j.escrowStatus)
+  );
+  const releasedEscrowJobs = jobs.filter((j) => j.escrowStatus === "released");
 
   // === Financial Stats ===
-  const protocolRevenue = escrowVolume * PLATFORM_FEE_RATE;
-  const avgJobValue = jobsPosted > 0 ? escrowVolume / jobsPosted : 0;
-  const activeEscrows = jobs.filter((j) => j.status === "in_progress").length;
-  const completedJobs = jobs.filter((j) => j.status === "completed");
+  const verifiedEscrowVolume = escrowBackedJobs.reduce((sum, j) => sum + parseBudgetAmount(j.budget), 0);
+  const jobBudgetVolume = jobs.reduce((sum, j) => sum + parseBudgetAmount(j.budget), 0);
+  const protocolRevenue = releasedEscrowJobs.reduce((sum, j) => sum + parseBudgetAmount(j.budget) * PLATFORM_FEE_RATE, 0);
+  const avgJobValue = jobsPosted > 0 ? jobBudgetVolume / jobsPosted : 0;
+  const activeEscrows = jobs.filter((j) =>
+    j.status === "in_progress" && ["locked", "funded", "disputed"].includes(j.escrowStatus)
+  ).length;
   const disputedJobs = jobs.filter((j) => j.status === "disputed");
-  const releasedToAgents = completedJobs.reduce((sum, j) => {
-    const match = j.budget.match(/([\d.]+)/);
-    return sum + (match ? parseFloat(match[1]) * (1 - PLATFORM_FEE_RATE) : 0);
-  }, 0);
+  const releasedToAgents = releasedEscrowJobs.reduce((sum, j) => sum + parseBudgetAmount(j.budget) * (1 - PLATFORM_FEE_RATE), 0);
   const totalRefunded = 0; // no refund status yet
-  const totalInDispute = disputedJobs.reduce((sum, j) => {
-    const match = j.budget.match(/([\d.]+)/);
-    return sum + (match ? parseFloat(match[1]) : 0);
-  }, 0);
-  const platformFeesCollected = completedJobs.reduce((sum, j) => {
-    const match = j.budget.match(/([\d.]+)/);
-    return sum + (match ? parseFloat(match[1]) * PLATFORM_FEE_RATE : 0);
-  }, 0);
+  const totalInDispute = disputedJobs.reduce((sum, j) => sum + parseBudgetAmount(j.budget), 0);
+  const platformFeesCollected = protocolRevenue;
 
   // Fetch on-chain balances
   const [treasuryBalance, deployerBalance, treasuryUsdc] = await Promise.all([
@@ -124,9 +122,9 @@ export default async function StatsPage() {
 
   // Escrow flow data
   const escrowFlowItems = [
-    { label: "Total Deposited", value: escrowVolume, color: "var(--accent)" },
+    { label: "Verified Funded/Locked", value: verifiedEscrowVolume, color: "var(--accent)" },
     { label: "Released to Agents", value: releasedToAgents, color: "#22c55e" },
-    { label: "Platform Fees", value: platformFeesCollected, color: "#f59e0b" },
+    { label: "Released Platform Fees", value: platformFeesCollected, color: "#f59e0b" },
     { label: "In Dispute", value: totalInDispute, color: "#ef4444" },
     { label: "Refunded", value: totalRefunded, color: "#6b7280" },
   ];
@@ -210,7 +208,7 @@ export default async function StatsPage() {
     { label: "Total Attestations", value: totalAttestations, icon: <Fingerprint size={18} /> },
     { label: "On-Chain Identities", value: onChainIdentities, icon: <BarChart3 size={18} /> },
     { label: "Jobs Posted", value: jobsPosted, icon: <Briefcase size={18} /> },
-    { label: "Escrow Volume", value: escrowVolume > 0 ? `$${escrowVolume.toLocaleString()}` : "—", icon: <DollarSign size={18} /> },
+    { label: "Verified Escrow Volume", value: verifiedEscrowVolume > 0 ? `$${verifiedEscrowVolume.toLocaleString()}` : "—", icon: <DollarSign size={18} /> },
   ];
 
   return (
@@ -245,12 +243,15 @@ export default async function StatsPage() {
         <h2 className="text-lg font-bold mb-4" style={{ color: "var(--text-primary)" }}>
           💰 Financial Overview
         </h2>
+        <p className="text-xs mb-4" style={{ color: "var(--text-tertiary)" }}>
+          Escrow metrics count only jobs with funded, locked, disputed, or released escrow evidence. Devnet-safe runtime smoke is verified; mainnet/live-funds escrow remains gated pending security re-review.
+        </p>
 
         {/* Financial Stat Cards */}
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
           {[
-            { label: "Total Escrow Volume", value: escrowVolume > 0 ? `$${escrowVolume.toLocaleString()}` : "—", icon: <ArrowDownToLine size={18} /> },
-            { label: "Protocol Revenue (5%)", value: protocolRevenue > 0 ? `$${protocolRevenue.toLocaleString()}` : "—", icon: <TrendingUp size={18} /> },
+            { label: "Verified Escrow Volume", value: verifiedEscrowVolume > 0 ? `$${verifiedEscrowVolume.toLocaleString()}` : "—", icon: <ArrowDownToLine size={18} /> },
+            { label: "Released Protocol Fees (5%)", value: protocolRevenue > 0 ? `$${protocolRevenue.toLocaleString()}` : "—", icon: <TrendingUp size={18} /> },
             { label: "Treasury Balance", value: `${treasuryBalance.toFixed(4)} SOL`, icon: <Wallet size={18} /> },
             { label: "Deployer Balance", value: `${deployerBalance.toFixed(4)} SOL`, icon: <Wallet size={18} /> },
             { label: "Average Job Value", value: avgJobValue > 0 ? `$${avgJobValue.toFixed(2)}` : "—", icon: <DollarSign size={18} /> },
@@ -297,8 +298,8 @@ export default async function StatsPage() {
             <h3 className="text-xs uppercase tracking-widest mb-4" style={{ color: "var(--text-secondary)" }}>
               Escrow Flow
             </h3>
-            {escrowVolume === 0 ? (
-              <p className="text-xs" style={{ color: "var(--text-tertiary)" }}>No escrow activity yet</p>
+            {verifiedEscrowVolume === 0 ? (
+              <p className="text-xs" style={{ color: "var(--text-tertiary)" }}>No verified funded or released escrow activity yet</p>
             ) : (
               <div className="space-y-3">
                 {escrowFlowItems.map((item) => (
@@ -529,7 +530,7 @@ export default async function StatsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {[
             { name: "Identity Registry", id: IDENTITY_REGISTRY, desc: "Agent DID registration and profile management" },
-            { name: "Escrow Program", id: ESCROW_PROGRAM, desc: "Job payment escrow and dispute resolution" },
+            { name: "Escrow Program (gated)", id: ESCROW_PROGRAM, desc: "Devnet-safe runtime smoke verified; mainnet/live-funds path pending security re-review" },
           ].map((p) => (
             <div key={p.id} className="rounded-lg p-4" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
               <div className="text-xs font-semibold mb-1" style={{ color: "var(--text-primary)" }}>{p.name}</div>
@@ -633,8 +634,8 @@ async function TokenStatsSection() {
         <div className="divide-y" style={{ borderColor: "var(--border)" }}>
           {[
             ["Reviews v2 Deploy", "2gkFVP8ZvL6eT1xXh7B8zoYUQDypePZE9HTZUNYZA6Wr6yvKQSydrhfG1uLfYcXFxa6vxcbW1dX6jiR6ppYExvaL", "Program"],
-            ["First Escrow Release", "5Y5X2tfNDj2f2TppA7BJwFrTvbwWEas32QNyjbNvX7jJqTaGTAeicGNzqp5SjX5VjGX2CKzkeh4eqaDR8B9H5MMA", "Escrow"],
-            ["Distribution Jobs Funded", "3Y3qujTooXvxPtM7YCxGm7QPazpkBBmVYvHG6MFAAD8gR8xqPrNFVkDxitWMswBWmzMwnoJ3JoPazH9CHCxQnSqD", "Escrow"],
+            ["Historical Escrow Release Receipt", "5Y5X2tfNDj2f2TppA7BJwFrTvbwWEas32QNyjbNvX7jJqTaGTAeicGNzqp5SjX5VjGX2CKzkeh4eqaDR8B9H5MMA", "Escrow"],
+            ["Historical Escrow Funding Receipt", "3Y3qujTooXvxPtM7YCxGm7QPazpkBBmVYvHG6MFAAD8gR8xqPrNFVkDxitWMswBWmzMwnoJ3JoPazH9CHCxQnSqD", "Escrow"],
             ["First On-Chain Review", "4NG9PUgpgXY495FcQWngyZdf1neY72cR9Um5ZGU6vQzppMwYfRW17DgF", "Review"],
           ].map(([label, tx, type]) => (
             <div key={label} className="px-4 py-3 flex items-center justify-between">

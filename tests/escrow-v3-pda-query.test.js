@@ -83,6 +83,9 @@ test('POST /api/v3/escrow/create is gated before live-funds release', async () =
 
     assert.equal(res.status, 423);
     assert.equal(body.code, 'LIVE_ESCROW_WRITES_READ_ONLY');
+    assert.equal(body.liveEscrow.status, 'live_funds_gated_pending_security_review');
+    assert.equal(body.liveEscrow.verifiedRuntime.network, 'devnet');
+    assert.equal(body.liveEscrow.mainnetLiveFundsCleared, false);
     assert.equal(body.enableWith, 'AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES');
     assert.equal(body.killSwitchEnv, 'AGENTFOLIO_ESCROW_KILL_SWITCH');
   } finally {
@@ -112,6 +115,9 @@ test('GET /api/v3/escrow/health exposes live escrow gate status', async () => {
     assert.equal(res.status, 200);
     assert.equal(body.liveEscrow.enabled, false);
     assert.equal(body.liveEscrow.killSwitchActive, true);
+    assert.equal(body.liveEscrow.status, 'live_funds_blocked_by_kill_switch');
+    assert.equal(body.liveEscrow.verifiedRuntime.network, 'devnet');
+    assert.equal(body.liveEscrow.mainnetLiveFundsCleared, false);
     assert.equal(body.liveEscrow.enableWith, 'AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES');
     assert.equal(body.liveEscrow.killSwitchEnv, 'AGENTFOLIO_ESCROW_KILL_SWITCH');
   } finally {

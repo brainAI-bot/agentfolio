@@ -35,9 +35,26 @@ function solanaIrysWriteGatePayload(operation = 'Solana/Irys write') {
 }
 
 function liveEscrowGateStatus(env = process.env) {
+  const enabled = isLiveEscrowEnabled(env);
+  const killSwitchActive = isEscrowKillSwitchActive(env);
   return {
-    enabled: isLiveEscrowEnabled(env),
-    killSwitchActive: isEscrowKillSwitchActive(env),
+    enabled,
+    killSwitchActive,
+    status: enabled
+      ? 'live_funds_enabled_by_environment'
+      : killSwitchActive
+        ? 'live_funds_blocked_by_kill_switch'
+        : 'live_funds_gated_pending_security_review',
+    liveFundsCleared: enabled,
+    verifiedRuntime: {
+      network: 'devnet',
+      pdaDerive: 'verified',
+    },
+    runtimeNetwork: 'devnet',
+    mainnetLiveFundsCleared: enabled,
+    publicCopy: enabled
+      ? 'Live escrow writes are enabled by deployment environment.'
+      : 'Devnet-safe escrow runtime smoke is verified; mainnet/live-funds escrow remains gated pending security re-review.',
     enableWith: ENABLE_LIVE_ESCROW_ENV,
     killSwitchEnv: ESCROW_KILL_SWITCH_ENV,
   };
@@ -52,6 +69,7 @@ function liveEscrowWriteGatePayload(operation = 'live escrow write') {
       ? 'Live escrow writes are disabled by the escrow kill switch.'
       : 'Live escrow writes are disabled until security re-review clears the live-funds path.',
     operation,
+    liveEscrow: liveEscrowGateStatus(),
     enableWith: ENABLE_LIVE_ESCROW_ENV,
     killSwitchEnv: ESCROW_KILL_SWITCH_ENV,
   };
