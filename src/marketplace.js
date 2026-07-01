@@ -12,6 +12,35 @@ let addActivity;
 try { addActivity = require('./profile-store').addActivity; } catch { addActivity = () => {}; }
 
 const DATA_DIR = path.join(__dirname, '..', 'data', 'marketplace');
+const SAFE_JOB_ID_RE = /^job_[A-Za-z0-9_-]{1,80}$/;
+
+function validateJobId(jobId) {
+  return typeof jobId === 'string' && SAFE_JOB_ID_RE.test(jobId);
+}
+
+function safeMarketplacePath(kind, id) {
+  const filename = `${id}.json`;
+  const target = path.resolve(DATA_DIR, kind, filename);
+  const base = path.resolve(DATA_DIR, kind) + path.sep;
+  if (!target.startsWith(base)) {
+    throw new Error(`Invalid ${kind} path`);
+  }
+  return target;
+}
+
+function safeJobPath(jobId) {
+  if (!validateJobId(jobId)) {
+    throw new Error('Invalid job id');
+  }
+  return safeMarketplacePath('jobs', jobId);
+}
+
+function safeJobReviewPath(jobId) {
+  if (!validateJobId(jobId)) {
+    throw new Error('Invalid job id');
+  }
+  return safeMarketplacePath('reviews', jobId);
+}
 
 
 function normalizeTrustScoreValue(score) {
@@ -57,7 +86,7 @@ function resolveApplicantId(applicantId) {
 }
 
 // Ensure data dirs exist
-['jobs', 'applications', 'escrow', 'deliverables'].forEach(dir => {
+['jobs', 'applications', 'escrow', 'deliverables', 'reviews'].forEach(dir => {
   const p = path.join(DATA_DIR, dir);
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
 });
@@ -159,6 +188,14 @@ function getAllFiles(dir) {
   try {
     return fs.readdirSync(dir).filter(f => f.endsWith('.json')).map(f => readJSON(path.join(dir, f))).filter(Boolean);
   } catch { return []; }
+}
+
+function readJobReviews(jobId) {
+  return readJSON(safeJobReviewPath(jobId)) || [];
+}
+
+function writeJobReviews(jobId, reviews) {
+  writeJSON(safeJobReviewPath(jobId), reviews);
 }
 
 // ===== ROUTES =====
@@ -496,6 +533,66 @@ function registerRoutes(app) {
     writeJSON(jobPath, job);
     
     res.json({ success: true, message: 'Work approved! Payment released.', job });
+  });
+
+  // POST /api/marketplace/jobs/:id/review — Leave a review after release/completion
+  app.post('/api/marketplace/jobs/:id/review', (req, res) => {
+    const jobId = req.params.id;
+    if (!validateJobId(jobId)) return res.status(400).json({ error: 'Invalid job id' });
+    const jobPath = safeJobPath(jobId);
+    const job = readJSON(jobPath);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+
+    const completeStatuses = new Set(['completed', 'release_complete', 'released']);
+    if (!completeStatuses.has(job.status)) {
+      return res.status(400).json({ error: 'Can only review completed or released jobs' });
+    }
+
+    const rating = parseInt(req.body.rating, 10);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      return res.status(400).json({ error: 'rating must be 1-5' });
+    }
+
+    const reviewerId = req.body.reviewerId || req.body.reviewer_id || req.body.clientId || req.body.client_id || job.clientId || job.postedBy;
+    const revieweeId = req.body.revieweeId || req.body.reviewee_id || req.body.agentId || req.body.agent_id || job.selectedAgentId || job.acceptedApplicant;
+    if (!reviewerId || !revieweeId) {
+      return res.status(400).json({ error: 'reviewerId/reviewer_id and revieweeId/reviewee_id are required' });
+    }
+    if (reviewerId === revieweeId) {
+      return res.status(400).json({ error: 'Cannot review yourself' });
+    }
+
+    const reviews = readJobReviews(jobId);
+    if (reviews.some(r => r.reviewerId === reviewerId && r.revieweeId === revieweeId)) {
+      return res.status(409).json({ error: 'You have already reviewed this job' });
+    }
+
+    const review = {
+      id: genId('review'),
+      jobId,
+      reviewerId,
+      revieweeId,
+      rating,
+      comment: req.body.comment || req.body.text || req.body.review || '',
+      type: req.body.type || (reviewerId === (job.clientId || job.postedBy) ? 'client_to_agent' : 'agent_to_client'),
+      createdAt: new Date().toISOString(),
+    };
+
+    reviews.push(review);
+    writeJobReviews(jobId, reviews);
+    try { addActivity(revieweeId, 'review', { jobId, reviewerId, rating }); } catch(e) {}
+
+    res.status(201).json(review);
+  });
+
+  // GET /api/marketplace/jobs/:id/reviews — Read job-scoped marketplace reviews
+  app.get('/api/marketplace/jobs/:id/reviews', (req, res) => {
+    const jobId = req.params.id;
+    if (!validateJobId(jobId)) return res.status(400).json({ error: 'Invalid job id' });
+    const job = readJSON(safeJobPath(jobId));
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    const reviews = readJobReviews(jobId);
+    res.json({ jobId, reviews, total: reviews.length });
   });
 
   // POST /api/marketplace/jobs/:id/request-changes — Request revisions

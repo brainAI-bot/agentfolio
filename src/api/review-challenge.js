@@ -4,19 +4,135 @@
  * POST /api/reviews/submit — verify signature + create review (escrow-gated)
  */
 
-const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
-const nacl = require('tweetnacl');
 
-function getDb(readonly = true) {
-  return new Database('/home/ubuntu/agentfolio/data/agentfolio.db', { readonly });
+let Database;
+let nacl;
+
+const DEFAULT_DB_PATH = path.join(__dirname, '..', '..', 'data', 'agentfolio.db');
+const DEFAULT_MARKETPLACE_DIR = path.join(__dirname, '..', '..', 'data', 'marketplace');
+const COMPLETED_JOB_STATUSES = new Set(['completed', 'release_complete', 'released', 'paid']);
+const RELEASED_ESCROW_STATUSES = new Set(['released', 'release_complete', 'paid']);
+const SELECTED_APPLICATION_STATUSES = new Set(['accepted', 'selected']);
+
+function getDb(readonly = true, dbPath = DEFAULT_DB_PATH) {
+  if (!Database) Database = require('better-sqlite3');
+  return new Database(dbPath, { readonly });
+}
+
+function readJSON(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function getMarketplaceSubdir(marketplaceDir, subdir) {
+  return path.join(marketplaceDir, subdir);
+}
+
+function listMarketplaceJobs(marketplaceDir = DEFAULT_MARKETPLACE_DIR) {
+  const jobsDir = getMarketplaceSubdir(marketplaceDir, 'jobs');
+  return fs.readdirSync(jobsDir)
+    .filter(file => file.endsWith('.json'))
+    .map(file => readJSON(path.join(jobsDir, file)))
+    .filter(Boolean);
+}
+
+function loadEscrowForJob(job, marketplaceDir) {
+  const escrowDir = getMarketplaceSubdir(marketplaceDir, 'escrow');
+  if (job.escrowId) {
+    return readJSON(path.join(escrowDir, `${job.escrowId}.json`));
+  }
+
+  try {
+    return fs.readdirSync(escrowDir)
+      .filter(file => file.endsWith('.json'))
+      .map(file => readJSON(path.join(escrowDir, file)))
+      .find(escrow => escrow && escrow.jobId === job.id) || null;
+  } catch {
+    return null;
+  }
+}
+
+function loadApplication(appRef, marketplaceDir) {
+  if (!appRef) return null;
+  if (typeof appRef === 'object') return appRef;
+  return readJSON(path.join(getMarketplaceSubdir(marketplaceDir, 'applications'), `${appRef}.json`));
+}
+
+function participantSet(values) {
+  return new Set(values.filter(value => typeof value === 'string' && value.trim()).map(value => value.trim()));
+}
+
+function getJobParticipants(job, marketplaceDir) {
+  const clients = participantSet([job.clientId, job.postedBy, job.v3EscrowFundedBy]);
+  const workers = participantSet([
+    job.acceptedApplicant,
+    job.selectedAgentId,
+    job.workerId,
+    job.winnerId,
+    job.assigneeId,
+    job.v3EscrowAgentId,
+    job.v3EscrowAgentWallet,
+  ]);
+
+  if (Array.isArray(job.applications)) {
+    for (const appRef of job.applications) {
+      const app = loadApplication(appRef, marketplaceDir);
+      if (app && SELECTED_APPLICATION_STATUSES.has(app.status) && app.applicantId) {
+        workers.add(app.applicantId);
+      }
+    }
+  }
+
+  return { clients, workers };
+}
+
+function jobHasReleasedEscrow(job, marketplaceDir) {
+  const escrow = loadEscrowForJob(job, marketplaceDir);
+  if (escrow && RELEASED_ESCROW_STATUSES.has(escrow.status)) return true;
+
+  const hasV3Release = Boolean(job.v3EscrowPDA && (job.v3ReleaseTx || job.v3ReleasedAt));
+  if (hasV3Release) return true;
+
+  const hasRecordedEscrow = Boolean(job.escrowId || job.v3EscrowPDA || job.escrowFunded);
+  return Boolean(job.fundsReleased && hasRecordedEscrow);
+}
+
+function hasCompletedEscrowBetween(reviewerId, revieweeId, options = {}) {
+  const marketplaceDir = options.marketplaceDir || DEFAULT_MARKETPLACE_DIR;
+  try {
+    return listMarketplaceJobs(marketplaceDir).some(job => {
+      if (!COMPLETED_JOB_STATUSES.has(job.status)) return false;
+      if (!jobHasReleasedEscrow(job, marketplaceDir)) return false;
+
+      const { clients, workers } = getJobParticipants(job, marketplaceDir);
+      return (
+        (clients.has(reviewerId) && workers.has(revieweeId)) ||
+        (clients.has(revieweeId) && workers.has(reviewerId))
+      );
+    });
+  } catch (e) {
+    console.error('[ReviewChallenge] escrow gate failed closed:', e.message);
+    return false;
+  }
+}
+
+function escrowGateError() {
+  return 'Reviews require a completed job with released escrow between these agents.';
 }
 
 // In-memory challenge store (TTL 30 min)
 const challenges = new Map();
 
-function registerReviewChallengeRoutes(app) {
+function registerReviewChallengeRoutes(app, options = {}) {
+  const dbPath = options.dbPath || DEFAULT_DB_PATH;
+  const marketplaceDir = options.marketplaceDir || DEFAULT_MARKETPLACE_DIR;
+
   // POST /api/reviews/challenge
   app.post('/api/reviews/challenge', (req, res) => {
     try {
@@ -26,6 +142,9 @@ function registerReviewChallengeRoutes(app) {
       }
       if (reviewerId === revieweeId) {
         return res.status(400).json({ success: false, error: 'Cannot review yourself' });
+      }
+      if (!hasCompletedEscrowBetween(reviewerId, revieweeId, { marketplaceDir })) {
+        return res.status(403).json({ success: false, error: escrowGateError() });
       }
 
       const challengeId = 'rc_' + crypto.randomBytes(16).toString('hex');
@@ -74,6 +193,7 @@ function registerReviewChallengeRoutes(app) {
 
       // Verify signature
       if (challenge.chain === 'solana') {
+        if (!nacl) nacl = require('tweetnacl');
         const _bs58 = require('bs58');
         const bs58 = _bs58.default || _bs58;
         const messageBytes = new TextEncoder().encode(challenge.message);
@@ -96,13 +216,13 @@ function registerReviewChallengeRoutes(app) {
         // For now, accept it (frontend did the signing)
       }
 
-      // Escrow gate: Check if reviewer has completed escrow with reviewee
-      // (Relaxed for now — will enforce after escrow system matures)
-      // TODO: const hasCompletedEscrow = checkEscrow(challenge.reviewerId, challenge.revieweeId);
-      // if (!hasCompletedEscrow) return res.status(403).json({ verified: false, error: 'No completed escrow between these agents' });
+      if (!hasCompletedEscrowBetween(challenge.reviewerId, challenge.revieweeId, { marketplaceDir })) {
+        challenges.delete(challengeId);
+        return res.status(403).json({ verified: false, error: escrowGateError() });
+      }
 
       // Save review
-      const db = getDb(false);
+      const db = getDb(false, dbPath);
       const id = 'rev_' + Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
       
       // Detect FK column
@@ -142,4 +262,7 @@ function registerReviewChallengeRoutes(app) {
   });
 }
 
-module.exports = { registerReviewChallengeRoutes };
+module.exports = {
+  registerReviewChallengeRoutes,
+  hasCompletedEscrowBetween,
+};

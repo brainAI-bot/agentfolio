@@ -2036,6 +2036,23 @@ satpReviews.registerRoutes(app);
 registerSATPRoutes(app);
 registerSATPWriteRoutes(app);
 
+// Register wallet-signed review write routes used by the production profile UI.
+try {
+  const { registerReviewChallengeRoutes } = require('./api/review-challenge');
+  registerReviewChallengeRoutes(app);
+  console.log('[Reviews] Challenge submit routes mounted at /api/reviews/challenge and /api/reviews/submit');
+} catch (e) {
+  console.warn('[Reviews] Failed to mount challenge submit routes:', e.message);
+}
+
+try {
+  const { registerReviewsV2Routes } = require('./api/reviews-v2');
+  registerReviewsV2Routes(app);
+  console.log('[Reviews V2] Mounted at /api/reviews/v2');
+} catch (e) {
+  console.warn('[Reviews V2] Failed to mount:', e.message);
+}
+
 // Trust Credential API (credat integration)
 const { registerTrustCredentialRoutes } = require('./routes/trust-credential');
 registerTrustCredentialRoutes(app);

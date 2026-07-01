@@ -18,6 +18,7 @@ const _bs58 = require('bs58');
 const bs58 = _bs58.default || _bs58;
 const path = require('path');
 const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
 const { sendWelcomeEmail } = require('./lib/welcome-email');
 const { assertSolanaIrysWriteEnabled, sendSolanaIrysWriteGateResponse } = require('./lib/write-surface-gate');
 
@@ -84,6 +85,14 @@ const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR ||
 const SATP_NETWORK = process.env.SATP_NETWORK || 'mainnet';
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'agentfolio.db');
+
+const profileReviewWriteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many review submissions, please retry later' },
+});
 
 let db;
 
@@ -1405,7 +1414,7 @@ function registerRoutes(app) {
   });
 
   // ── POST /api/profile/:id/reviews ──────────────────────────────
-  app.post('/api/profile/:id/reviews', (req, res) => {
+  app.post('/api/profile/:id/reviews', profileReviewWriteLimiter, (req, res) => {
     const { reviewer_id, reviewer_name, rating, title, comment, job_id } = req.body;
     if (!reviewer_id || !rating) return res.status(400).json({ error: 'reviewer_id and rating (1-5) are required' });
     const r = parseInt(rating);
@@ -1417,16 +1426,20 @@ function registerRoutes(app) {
     if (reviewer_id === req.params.id) return res.status(400).json({ error: 'Cannot self-review' });
 
     const id = genId('rev');
-    d.prepare(`
-      INSERT INTO reviews (id, profile_id, reviewer_id, reviewer_name, rating, title, comment, job_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, req.params.id, reviewer_id, reviewer_name || '', r, title || '', comment || '', job_id || '');
+    const reviewFk = module.exports._reviewFk || 'profile_id';
+    if (reviewFk === 'reviewee_id') {
+      d.prepare(`
+        INSERT INTO reviews (id, job_id, reviewer_id, reviewee_id, rating, comment, type, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, job_id || '__profile_reviews__', reviewer_id, req.params.id, r, comment || title || '', 'profile', new Date().toISOString());
+    } else {
+      d.prepare(`
+        INSERT INTO reviews (id, profile_id, reviewer_id, reviewer_name, rating, title, comment, job_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, req.params.id, reviewer_id, reviewer_name || '', r, title || '', comment || '', job_id || '');
+    }
     addActivity(req.params.id, 'review', { reviewer_id, reviewer_name, rating: r, title });
 
-      // Fire-and-forget: send welcome email if agent provided an email
-      if (resolvedEmail) {
-        sendWelcomeEmail(resolvedEmail, { id, name: name.trim(), handle: h });
-      }
     res.status(201).json({ id, rating: r, title: title || '', comment: comment || '', reviewer_id, reviewer_name: reviewer_name || '', job_id: job_id || '', message: 'Review added' });
   });
 
