@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
+import { ReleaseGateNotice } from "@/components/ReleaseGateNotice";
 import { JetBrains_Mono, Inter } from "next/font/google";
 
 import { ClientProviders } from "@/components/ClientProviders";
@@ -63,6 +64,7 @@ export default function RootLayout({
       <body className="antialiased min-h-screen" style={{ background: "var(--bg-primary)", color: "var(--text-primary)" }}>
         <ClientProviders>
           <Navbar />
+          <ReleaseGateNotice />
           <main>{children}</main>
           <Footer />
         </ClientProviders>
