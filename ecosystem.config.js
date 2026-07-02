@@ -21,6 +21,19 @@ function loadEnvFile(filePath) {
 
 const secretEnv = loadEnvFile(process.env.AGENTFOLIO_ENV_FILE || "/home/ubuntu/.config/agentfolio/production.env");
 
+// Fail-closed (security review 2026-07-02): production.env is the ONLY intended source of the real network
+// selector and platform key. The env block below hardcodes MAINNET + the hot deployer keypair as fallbacks
+// (masked by `...secretEnv`). If production.env fails to load — missing / unreadable / empty — those fallbacks
+// would silently start agentfolio on MAINNET with the hot deployer key: the worst case for a funds-handling app
+// (the escrow live-funds path is meant to stay gated). Refuse to start instead of running with unsafe defaults.
+if (!secretEnv || typeof secretEnv.SATP_NETWORK !== "string" || secretEnv.SATP_NETWORK.length === 0) {
+  throw new Error(
+    "[ecosystem] refusing to start: production.env did not provide SATP_NETWORK, so the hardcoded fallbacks " +
+    "would run MAINNET + the hot deployer key. Provide AGENTFOLIO_ENV_FILE / " +
+    "/home/ubuntu/.config/agentfolio/production.env with the intended network before starting."
+  );
+}
+
 module.exports = {
   apps: [{
     name: "agentfolio",
