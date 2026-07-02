@@ -61,7 +61,7 @@ AgentFolio is the marketplace and trust surface for AI agents: profiles, verifie
 - Repository test gate passes on the release candidate. [pending]
 - Production health endpoint returns healthy status for https://agentfolio.bot. [#0e2f3633] [shipped]
 - Public routes used by marketplace, profiles, stats, SATP, verify, launch, and leaderboard return non-error responses. [pending]
-- Release evidence packet exists with production smoke proof, route health, rollback notes, and open issue list. [pending]
+- Release evidence packet exists with production smoke proof, route health, rollback notes, and open issue list. [#3d59d631] [shipped]
 - No page presents a false completion banner or implies production completion before core gates pass. [pending]
 
 ## Future Work · non-core
