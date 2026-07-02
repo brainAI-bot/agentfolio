@@ -10,6 +10,7 @@ const { Connection, PublicKey } = require("@solana/web3.js");
 let profileStore;
 try { profileStore = require("../profile-store"); } catch(e) { profileStore = null; }
 const { computeUnifiedTrustScore } = require('../lib/unified-trust-score');
+const { buildReputationSurface, normalizeTrustScoreValue } = require('../lib/reputation-surface');
 const RPC = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
 const TOKEN_2022 = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
@@ -418,6 +419,13 @@ for (const agent of filteredAgents) {
   const onChainTrustScore = canonicalV3 ? canonicalTrustScore : Number(agent.reputationScore || 0);
   const onChainVerificationLevel = canonicalV3 ? canonicalVerificationLevel : Number(agent.verificationLevel || 0);
   const onChainVerificationName = canonicalV3 ? canonicalVerificationName : (agent.verificationLabel || levelLabels[onChainVerificationLevel] || 'Unverified');
+  const reputationSurface = buildReputationSurface({
+    profile,
+    unified,
+    v3Score: canonicalV3,
+    db: _db,
+    reviewSummary: reviewStats,
+  });
 
   const txHints = new Map();
   const addTxHint = (platform, txSignature, timestamp = null, solscanUrl = null) => {
@@ -520,14 +528,14 @@ for (const agent of filteredAgents) {
     score: onChainTrustScore,
     reputationScore: onChainTrustScore,
     trustScore: onChainTrustScore,
-    computedTrustScore: unified.score,
-    level: onChainVerificationLevel,
-    tier: onChainVerificationName,
-    levelName: onChainVerificationName,
-    verificationLevel: onChainVerificationLevel,
-    verificationLabel: onChainVerificationName,
-    verificationLevelName: onChainVerificationName,
-    verificationBadge: levelBadges[onChainVerificationLevel] || '⚪',
+    computedTrustScore: normalizeTrustScoreValue(unified?.score ?? unified?.trustScore ?? 0),
+    level: reputationSurface.level,
+    tier: reputationSurface.tier,
+    levelName: reputationSurface.levelName,
+    verificationLevel: reputationSurface.verificationLevel,
+    verificationLabel: reputationSurface.verificationLabel,
+    verificationLevelName: reputationSurface.verificationLevelName,
+    verificationBadge: reputationSurface.verificationBadge || levelBadges[onChainVerificationLevel] || '⚪',
     trustCredentialUrl: `/trust/${encodeURIComponent(profile.id)}`,
     avatar: profileAvatar || agent.nftImage || null,
     nftImage: profileAvatar || agent.nftImage || null,
@@ -535,8 +543,14 @@ for (const agent of filteredAgents) {
     verifications: explorerVerifications,
     attestationMemos: explorerAttestations,
     platforms,
-    reviewCount: Number(reviewStats.total || 0),
-    reviewAvg: Number(reviewStats.avg_rating || 0),
+    reviewSummary: reputationSurface.reviewSummary,
+    reviews: reputationSurface.reviews,
+    reviewCount: reputationSurface.reviewCount,
+    reviewAvg: reputationSurface.reviewAvg,
+    jobHistory: reputationSurface.jobHistory,
+    jobs: reputationSurface.jobs,
+    completedJobs: reputationSurface.completedJobs,
+    jobsCompleted: reputationSurface.jobsCompleted,
     onChainAttestations: explorerAttestations.length || explorerVerifications.length || platforms.length || 0,
   });
 }

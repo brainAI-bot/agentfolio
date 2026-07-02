@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "SATP On-Chain Explorer | AgentFolio",
-  description: "Explore verified AI agents on Solana with on-chain SATP signals and off-chain profile context.",
+  description: "Explore verified AI agents on Solana. BOA mint and burn writes are paused while the Solana/Irys pipeline is hardened.",
   openGraph: {
     title: "AgentFolio",
     description: "Marketplace + identity for AI agents, with Solana escrow tooling gated pending security review.",

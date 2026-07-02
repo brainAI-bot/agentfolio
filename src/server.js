@@ -29,6 +29,12 @@ const {
 // Scoring module
 const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainData } = require('./scoring');
 const { computeUnifiedTrustScore } = require('./lib/unified-trust-score');
+const {
+  LEVEL_LABELS,
+  normalizeTrustScoreValue,
+  normalizeLevel,
+  buildReputationSurface,
+} = require('./lib/reputation-surface');
 
 // Chain Cache — on-chain data layer (identities + attestations refresh loop)
 const chainCache = require('./lib/chain-cache');
@@ -58,12 +64,6 @@ async function getV3Score(agentIdOrName) {
     } catch (e) { /* fall through */ }
   }
   return _rawGetV3Score(agentIdOrName);
-}
-
-function normalizeTrustScoreValue(score) {
-  const numeric = Number(score || 0);
-  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
-  return numeric > 800 ? Math.min(Math.round(numeric / 10000), 800) : Math.max(0, numeric);
 }
 
 function parseJsonFieldSafe(value, fallback = null) {
@@ -124,37 +124,6 @@ function getProfileColumns(db) {
   }
 }
 
-const LEADERBOARD_LEVEL_LABELS = ['Unverified', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
-const TRUST_SCORE_LEVEL_LABELS = ['Unclaimed', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
-const LEADERBOARD_LEVEL_MAP = {
-  NEW: 0,
-  UNVERIFIED: 0,
-  REGISTERED: 1,
-  L1: 1,
-  BASIC: 2,
-  VERIFIED: 2,
-  L2: 2,
-  ESTABLISHED: 3,
-  L3: 3,
-  TRUSTED: 4,
-  L4: 4,
-  SOVEREIGN: 5,
-  ELITE: 5,
-  L5: 5,
-};
-
-function normalizeLeaderboardLevel(value, score = 0) {
-  if (Number.isFinite(Number(value))) return Math.max(0, Math.min(5, Number(value)));
-  const mapped = LEADERBOARD_LEVEL_MAP[String(value || '').trim().toUpperCase()];
-  if (mapped !== undefined) return mapped;
-  if (score >= 600) return 5;
-  if (score >= 450) return 4;
-  if (score >= 300) return 3;
-  if (score >= 100) return 2;
-  if (score > 0) return 1;
-  return 0;
-}
-
 async function loadTrustScoreSurface(profileId) {
   const rawId = String(profileId || '').trim();
   if (!rawId) return null;
@@ -174,37 +143,33 @@ async function loadTrustScoreSurface(profileId) {
   } catch (_) {}
 
   const unified = computeUnifiedTrustScore(db, row, { v3Score });
-  const score = normalizeTrustScoreValue(unified?.score ?? unified?.trustScore ?? 0);
-  const level = normalizeLeaderboardLevel(
-    v3Score?.verificationLevel ?? unified?.level,
-    score
-  );
-  const levelName =
-    v3Score?.verificationLabel ||
-    v3Score?.tierLabel ||
-    v3Score?.tier ||
-    unified?.levelName ||
-    TRUST_SCORE_LEVEL_LABELS[level] ||
-    'Unclaimed';
-  const breakdown = unified?.breakdown || {};
-  const trustScoreBreakdown = unified?.trustBreakdown || breakdown;
+  const surface = buildReputationSurface({
+    profile: row,
+    unified,
+    v3Score,
+    score: unified?.score ?? unified?.trustScore ?? 0,
+    level: v3Score?.verificationLevel ?? unified?.level,
+    levelName: v3Score?.verificationLabel || v3Score?.tierLabel || v3Score?.tier || unified?.levelName,
+    db,
+    trustLevelLabels: true,
+  });
 
   const payload = {
     agentId: row.id,
     profileId: row.id,
-    score,
-    trustScore: score,
-    reputationScore: score,
-    level,
-    levelName,
-    verificationLevel: level,
-    verificationLevelName: levelName,
-    verificationLabel: levelName,
-    tier: levelName,
-    isBorn: !!(v3Score?.isBorn || unified?.hasBoaAvatar),
-    source: unified?.source || (v3Score ? 'v3-onchain' : 'scoring-v2-phase-a'),
-    breakdown,
-    trustScoreBreakdown,
+    score: surface.score,
+    trustScore: surface.trustScore,
+    reputationScore: surface.reputationScore,
+    level: surface.level,
+    levelName: surface.levelName,
+    verificationLevel: surface.verificationLevel,
+    verificationLevelName: surface.verificationLevelName,
+    verificationLabel: surface.verificationLabel,
+    tier: surface.tier,
+    isBorn: surface.isBorn,
+    source: unified?.source || surface.source,
+    breakdown: surface.breakdown,
+    trustScoreBreakdown: surface.trustScoreBreakdown,
   };
 
   return {
@@ -674,9 +639,16 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     const unified = computeUnifiedTrustScore(db, profile, { v3Score });
     const parsedNftAvatar = parseJsonFieldSafe(profile.nft_avatar, null);
     const resolvedAvatar = parsedNftAvatar?.image || parsedNftAvatar?.arweaveUrl || profile.avatar || matchedV3?.faceImage || null;
-    const displayTrustScore = matchedV3 ? (Number(matchedV3.reputationScore || 0) > 10000 ? Math.round(Number(matchedV3.reputationScore || 0) / 1000) : Number(matchedV3.reputationScore || 0)) : unified.score;
-    const displayVerificationLevel = matchedV3 ? Number(matchedV3.verificationLevel || 0) : unified.level;
-    const displayVerificationName = matchedV3 ? (matchedV3.verificationLabel || matchedV3.tierLabel || matchedV3.tier || unified.levelName) : unified.levelName;
+    const matchedV3Score = Number(matchedV3?.reputationScore || 0);
+    const onChainReputationScore = matchedV3
+      ? (matchedV3Score > 10000 ? Math.round(matchedV3Score / 1000) : normalizeTrustScoreValue(matchedV3Score))
+      : normalizeTrustScoreValue(unified.score);
+    const reputationSurface = buildReputationSurface({
+      profile,
+      unified,
+      v3Score,
+      db,
+    });
 
     const attestationHints = new Map();
     try {
@@ -730,17 +702,25 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       profileId: profile.id,
       name: profile.name,
       did: 'did:agentfolio:' + profile.id,
-      trustScore: displayTrustScore,
-      score: displayTrustScore,
-      reputationScore: displayTrustScore,
-      level: displayVerificationLevel,
-      levelName: displayVerificationName,
-      verificationLevel: displayVerificationLevel,
-      verificationLevelName: displayVerificationName,
-      verificationLabel: displayVerificationName,
-      tier: displayVerificationName,
-      verificationBadge: ['⚪','🟡','🔵','🟢','🟠','🟣'][displayVerificationLevel] || unified.badge,
-      scoreVersion: unified.source,
+      trustScore: reputationSurface.trustScore,
+      score: reputationSurface.score,
+      reputationScore: onChainReputationScore,
+      level: reputationSurface.level,
+      levelName: reputationSurface.levelName,
+      verificationLevel: reputationSurface.verificationLevel,
+      verificationLevelName: reputationSurface.verificationLevelName,
+      verificationLabel: reputationSurface.verificationLabel,
+      tier: reputationSurface.tier,
+      verificationBadge: reputationSurface.verificationBadge,
+      scoreVersion: reputationSurface.source,
+      reviewSummary: reputationSurface.reviewSummary,
+      reviews: reputationSurface.reviews,
+      reviewCount: reputationSurface.reviewCount,
+      reviewAvg: reputationSurface.reviewAvg,
+      jobHistory: reputationSurface.jobHistory,
+      jobs: reputationSurface.jobs,
+      completedJobs: reputationSurface.completedJobs,
+      jobsCompleted: reputationSurface.jobsCompleted,
       verifications: publicVerifications,
       platforms: publicPlatforms,
       pda: matchedV3?.pda || null,
@@ -754,14 +734,14 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       skills: parseJsonFieldSafe(profile.skills, []),
       onChainRegistered: unified.hasSatpIdentity,
       v3: {
-        reputationScore: displayTrustScore,
-        verificationLevel: displayVerificationLevel,
-        verificationLabel: displayVerificationName,
+        reputationScore: onChainReputationScore,
+        verificationLevel: reputationSurface.verificationLevel,
+        verificationLabel: reputationSurface.verificationLabel,
         isBorn: !!(matchedV3 ? matchedV3.isBorn : (v3Score && v3Score.isBorn)),
         bornAt: matchedV3?.bornAt || v3Score?.bornAt || null,
         faceMint: matchedV3?.faceMint || v3Score?.faceMint || null,
       },
-      breakdown: unified.breakdown || {},
+      breakdown: reputationSurface.breakdown || {},
       links: {
         profile: 'https://agentfolio.bot/profile/' + profile.id,
         trustCredential: 'https://agentfolio.bot/trust/' + profile.id,
@@ -2275,7 +2255,7 @@ app.get('/api/leaderboard', publicLeaderboardLimiter, (req, res) => {
       ORDER BY leaderboard_score DESC, p.created_at DESC
     `).all();
 
-    const leaderboard = rows.map((row) => {
+  const leaderboard = rows.map((row) => {
       const verification = parseJsonFieldSafe(row.verification, {});
       const nft = parseJsonFieldSafe(row.nft_avatar, {});
       let score = normalizeTrustScoreValue(row.leaderboard_score);
@@ -2291,11 +2271,11 @@ app.get('/api/leaderboard', publicLeaderboardLimiter, (req, res) => {
         }
       }
 
-      const level = normalizeLeaderboardLevel(
+      const level = normalizeLevel(
         row.leaderboard_level ?? verification?.level ?? verification?.verificationLevel,
         score
       );
-      const levelName = LEADERBOARD_LEVEL_LABELS[level] || 'Unverified';
+      const levelName = LEVEL_LABELS[level] || 'Unverified';
 
       return {
         agentId: row.id,

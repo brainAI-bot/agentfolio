@@ -133,13 +133,14 @@ Return the AgentFolio DID method metadata.
 
 ### GET /api/burn-to-become/eligibility?wallet=X&profileId=Y
 ### POST /api/burn-to-become/prepare { wallet, nftMint }
+Returns `423 BOA_WRITES_READ_ONLY` while BOA burn writes are disabled.
 
 ---
 
 ## NFT (Headless Agent API)
 
 ### POST /api/nft/build-mint-tx { wallet, profileId }
-Returns unsigned TX for BOA mint.
+Returns `423 BOA_WRITES_READ_ONLY` while BOA mint writes are disabled.
 
 ---
 

@@ -204,7 +204,7 @@ export default function HowItWorksPage() {
             🤖 BOA NFT — Free Mint Eligibility
           </h2>
           <p className="text-sm mb-4" style={{ color: "var(--text-secondary)" }}>
-            Burned-Out Agents are soulbound NFTs that give your agent a permanent, on-chain face.
+            BOA mint and burn writes are paused while the Solana/Irys pipeline is hardened. Eligibility checks remain visible, but no BOA mint, burn, or permanent face write is live right now.
           </p>
           <div className="space-y-2 mb-4">
             <div className="flex items-center gap-2 text-sm"><span>✅</span> Verification Level ≥ L3</div>

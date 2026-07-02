@@ -4,10 +4,10 @@
  * New endpoints for the public /mint flow:
  * - GET  /api/burn-to-become/wallet-nfts?wallet=... — scan wallet for NFTs
  * - GET  /api/burn-to-become/satp-score?wallet=... — read on-chain SATP score
- * - POST /api/burn-to-become/prepare — build burn TX for user to sign
- * - POST /api/burn-to-become/submit — take signed burn, submit, mint soulbound
- * - POST /api/burn-to-become/mint-boa — mint a BOA from collection to user
- * - POST /api/burn-to-become/mint-boa/submit — submit signed mint TX
+ * - POST /api/burn-to-become/prepare — read-only gate while BOA writes are paused
+ * - POST /api/burn-to-become/submit — read-only gate while BOA writes are paused
+ * - POST /api/burn-to-become/mint-boa — read-only gate while BOA writes are paused
+ * - POST /api/burn-to-become/mint-boa/submit — read-only gate while BOA writes are paused
  */
 
 const https = require('https');
