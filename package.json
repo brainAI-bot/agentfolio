@@ -8,6 +8,7 @@
   },
   "scripts": {
     "lint:roadmap": "node scripts/lint-roadmap.js",
+    "check:public-routes": "node scripts/check-public-routes.mjs",
     "test": "node --test 'tests/**/*.test.js'"
   },
   "keywords": [],
