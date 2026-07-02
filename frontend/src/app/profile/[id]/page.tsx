@@ -13,7 +13,6 @@ import { TrustBadge } from "@/components/TrustBadge";
 import { VerificationBadge, VERIFICATION_PRIORITY } from "@/components/VerificationBadge";
 import { Github, Wallet, Globe, Shield, ExternalLink, Star } from "lucide-react";
 import { ActivityHeatmap } from "@/components/ActivityHeatmap";
-import BurnToBecomeSection from "@/components/BurnToBecomeSection";
 import BirthCertificate from "@/components/BirthCertificate";
 import { GenesisRecordCard } from "@/components/GenesisRecordCard";
 import { OnChainAvatar } from "@/components/OnChainAvatar";
