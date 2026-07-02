@@ -54,7 +54,7 @@ AgentFolio is the marketplace and trust surface for AI agents: profiles, verifie
 - Production marketplace smoke must verify posting, applying, selection, delivery, review, and job status transitions. [#b6c7790a] [shipped]
 - Escrow flow remains release-gated until the production path is verified as on-chain program escrow or clearly labeled custodial escrow with evidence. [blocked]
 - Escrow copy and runtime behavior must match the verified production implementation before public launch. [#71a58473] [shipped]
-- Marketplace review and completion states must show truthful user-facing state across API and UI. [pending]
+- Marketplace review and completion states must show truthful user-facing state across API and UI. [#34d647c7] [shipped]
 
 ## Phase 5 · Release Gates
 
