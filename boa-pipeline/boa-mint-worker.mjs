@@ -26,7 +26,7 @@ if (!nftNum || !recipient) {
   process.exit(1);
 }
 
-const RPC = process.env.SOLANA_RPC_URL || (CLUSTER === 'mainnet' ? 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb' : 'https://api.devnet.solana.com');
+const RPC = process.env.SOLANA_RPC_URL || (CLUSTER === 'mainnet' ? 'https://api.mainnet-beta.solana.com' : 'https://api.devnet.solana.com');
 const TREASURY = 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
 const DEPLOYER_PATH = process.env.HOME + '/.config/solana/mainnet-deployer.json';
 const ASSETS_DIR = process.env.HOME + '/boa-assets';

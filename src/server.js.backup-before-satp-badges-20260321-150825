@@ -113,7 +113,7 @@ async function getOnChainScores(profileId) {
   try {
     const { createSATPClient } = require('./satp-client/src');
     const client = createSATPClient({ 
-      rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb' 
+      rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com' 
     });
     const genesis = await client.getGenesisRecord(profileId);
     if (genesis && genesis.reputationScore !== undefined) {
@@ -17345,7 +17345,7 @@ res.writeHead(200, { 'Content-Type': 'text/html' });
     const profileId = url.pathname.split('/')[3];
     try {
       const { createSATPClient } = require('./satp-client/src');
-      const client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb' });
+      const client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com' });
       client.getGenesisRecord(profileId).then(record => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ genesis: record }));
@@ -17368,7 +17368,7 @@ res.writeHead(200, { 'Content-Type': 'text/html' });
     req.on('end', async () => {
       try {
         const { createSATPClient, agentIdHash } = require('./satp-client/src');
-        const client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb' });
+        const client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com' });
         
         const data = JSON.parse(body);
         const { agentId, payer } = data;

@@ -10,7 +10,7 @@ import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs'
 
 assertSolanaIrysWriteEnabled('Solana/Irys script write surface: boa-pipeline/burn-core-test-mints.mjs');
 
-const RPC = 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+const RPC = 'https://api.mainnet-beta.solana.com';
 const umi = createUmi(RPC).use(mplCore());
 const raw = JSON.parse(fs.readFileSync(process.env.HOME + "/.config/solana/mainnet-deployer.json"));
 const kp = umi.eddsa.createKeypairFromSecretKey(new Uint8Array(raw));

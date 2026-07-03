@@ -23,6 +23,14 @@ const { sendWelcomeEmail } = require('./lib/welcome-email');
 const { assertSolanaIrysWriteEnabled, sendSolanaIrysWriteGateResponse } = require('./lib/write-surface-gate');
 const { buildReputationSurface, normalizeTrustScoreValue } = require('./lib/reputation-surface');
 
+function getHqPushHeaders() {
+  const token = process.env.HQ_AGENT_TOKEN || process.env.HQ_KEY;
+  if (!token) {
+    throw new Error('HQ_AGENT_TOKEN must be set for HQ notifications');
+  }
+  return { 'Content-Type': 'application/json', 'X-HQ-Key': token };
+}
+
 // SATP on-chain identity registration (fire-and-forget on profile creation)
 let satpWrite;
 try {
@@ -430,13 +438,15 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
     const notifReq = http.request({
       hostname: 'localhost', port: 3456, path: '/api/comms/push',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-HQ-Key': '8abe67cfdddd0152925a512175515820dabb7dfce8ebe258' },
+      headers: getHqPushHeaders(),
       timeout: 3000,
     });
     notifReq.on('error', () => {});
     notifReq.write(notifData);
     notifReq.end();
-  } catch (_) {}
+  } catch (e) {
+    console.warn('[ProfileStore] HQ verification notification skipped:', e.message);
+  }
 
     // Record score history on verification change
   if (global._recordScoreHistory) {
@@ -913,13 +923,15 @@ function registerRoutes(app) {
         const notifReq = http.request({
           hostname: 'localhost', port: 3456, path: '/api/comms/push',
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-HQ-Key': '8abe67cfdddd0152925a512175515820dabb7dfce8ebe258' },
+          headers: getHqPushHeaders(),
           timeout: 3000,
         });
         notifReq.on('error', () => {}); // fire-and-forget
         notifReq.write(notifData);
         notifReq.end();
-      } catch (_) {} // Never fail registration due to notification
+      } catch (e) {
+        console.warn('[ProfileStore] HQ registration notification skipped:', e.message);
+      } // Never fail registration due to notification
 
       res.status(201).json({
         id,
