@@ -111,7 +111,7 @@ async function main() {
 
   // Load SATP client
   const client = createSATPClient({
-    rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb',
+    rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
   });
 
   // Load signer

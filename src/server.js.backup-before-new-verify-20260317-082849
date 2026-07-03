@@ -46,7 +46,7 @@ const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainD
 let satpV3Leaderboard;
 try {
   const { createSATPClient } = require('./satp-client/src');
-  satpV3Leaderboard = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb' });
+  satpV3Leaderboard = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com' });
 } catch (e) { console.warn('[Server] V3 SDK not available for leaderboard:', e.message); }
 
 // x402 Payment Layer

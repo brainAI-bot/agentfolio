@@ -25,7 +25,7 @@ import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs'
 
 assertSolanaIrysWriteEnabled('Solana/Irys script write surface: core-cm-v2/mainnet-noguard.mjs');
 
-const RPC = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+const RPC = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const DEPLOYER_PATH = process.env.HOME + '/.config/solana/mainnet-deployer.json';
 const OUTPUT_DIR = process.env.HOME + '/agentfolio/boa-pipeline/candy-machine-data';
 const UPLOADED_PATH = path.join(OUTPUT_DIR, 'uploaded-assets.json');

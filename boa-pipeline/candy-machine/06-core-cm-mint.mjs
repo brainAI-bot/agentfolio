@@ -31,7 +31,7 @@ if (!recipient) {
 }
 
 const SCRIPT_DIR = path.dirname(new URL(import.meta.url).pathname);
-const RPC = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+const RPC = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const DEPLOYER_PATH = process.env.HOME + '/.config/solana/mainnet-deployer.json';
 const CM_STATE_PATH = path.join(SCRIPT_DIR, '..', 'candy-machine-data', 'core-cm-state.json');
 const UPLOADED_PATH = path.join(SCRIPT_DIR, '..', 'candy-machine-data', 'uploaded-assets.json');

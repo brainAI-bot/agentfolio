@@ -24,7 +24,7 @@ assertSolanaIrysWriteEnabled('Solana/Irys script write surface: core-cm-v2/updat
 const isDevnet = process.argv.includes('--devnet');
 const RPC = isDevnet 
   ? 'https://api.devnet.solana.com'
-  : 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+  : 'https://api.mainnet-beta.solana.com';
 
 const CM_ADDRESS = isDevnet
   ? process.env.DEVNET_CM || 'TODO_DEVNET_CM'

@@ -17,7 +17,7 @@ const START = parseInt(process.argv[2]) || 1;
 const END = parseInt(process.argv[3]) || 100;
 const BATCH_SIZE = 3; // Upload 3 at a time (Irys rate limits)
 
-const RPC = process.env.SOLANA_RPC_URL || process.env.SOLANA_RPC || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+const RPC = process.env.SOLANA_RPC_URL || process.env.SOLANA_RPC || 'https://api.mainnet-beta.solana.com';
 const DEPLOYER_PATH = process.env.HOME + '/.config/solana/mainnet-deployer.json';
 const ASSETS_DIR = process.env.HOME + '/boa-assets';
 const OUTPUT_DIR = process.env.HOME + '/agentfolio/boa-pipeline/candy-machine-data';

@@ -48,7 +48,7 @@ if (!recipient) {
   process.exit(1);
 }
 
-const RPC = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+const RPC = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const DEPLOYER_PATH = process.env.HOME + '/.config/solana/mainnet-deployer.json';
 const DATA_DIR = process.env.HOME + '/agentfolio/boa-pipeline/candy-machine-data';
 const CM_STATE_PATH = path.join(DATA_DIR, 'core-cm-state.json');

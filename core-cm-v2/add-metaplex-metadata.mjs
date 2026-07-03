@@ -9,7 +9,7 @@ import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs'
 
 assertSolanaIrysWriteEnabled('Solana/Irys script write surface: core-cm-v2/add-metaplex-metadata.mjs');
 
-const RPC = 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+const RPC = 'https://api.mainnet-beta.solana.com';
 const DEPLOYER_PATH = process.env.HOME + '/.config/solana/mainnet-deployer.json';
 const TOKEN_METADATA_PROGRAM = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 
