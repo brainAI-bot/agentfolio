@@ -21,6 +21,7 @@ const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const { sendWelcomeEmail } = require('./lib/welcome-email');
 const { assertSolanaIrysWriteEnabled, sendSolanaIrysWriteGateResponse } = require('./lib/write-surface-gate');
+const { buildReputationSurface, normalizeTrustScoreValue } = require('./lib/reputation-surface');
 
 // SATP on-chain identity registration (fire-and-forget on profile creation)
 let satpWrite;
@@ -45,12 +46,6 @@ try {
   console.log('[SATP V3] SDK loaded successfully (SATPV3SDK + createSATPClient + PDA helpers)');
 } catch (e) {
   console.warn('[SATP V3] SDK not available:', e.message);
-}
-
-function normalizeTrustScoreValue(score) {
-  const numeric = Number(score || 0);
-  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
-  return numeric > 800 ? Math.min(Math.round(numeric / 10000), 800) : Math.max(0, numeric);
 }
 
 // V3 Score Service — batch on-chain scoring
@@ -479,6 +474,17 @@ function enrichProfile(row) {
       SUM(CASE WHEN rating <= 2 THEN 1 ELSE 0 END) as negative
     FROM reviews WHERE ${rfk} = ?
   `).get(row.id);
+  let jobStats = { completed: 0, posted: 0, total: 0 };
+  try {
+    jobStats = d.prepare(`
+      SELECT
+        SUM(CASE WHEN client_id = ? THEN 1 ELSE 0 END) AS posted,
+        SUM(CASE WHEN selected_agent_id = ? AND status = 'completed' THEN 1 ELSE 0 END) AS completed,
+        COUNT(*) AS total
+      FROM jobs
+      WHERE client_id = ? OR selected_agent_id = ?
+    `).get(row.id, row.id, row.id, row.id) || jobStats;
+  } catch (_) {}
   
   // SATP Trust Score (from satp_trust_scores table)
   let trust_score = null;
@@ -520,6 +526,17 @@ function enrichProfile(row) {
       };
     } catch {}
   }
+
+  const reputationSurface = buildReputationSurface({
+    profile: row,
+    v3Score: v3,
+    score: v3?.reputationScore ?? trust_score?.overall_score ?? 0,
+    level: v3?.verificationLevel ?? trust_score?.level ?? 0,
+    levelName: v3?.verificationLabel || null,
+    source: v3 ? 'v3_score_service' : (trust_score ? 'satp_trust_scores' : 'profile-store'),
+    reviewSummary: reviewStats,
+    jobHistory: jobStats,
+  });
 
   return {
     ...row,
@@ -612,12 +629,9 @@ function enrichProfile(row) {
       negative: reviewStats.negative,
     },
     trust_score,
-    // Computed level/tier/score — chain-cache is primary source
-    level: v3 ? v3.verificationLevel : (trust_score ? trust_score.level : null),
-    tier: v3 ? (['Unclaimed','Registered','Verified','Established','Trusted','Sovereign'][v3.verificationLevel] || v3.verificationLabel || 'Unclaimed') : (trust_score ? (trust_score.level >= 4 ? 'Elite' : trust_score.level >= 3 ? 'Established' : trust_score.level >= 2 ? 'Verified' : trust_score.level >= 1 ? 'Basic' : 'Unclaimed') : null),
-    score: v3 ? v3.reputationScore : (trust_score ? trust_score.overall_score : null),
-    verification_level: v3 ? v3.verificationLevel : (trust_score ? trust_score.level : 0),
-    reputation_score: v3 ? v3.reputationScore : (trust_score ? trust_score.overall_score : 0),
+    ...reputationSurface,
+    verification_level: reputationSurface.verificationLevel,
+    reputation_score: reputationSurface.reputationScore,
     // Top-level unclaimed flag for frontend (from metadata)
     unclaimed: (() => { try { const m = typeof row.metadata === 'string' ? JSON.parse(row.metadata || '{}') : (row.metadata || {}); return m.unclaimed === true || m.isPlaceholder === true || m.placeholder === true; } catch { return false; } })(),
   };
@@ -1215,15 +1229,23 @@ function registerRoutes(app) {
       profiles.sort((a, b) => (b.trust_score || 0) - (a.trust_score || 0));
     } catch (e) { /* chain-cache may not be ready yet */ }
 
-    // P0 FIX: Promote v3/chain-cache level+score to top-level fields for directory consumption
-    const levelLabels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
+    // Promote v3/chain-cache level+score through the shared reputation surface.
     for (const p of profiles) {
       const v = p.v3 || {};
       const cl = p.chain_level || 0;
       const cs = p.chain_score || 0;
-      p.level = v.verificationLevel ?? v.level ?? cl ?? 0;
-      p.score = v.reputationScore ?? v.score ?? cs ?? p.trust_score ?? 0;
-      p.levelName = v.verificationLabel || levelLabels[p.level] || 'Unknown';
+      const surface = buildReputationSurface({
+        profile: p,
+        v3Score: p.v3 || null,
+        score: v.reputationScore ?? v.score ?? cs ?? p.trust_score ?? 0,
+        level: v.verificationLevel ?? v.level ?? cl ?? 0,
+        levelName: v.verificationLabel || null,
+        source: p.v3 ? 'v3_score_service' : (cs ? 'chain-cache' : 'profiles'),
+      });
+      Object.assign(p, surface, {
+        verification_level: surface.verificationLevel,
+        reputation_score: surface.reputationScore,
+      });
     }
 
     const paginatedProfiles = profiles.slice(offset, offset + limit);
@@ -1281,20 +1303,24 @@ function registerRoutes(app) {
       }
     }
 
-    // Set top-level level/score/tier from V3 data (authoritative)
+    // Set top-level level/score/tier from the shared reputation surface.
     if (enriched) {
-      const levelLabels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
       const ts = enriched.trust_score || {};
       const v3 = enriched.v3 || {};
-      let level = ts.verificationLevel ?? v3.verificationLevel ?? 0;
-      let score = ts.reputationScore ?? v3.reputationScore ?? 0;
-      let label = ts.verificationLabel || v3.verificationLabel || '';
-
-      enriched.level = level;
-      enriched.score = score;
-      enriched.levelName = label || levelLabels[level] || 'Unknown';
-      enriched.verificationLevel = level;
-      enriched.tier = label || levelLabels[level] || 'Unknown';
+      const surface = buildReputationSurface({
+        profile: enriched,
+        v3Score: ts.reputationScore ? ts : (enriched.v3 || null),
+        score: ts.reputationScore ?? v3.reputationScore ?? enriched.score ?? 0,
+        level: ts.verificationLevel ?? v3.verificationLevel ?? enriched.verificationLevel ?? 0,
+        levelName: ts.verificationLabel || v3.verificationLabel || enriched.verificationLabel || null,
+        source: ts.source || enriched.source || 'profile-store',
+        reviewSummary: enriched.reviewSummary || enriched.reviews,
+        jobHistory: enriched.jobHistory,
+      });
+      Object.assign(enriched, surface, {
+        verification_level: surface.verificationLevel,
+        reputation_score: surface.reputationScore,
+      });
     }
     res.json(enriched);
   });

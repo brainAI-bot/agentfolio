@@ -348,7 +348,7 @@ export default function MintPage() {
     { id: "connect", label: "Connect", num: 1 },
     { id: "choose", label: "Choose", num: 2 },
     { id: "preview", label: "Confirm", num: 3 },
-    { id: "complete", label: "Soulbound", num: 4 },
+    { id: "complete", label: "Paused", num: 4 },
   ];
 
   const stepMap: Record<string, number> = { connect: 0, loading: 1, choose: 1, minting: 1, select: 1, preview: 2, burning: 2, error: 2, complete: 3 };
@@ -769,7 +769,7 @@ export default function MintPage() {
                 <p className="text-center mt-3 font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>{selectedNft.name}</p>
               </div>
               <div className="w-full sm:w-7/12 space-y-5">
-                <h2 className="text-xl font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>Confirm Burn to Become</h2>
+                <h2 className="text-xl font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>BOA Writes Paused</h2>
 
                 <div className="rounded-xl p-4 space-y-2" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
                   <div className="flex items-center gap-2">
@@ -801,9 +801,10 @@ export default function MintPage() {
                     className="flex-1 py-3.5 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all hover:bg-[var(--bg-tertiary)]"
                     style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}>Back</button>
                   <button onClick={handleBurn}
+                    disabled={MINTING_PAUSED}
                     className="flex-[2] inline-flex items-center justify-center gap-2 py-3.5 rounded-lg text-sm font-bold uppercase tracking-wider transition-all hover:shadow-[0_0_40px_rgba(153,69,255,0.4)] hover:scale-[1.02]"
-                    style={{ fontFamily: "var(--font-mono)", background: "linear-gradient(135deg, var(--accent), #7c3aed)", color: "#fff" }}>
-                    <Flame size={16} /> Burn & Become
+                    style={{ fontFamily: "var(--font-mono)", background: MINTING_PAUSED ? "var(--bg-tertiary)" : "linear-gradient(135deg, var(--accent), #7c3aed)", color: MINTING_PAUSED ? "var(--text-tertiary)" : "#fff", border: MINTING_PAUSED ? "1px solid var(--border)" : "none", cursor: MINTING_PAUSED ? "not-allowed" : "pointer" }}>
+                    <Flame size={16} /> {MINTING_PAUSED ? "Coming Soon" : "Burn & Become"}
                   </button>
                 </div>
               </div>
@@ -861,7 +862,7 @@ export default function MintPage() {
                 {/* On-Chain Proof */}
                 <div className="flex-1">
                   <p className="text-[10px] uppercase tracking-widest mb-2 font-semibold" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>
-                    <Shield size={10} className="inline mr-1" /> On-Chain Proof
+                    <Shield size={10} className="inline mr-1" /> Write Status
                   </p>
                   <div className="rounded-xl border-2 aspect-square flex items-center justify-center" style={{ borderColor: "var(--success)", background: "var(--bg-tertiary)" }}>
                     <div className="text-center p-4 space-y-3">
@@ -881,7 +882,7 @@ export default function MintPage() {
                       </div>
                     </div>
                   </div>
-                  <p className="mt-2 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>SOLANA • ARWEAVE • PERMANENT</p>
+                  <p className="mt-2 text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>SOLANA / IRYS WRITES PAUSED</p>
                 </div>
               </div>
 

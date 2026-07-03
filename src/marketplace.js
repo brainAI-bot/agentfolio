@@ -8,6 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { buildReputationSurface } = require('./lib/reputation-surface');
 let addActivity;
 try { addActivity = require('./profile-store').addActivity; } catch { addActivity = () => {}; }
 
@@ -43,28 +44,6 @@ function safeJobReviewPath(jobId) {
 }
 
 
-function normalizeTrustScoreValue(score) {
-  const numeric = Number(score || 0);
-  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
-  return numeric > 800 ? Math.min(Math.round(numeric / 10000), 800) : Math.max(0, numeric);
-}
-
-function safeCount(db, sql, params) {
-  try {
-    return Number(db.prepare(sql).get(...params)?.c || 0);
-  } catch {
-    return 0;
-  }
-}
-
-function safeAverage(db, sql, params) {
-  try {
-    return Number(db.prepare(sql).get(...params)?.avg || 0);
-  } catch {
-    return 0;
-  }
-}
-
 // Helper: resolve wallet address to profile ID
 function resolveApplicantId(applicantId) {
   if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(applicantId)) {
@@ -85,6 +64,38 @@ function resolveApplicantId(applicantId) {
   return applicantId;
 }
 
+function loadProfileReputation(profileId) {
+  if (!profileId) return null;
+  try {
+    const profileStore = require('./profile-store');
+    const db = profileStore.getDb();
+    let row = db.prepare('SELECT id, name, avatar, nft_avatar, verification_data FROM profiles WHERE id = ?').get(profileId);
+    if (!row) row = db.prepare('SELECT id, name, avatar, nft_avatar, verification_data FROM profiles WHERE id = ?').get('agent_' + String(profileId).toLowerCase());
+    if (!row) row = db.prepare('SELECT id, name, avatar, nft_avatar, verification_data FROM profiles WHERE LOWER(name) = ?').get(String(profileId).toLowerCase());
+    if (!row) return null;
+
+    let trustRow = null;
+    try {
+      trustRow = db.prepare('SELECT overall_score, level FROM satp_trust_scores WHERE agent_id = ?').get(row.id);
+    } catch (_) {}
+
+    return {
+      row,
+      surface: buildReputationSurface({
+        profile: row,
+        score: trustRow?.overall_score ?? 0,
+        level: trustRow?.level ?? 0,
+        levelName: null,
+        source: trustRow ? 'satp_trust_scores' : 'marketplace',
+        db,
+      }),
+    };
+  } catch (e) {
+    console.error('[Marketplace] loadProfileReputation error:', e.message);
+    return null;
+  }
+}
+
 // Ensure data dirs exist
 ['jobs', 'applications', 'escrow', 'deliverables', 'reviews'].forEach(dir => {
   const p = path.join(DATA_DIR, dir);
@@ -103,20 +114,11 @@ function readJSON(filepath) {
 function enrichApplication(app) {
   if (!app || !app.applicantId) return app;
   try {
-    const profileStore = require('./profile-store');
-    const db = profileStore.getDb();
+    const reputation = loadProfileReputation(app.applicantId);
+    const row = reputation?.row;
+    const surface = reputation?.surface;
     
-    // Try exact match, then lowercase with agent_ prefix, then case-insensitive name
-    let row = db.prepare('SELECT id, name, avatar, nft_avatar, verification_data FROM profiles WHERE id = ?').get(app.applicantId);
-    if (!row) {
-      row = db.prepare('SELECT id, name, avatar, nft_avatar, verification_data FROM profiles WHERE id = ?').get('agent_' + app.applicantId.toLowerCase());
-    }
-    if (!row) {
-      row = db.prepare('SELECT id, name, avatar, nft_avatar, verification_data FROM profiles WHERE LOWER(name) = ?').get(app.applicantId.toLowerCase());
-    }
-    
-    if (row) {
-      const levelNames = ['Unverified', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
+    if (row && surface) {
       const vd = JSON.parse(row.verification_data || '{}');
       const badges = [];
       if (vd.solana?.verified) badges.push('solana');
@@ -133,44 +135,53 @@ function enrichApplication(app) {
           if (nft.image || nft.arweaveUrl) resolvedAvatar = (nft.image || nft.arweaveUrl).replace('node1.irys.xyz', 'gateway.irys.xyz');
         } catch {}
       }
-      
-      // Get trust score from satp_trust_scores table
-      let trustScore = 0;
-      let verificationLevel = 0;
-      let verificationLevelName = 'Unverified';
-      try {
-        const trustRow = db.prepare('SELECT overall_score, level FROM satp_trust_scores WHERE agent_id = ?').get(row.id);
-        if (trustRow) {
-          trustScore = normalizeTrustScoreValue(trustRow.overall_score);
-          // level can be a number or a string label
-          const lvl = trustRow.level;
-          if (typeof lvl === 'number') {
-            verificationLevel = lvl;
-            verificationLevelName = levelNames[lvl] || 'Unverified';
-          } else if (typeof lvl === 'string') {
-            // Map string labels to numbers
-            const labelMap = { 'UNVERIFIED': 0, 'REGISTERED': 1, 'VERIFIED': 2, 'ESTABLISHED': 3, 'TRUSTED': 4, 'SOVEREIGN': 5 };
-            verificationLevel = labelMap[lvl.toUpperCase()] ?? 0;
-            verificationLevelName = levelNames[verificationLevel] || lvl;
-          }
-        }
-      } catch {}
-      
+
       app.applicantName = row.name;
       app.applicantAvatar = resolvedAvatar;
       app.applicantProfileId = row.id;
-      app.trustScore = trustScore;
-      app.verificationLevel = verificationLevel;
-      app.verificationLevelName = verificationLevelName;
+      app.trustScore = surface.trustScore;
+      app.score = surface.score;
+      app.reputationScore = surface.reputationScore;
+      app.verificationLevel = surface.verificationLevel;
+      app.verificationLevelName = surface.verificationLevelName;
+      app.verificationLabel = surface.verificationLabel;
+      app.tier = surface.tier;
+      app.reviewSummary = surface.reviewSummary;
+      app.reviews = surface.reviews;
+      app.reviewCount = surface.reviewCount;
+      app.reviewAvg = surface.reviewAvg;
+      app.jobHistory = surface.jobHistory;
+      app.jobs = surface.jobs;
+      app.completedJobs = surface.completedJobs;
+      app.jobsCompleted = surface.jobsCompleted;
       app.verificationBadges = badges;
-      app.jobsCompleted = safeCount(db, "SELECT COUNT(*) as c FROM jobs WHERE selected_agent_id = ? AND status = 'completed'", [row.id]);
-      app.reviewCount = safeCount(db, 'SELECT COUNT(*) as c FROM reviews WHERE reviewee_id = ?', [row.id])
-        || safeCount(db, 'SELECT COUNT(*) as c FROM reviews WHERE profile_id = ?', [row.id]);
-      app.rating = safeAverage(db, 'SELECT AVG(rating) as avg FROM reviews WHERE reviewee_id = ?', [row.id])
-        || safeAverage(db, 'SELECT AVG(rating) as avg FROM reviews WHERE profile_id = ?', [row.id]);
     }
   } catch (e) { console.error('[Marketplace] enrichApplication error:', e.message); }
   return app;
+}
+
+function attachJobReputation(job) {
+  if (!job) return job;
+  const posterId = job.postedBy || job.clientId;
+  const assigneeId = job.acceptedApplicant || job.selectedAgentId || job.v3EscrowAgentId;
+  const poster = loadProfileReputation(posterId);
+  const assignee = loadProfileReputation(assigneeId);
+
+  if (poster?.surface) {
+    job.posterReputation = poster.surface;
+    job.posterTrustScore = poster.surface.trustScore;
+    job.posterTier = poster.surface.tier;
+    job.posterReviewSummary = poster.surface.reviewSummary;
+    job.posterJobHistory = poster.surface.jobHistory;
+  }
+  if (assignee?.surface) {
+    job.assigneeReputation = assignee.surface;
+    job.assigneeTrustScore = assignee.surface.trustScore;
+    job.assigneeTier = assignee.surface.tier;
+    job.assigneeReviewSummary = assignee.surface.reviewSummary;
+    job.assigneeJobHistory = assignee.surface.jobHistory;
+  }
+  return job;
 }
 
 // Normalize job.applications to always be an array
@@ -260,7 +271,7 @@ function registerRoutes(app) {
           return enrichApplication(appId); // already hydrated object
         });
       }
-      return job;
+      return attachJobReputation(job);
     });
     res.json({ jobs: hydrated, total: hydrated.length });
   });
@@ -276,7 +287,7 @@ function registerRoutes(app) {
         return enrichApplication(app) || { id: appId, error: 'not_found' };
       });
     }
-    res.json(job);
+    res.json(attachJobReputation(job));
   });
 
   // 2. POST /api/marketplace/jobs/:id/apply (or /applications) — Apply to a job
