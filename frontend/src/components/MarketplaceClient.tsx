@@ -275,6 +275,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
         clientWallet: publicKey.toBase58(),
         agentWallet,
         agentId,
+        jobId: selectedJob.id,
         amountLamports,
         description: selectedJob.title,
         deadlineUnix,
