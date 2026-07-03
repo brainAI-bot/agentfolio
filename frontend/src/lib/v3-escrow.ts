@@ -170,12 +170,12 @@ export async function getV3EscrowState(escrowPDA: string): Promise<any> {
  * Derive an escrow PDA from client + description.
  */
 export async function deriveV3EscrowPDA(client: string, description: string, nonce?: number): Promise<string> {
-  const params = new URLSearchParams({ client, description });
+  const params = new URLSearchParams({ clientWallet: client, description });
   if (nonce) params.set('nonce', String(nonce));
   const res = await fetch(`${API_BASE}/api/v3/escrow/pda/derive?${params}`);
   const data = await res.json();
   if (data.error) throw new Error(data.error);
-  return data.pda;
+  return data.escrowPDA;
 }
 
 /**
