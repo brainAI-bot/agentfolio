@@ -19,7 +19,8 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333';
 interface V3EscrowCreateParams {
   clientWallet: string;
   agentWallet: string;
-  agentId: string;
+  agentId?: string;
+  jobId?: string;
   amountLamports: number;
   description: string;
   deadlineUnix: number;

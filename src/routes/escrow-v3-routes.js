@@ -38,6 +38,7 @@ const {
   liveEscrowGateStatus,
   sendLiveEscrowGateResponse,
 } = require('../lib/write-surface-gate');
+const { loadJob } = require('../lib/database');
 
 const router = Router();
 
@@ -136,6 +137,33 @@ function deriveEscrowPDA(client, descriptionOrHash, nonce) {
   };
 }
 
+function resolveEscrowAgentId({ jobId, agentId }, loadJobById = loadJob) {
+  if (!jobId) return { agentId, job: null };
+
+  const job = loadJobById(jobId);
+  if (!job) {
+    const err = new Error('Job not found');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const selectedAgentId = job.selected_agent_id || job.selectedAgentId;
+  if (!selectedAgentId) {
+    const err = new Error('Job has no selected agent');
+    err.statusCode = 409;
+    throw err;
+  }
+
+  if (agentId && agentId !== selectedAgentId) {
+    const err = new Error('agentId must match the job selected agent');
+    err.statusCode = 409;
+    err.details = { selectedAgentId };
+    throw err;
+  }
+
+  return { agentId: selectedAgentId, job };
+}
+
 router.get('/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -158,7 +186,8 @@ router.use((req, res, next) => {
  * Body: {
  *   clientWallet: string,           // Client's wallet (payer + signer)
  *   agentWallet: string,            // Agent's wallet
- *   agentId: string,                // Agent's SATP V3 identity ID (for Genesis Record lookup)
+ *   agentId?: string,               // Agent's SATP V3 identity ID (must match job when jobId is supplied)
+ *   jobId?: string,                 // Marketplace job; selected_agent_id is authoritative for Genesis lookup
  *   amountLamports: number,         // SOL amount in lamports
  *   description: string,            // Job description (hashed on-chain as [u8;32])
  *   deadlineUnix: number,           // Unix timestamp deadline
@@ -171,17 +200,19 @@ router.use((req, res, next) => {
 router.post('/create', requireSDK, async (req, res) => {
   try {
     const {
-      clientWallet, agentWallet, agentId, amountLamports,
+      clientWallet, agentWallet, agentId, jobId, amountLamports,
       description, deadlineUnix, nonce, arbiter,
       minVerificationLevel, requireBorn,
     } = req.body;
 
+    const { agentId: escrowAgentId, job } = resolveEscrowAgentId({ jobId, agentId });
+
     // Required fields
-    if (!clientWallet || !agentWallet || !agentId || !amountLamports || !description || !deadlineUnix) {
+    if (!clientWallet || !agentWallet || !escrowAgentId || !amountLamports || !description || !deadlineUnix) {
       return res.status(400).json({
         error: 'Missing required fields',
-        required: ['clientWallet', 'agentWallet', 'agentId', 'amountLamports', 'description', 'deadlineUnix'],
-        optional: ['nonce', 'arbiter', 'minVerificationLevel', 'requireBorn'],
+        required: ['clientWallet', 'agentWallet', 'agentId or jobId', 'amountLamports', 'description', 'deadlineUnix'],
+        optional: ['jobId', 'nonce', 'arbiter', 'minVerificationLevel', 'requireBorn'],
       });
     }
 
@@ -222,7 +253,7 @@ router.post('/create', requireSDK, async (req, res) => {
     if (requireBorn) opts.requireBorn = true;
 
     const result = await req.sdk.buildCreateEscrow(
-      clientWallet, agentWallet, agentId, amount,
+      clientWallet, agentWallet, escrowAgentId, amount,
       description, deadline, nonce || 0, opts,
     );
 
@@ -232,12 +263,17 @@ router.post('/create', requireSDK, async (req, res) => {
       descriptionHash: result.descriptionHash.toString('hex'),
       network: NETWORK,
       nonce: nonce || 0,
+      agentId: escrowAgentId,
+      jobId: job ? job.id : undefined,
       identityGateIncluded: true,
       message: 'Sign and submit to create an identity-gated escrow after live-funds release gates are enabled',
     });
   } catch (err) {
     console.error('[Escrow V3] create error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({
+      error: err.message,
+      ...(err.details ? err.details : {}),
+    });
   }
 });
 
@@ -823,5 +859,7 @@ router.get('/by-agent-id/:agentId', requireSDK, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+router.__test = { resolveEscrowAgentId };
 
 module.exports = router;
