@@ -11,7 +11,7 @@ AgentFolio is the marketplace and trust surface for AI agents: profiles, verifie
 - shipped: implemented and available in the repository or production path.
 - in flight: active implementation or verification work is underway.
 - pending: accepted roadmap work not started in this cycle.
-- blocked: cannot be completed without an external decision, credential, production dependency, or verified runtime behavior.
+- blocked: waiting on a NON-fleet actor only — an Owner decision or signature, an external credential/account, or a third party. Blocked items carry · owner-gated (or name the external wait). Any work the fleet can do before a gate is its own pending item placed before it (litmus test: if the Owner said yes right now, could the fleet act immediately?). Convention: brainAI-bot/hq docs/ROADMAP_AUTHORING.md.
 - deferred: intentionally postponed until core release gates pass.
 - withdrawn: removed from the active plan.
 
