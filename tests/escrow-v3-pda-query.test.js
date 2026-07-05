@@ -120,6 +120,9 @@ test('GET /api/v3/escrow/health exposes live escrow gate status', async () => {
     assert.equal(body.liveEscrow.mainnetLiveFundsCleared, false);
     assert.equal(body.liveEscrow.enableWith, 'AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES');
     assert.equal(body.liveEscrow.killSwitchEnv, 'AGENTFOLIO_ESCROW_KILL_SWITCH');
+    assert.equal(body.escrowAuthority.expectedProgramId, '4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a');
+    assert.equal(body.escrowAuthority.status, 'blocked_pending_authoritative_source_idl');
+    assert.equal(body.escrowAuthority.releaseGate.liveEscrowWritesAllowed, false);
   } finally {
     if (previousEnable === undefined) delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
     else process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = previousEnable;
