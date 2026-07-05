@@ -38,6 +38,9 @@ const {
   liveEscrowGateStatus,
   sendLiveEscrowGateResponse,
 } = require('../lib/write-surface-gate');
+const {
+  getEscrowV3AuthorityReadback,
+} = require('../lib/escrow-v3-authority');
 const { loadJob } = require('../lib/database');
 
 const router = Router();
@@ -170,6 +173,7 @@ router.get('/health', (req, res) => {
     network: NETWORK,
     sdkAvailable: Boolean(SATPV3SDK),
     liveEscrow: liveEscrowGateStatus(),
+    escrowAuthority: getEscrowV3AuthorityReadback({ satpClient }),
     timestamp: new Date().toISOString(),
   });
 });
