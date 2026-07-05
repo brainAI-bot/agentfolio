@@ -52,7 +52,11 @@ AgentFolio is the marketplace and trust surface for AI agents: profiles, verifie
 
 - Marketplace specification and escrow workflow documentation exist in docs/specs/MARKETPLACE-SPEC.md and related docs. [shipped]
 - Production marketplace smoke must verify posting, applying, selection, delivery, review, and job status transitions. [in flight]
-- Escrow flow remains release-gated until the production path is verified as on-chain program escrow or clearly labeled custodial escrow with evidence. [blocked]
+- Rebuild the escrow program from the audited source (clawd-brainchain) and verify src == deployed == IDL on devnet, resolving the program-id split-brain; evidence must be cross-host auditable (GitHub/HQ-inline). [pending]
+- Produce the authority-separation plan: split deploy/upgrade authority from operational signers, naming the exact key roles for Owner provisioning (no key material in repo or HQ; fingerprints only). [pending]
+- Close the 2026-07-02 release-gate findings on devnet: payment-replay race, unauthorized release/refund paths, identity-gate bypass; remove or hard-disable the custodial code path per Owner decision (b). [pending]
+- End-to-end devnet escrow verification of the production flow against the rebuilt program, per docs/operational/ONCHAIN-ESCROW-PROGRAM-GATE-PACKET-2026-07-05.md, with cross-host-auditable evidence. [pending]
+- Mainnet escrow launch via a single Owner signing packet (program redeploy + authority separation): release stays under the Owner 2026-07-05 hold for genuine on-chain escrow until every fix item above is shipped. [#ed3999ac] [blocked] · owner-gated
 - Escrow copy and runtime behavior must match the verified production implementation before public launch. [pending]
 - Marketplace review and completion states must show truthful user-facing state across API and UI. [pending]
 
