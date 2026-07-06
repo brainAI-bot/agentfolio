@@ -31,6 +31,7 @@
  */
 
 const { Router } = require('express');
+const rateLimit = require('express-rate-limit');
 const {
   Connection,
   PublicKey,
@@ -57,6 +58,14 @@ const {
 } = require('../lib/escrow-onchain');
 
 const router = Router();
+
+const escrowV3CreateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many escrow create requests, please retry later' },
+});
 
 // ── SDK Setup ──────────────────────────────────────────────────────────────────
 let SATPV3SDK;
@@ -409,7 +418,7 @@ router.use((req, res, next) => {
  *   requireBorn?: boolean           // Require agent has completed burn-to-become (default: false)
  * }
  */
-router.post('/create', requireSDK, async (req, res) => {
+router.post('/create', escrowV3CreateLimiter, requireSDK, async (req, res) => {
   try {
     const {
       clientWallet, agentWallet, agentId, jobId, amountLamports, amountUSDC, currency,
