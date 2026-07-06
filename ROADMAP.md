@@ -52,7 +52,7 @@ AgentFolio is the marketplace and trust surface for AI agents: profiles, verifie
 
 - Marketplace specification and escrow workflow documentation exist in docs/specs/MARKETPLACE-SPEC.md and related docs. [shipped]
 - Production marketplace smoke must verify posting, applying, selection, delivery, review, and job status transitions. [#b6c7790a] [shipped]
-- Rebuild the escrow program from the audited source (clawd-brainchain) and verify src == deployed == IDL on devnet, resolving the program-id split-brain; evidence must be cross-host auditable (GitHub/HQ-inline). [#49e40f78] [shipped]
+- Rebuild the escrow program from the audited source (clawd-brainchain) and verify src == deployed == IDL on devnet, resolving the program-id split-brain; evidence must be cross-host auditable (GitHub/HQ-inline). [#49e40f78] [blocked]
 - Produce the authority-separation plan: split deploy/upgrade authority from operational signers, naming the exact key roles for Owner provisioning (no key material in repo or HQ; fingerprints only). [#eb6ea3d2] [shipped]
 - Close the 2026-07-02 release-gate findings on devnet: payment-replay race, unauthorized release/refund paths, identity-gate bypass; remove or hard-disable the custodial code path per Owner decision (b). [#cd15dddc] [shipped]
 - End-to-end devnet escrow verification of the production flow against the rebuilt program, per docs/operational/ONCHAIN-ESCROW-PROGRAM-GATE-PACKET-2026-07-05.md, with cross-host-auditable evidence. [#580d4a47] [shipped]
