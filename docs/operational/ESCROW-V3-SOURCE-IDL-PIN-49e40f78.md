@@ -18,6 +18,33 @@ Tracked artifacts:
 | Program source | `onchain/escrow_v3/programs/escrow_v3/src/lib.rs` | `d36a4c165b11dad18767741a727b386eb31de5ae088163bef6aca7e8b34788bf` |
 | Tracked IDL | `onchain/escrow_v3/target/idl/escrow_v3.json` | `10f07341c03679f8bc32dcadb8b2f7d4280095ef79e5a94d960b2194b4a159ba` |
 
+Provenance correction:
+
+The source hash above is a hash of this PR's repo-visible `escrow_v3` source
+blob. It is not an audited SATP source-history match for the deployed devnet
+program. A 2026-07-06 read-only provenance check compared the claim against
+`github.com/brainAI-bot/satp` refs after fetch:
+
+| Repo/ref searched | Commit or result | Finding |
+| --- | --- | --- |
+| `satp` `origin/main` | `58fa9bdf4e0f4abf7d69c54b88bcef47b2aad9c8` | Carries `programs/satp_escrow/src/lib.rs` sha256 `4dc5793316b30342b2d3af30a670803428f36e52f143d5f5ff8e861c203d16c9` and `idls/satp_escrow.json` sha256 `a1c8209e023137fd0147457f1fa10cc57a7b707e91da63565a7ff20d82951c1b`; program id is `UpJ7jmUzHkQ7EdBKiBv3zq8Dr1fVh6GVWKa7nYtwQ22`, not `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`. |
+| `satp` `master` | Remote branch absent | No searchable authoritative branch at `origin/master`. |
+| `satp` `anchor-1.0-migration` | Remote branch absent | No searchable authoritative branch at `origin/anchor-1.0-migration`. |
+| `satp` `feat/anchor-1.0-migration` | Remote branch absent | No searchable authoritative branch at `origin/feat/anchor-1.0-migration`. |
+| `satp` 49e40f78 source-history commits | `3e6fceea3a54043d527d14ba4e347e2693d5e1ed`, `47379ef97629ea2cce70c816d3e4b75890c8cabb`, `761ae99f8b8ec7f4878e5972e1fbb8e1b423178e`, `58fa9bdf4e0f4abf7d69c54b88bcef47b2aad9c8` | No exact blob-content match for `d36a4c165b11dad18767741a727b386eb31de5ae088163bef6aca7e8b34788bf`. |
+
+Classification: absence/mismatch. This PR can document that its local
+`escrow_v3` source, `Anchor.toml`, and IDL agree with
+`HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`, but it must not certify that the
+source was recovered from audited SATP history or that it matches the deployed
+program bytes.
+
+Safe next action for brainForge: review this absence/mismatch classification and
+choose either an owner-approved replacement devnet deploy from the audited SATP
+source, or provide the missing authoritative audited source commit/tree and IDL
+for `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`. Until one of those exists,
+keep live escrow writes gated.
+
 Verification:
 
 ```sh
