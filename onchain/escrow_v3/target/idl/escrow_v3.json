@@ -193,6 +193,10 @@
     { "code": 6011, "name": "DeadlineNotExtended", "msg": "New deadline must extend the current deadline" },
     { "code": 6012, "name": "AmountExceedsRemaining", "msg": "Amount exceeds remaining escrow balance" },
     { "code": 6013, "name": "NothingToRelease", "msg": "No releasable balance remains" },
-    { "code": 6014, "name": "InvalidTrustRequirement", "msg": "Invalid trust requirement" }
+    { "code": 6014, "name": "InvalidTrustRequirement", "msg": "Invalid trust requirement" },
+    { "code": 6015, "name": "WrongAgentIdentity", "msg": "Wrong SATP agent identity" },
+    { "code": 6016, "name": "InvalidAgentIdentity", "msg": "Invalid SATP agent identity" },
+    { "code": 6017, "name": "AgentVerificationTooLow", "msg": "Agent verification level is below escrow requirement" },
+    { "code": 6018, "name": "AgentNotBorn", "msg": "Agent has not completed SATP birth requirement" }
   ]
 }

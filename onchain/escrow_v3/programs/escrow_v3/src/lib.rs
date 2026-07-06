@@ -1,7 +1,13 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{hash::hash, program::invoke, system_instruction};
+use anchor_lang::solana_program::{hash::hash, program::invoke, pubkey, system_instruction};
 
 declare_id!("HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C");
+
+const SATP_V3_IDENTITY_PROGRAM_ID: Pubkey = pubkey!("GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG");
+const ANCHOR_DISCRIMINATOR_LEN: usize = 8;
+const PUBKEY_LEN: usize = 32;
+const MAX_SATP_STRING_BYTES: usize = 2048;
+const MAX_SATP_CAPABILITIES: u32 = 128;
 
 #[program]
 pub mod escrow_v3 {
@@ -23,6 +29,14 @@ pub mod escrow_v3 {
         let now = Clock::get()?.unix_timestamp;
         require!(deadline > now, EscrowError::DeadlinePassed);
 
+        let agent_id_hash = hash(agent_id.as_bytes()).to_bytes();
+        validate_agent_identity(
+            &ctx.accounts.agent_identity.to_account_info(),
+            &agent_id_hash,
+            min_verification_level,
+            require_born,
+        )?;
+
         invoke(
             &system_instruction::transfer(&ctx.accounts.client.key(), &ctx.accounts.escrow.key(), amount),
             &[
@@ -35,7 +49,7 @@ pub mod escrow_v3 {
         let escrow = &mut ctx.accounts.escrow;
         escrow.client = ctx.accounts.client.key();
         escrow.agent = ctx.accounts.agent_wallet.key();
-        escrow.agent_id_hash = hash(agent_id.as_bytes()).to_bytes();
+        escrow.agent_id_hash = agent_id_hash;
         escrow.amount = amount;
         escrow.released_amount = 0;
         escrow.description_hash = description_hash;
@@ -197,6 +211,8 @@ pub mod escrow_v3 {
 
         require!(ctx.accounts.escrow.status == EscrowStatus::Disputed, EscrowError::NotDisputed);
         require_keys_eq!(ctx.accounts.escrow.arbiter, ctx.accounts.arbiter.key(), EscrowError::Unauthorized);
+        require_keys_eq!(ctx.accounts.escrow.agent, ctx.accounts.agent.key(), EscrowError::WrongAgent);
+        require_keys_eq!(ctx.accounts.escrow.client, ctx.accounts.client.key(), EscrowError::Unauthorized);
         require!(total <= remaining, EscrowError::AmountExceedsRemaining);
 
         transfer_from_escrow(
@@ -269,6 +285,134 @@ fn transfer_from_escrow<'info>(
     }
     escrow.sub_lamports(amount)?;
     recipient.add_lamports(amount)?;
+    Ok(())
+}
+
+fn validate_agent_identity(
+    agent_identity: &AccountInfo,
+    agent_id_hash: &[u8; 32],
+    min_verification_level: u8,
+    require_born: bool,
+) -> Result<()> {
+    let (expected_identity, _) = Pubkey::find_program_address(
+        &[b"genesis", agent_id_hash],
+        &SATP_V3_IDENTITY_PROGRAM_ID,
+    );
+    require_keys_eq!(agent_identity.key(), expected_identity, EscrowError::WrongAgentIdentity);
+    require_keys_eq!(*agent_identity.owner, SATP_V3_IDENTITY_PROGRAM_ID, EscrowError::InvalidAgentIdentity);
+
+    let data = agent_identity.try_borrow_data()?;
+    let mut offset = ANCHOR_DISCRIMINATOR_LEN;
+
+    require!(
+        data.len() >= offset + PUBKEY_LEN,
+        EscrowError::InvalidAgentIdentity
+    );
+    require!(
+        data[offset..offset + PUBKEY_LEN] == agent_id_hash[..],
+        EscrowError::WrongAgentIdentity
+    );
+    offset += PUBKEY_LEN;
+
+    skip_satp_string(&data, &mut offset)?; // agent_name
+    skip_satp_string(&data, &mut offset)?; // description
+    skip_satp_string(&data, &mut offset)?; // category
+    skip_satp_string_vec(&data, &mut offset)?; // capabilities
+    skip_satp_string(&data, &mut offset)?; // metadata_uri
+    skip_satp_string(&data, &mut offset)?; // face_image
+
+    require!(
+        data.len() >= offset + PUBKEY_LEN,
+        EscrowError::InvalidAgentIdentity
+    );
+    offset += PUBKEY_LEN; // face_mint
+
+    skip_satp_string(&data, &mut offset)?; // face_burn_tx
+
+    let genesis_record = read_i64_le(&data, &mut offset)?;
+
+    require!(
+        data.len() >= offset + PUBKEY_LEN,
+        EscrowError::InvalidAgentIdentity
+    );
+    offset += PUBKEY_LEN; // authority
+
+    require!(data.len() > offset, EscrowError::InvalidAgentIdentity);
+    let has_pending_authority = data[offset];
+    offset += 1;
+    if has_pending_authority == 1 {
+        require!(
+            data.len() >= offset + PUBKEY_LEN,
+            EscrowError::InvalidAgentIdentity
+        );
+        offset += PUBKEY_LEN;
+    } else {
+        require!(has_pending_authority == 0, EscrowError::InvalidAgentIdentity);
+    }
+
+    let _reputation_score = read_u64_le(&data, &mut offset)?;
+    require!(data.len() > offset, EscrowError::InvalidAgentIdentity);
+    let verification_level = data[offset];
+
+    require!(verification_level <= 5, EscrowError::InvalidAgentIdentity);
+    require!(
+        verification_level >= min_verification_level,
+        EscrowError::AgentVerificationTooLow
+    );
+    if require_born {
+        require!(genesis_record > 0, EscrowError::AgentNotBorn);
+    }
+
+    Ok(())
+}
+
+fn read_u32_le(data: &[u8], offset: &mut usize) -> Result<u32> {
+    require!(data.len() >= *offset + 4, EscrowError::InvalidAgentIdentity);
+    let value = u32::from_le_bytes(
+        data[*offset..*offset + 4]
+            .try_into()
+            .map_err(|_| error!(EscrowError::InvalidAgentIdentity))?,
+    );
+    *offset += 4;
+    Ok(value)
+}
+
+fn read_u64_le(data: &[u8], offset: &mut usize) -> Result<u64> {
+    require!(data.len() >= *offset + 8, EscrowError::InvalidAgentIdentity);
+    let value = u64::from_le_bytes(
+        data[*offset..*offset + 8]
+            .try_into()
+            .map_err(|_| error!(EscrowError::InvalidAgentIdentity))?,
+    );
+    *offset += 8;
+    Ok(value)
+}
+
+fn read_i64_le(data: &[u8], offset: &mut usize) -> Result<i64> {
+    require!(data.len() >= *offset + 8, EscrowError::InvalidAgentIdentity);
+    let value = i64::from_le_bytes(
+        data[*offset..*offset + 8]
+            .try_into()
+            .map_err(|_| error!(EscrowError::InvalidAgentIdentity))?,
+    );
+    *offset += 8;
+    Ok(value)
+}
+
+fn skip_satp_string(data: &[u8], offset: &mut usize) -> Result<()> {
+    let len = read_u32_le(data, offset)? as usize;
+    require!(len <= MAX_SATP_STRING_BYTES, EscrowError::InvalidAgentIdentity);
+    require!(data.len() >= *offset + len, EscrowError::InvalidAgentIdentity);
+    *offset += len;
+    Ok(())
+}
+
+fn skip_satp_string_vec(data: &[u8], offset: &mut usize) -> Result<()> {
+    let count = read_u32_le(data, offset)?;
+    require!(count <= MAX_SATP_CAPABILITIES, EscrowError::InvalidAgentIdentity);
+    for _ in 0..count {
+        skip_satp_string(data, offset)?;
+    }
     Ok(())
 }
 
@@ -484,4 +628,12 @@ pub enum EscrowError {
     NothingToRelease,
     #[msg("Invalid trust requirement")]
     InvalidTrustRequirement,
+    #[msg("Wrong SATP agent identity")]
+    WrongAgentIdentity,
+    #[msg("Invalid SATP agent identity")]
+    InvalidAgentIdentity,
+    #[msg("Agent verification level is below escrow requirement")]
+    AgentVerificationTooLow,
+    #[msg("Agent has not completed SATP birth requirement")]
+    AgentNotBorn,
 }
