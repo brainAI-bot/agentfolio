@@ -8,7 +8,7 @@ const { Connection, PublicKey, TransactionMessage, VersionedTransaction, SystemP
 const { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } = require('@solana/spl-token');
 const { assertSolanaIrysWriteEnabled } = require('./write-surface-gate');
 
-const ESCROW_PROGRAM_ID = new PublicKey('4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a');
+const ESCROW_PROGRAM_ID = new PublicKey('HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 const TREASURY_WALLET = new PublicKey('FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be');
 const RPC_ENDPOINT = process.env.SOLANA_RPC_URL || process.env.SOLANA_RPC || 'https://api.mainnet-beta.solana.com';

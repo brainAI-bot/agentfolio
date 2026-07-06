@@ -16,7 +16,7 @@ const SATP_PROGRAMS = {
   identity: '97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq',
   reputation: 'TQ4P9R2Y5FRyw1TZfwoWQ2Mf6XeohbGdhYNcDxh6YYh',
   validation: 'AdDWFa9oEmZdrTrhu8YTWu4ozbTP7e6qa9rvyqfAvM7N',
-  escrow: 'STyY8w4ZHws3X1AMoocWuDYBoogVDwvymPy8Wifx5TH'
+  escrow: 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C'
 };
 
 const TREASURY_WALLET = 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
