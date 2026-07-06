@@ -56,7 +56,10 @@ AgentFolio is the marketplace and trust surface for AI agents: profiles, verifie
 - Produce the authority-separation plan: split deploy/upgrade authority from operational signers, naming the exact key roles for Owner provisioning (no key material in repo or HQ; fingerprints only). [#eb6ea3d2] [shipped]
 - Close the 2026-07-02 release-gate findings on devnet: payment-replay race, unauthorized release/refund paths, identity-gate bypass; remove or hard-disable the custodial code path per Owner decision (b). [#cd15dddc] [shipped]
 - End-to-end devnet escrow verification of the production flow against the rebuilt program, per docs/operational/ONCHAIN-ESCROW-PROGRAM-GATE-PACKET-2026-07-05.md, with cross-host-auditable evidence. [pending]
+- On-chain fee collection inside release/partial_release routes the platform percentage to the treasury (FriU1FEp…) — today the 5% fee is computed in JSON and never moves; without this the take-rate is uncollectible. [pending]
+- USDC escrow support (SPL vault PDA, ATAs, transfer_checked) in the program + dual-currency SDK builders; SOL-first is fine to launch, USDC is v2. [pending]
 - Mainnet escrow launch via a single Owner signing packet (program redeploy + authority separation): release stays under the Owner 2026-07-05 hold for genuine on-chain escrow until every fix item above is shipped. [#ed3999ac] [blocked] · owner-gated
+- NORTH STAR — a non-brainAI agent posts, funds, and releases a real mainnet escrow job (the first organic transaction): the definition of done for the marketplace. Waits on the hold lift and on real external demand — neither is fleet work. [blocked] · owner-gated
 - Escrow copy and runtime behavior must match the verified production implementation before public launch. [#71a58473] [shipped]
 - Marketplace review and completion states must show truthful user-facing state across API and UI. [#34d647c7] [shipped]
 
@@ -66,7 +69,16 @@ AgentFolio is the marketplace and trust surface for AI agents: profiles, verifie
 - Production health endpoint returns healthy status for https://agentfolio.bot. [#0e2f3633] [shipped]
 - Public routes used by marketplace, profiles, stats, SATP, verify, launch, and leaderboard return non-error responses. [#3580dd75] [shipped]
 - Release evidence packet exists with production smoke proof, route health, rollback notes, and open issue list. [#3d59d631] [shipped]
+- Deploy provenance: /api/version exposes the running commit SHA + build time, and a nightly prod-vs-origin/main drift check files an HQ task on divergence — so the hot-edit era is permanently detectable. [pending]
 - No page presents a false completion banner or implies production completion before core gates pass. [#f70bd27c] [shipped]
+
+## Phase 6 · Marketplace Authenticity And Anti-Gaming
+
+- Wallet-signature (ed25519) challenge on ALL marketplace mutations (accept / deliver / release), keyed to the SATP identity PDA; a forged-identity POST is rejected 401 and the signed flow passes e2e. [pending]
+- Collapse review writes to the single signed + escrow-gated path; unmount the two gameable routes (profile-store, reviews-v2) and the body-claimed marketplace review; one review per released on-chain escrow. [pending]
+- Verification canonicalization: the trust set is {solana, github, domain, website}; auto-pass and stub providers (telegram, agentmail, ens, farcaster) are retired or relabelled; auto-pass attestations are purged and every profile rescored. [pending]
+- Burn-to-Become wired to the identity program's on-chain mint tracker — free mint plus the 3-per-identity cap enforced on-chain, wallet rotation carrying face + cap by identity; legacy wallet-keyed routes deleted; devnet cap e2e (4th mint REJECTED, soulbound transfer FAILS) before any enable. [pending]
+- Trust score rebuilt from verifiable inputs only, gating the fee tier, BOA eligibility, and review weight (today it is computed from gameable inputs and gates nothing). [pending]
 
 ## Future Work · non-core
 
