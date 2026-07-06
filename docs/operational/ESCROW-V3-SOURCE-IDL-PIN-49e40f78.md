@@ -15,7 +15,7 @@ Tracked artifacts:
 | Artifact | Path | SHA-256 |
 | --- | --- | --- |
 | Anchor workspace config | `onchain/escrow_v3/Anchor.toml` | `a296f41760a1a703e84f6e9a7a90eabec5fd03146d354ea45dfe4c0ad0783f5a` |
-| Program source | `onchain/escrow_v3/programs/escrow_v3/src/lib.rs` | `aa63a3fd9e39c8a5ac676b8396c159a513a06949a7426e7c0c3e0e7fe76ae74d` |
+| Program source | `onchain/escrow_v3/programs/escrow_v3/src/lib.rs` | `ef44769c02a1ebfb4d3b1438fd630d395d8547d35c4211e693b95623fc7c7484` |
 | Tracked IDL | `onchain/escrow_v3/target/idl/escrow_v3.json` | `f0bbc14e762f8e6beb66ee8ae15d23e29a0bbc60a9a03716bdc5bcf714cf27e1` |
 
 Security follow-up for PR #155 review:
@@ -37,7 +37,7 @@ program. A 2026-07-06 read-only provenance check compared the claim against
 | `satp` `master` | Remote branch absent | No searchable authoritative branch at `origin/master`. |
 | `satp` `anchor-1.0-migration` | Remote branch absent | No searchable authoritative branch at `origin/anchor-1.0-migration`. |
 | `satp` `feat/anchor-1.0-migration` | Remote branch absent | No searchable authoritative branch at `origin/feat/anchor-1.0-migration`. |
-| `satp` 49e40f78 source-history commits | `3e6fceea3a54043d527d14ba4e347e2693d5e1ed`, `47379ef97629ea2cce70c816d3e4b75890c8cabb`, `761ae99f8b8ec7f4878e5972e1fbb8e1b423178e`, `58fa9bdf4e0f4abf7d69c54b88bcef47b2aad9c8` | No exact blob-content match for the pre-review source hash `d36a4c165b11dad18767741a727b386eb31de5ae088163bef6aca7e8b34788bf`; the current PR source hash `aa63a3fd9e39c8a5ac676b8396c159a513a06949a7426e7c0c3e0e7fe76ae74d` is a PR-local security patch and remains non-deployable until provenance is certified. |
+| `satp` 49e40f78 source-history commits | `3e6fceea3a54043d527d14ba4e347e2693d5e1ed`, `47379ef97629ea2cce70c816d3e4b75890c8cabb`, `761ae99f8b8ec7f4878e5972e1fbb8e1b423178e`, `58fa9bdf4e0f4abf7d69c54b88bcef47b2aad9c8` | No exact blob-content match for the pre-review source hash `d36a4c165b11dad18767741a727b386eb31de5ae088163bef6aca7e8b34788bf`; the current PR source hash `ef44769c02a1ebfb4d3b1438fd630d395d8547d35c4211e693b95623fc7c7484` is a PR-local security patch and remains non-deployable until provenance is certified. |
 
 Classification: absence/mismatch. This PR can document that its local
 `escrow_v3` source, `Anchor.toml`, and IDL agree with
