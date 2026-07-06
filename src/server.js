@@ -639,9 +639,8 @@ app.get('/api/explorer/:agentId', async (req, res) => {
     const unified = computeUnifiedTrustScore(db, profile, { v3Score });
     const parsedNftAvatar = parseJsonFieldSafe(profile.nft_avatar, null);
     const resolvedAvatar = parsedNftAvatar?.image || parsedNftAvatar?.arweaveUrl || profile.avatar || matchedV3?.faceImage || null;
-    const matchedV3Score = Number(matchedV3?.reputationScore || 0);
     const onChainReputationScore = matchedV3
-      ? (matchedV3Score > 10000 ? Math.round(matchedV3Score / 1000) : normalizeTrustScoreValue(matchedV3Score))
+      ? normalizeTrustScoreValue(matchedV3.rawReputationScore ?? matchedV3.reputationScore)
       : normalizeTrustScoreValue(unified.score);
     const reputationSurface = buildReputationSurface({
       profile,
@@ -738,6 +737,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
         verificationLevel: reputationSurface.verificationLevel,
         verificationLabel: reputationSurface.verificationLabel,
         isBorn: !!(matchedV3 ? matchedV3.isBorn : (v3Score && v3Score.isBorn)),
+        isActive: matchedV3?.isActive ?? v3Score?.isActive ?? undefined,
         bornAt: matchedV3?.bornAt || v3Score?.bornAt || null,
         faceMint: matchedV3?.faceMint || v3Score?.faceMint || null,
       },

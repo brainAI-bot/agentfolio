@@ -42,6 +42,57 @@ function getGenesisPDA(agentId) {
   )[0];
 }
 
+function normalizeReputationScore(rawReputationScore) {
+  const numeric = Number(rawReputationScore || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return numeric > 10000
+    ? Math.min(Math.round(numeric / 10000), 800)
+    : Math.max(0, Math.round(numeric));
+}
+
+function parseAuthorityTail(data, startOffset, hasIsActive) {
+  let offset = startOffset;
+  let isActive = true;
+
+  if (hasIsActive) {
+    if (offset >= data.length || (data[offset] !== 0 && data[offset] !== 1)) return null;
+    isActive = data[offset] === 1;
+    offset += 1;
+  }
+
+  if (offset + 32 + 1 + 8 + 1 > data.length) return null;
+  const authority = new PublicKey(data.slice(offset, offset + 32));
+  offset += 32;
+
+  const hasPending = data[offset];
+  offset += 1;
+  if (hasPending !== 0 && hasPending !== 1) return null;
+
+  let pendingAuthority = null;
+  if (hasPending === 1) {
+    if (offset + 32 + 8 + 1 > data.length) return null;
+    pendingAuthority = new PublicKey(data.slice(offset, offset + 32)).toBase58();
+    offset += 32;
+  }
+
+  const rawReputationScore = Number(data.readBigUInt64LE(offset));
+  offset += 8;
+  const reputationScore = normalizeReputationScore(rawReputationScore);
+  const verificationLevel = data[offset];
+  offset += 1;
+  if (verificationLevel > 5) return null;
+
+  return {
+    authority,
+    pendingAuthority,
+    rawReputationScore,
+    reputationScore,
+    verificationLevel,
+    isActive,
+    offset,
+  };
+}
+
 function isRateLimitError(error) {
   const message = error?.message || '';
   return /429|rate limit|too many requests/i.test(message);
@@ -98,21 +149,11 @@ function parseGenesisRecord(data) {
     const faceBurnTx = readString();
     const genesisRecord = Number(data.readBigInt64LE(offset));
     offset += 8;
-    // NOTE: No isActive field on-chain. Struct goes straight to authority.
-    // See brainChain SDK 3.5.0 TypeScript types (GenesisRecord interface).
-    const authority = new PublicKey(data.slice(offset, offset + 32));
-    offset += 32;
-
-    // Option<Pubkey> — Borsh: 1 byte tag + 32 bytes only if Some
-    const hasPending = data[offset];
-    offset += 1;
-    if (hasPending === 1) offset += 32;
-
-    const rawReputationScore = Number(data.readBigUInt64LE(offset));
-    offset += 8;
-    const reputationScore = Math.min(Math.round(rawReputationScore / 10000), 800);
-    const verificationLevel = data[offset];
-    offset += 1;
+    const noActiveTail = parseAuthorityTail(data, offset, false);
+    const activeTail = parseAuthorityTail(data, offset, true);
+    const tail = activeTail || noActiveTail;
+    if (!tail) return null;
+    offset = tail.offset;
 
     // Timestamps (SDK 3.5.0 struct)
     const reputationUpdatedAt = Number(data.readBigInt64LE(offset)); offset += 8;
@@ -123,16 +164,18 @@ function parseGenesisRecord(data) {
 
     return {
       agentName,
-      reputationScore,
-      rawReputationScore,
-      reputationPct: (rawReputationScore / 10000).toFixed(2),
-      verificationLevel,
-      verificationLabel: ['Unverified','Registered','Verified','Established','Trusted','Sovereign'][verificationLevel] || 'Unknown',
+      reputationScore: tail.reputationScore,
+      rawReputationScore: tail.rawReputationScore,
+      reputationPct: (tail.rawReputationScore / 10000).toFixed(2),
+      verificationLevel: tail.verificationLevel,
+      verificationLabel: ['Unverified','Registered','Verified','Established','Trusted','Sovereign'][tail.verificationLevel] || 'Unknown',
       isBorn: genesisRecord > 0,
+      isActive: tail.isActive,
       bornAt: genesisRecord > 0 ? new Date(genesisRecord * 1000).toISOString() : null,
       faceImage,
       faceMint: faceMint.toBase58(),
-      authority: authority.toBase58(),
+      authority: tail.authority.toBase58(),
+      pendingAuthority: tail.pendingAuthority,
       reputationUpdatedAt,
       verificationUpdatedAt,
       createdAt: createdAt > 0 ? new Date(createdAt * 1000).toISOString() : null,
@@ -265,6 +308,7 @@ module.exports = {
   clearV3Cache,
   getGenesisPDA,
   parseGenesisRecord,
+  normalizeReputationScore,
   _getFromCache,
   __test: {
     _cache,
