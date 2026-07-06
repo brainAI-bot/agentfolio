@@ -22,6 +22,9 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const {
+  custodialEscrowDisabledPayload,
+} = require('./write-surface-gate');
 
 // ============ CONSTANTS ============
 
@@ -61,14 +64,13 @@ const CANCEL_COMPENSATION_PCT = 10;  // agent gets 10% if client cancels after a
 const BURN_ADDRESS = 'BURN_ADDRESS_TBD'; // placeholder for $BRAIN token burn
 
 const DATA_DIR = path.join(__dirname, '../../data/escrow');
+const PLATFORM_ESCROW_WALLET = process.env.ESCROW_WALLET || 'CUSTODIAL_ESCROW_DISABLED';
 
-let PLATFORM_ESCROW_WALLET;
-try {
-  const solanaEscrow = require('./solana-escrow');
-  PLATFORM_ESCROW_WALLET = solanaEscrow.getEscrowKeypair().publicKey.toBase58();
-} catch (e) {
-  PLATFORM_ESCROW_WALLET = process.env.ESCROW_WALLET || 'ESCROW_WALLET_NOT_CONFIGURED';
-  console.warn('[Escrow] Could not load escrow keypair:', e.message);
+function custodialEscrowBlocked(operation) {
+  return {
+    ...custodialEscrowDisabledPayload(operation),
+    statusCode: 423,
+  };
 }
 
 // ============ DATA HELPERS ============
@@ -137,6 +139,7 @@ function recordTransaction(escrowId, type, data) {
  * @param {object} data - clientId, clientWallet, amount, currency, expiresAt, burnPct
  */
 function createEscrow(jobId, data) {
+  return custodialEscrowBlocked('custodial escrow create');
   ensureDataDirs();
   
   const burnPct = Math.max(0, Math.min(100, data.burnPct || 0));
@@ -208,6 +211,7 @@ function createEscrow(jobId, data) {
  * Confirm deposit received
  */
 function confirmDeposit(escrowId, txHash) {
+  return custodialEscrowBlocked('custodial escrow confirm deposit');
   const escrow = loadEscrow(escrowId);
   if (!escrow) return { error: 'Escrow not found' };
   if (escrow.status !== ESCROW_STATUS.PENDING_DEPOSIT) return { error: 'Escrow not awaiting deposit' };
@@ -229,6 +233,7 @@ function confirmDeposit(escrowId, txHash) {
  * Lock funds when agent is selected (agent_accepted state)
  */
 function lockFunds(escrowId, agentId, agentWallet) {
+  return custodialEscrowBlocked('custodial escrow lock funds');
   const escrow = loadEscrow(escrowId);
   if (!escrow) return { error: 'Escrow not found' };
   if (escrow.status !== ESCROW_STATUS.FUNDED) return { error: 'Escrow not funded' };
@@ -246,6 +251,7 @@ function lockFunds(escrowId, agentId, agentWallet) {
  * Mark agent as actively working (transition from accepted → locked/in_progress)
  */
 function startWork(escrowId) {
+  return custodialEscrowBlocked('custodial escrow start work');
   const escrow = loadEscrow(escrowId);
   if (!escrow) return { error: 'Escrow not found' };
   if (escrow.status !== ESCROW_STATUS.AGENT_ACCEPTED) return { error: 'Agent must be accepted first' };
@@ -261,6 +267,7 @@ function startWork(escrowId) {
  * Agent submits work — starts the 24h auto-release timer
  */
 function submitWork(escrowId) {
+  return custodialEscrowBlocked('custodial escrow submit work');
   const escrow = loadEscrow(escrowId);
   if (!escrow) return { error: 'Escrow not found' };
   // Allow submission from agent_accepted or locked status
@@ -287,6 +294,7 @@ function submitWork(escrowId) {
  * Release funds to agent (job completed / client approves)
  */
 async function releaseFunds(escrowId, txHash = null) {
+  return custodialEscrowBlocked('custodial escrow release funds');
   const escrow = loadEscrow(escrowId);
   if (!escrow) return { error: 'Escrow not found' };
   // Allow release from locked, work_submitted, or agent_accepted
@@ -370,6 +378,7 @@ async function releaseFunds(escrowId, txHash = null) {
  * Auto-release: called by periodic check when 24h timer expires
  */
 async function autoRelease(escrowId) {
+  return custodialEscrowBlocked('custodial escrow auto-release funds');
   const escrow = loadEscrow(escrowId);
   if (!escrow) return { error: 'Escrow not found' };
   if (escrow.status !== ESCROW_STATUS.WORK_SUBMITTED) return { error: 'Not in work_submitted state' };
@@ -440,6 +449,7 @@ async function autoRelease(escrowId) {
  * Refund to client — full refund (agent never responded)
  */
 function refundClient(escrowId, reason = '', txHash = null) {
+  return custodialEscrowBlocked('custodial escrow refund client');
   const escrow = loadEscrow(escrowId);
   if (!escrow) return { error: 'Escrow not found' };
   if (![ESCROW_STATUS.FUNDED, ESCROW_STATUS.LOCKED, ESCROW_STATUS.AGENT_ACCEPTED,
@@ -468,6 +478,7 @@ function refundClient(escrowId, reason = '', txHash = null) {
  * Client gets 90%, agent gets 10% compensation
  */
 async function cancelWithCompensation(escrowId, reason = '') {
+  return custodialEscrowBlocked('custodial escrow cancel with compensation');
   const escrow = loadEscrow(escrowId);
   if (!escrow) return { error: 'Escrow not found' };
   if (escrow.status !== ESCROW_STATUS.AGENT_ACCEPTED) {
@@ -516,6 +527,7 @@ async function cancelWithCompensation(escrowId, reason = '') {
  * Open dispute — requires 15% collateral from disputing party
  */
 function openDispute(escrowId, disputeData) {
+  return custodialEscrowBlocked('custodial escrow open dispute');
   const escrow = loadEscrow(escrowId);
   if (!escrow) return { error: 'Escrow not found' };
   if (![ESCROW_STATUS.LOCKED, ESCROW_STATUS.WORK_SUBMITTED, ESCROW_STATUS.AGENT_ACCEPTED].includes(escrow.status)) {
@@ -582,6 +594,7 @@ function openDispute(escrowId, disputeData) {
  * Resolve dispute
  */
 function resolveDispute(disputeId, resolution, resolvedBy) {
+  return custodialEscrowBlocked('custodial escrow resolve dispute');
   ensureDataDirs();
   const disputePath = path.join(DATA_DIR, 'disputes', `${disputeId}.json`);
   if (!fs.existsSync(disputePath)) return { error: 'Dispute not found' };
@@ -642,6 +655,7 @@ function resolveDispute(disputeId, resolution, resolvedBy) {
  * Returns array of results.
  */
 async function scanAutoRelease() {
+  return [custodialEscrowBlocked('custodial escrow auto-release scan')];
   ensureDataDirs();
   const dir = path.join(DATA_DIR, 'escrows');
   if (!fs.existsSync(dir)) return [];
