@@ -5,7 +5,13 @@
  */
 
 const { Connection, PublicKey, TransactionMessage, VersionedTransaction, SystemProgram } = require('@solana/web3.js');
-const { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } = require('@solana/spl-token');
+const {
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
+  createTransferCheckedInstruction,
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+} = require('@solana/spl-token');
 const { assertSolanaIrysWriteEnabled } = require('./write-surface-gate');
 
 const ESCROW_PROGRAM_ID = new PublicKey('4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a');
@@ -59,8 +65,97 @@ function deriveVaultPDA(jobId) {
   );
 }
 
+function deriveUsdcVaultAuthorityPDA(jobId) {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('usdc_vault'), Buffer.from(jobId)],
+    ESCROW_PROGRAM_ID
+  );
+}
+
+async function deriveUsdcVaultATA(jobId) {
+  const [vaultAuthorityPDA] = deriveUsdcVaultAuthorityPDA(jobId);
+  return getAssociatedTokenAddress(USDC_MINT, vaultAuthorityPDA, true);
+}
+
 async function getConnection() {
   return new Connection(RPC_ENDPOINT, 'confirmed');
+}
+
+async function buildCreateEscrowTxInstructions({
+  clientWallet,
+  jobId,
+  amountUSDC,
+  deadlineUnix,
+  vaultAtaExists = false,
+}) {
+  const client = new PublicKey(clientWallet);
+  const [escrowPDA] = deriveEscrowPDA(jobId);
+  const [legacyVaultPDA] = deriveVaultPDA(jobId);
+  const [vaultAuthorityPDA] = deriveUsdcVaultAuthorityPDA(jobId);
+  const clientToken = await getAssociatedTokenAddress(USDC_MINT, client);
+  const vaultATA = await getAssociatedTokenAddress(USDC_MINT, vaultAuthorityPDA, true);
+
+  const amountRaw = Math.floor(amountUSDC * 1e6);
+  if (!Number.isSafeInteger(amountRaw) || amountRaw <= 0) {
+    throw new Error('amountUSDC must convert to a positive safe integer of USDC base units');
+  }
+
+  const instructions = [];
+  if (!vaultAtaExists) {
+    instructions.push(createAssociatedTokenAccountInstruction(
+      client,
+      vaultATA,
+      vaultAuthorityPDA,
+      USDC_MINT,
+      TOKEN_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID,
+    ));
+  }
+
+  instructions.push(createTransferCheckedInstruction(
+    clientToken,
+    USDC_MINT,
+    vaultATA,
+    client,
+    amountRaw,
+    6,
+  ));
+
+  const data = Buffer.concat([
+    DISCRIMINATORS.create_escrow,
+    encodeString(jobId),
+    encodeU64(amountRaw),
+    encodeI64(deadlineUnix),
+  ]);
+
+  instructions.push({
+    programId: ESCROW_PROGRAM_ID,
+    keys: [
+      { pubkey: escrowPDA, isSigner: false, isWritable: true },
+      { pubkey: vaultATA, isSigner: false, isWritable: true },
+      { pubkey: clientToken, isSigner: false, isWritable: true },
+      { pubkey: USDC_MINT, isSigner: false, isWritable: false },
+      { pubkey: client, isSigner: true, isWritable: true },
+      { pubkey: vaultAuthorityPDA, isSigner: false, isWritable: false },
+      { pubkey: legacyVaultPDA, isSigner: false, isWritable: false },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: RENT_SYSVAR, isSigner: false, isWritable: false },
+    ],
+    data,
+  });
+
+  return {
+    instructions,
+    escrowPDA,
+    vaultPDA: vaultAuthorityPDA,
+    legacyVaultPDA,
+    vaultATA,
+    clientATA: clientToken,
+    mint: USDC_MINT,
+    amountRaw,
+  };
 }
 
 /**
@@ -74,47 +169,34 @@ async function buildCreateEscrowTx(clientWallet, jobId, amountUSDC, deadlineUnix
   assertSolanaIrysWriteEnabled('Solana escrow create transaction build');
   const connection = await getConnection();
   const client = new PublicKey(clientWallet);
-  const [escrowPDA] = deriveEscrowPDA(jobId);
-  const [vaultPDA] = deriveVaultPDA(jobId);
-  const clientToken = await getAssociatedTokenAddress(USDC_MINT, client);
-
-  const amountRaw = Math.floor(amountUSDC * 1e6);
-
-  const data = Buffer.concat([
-    DISCRIMINATORS.create_escrow,
-    encodeString(jobId),
-    encodeU64(amountRaw),
-    encodeI64(deadlineUnix),
-  ]);
-
-  const instruction = {
-    programId: ESCROW_PROGRAM_ID,
-    keys: [
-      { pubkey: escrowPDA, isSigner: false, isWritable: true },
-      { pubkey: vaultPDA, isSigner: false, isWritable: true },
-      { pubkey: clientToken, isSigner: false, isWritable: true },
-      { pubkey: USDC_MINT, isSigner: false, isWritable: false },
-      { pubkey: client, isSigner: true, isWritable: true },
-      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: RENT_SYSVAR, isSigner: false, isWritable: false },
-    ],
-    data,
-  };
+  const vaultATA = await deriveUsdcVaultATA(jobId);
+  const vaultAtaInfo = await connection.getAccountInfo(vaultATA);
+  const build = await buildCreateEscrowTxInstructions({
+    clientWallet,
+    jobId,
+    amountUSDC,
+    deadlineUnix,
+    vaultAtaExists: Boolean(vaultAtaInfo),
+  });
 
   const { blockhash } = await connection.getLatestBlockhash();
   const msg = new TransactionMessage({
     payerKey: client,
     recentBlockhash: blockhash,
-    instructions: [instruction],
+    instructions: build.instructions,
   }).compileToV0Message();
 
   const tx = new VersionedTransaction(msg);
   return {
     success: true,
     transaction: Buffer.from(tx.serialize()).toString('base64'),
-    escrowPDA: escrowPDA.toBase58(),
-    vaultPDA: vaultPDA.toBase58(),
+    currency: 'USDC',
+    escrowPDA: build.escrowPDA.toBase58(),
+    vaultPDA: build.vaultPDA.toBase58(),
+    vaultATA: build.vaultATA.toBase58(),
+    clientATA: build.clientATA.toBase58(),
+    usdcMint: USDC_MINT.toBase58(),
+    amountRaw: build.amountRaw,
   };
 }
 
@@ -407,10 +489,14 @@ module.exports = {
   confirmTransaction,
   readEscrowAccount,
   mapOnchainStatusToJobStatus,
+  buildCreateEscrowTxInstructions,
   deriveEscrowPDA,
   deriveVaultPDA,
+  deriveUsdcVaultAuthorityPDA,
+  deriveUsdcVaultATA,
   getConnection,
   ESCROW_PROGRAM_ID,
+  USDC_MINT,
   ESCROW_STATES,
   DISCRIMINATORS,
 };
