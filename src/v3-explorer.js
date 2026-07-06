@@ -21,6 +21,14 @@ const GENESIS_DISC = crypto.createHash('sha256')
   .update('account:GenesisRecord')
   .digest().slice(0, 8);
 
+function normalizeReputationScore(rawReputationScore) {
+  var numeric = Number(rawReputationScore || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return numeric > 10000
+    ? Math.min(Math.round(numeric / 10000), 800)
+    : Math.max(0, Math.round(numeric));
+}
+
 function parseGenesisRecord(pubkey, data) {
   if (!data || data.length < 100) return null;
 
@@ -94,14 +102,13 @@ function parseGenesisRecord(pubkey, data) {
 
     var rawReputationScore = Number(data.readBigUInt64LE(offset));
     offset += 8;
-    var reputationScore = rawReputationScore > 10000
-      ? Math.min(Math.round(rawReputationScore / 10000), 800)
-      : Math.max(0, rawReputationScore);
+    var reputationScore = normalizeReputationScore(rawReputationScore);
     var verificationLevel = data[offset];
     offset += 1;
 
     var tierLabels = ['unverified', 'registered', 'verified', 'established', 'trusted', 'sovereign'];
     var tierName = tierLabels[verificationLevel] || 'unverified';
+    var verificationLabel = tierName.charAt(0).toUpperCase() + tierName.slice(1);
 
     return {
       pda: pubkey,
@@ -123,8 +130,9 @@ function parseGenesisRecord(pubkey, data) {
       reputationScore: reputationScore,
       rawReputationScore: rawReputationScore,
       verificationLevel: verificationLevel,
+      verificationLabel: verificationLabel,
       tier: tierName,
-      tierLabel: 'L' + verificationLevel + ' \u00b7 ' + tierName.charAt(0).toUpperCase() + tierName.slice(1),
+      tierLabel: 'L' + verificationLevel + ' \u00b7 ' + verificationLabel,
     };
   } catch (e) {
     return null;
@@ -185,4 +193,9 @@ function clearCache() {
   _cacheTime = 0;
 }
 
-module.exports = { fetchAllV3Agents: fetchAllV3Agents, clearCache: clearCache, parseGenesisRecord: parseGenesisRecord };
+module.exports = {
+  fetchAllV3Agents: fetchAllV3Agents,
+  clearCache: clearCache,
+  parseGenesisRecord: parseGenesisRecord,
+  normalizeReputationScore: normalizeReputationScore,
+};

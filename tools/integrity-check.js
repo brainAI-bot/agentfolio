@@ -21,7 +21,9 @@ const API_BASE = process.env.AGENTFOLIO_API || 'https://agentfolio.bot';
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const GENESIS_PROGRAM = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
 
-const TEAM_AGENTS = [
+// Default source: the current AgentFolio team rollout IDs. Seven are expected
+// unminted until their V3 Genesis Records are explicitly born on-chain.
+const DEFAULT_AUDIT_AGENT_IDS = [
   'agent_brainkid',
   'agent_braingrowth',
   'agent_braintrade',
@@ -31,6 +33,7 @@ const TEAM_AGENTS = [
   'agent_aremes',
   'agent_braintest',
 ];
+const EXPECTED_UNMINTED_GENESIS_IDS = new Set(DEFAULT_AUDIT_AGENT_IDS.filter(id => id !== 'agent_braintest'));
 
 const LEVEL_LABELS = ['Unverified', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
 
@@ -44,6 +47,56 @@ function getGenesisPDA(agentId) {
     [Buffer.from('genesis'), agentIdHash(agentId)],
     GENESIS_PROGRAM
   )[0];
+}
+
+function normalizeReputationScore(rawReputationScore) {
+  const numeric = Number(rawReputationScore || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return numeric > 10000
+    ? Math.min(Math.round(numeric / 10000), 800)
+    : Math.max(0, Math.round(numeric));
+}
+
+function parseAuthorityTail(data, startOffset, hasIsActive) {
+  let offset = startOffset;
+  let isActive = true;
+
+  if (hasIsActive) {
+    if (offset >= data.length || (data[offset] !== 0 && data[offset] !== 1)) return null;
+    isActive = data[offset] === 1;
+    offset += 1;
+  }
+
+  if (offset + 32 + 1 + 8 + 1 > data.length) return null;
+  const authority = new PublicKey(data.slice(offset, offset + 32));
+  offset += 32;
+
+  const hasPending = data[offset];
+  offset += 1;
+  if (hasPending !== 0 && hasPending !== 1) return null;
+
+  let pendingAuthority = null;
+  if (hasPending === 1) {
+    if (offset + 32 + 8 + 1 > data.length) return null;
+    pendingAuthority = new PublicKey(data.slice(offset, offset + 32)).toBase58();
+    offset += 32;
+  }
+
+  const rawReputationScore = Number(data.readBigUInt64LE(offset));
+  offset += 8;
+  const verificationLevel = data[offset];
+  offset += 1;
+  if (verificationLevel > 5) return null;
+
+  return {
+    authority,
+    pendingAuthority,
+    rawReputationScore,
+    reputationScore: normalizeReputationScore(rawReputationScore),
+    verificationLevel,
+    isActive,
+    offset,
+  };
 }
 
 function parseGenesisRecord(data) {
@@ -78,28 +131,23 @@ function parseGenesisRecord(data) {
     const faceBurnTx = readString();
     const genesisRecord = Number(data.readBigInt64LE(offset));
     offset += 8;
-    const authority = new PublicKey(data.slice(offset, offset + 32));
-    offset += 32;
-    const hasPending = data[offset];
-    offset += 1;
-    let pendingAuthority = null;
-    if (hasPending === 1) {
-      pendingAuthority = new PublicKey(data.slice(offset, offset + 32)).toBase58();
-      offset += 32;
-    }
-    const reputationScore = Number(data.readBigUInt64LE(offset));
-    offset += 8;
-    const verificationLevel = data[offset];
+
+    const noActiveTail = parseAuthorityTail(data, offset, false);
+    const activeTail = parseAuthorityTail(data, offset, true);
+    const tail = activeTail || noActiveTail;
+    if (!tail) throw new Error('unsupported Genesis Record authority/reputation layout');
 
     return {
       agentName,
       description,
-      authority: authority.toBase58(),
-      pendingAuthority,
-      reputationScore,
-      verificationLevel,
-      verificationLabel: LEVEL_LABELS[verificationLevel] || 'Unknown',
+      authority: tail.authority.toBase58(),
+      pendingAuthority: tail.pendingAuthority,
+      rawReputationScore: tail.rawReputationScore,
+      reputationScore: tail.reputationScore,
+      verificationLevel: tail.verificationLevel,
+      verificationLabel: LEVEL_LABELS[tail.verificationLevel] || 'Unknown',
       isBorn: genesisRecord > 0,
+      isActive: tail.isActive,
       bornAt: genesisRecord > 0 ? new Date(genesisRecord * 1000).toISOString() : null,
       faceImage: faceImage || null,
       faceMint: faceMint.toBase58() === '11111111111111111111111111111111' ? null : faceMint.toBase58(),
@@ -152,6 +200,18 @@ async function auditAgent(conn, agentId) {
   }
 
   if (!genesis) {
+    if (EXPECTED_UNMINTED_GENESIS_IDS.has(agentId)) {
+      result.pass = true;
+      result.expectedUnminted = true;
+      result.checks.push({
+        field: 'Genesis Record',
+        onChain: 'MISSING',
+        api: 'EXPECTED_UNMINTED',
+        match: true,
+        note: 'Expected-unminted AgentFolio team ID; checker source is DEFAULT_AUDIT_AGENT_IDS plus EXPECTED_UNMINTED_GENESIS_IDS.',
+      });
+      return result;
+    }
     result.pass = false;
     result.checks.push({ field: 'Genesis Record', onChain: 'MISSING', api: 'N/A', match: false });
     return result;
@@ -234,6 +294,14 @@ async function auditAgent(conn, agentId) {
     v3.isBorn
   ));
 
+  if (v3.isActive !== undefined) {
+    result.checks.push(compareField(
+      'Active',
+      genesis.isActive,
+      v3.isActive
+    ));
+  }
+
   // Face image presence
   const chainHasFace = !!genesis.faceImage;
   const apiHasFace = !!v3.faceImage;
@@ -311,7 +379,7 @@ async function main() {
   const flags = process.argv.slice(2).filter(a => a.startsWith('--'));
   const jsonOutput = flags.includes('--json');
 
-  const agents = args.length > 0 ? args : TEAM_AGENTS;
+  const agents = args.length > 0 ? args : DEFAULT_AUDIT_AGENT_IDS;
   const conn = new Connection(RPC_URL, 'confirmed');
 
   if (!jsonOutput) {
@@ -408,7 +476,18 @@ async function main() {
   }
 }
 
-main().catch(e => {
-  console.error('FATAL:', e);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(e => {
+    console.error('FATAL:', e);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  DEFAULT_AUDIT_AGENT_IDS,
+  EXPECTED_UNMINTED_GENESIS_IDS,
+  getGenesisPDA,
+  normalizeReputationScore,
+  parseGenesisRecord,
+  auditAgent,
+};

@@ -53,6 +53,14 @@ function getRpcUrl(network) {
   return (network === 'devnet') ? DEVNET_RPC : RPC_URL;
 }
 
+function normalizeReputationScore(rawReputationScore) {
+  const numeric = Number(rawReputationScore || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return numeric > 10000
+    ? Math.min(Math.round(numeric / 10000), 800)
+    : Math.max(0, Math.round(numeric));
+}
+
 // ─── Account Cache (TTL-based, all identity programs) ────
 const _cache = { accounts: null, time: 0, byAuthority: new Map(), byName: new Map() };
 const CACHE_TTL_MS = 1_800_000; // 30min cache // 10min cache (accounts rarely change)
@@ -250,17 +258,18 @@ function parseIdentityAccount(data) {
     try {
       const v3 = deserializeGenesisRecord(data);
       if (v3 && v3.authority) {
+        const reputationScore = normalizeReputationScore(v3.reputationScore);
         return {
           authority: v3.authority,
           name: v3.agentName || '',
           description: v3.description || '',
           metadataUri: v3.metadataUri || '',
           version: 3,
-          reputationScore: v3.reputationScore / 10000,
+          reputationScore,
           reputationScoreRaw: v3.reputationScore,
           verificationLevel: v3.verificationLevel,
           verificationLabel: levelToLabel(v3.verificationLevel),
-          reputationRank: scoreToRank(v3.reputationScore / 10000),
+          reputationRank: scoreToRank(reputationScore),
           createdAt: v3.createdAt ? new Date(v3.createdAt * 1000).toISOString() : null,
           updatedAt: v3.updatedAt ? new Date(v3.updatedAt * 1000).toISOString() : null,
           onChain: true,
@@ -342,9 +351,7 @@ function parseIdentityAccount(data) {
       if (lvl <= 5) verificationLevel = lvl;
       offset += 1;
     }
-    const reputationScore = rawReputationScore > 800
-      ? Math.min(Math.round(rawReputationScore / 10000), 800)
-      : Math.max(0, rawReputationScore);
+    const reputationScore = normalizeReputationScore(rawReputationScore);
     
     return {
       authority, name, description, metadataUri, version,
@@ -608,6 +615,7 @@ module.exports = {
   getAttestationPDA,
   getReviewPDA,
   parseIdentityAccount,
+  normalizeReputationScore,
   parseAttestationAccount,
   getAgentIdentity,
   findAgentByName,
