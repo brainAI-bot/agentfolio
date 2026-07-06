@@ -41,7 +41,7 @@ const {
 const {
   getEscrowV3AuthorityReadback,
 } = require('../lib/escrow-v3-authority');
-const { loadJob } = require('../lib/database');
+const { loadJob, loadProfile } = require('../lib/database');
 
 const router = Router();
 
@@ -50,6 +50,7 @@ let SATPV3SDK;
 let sdkInstance = null;
 const getV3ProgramIds = satpClient.getV3ProgramIds;
 const getV3EscrowPDA = satpClient.getV3EscrowPDA;
+const getGenesisPDA = satpClient.getGenesisPDA;
 
 function normalizeNetwork(value) {
   return String(value || '').toLowerCase().includes('devnet') ? 'devnet' : 'mainnet';
@@ -107,6 +108,11 @@ function getSingleQueryString(value) {
   return typeof value === 'string' ? value : undefined;
 }
 
+function publicKeyToString(value) {
+  if (!value) return null;
+  return typeof value.toBase58 === 'function' ? value.toBase58() : String(value);
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function serializeTx(tx) {
@@ -140,6 +146,41 @@ function deriveEscrowPDA(client, descriptionOrHash, nonce) {
   };
 }
 
+function deriveSelectedAgentSatpReadback(agentId, network = NETWORK) {
+  if (!agentId || typeof getGenesisPDA !== 'function' || typeof getV3ProgramIds !== 'function') {
+    return null;
+  }
+
+  const [genesisPDA] = getGenesisPDA(agentId, network);
+  const programIds = getV3ProgramIds(network);
+
+  return {
+    agentId,
+    network,
+    genesisPDA: publicKeyToString(genesisPDA),
+    identityProgramId: publicKeyToString(programIds.IDENTITY),
+  };
+}
+
+function resolveProfileSolanaWallet(profile) {
+  if (!profile) return null;
+
+  const candidates = [
+    profile.wallets?.solana,
+    profile.wallet,
+    profile.verificationData?.solana?.address,
+    profile.verification_data?.solana?.address,
+  ];
+
+  const verifiedSolana = Array.isArray(profile.verifications)
+    ? profile.verifications.find((verification) => verification?.platform === 'solana')
+    : null;
+  candidates.push(verifiedSolana?.identifier);
+
+  const wallet = candidates.find((candidate) => typeof candidate === 'string' && candidate.trim());
+  return wallet ? wallet.trim() : null;
+}
+
 function resolveEscrowAgentId({ jobId, agentId }, loadJobById = loadJob) {
   if (!jobId) return { agentId, job: null };
 
@@ -167,13 +208,68 @@ function resolveEscrowAgentId({ jobId, agentId }, loadJobById = loadJob) {
   return { agentId: selectedAgentId, job };
 }
 
+function resolveEscrowAgentBinding(
+  { jobId, agentId, agentWallet },
+  {
+    loadJobById = loadJob,
+    loadProfileById = loadProfile,
+    network = NETWORK,
+  } = {},
+) {
+  const { agentId: selectedAgentId, job } = resolveEscrowAgentId({ jobId, agentId }, loadJobById);
+  const satpIdentity = deriveSelectedAgentSatpReadback(selectedAgentId, network);
+
+  if (!jobId) {
+    return {
+      agentId: selectedAgentId,
+      agentWallet,
+      job,
+      selectedAgentWallet: null,
+      satpIdentity,
+    };
+  }
+
+  const selectedAgentProfile = loadProfileById(selectedAgentId);
+  if (!selectedAgentProfile) {
+    const err = new Error('Selected agent profile not found');
+    err.statusCode = 409;
+    err.details = { selectedAgentId };
+    throw err;
+  }
+
+  const selectedAgentWallet = resolveProfileSolanaWallet(selectedAgentProfile);
+  if (!selectedAgentWallet) {
+    const err = new Error('Selected agent has no Solana wallet for escrow payout binding');
+    err.statusCode = 409;
+    err.details = { selectedAgentId };
+    throw err;
+  }
+
+  if (agentWallet && agentWallet !== selectedAgentWallet) {
+    const err = new Error('agentWallet must match the selected job agent Solana wallet');
+    err.statusCode = 409;
+    err.details = { selectedAgentId, selectedAgentWallet };
+    throw err;
+  }
+
+  return {
+    agentId: selectedAgentId,
+    agentWallet: selectedAgentWallet,
+    job,
+    selectedAgentWallet,
+    satpIdentity,
+  };
+}
+
 router.get('/health', (req, res) => {
+  const agentId = getSingleQueryString(req.query.agentId);
   res.json({
     status: 'ok',
     network: NETWORK,
     sdkAvailable: Boolean(SATPV3SDK),
     liveEscrow: liveEscrowGateStatus(),
     escrowAuthority: getEscrowV3AuthorityReadback({ satpClient }),
+    selectedAgentSatpIdentity: deriveSelectedAgentSatpReadback(agentId),
     timestamp: new Date().toISOString(),
   });
 });
@@ -209,10 +305,10 @@ router.post('/create', requireSDK, async (req, res) => {
       minVerificationLevel, requireBorn,
     } = req.body;
 
-    const { agentId: escrowAgentId, job } = resolveEscrowAgentId({ jobId, agentId });
+    const agentBinding = resolveEscrowAgentBinding({ jobId, agentId, agentWallet });
 
     // Required fields
-    if (!clientWallet || !agentWallet || !escrowAgentId || !amountLamports || !description || !deadlineUnix) {
+    if (!clientWallet || !agentBinding.agentWallet || !agentBinding.agentId || !amountLamports || !description || !deadlineUnix) {
       return res.status(400).json({
         error: 'Missing required fields',
         required: ['clientWallet', 'agentWallet', 'agentId or jobId', 'amountLamports', 'description', 'deadlineUnix'],
@@ -224,7 +320,7 @@ router.post('/create', requireSDK, async (req, res) => {
     if (!validatePublicKey(clientWallet, 'clientWallet')) {
       return res.status(400).json({ error: 'Invalid clientWallet address' });
     }
-    if (!validatePublicKey(agentWallet, 'agentWallet')) {
+    if (!validatePublicKey(agentBinding.agentWallet, 'agentWallet')) {
       return res.status(400).json({ error: 'Invalid agentWallet address' });
     }
     if (arbiter && !validatePublicKey(arbiter, 'arbiter')) {
@@ -257,7 +353,7 @@ router.post('/create', requireSDK, async (req, res) => {
     if (requireBorn) opts.requireBorn = true;
 
     const result = await req.sdk.buildCreateEscrow(
-      clientWallet, agentWallet, escrowAgentId, amount,
+      clientWallet, agentBinding.agentWallet, agentBinding.agentId, amount,
       description, deadline, nonce || 0, opts,
     );
 
@@ -267,8 +363,10 @@ router.post('/create', requireSDK, async (req, res) => {
       descriptionHash: result.descriptionHash.toString('hex'),
       network: NETWORK,
       nonce: nonce || 0,
-      agentId: escrowAgentId,
-      jobId: job ? job.id : undefined,
+      agentId: agentBinding.agentId,
+      agentWallet: agentBinding.agentWallet,
+      jobId: agentBinding.job ? agentBinding.job.id : undefined,
+      selectedAgentSatpIdentity: agentBinding.satpIdentity,
       identityGateIncluded: true,
       message: 'Sign and submit to create an identity-gated escrow after live-funds release gates are enabled',
     });
@@ -864,6 +962,11 @@ router.get('/by-agent-id/:agentId', requireSDK, async (req, res) => {
   }
 });
 
-router.__test = { resolveEscrowAgentId };
+router.__test = {
+  deriveSelectedAgentSatpReadback,
+  resolveEscrowAgentBinding,
+  resolveEscrowAgentId,
+  resolveProfileSolanaWallet,
+};
 
 module.exports = router;
