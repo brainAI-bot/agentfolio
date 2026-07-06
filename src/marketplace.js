@@ -9,6 +9,9 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { buildReputationSurface } = require('./lib/reputation-surface');
+const {
+  sendCustodialEscrowDisabledResponse,
+} = require('./lib/write-surface-gate');
 let addActivity;
 try { addActivity = require('./profile-store').addActivity; } catch { addActivity = () => {}; }
 
@@ -380,6 +383,7 @@ function registerRoutes(app) {
 
   // 4. POST /api/marketplace/jobs/:id/escrow — Fund escrow for a job
   app.post('/api/marketplace/jobs/:id/escrow', (req, res) => {
+    if (sendCustodialEscrowDisabledResponse(res, 'legacy marketplace custodial escrow fund')) return;
     const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
     const job = readJSON(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -453,6 +457,7 @@ function registerRoutes(app) {
 
   // 6. POST /api/marketplace/escrow/:id/release — Release payment
   app.post('/api/marketplace/escrow/:id/release', (req, res) => {
+    if (sendCustodialEscrowDisabledResponse(res, 'legacy marketplace custodial escrow release')) return;
     const escrowPath = path.join(DATA_DIR, 'escrow', `${req.params.id}.json`);
     const escrow = readJSON(escrowPath);
     if (!escrow) return res.status(404).json({ error: 'Escrow not found' });
@@ -498,6 +503,7 @@ function registerRoutes(app) {
 
   // POST /api/marketplace/escrow/:id/refund — Refund escrow
   app.post('/api/marketplace/escrow/:id/refund', (req, res) => {
+    if (sendCustodialEscrowDisabledResponse(res, 'legacy marketplace custodial escrow refund')) return;
     const escrowPath = path.join(DATA_DIR, 'escrow', `${req.params.id}.json`);
     const escrow = readJSON(escrowPath);
     if (!escrow) return res.status(404).json({ error: 'Escrow not found' });
