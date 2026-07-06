@@ -31,7 +31,13 @@
  */
 
 const { Router } = require('express');
-const { PublicKey } = require('@solana/web3.js');
+const {
+  Connection,
+  PublicKey,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+} = require('@solana/web3.js');
 const crypto = require('crypto');
 const satpClient = require('@brainai/satp-client');
 const {
@@ -69,6 +75,16 @@ try {
 
 const NETWORK = normalizeNetwork(process.env.SATP_NETWORK || process.env.SOLANA_NETWORK || 'mainnet');
 const RPC_URL = process.env.SOLANA_RPC_URL || null;
+const DEFAULT_SOLANA_RPC_URL = NETWORK === 'devnet'
+  ? 'https://api.devnet.solana.com'
+  : 'https://api.mainnet-beta.solana.com';
+const PLATFORM_FEE_BPS = 500;
+const BPS_DENOMINATOR = 10_000;
+const PLATFORM_TREASURY_WALLET = 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
+const ESCROW_V3_DISCRIMINATORS = {
+  release: Buffer.from([253, 249, 15, 206, 28, 127, 193, 241]),
+  partialRelease: Buffer.from([20, 4, 101, 245, 53, 131, 213, 8]),
+};
 
 function getSDK() {
   if (!sdkInstance && SATPV3SDK) {
@@ -118,6 +134,85 @@ function publicKeyToString(value) {
 function serializeTx(tx) {
   const serialized = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
   return Buffer.from(serialized).toString('base64');
+}
+
+function getEscrowProgramId() {
+  const ids = typeof getV3ProgramIds === 'function' ? getV3ProgramIds(NETWORK) : null;
+  const escrowId = ids?.ESCROW || ids?.escrow || ids?.ESCROW_V3 || ids?.escrowV3;
+  return new PublicKey(escrowId || 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
+}
+
+function encodeU64(value) {
+  const amount = BigInt(value);
+  const buffer = Buffer.alloc(8);
+  buffer.writeBigUInt64LE(amount);
+  return buffer;
+}
+
+function calculatePlatformFeeSplit(amountLamports) {
+  const amount = BigInt(amountLamports);
+  if (amount <= 0n) {
+    throw new Error('amountLamports must be a positive number');
+  }
+  const platformFee = (amount * BigInt(PLATFORM_FEE_BPS)) / BigInt(BPS_DENOMINATOR);
+  const agentAmount = amount - platformFee;
+  if (agentAmount <= 0n) {
+    throw new Error('release amount is too small after platform fee');
+  }
+  return {
+    grossAmountLamports: amount.toString(),
+    agentAmountLamports: agentAmount.toString(),
+    platformFeeLamports: platformFee.toString(),
+    platformFeeBps: PLATFORM_FEE_BPS,
+    treasuryWallet: PLATFORM_TREASURY_WALLET,
+    rounding: 'integer floor in lamports; sub-20-lamport releases produce 0 platform fee',
+  };
+}
+
+function validatePositiveLamports(value, fieldName) {
+  if (typeof value === 'bigint') {
+    if (value <= 0n) throw new Error(`${fieldName} must be a positive integer`);
+    return value;
+  }
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
+    return BigInt(value);
+  }
+  if (typeof value === 'string' && /^[1-9]\d*$/.test(value)) {
+    return BigInt(value);
+  }
+  throw new Error(`${fieldName} must be a positive integer`);
+}
+
+async function buildEscrowReleaseTx({ clientWallet, agentWallet, escrowPDA, amountLamports = null }) {
+  const connection = new Connection(RPC_URL || DEFAULT_SOLANA_RPC_URL, 'confirmed');
+  const client = new PublicKey(clientWallet);
+  const agent = new PublicKey(agentWallet);
+  const escrow = new PublicKey(escrowPDA);
+  const treasury = new PublicKey(PLATFORM_TREASURY_WALLET);
+  const programId = getEscrowProgramId();
+  const data = amountLamports === null
+    ? ESCROW_V3_DISCRIMINATORS.release
+    : Buffer.concat([ESCROW_V3_DISCRIMINATORS.partialRelease, encodeU64(amountLamports)]);
+
+  const instruction = new TransactionInstruction({
+    programId,
+    keys: [
+      { pubkey: escrow, isSigner: false, isWritable: true },
+      { pubkey: client, isSigner: true, isWritable: false },
+      { pubkey: agent, isSigner: false, isWritable: true },
+      { pubkey: treasury, isSigner: false, isWritable: true },
+    ],
+    data,
+  });
+
+  const { blockhash } = await connection.getLatestBlockhash();
+  const msg = new TransactionMessage({
+    payerKey: client,
+    recentBlockhash: blockhash,
+    instructions: [instruction],
+  }).compileToV0Message();
+
+  return new VersionedTransaction(msg);
 }
 
 function hashIfNeeded(input) {
@@ -450,12 +545,18 @@ router.post('/release', requireSDK, async (req, res) => {
       return res.status(400).json({ error: 'Invalid escrowPDA address' });
     }
 
-    const result = await req.sdk.buildEscrowRelease(clientWallet, agentWallet, escrowPDA);
+    const transaction = await buildEscrowReleaseTx({ clientWallet, agentWallet, escrowPDA });
 
     res.json({
-      transaction: serializeTx(result.transaction),
+      transaction: serializeTx(transaction),
       network: NETWORK,
-      message: 'Client: sign and submit to release all remaining funds to agent',
+      platformFee: {
+        bps: PLATFORM_FEE_BPS,
+        treasuryWallet: PLATFORM_TREASURY_WALLET,
+        collection: 'on-chain',
+        rounding: 'integer floor in lamports; sub-20-lamport releases produce 0 platform fee',
+      },
+      message: 'Client: sign and submit to release all remaining funds with platform fee routed on-chain to treasury',
     });
   } catch (err) {
     console.error('[Escrow V3] release error:', err.message);
@@ -494,18 +595,27 @@ router.post('/partial-release', requireSDK, async (req, res) => {
       return res.status(400).json({ error: 'Invalid escrowPDA address' });
     }
 
-    const amount = Number(amountLamports);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({ error: 'amountLamports must be a positive number' });
+    let amount;
+    try {
+      amount = validatePositiveLamports(amountLamports, 'amountLamports');
+    } catch (validationError) {
+      return res.status(400).json({ error: validationError.message });
     }
+    const feeSplit = calculatePlatformFeeSplit(amount);
 
-    const result = await req.sdk.buildPartialRelease(clientWallet, agentWallet, escrowPDA, amount);
+    const transaction = await buildEscrowReleaseTx({
+      clientWallet,
+      agentWallet,
+      escrowPDA,
+      amountLamports: amount,
+    });
 
     res.json({
-      transaction: serializeTx(result.transaction),
-      milestoneAmount: amount,
+      transaction: serializeTx(transaction),
+      milestoneAmount: feeSplit.grossAmountLamports,
+      platformFee: feeSplit,
       network: NETWORK,
-      message: 'Client: sign and submit to release milestone payment to agent',
+      message: 'Client: sign and submit to release milestone payment with platform fee routed on-chain to treasury',
     });
   } catch (err) {
     console.error('[Escrow V3] partial-release error:', err.message);

@@ -72,7 +72,8 @@
       "accounts": [
         { "name": "escrow", "writable": true },
         { "name": "client", "signer": true },
-        { "name": "agent", "writable": true }
+        { "name": "agent", "writable": true },
+        { "name": "treasury", "writable": true }
       ],
       "args": [{ "name": "amount", "type": "u64" }]
     },
@@ -91,7 +92,8 @@
       "accounts": [
         { "name": "escrow", "writable": true },
         { "name": "client", "signer": true },
-        { "name": "agent", "writable": true }
+        { "name": "agent", "writable": true },
+        { "name": "treasury", "writable": true }
       ],
       "args": []
     },
@@ -197,6 +199,7 @@
     { "code": 6015, "name": "WrongAgentIdentity", "msg": "Wrong SATP agent identity" },
     { "code": 6016, "name": "InvalidAgentIdentity", "msg": "Invalid SATP agent identity" },
     { "code": 6017, "name": "AgentVerificationTooLow", "msg": "Agent verification level is below escrow requirement" },
-    { "code": 6018, "name": "AgentNotBorn", "msg": "Agent has not completed SATP birth requirement" }
+    { "code": 6018, "name": "AgentNotBorn", "msg": "Agent has not completed SATP birth requirement" },
+    { "code": 6019, "name": "WrongTreasury", "msg": "Wrong platform treasury wallet" }
   ]
 }

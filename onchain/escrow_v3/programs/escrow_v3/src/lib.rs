@@ -8,6 +8,9 @@ const ANCHOR_DISCRIMINATOR_LEN: usize = 8;
 const PUBKEY_LEN: usize = 32;
 const MAX_SATP_STRING_BYTES: usize = 2048;
 const MAX_SATP_CAPABILITIES: u32 = 128;
+const PLATFORM_FEE_BPS: u64 = 500;
+const BPS_DENOMINATOR: u64 = 10_000;
+const PLATFORM_TREASURY: Pubkey = pubkey!("FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be");
 
 #[program]
 pub mod escrow_v3 {
@@ -98,21 +101,26 @@ pub mod escrow_v3 {
     }
 
     pub fn release(ctx: Context<Release>) -> Result<()> {
-        let remaining = releasable_amount(&ctx.accounts.escrow);
-        require!(remaining > 0, EscrowError::NothingToRelease);
-        transfer_from_escrow(
-            &ctx.accounts.escrow.to_account_info(),
-            &ctx.accounts.agent.to_account_info(),
-            remaining,
-        )?;
-
-        let escrow = &mut ctx.accounts.escrow;
+        let escrow = &ctx.accounts.escrow;
         require!(
             escrow.status == EscrowStatus::Active || escrow.status == EscrowStatus::WorkSubmitted,
             EscrowError::NotReleasable
         );
         require_keys_eq!(escrow.client, ctx.accounts.client.key(), EscrowError::Unauthorized);
         require_keys_eq!(escrow.agent, ctx.accounts.agent.key(), EscrowError::WrongAgent);
+        require_keys_eq!(ctx.accounts.treasury.key(), PLATFORM_TREASURY, EscrowError::WrongTreasury);
+
+        let remaining = releasable_amount(escrow);
+        require!(remaining > 0, EscrowError::NothingToRelease);
+        let fee_split = calculate_platform_fee_split(remaining)?;
+        transfer_fee_split(
+            &ctx.accounts.escrow.to_account_info(),
+            &ctx.accounts.agent.to_account_info(),
+            &ctx.accounts.treasury.to_account_info(),
+            fee_split,
+        )?;
+
+        let escrow = &mut ctx.accounts.escrow;
         escrow.released_amount = escrow.amount;
         escrow.status = EscrowStatus::Released;
 
@@ -120,6 +128,9 @@ pub mod escrow_v3 {
             escrow: escrow.key(),
             agent: escrow.agent,
             amount: remaining,
+            agent_amount: fee_split.agent_amount,
+            platform_fee: fee_split.platform_fee,
+            treasury: PLATFORM_TREASURY,
         });
 
         Ok(())
@@ -128,21 +139,26 @@ pub mod escrow_v3 {
     pub fn partial_release(ctx: Context<Release>, amount: u64) -> Result<()> {
         require!(amount > 0, EscrowError::ZeroAmount);
 
-        let remaining = releasable_amount(&ctx.accounts.escrow);
-        require!(amount <= remaining, EscrowError::AmountExceedsRemaining);
-        transfer_from_escrow(
-            &ctx.accounts.escrow.to_account_info(),
-            &ctx.accounts.agent.to_account_info(),
-            amount,
-        )?;
-
-        let escrow = &mut ctx.accounts.escrow;
+        let escrow = &ctx.accounts.escrow;
         require!(
             escrow.status == EscrowStatus::Active || escrow.status == EscrowStatus::WorkSubmitted,
             EscrowError::NotReleasable
         );
         require_keys_eq!(escrow.client, ctx.accounts.client.key(), EscrowError::Unauthorized);
         require_keys_eq!(escrow.agent, ctx.accounts.agent.key(), EscrowError::WrongAgent);
+        require_keys_eq!(ctx.accounts.treasury.key(), PLATFORM_TREASURY, EscrowError::WrongTreasury);
+
+        let remaining = releasable_amount(escrow);
+        require!(amount <= remaining, EscrowError::AmountExceedsRemaining);
+        let fee_split = calculate_platform_fee_split(amount)?;
+        transfer_fee_split(
+            &ctx.accounts.escrow.to_account_info(),
+            &ctx.accounts.agent.to_account_info(),
+            &ctx.accounts.treasury.to_account_info(),
+            fee_split,
+        )?;
+
+        let escrow = &mut ctx.accounts.escrow;
         escrow.released_amount = escrow.released_amount.saturating_add(amount);
         if escrow.released_amount == escrow.amount {
             escrow.status = EscrowStatus::Released;
@@ -152,6 +168,9 @@ pub mod escrow_v3 {
             escrow: escrow.key(),
             agent: escrow.agent,
             amount,
+            agent_amount: fee_split.agent_amount,
+            platform_fee: fee_split.platform_fee,
+            treasury: PLATFORM_TREASURY,
             remaining: escrow.amount.saturating_sub(escrow.released_amount),
         });
 
@@ -293,6 +312,39 @@ pub mod escrow_v3 {
 
 fn releasable_amount(escrow: &Account<EscrowV3>) -> u64 {
     escrow.amount.saturating_sub(escrow.released_amount)
+}
+
+#[derive(Clone, Copy)]
+struct FeeSplit {
+    agent_amount: u64,
+    platform_fee: u64,
+}
+
+fn calculate_platform_fee_split(amount: u64) -> Result<FeeSplit> {
+    require!(amount > 0, EscrowError::ZeroAmount);
+    let platform_fee = amount
+        .checked_mul(PLATFORM_FEE_BPS)
+        .ok_or(EscrowError::AmountExceedsRemaining)?
+        / BPS_DENOMINATOR;
+    let agent_amount = amount
+        .checked_sub(platform_fee)
+        .ok_or(EscrowError::AmountExceedsRemaining)?;
+    require!(agent_amount > 0, EscrowError::NothingToRelease);
+    Ok(FeeSplit {
+        agent_amount,
+        platform_fee,
+    })
+}
+
+fn transfer_fee_split<'info>(
+    escrow: &AccountInfo<'info>,
+    agent: &AccountInfo<'info>,
+    treasury: &AccountInfo<'info>,
+    fee_split: FeeSplit,
+) -> Result<()> {
+    transfer_from_escrow(escrow, agent, fee_split.agent_amount)?;
+    transfer_from_escrow(escrow, treasury, fee_split.platform_fee)?;
+    Ok(())
 }
 
 fn transfer_from_escrow<'info>(
@@ -473,6 +525,9 @@ pub struct Release<'info> {
     /// CHECK: Lamport recipient must match escrow.agent.
     #[account(mut)]
     pub agent: UncheckedAccount<'info>,
+    /// CHECK: Lamport recipient must match PLATFORM_TREASURY.
+    #[account(mut)]
+    pub treasury: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -577,6 +632,9 @@ pub struct EscrowReleased {
     pub escrow: Pubkey,
     pub agent: Pubkey,
     pub amount: u64,
+    pub agent_amount: u64,
+    pub platform_fee: u64,
+    pub treasury: Pubkey,
 }
 
 #[event]
@@ -584,6 +642,9 @@ pub struct EscrowPartiallyReleased {
     pub escrow: Pubkey,
     pub agent: Pubkey,
     pub amount: u64,
+    pub agent_amount: u64,
+    pub platform_fee: u64,
+    pub treasury: Pubkey,
     pub remaining: u64,
 }
 
@@ -656,4 +717,6 @@ pub enum EscrowError {
     AgentVerificationTooLow,
     #[msg("Agent has not completed SATP birth requirement")]
     AgentNotBorn,
+    #[msg("Wrong platform treasury wallet")]
+    WrongTreasury,
 }
