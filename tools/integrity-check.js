@@ -170,6 +170,13 @@ function compareField(name, onChain, api, strict = true) {
   return { field: name, onChain, api, match };
 }
 
+function normalizeVerificationLabelForCompare(label) {
+  return String(label || '')
+    .replace(/^L\d+\s*[·-]\s*/i, '')
+    .trim()
+    .toLowerCase();
+}
+
 async function auditAgent(conn, agentId) {
   const pda = getGenesisPDA(agentId);
   const result = {
@@ -267,8 +274,8 @@ async function auditAgent(conn, agentId) {
   // Verification label
   result.checks.push(compareField(
     'Verification Label',
-    genesis.verificationLabel,
-    v3.verificationLabel,
+    normalizeVerificationLabelForCompare(genesis.verificationLabel),
+    normalizeVerificationLabelForCompare(v3.verificationLabel),
     false // case-insensitive compare
   ));
 

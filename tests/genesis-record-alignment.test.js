@@ -5,6 +5,7 @@ const { PublicKey } = require('@solana/web3.js');
 
 const explorer = require('../src/v3-explorer');
 const scoreService = require('../src/v3-score-service');
+const trustCredential = require('../src/routes/trust-credential');
 const integrity = require('../tools/integrity-check');
 
 const GENESIS_DISC = crypto.createHash('sha256')
@@ -121,5 +122,21 @@ describe('Genesis Record truth alignment', () => {
       'agent_braintrade',
       'agent_suppi',
     ]);
+  });
+
+  it('builds trust credential fields from V3 Genesis truth', () => {
+    const fields = trustCredential.buildCredentialTrustFields({
+      v3Data: {
+        reputationScore: 13,
+        verificationLabel: 'L3 · Established',
+      },
+    });
+
+    assert.strictEqual(fields.trustScore, 13);
+    assert.strictEqual(fields.maxScore, 800);
+    assert.strictEqual(fields.tier, 'ESTABLISHED');
+    assert.strictEqual(fields.scoreVersion, 'v3');
+    assert.strictEqual(fields.trustEvidenceBacked, true);
+    assert.strictEqual(fields.onChainRegistered, true);
   });
 });

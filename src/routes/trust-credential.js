@@ -74,6 +74,26 @@ function scoreTier(score) {
   return 'NEW';
 }
 
+function normalizeCredentialTierLabel(label) {
+  const normalized = String(label || '')
+    .replace(/^L\d+\s*[·-]\s*/i, '')
+    .trim();
+  return (normalized || 'UNVERIFIED').toUpperCase();
+}
+
+function buildCredentialTrustFields({ v3Data, scoreResult = {}, parsed = {} }) {
+  const hasV3Evidence = !!v3Data;
+  return {
+    trustScore: hasV3Evidence ? v3Data.reputationScore : 0,
+    maxScore: 800,
+    tier: hasV3Evidence ? normalizeCredentialTierLabel(v3Data.verificationLabel) : 'PENDING_EVIDENCE',
+    scoreVersion: hasV3Evidence ? 'v3' : 'pending-v3-evidence',
+    trustEvidenceBacked: hasV3Evidence,
+    reputationStatus: hasV3Evidence ? 'evidence-backed' : 'pending on-chain evidence',
+    onChainRegistered: hasV3Evidence ? true : (scoreResult.onChainRegistered || parsed.metadata?.registeredOnChain || parsed.verifications?.some(v => v.platform === 'satp' && v.verified) || false),
+  };
+}
+
 // ─── Route Registration ─────────────────────────────────
 function registerTrustCredentialRoutes(app) {
   const profileStore = require('../profile-store');
@@ -183,16 +203,17 @@ function registerTrustCredentialRoutes(app) {
       const now = new Date();
       const expiresAt = new Date(now.getTime() + CREDENTIAL_TTL_SECONDS * 1000);
 
+      const credentialTrustFields = buildCredentialTrustFields({ v3Data, scoreResult, parsed });
       const credentialSubject = {
         id: `did:agentfolio:${agentId}`,
         agentId,
         name: profile.name,
-        trustScore: hasV3Evidence ? v3Data.reputationScore : 0,
-        maxScore: 800,
-        tier: hasV3Evidence ? v3Data.verificationLabel.toUpperCase() : 'PENDING_EVIDENCE',
-        scoreVersion: hasV3Evidence ? 'v3' : 'pending-v3-evidence',
-        trustEvidenceBacked: hasV3Evidence,
-        reputationStatus: hasV3Evidence ? 'evidence-backed' : 'pending on-chain evidence',
+        trustScore: credentialTrustFields.trustScore,
+        maxScore: credentialTrustFields.maxScore,
+        tier: credentialTrustFields.tier,
+        scoreVersion: credentialTrustFields.scoreVersion,
+        trustEvidenceBacked: credentialTrustFields.trustEvidenceBacked,
+        reputationStatus: credentialTrustFields.reputationStatus,
         verificationCount: (() => {
           // Merge DB verifications with chain-cache verifications for full count
           const dbCount = parsed.verifications.filter(v => v.verified !== false).length;
@@ -207,7 +228,7 @@ function registerTrustCredentialRoutes(app) {
             return Math.max(dbCount, allPlatforms.size);
           } catch { return dbCount; }
         })(),
-        onChainRegistered: hasV3Evidence ? true : (scoreResult.onChainRegistered || parsed.metadata?.registeredOnChain || parsed.verifications?.some(v => v.platform === 'satp' && v.verified) || false),
+        onChainRegistered: credentialTrustFields.onChainRegistered,
         breakdown: (() => {
           // V3 scoring uses different category structure than V2
           const cats = scoreResult.breakdown?.trustScore?.categories || {};
@@ -316,4 +337,8 @@ function registerTrustCredentialRoutes(app) {
   console.log('[TrustCredential] Routes registered: GET /api/trust-credential/verify, GET /api/trust-credential/:agentId');
 }
 
-module.exports = { registerTrustCredentialRoutes };
+module.exports = {
+  registerTrustCredentialRoutes,
+  buildCredentialTrustFields,
+  normalizeCredentialTierLabel,
+};
