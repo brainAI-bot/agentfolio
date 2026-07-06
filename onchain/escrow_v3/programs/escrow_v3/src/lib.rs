@@ -203,16 +203,36 @@ pub mod escrow_v3 {
         Ok(())
     }
 
-    pub fn resolve_dispute(ctx: Context<ResolveDispute>, agent_amount: u64, client_amount: u64) -> Result<()> {
+    pub fn resolve_dispute(
+        ctx: Context<ResolveDispute>,
+        agent_amount: u64,
+        client_amount: u64,
+    ) -> Result<()> {
+        let escrow = &ctx.accounts.escrow;
         let total = agent_amount
             .checked_add(client_amount)
             .ok_or(EscrowError::AmountExceedsRemaining)?;
-        let remaining = ctx.accounts.escrow.amount.saturating_sub(ctx.accounts.escrow.released_amount);
+        let remaining = escrow.amount.saturating_sub(escrow.released_amount);
 
-        require!(ctx.accounts.escrow.status == EscrowStatus::Disputed, EscrowError::NotDisputed);
-        require_keys_eq!(ctx.accounts.escrow.arbiter, ctx.accounts.arbiter.key(), EscrowError::Unauthorized);
-        require_keys_eq!(ctx.accounts.escrow.agent, ctx.accounts.agent.key(), EscrowError::WrongAgent);
-        require_keys_eq!(ctx.accounts.escrow.client, ctx.accounts.client.key(), EscrowError::Unauthorized);
+        require!(
+            escrow.status == EscrowStatus::Disputed,
+            EscrowError::NotDisputed
+        );
+        require_keys_eq!(
+            escrow.arbiter,
+            ctx.accounts.arbiter.key(),
+            EscrowError::Unauthorized
+        );
+        require_keys_eq!(
+            escrow.agent,
+            ctx.accounts.agent.key(),
+            EscrowError::WrongAgent
+        );
+        require_keys_eq!(
+            escrow.client,
+            ctx.accounts.client.key(),
+            EscrowError::Unauthorized
+        );
         require!(total <= remaining, EscrowError::AmountExceedsRemaining);
 
         transfer_from_escrow(

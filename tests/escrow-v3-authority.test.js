@@ -46,12 +46,24 @@ test('escrow_v3 source binds dispute recipients and enforces SATP identity requi
     path.resolve(__dirname, '..', 'onchain/escrow_v3/programs/escrow_v3/src/lib.rs'),
     'utf8',
   );
+  const resolveDispute = source.slice(
+    source.indexOf('pub fn resolve_dispute'),
+    source.indexOf('pub fn extend_deadline'),
+  );
+  const agentBinding = /require_keys_eq!\(\s*escrow\.agent,\s*ctx\.accounts\.agent\.key\(\),\s*EscrowError::WrongAgent\s*\)/;
+  const clientBinding = /require_keys_eq!\(\s*escrow\.client,\s*ctx\.accounts\.client\.key\(\),\s*EscrowError::Unauthorized\s*\)/;
+  const agentBindingMatch = resolveDispute.match(agentBinding);
+  const clientBindingMatch = resolveDispute.match(clientBinding);
+  const firstTransfer = resolveDispute.indexOf('transfer_from_escrow(');
 
   assert.match(source, /validate_agent_identity\(/);
   assert.match(source, /SATP_V3_IDENTITY_PROGRAM_ID/);
   assert.match(source, /Pubkey::find_program_address\(\s*&\[b"genesis", agent_id_hash\]/);
-  assert.match(source, /require_keys_eq!\(ctx\.accounts\.escrow\.agent, ctx\.accounts\.agent\.key\(\), EscrowError::WrongAgent\)/);
-  assert.match(source, /require_keys_eq!\(ctx\.accounts\.escrow\.client, ctx\.accounts\.client\.key\(\), EscrowError::Unauthorized\)/);
+  assert.ok(agentBindingMatch);
+  assert.ok(clientBindingMatch);
+  assert.notEqual(firstTransfer, -1);
+  assert.ok(agentBindingMatch.index < firstTransfer);
+  assert.ok(clientBindingMatch.index < firstTransfer);
   assert.match(source, /EscrowError::AgentVerificationTooLow/);
   assert.match(source, /EscrowError::AgentNotBorn/);
 });
