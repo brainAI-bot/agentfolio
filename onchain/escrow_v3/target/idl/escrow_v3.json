@@ -1,0 +1,198 @@
+{
+  "address": "4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a",
+  "metadata": {
+    "name": "escrow_v3",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "AgentFolio SATP V3 devnet escrow source pin"
+  },
+  "instructions": [
+    {
+      "name": "cancel",
+      "discriminator": [232, 219, 223, 41, 219, 236, 220, 190],
+      "accounts": [
+        { "name": "escrow", "writable": true },
+        { "name": "client", "writable": true, "signer": true }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_escrow",
+      "discriminator": [139, 171, 94, 146, 191, 91, 144, 50],
+      "accounts": [
+        { "name": "escrow", "writable": true },
+        { "name": "client", "writable": true, "signer": true }
+      ],
+      "args": []
+    },
+    {
+      "name": "create_escrow",
+      "discriminator": [253, 215, 165, 116, 36, 108, 68, 80],
+      "accounts": [
+        { "name": "client", "writable": true, "signer": true },
+        { "name": "agent_wallet" },
+        { "name": "agent_identity" },
+        { "name": "arbiter" },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              { "kind": "const", "value": [101, 115, 99, 114, 111, 119, 95, 118, 51] },
+              { "kind": "account", "path": "client" },
+              { "kind": "arg", "path": "description_hash" },
+              { "kind": "arg", "path": "nonce" }
+            ]
+          }
+        },
+        { "name": "system_program", "address": "11111111111111111111111111111111" }
+      ],
+      "args": [
+        { "name": "agent_id", "type": "string" },
+        { "name": "amount", "type": "u64" },
+        { "name": "description_hash", "type": { "array": ["u8", 32] } },
+        { "name": "deadline", "type": "i64" },
+        { "name": "nonce", "type": "u64" },
+        { "name": "min_verification_level", "type": "u8" },
+        { "name": "require_born", "type": "bool" }
+      ]
+    },
+    {
+      "name": "extend_deadline",
+      "discriminator": [18, 209, 27, 175, 87, 13, 213, 188],
+      "accounts": [
+        { "name": "escrow", "writable": true },
+        { "name": "client", "signer": true }
+      ],
+      "args": [{ "name": "new_deadline", "type": "i64" }]
+    },
+    {
+      "name": "partial_release",
+      "discriminator": [20, 4, 101, 245, 53, 131, 213, 8],
+      "accounts": [
+        { "name": "escrow", "writable": true },
+        { "name": "client", "signer": true },
+        { "name": "agent", "writable": true }
+      ],
+      "args": [{ "name": "amount", "type": "u64" }]
+    },
+    {
+      "name": "raise_dispute",
+      "discriminator": [41, 243, 1, 51, 150, 95, 246, 73],
+      "accounts": [
+        { "name": "escrow", "writable": true },
+        { "name": "signer", "signer": true }
+      ],
+      "args": [{ "name": "reason_hash", "type": { "array": ["u8", 32] } }]
+    },
+    {
+      "name": "release",
+      "discriminator": [253, 249, 15, 206, 28, 127, 193, 241],
+      "accounts": [
+        { "name": "escrow", "writable": true },
+        { "name": "client", "signer": true },
+        { "name": "agent", "writable": true }
+      ],
+      "args": []
+    },
+    {
+      "name": "resolve_dispute",
+      "discriminator": [231, 6, 202, 6, 96, 103, 12, 230],
+      "accounts": [
+        { "name": "escrow", "writable": true },
+        { "name": "arbiter", "signer": true },
+        { "name": "agent", "writable": true },
+        { "name": "client", "writable": true }
+      ],
+      "args": [
+        { "name": "agent_amount", "type": "u64" },
+        { "name": "client_amount", "type": "u64" }
+      ]
+    },
+    {
+      "name": "submit_work",
+      "discriminator": [158, 80, 101, 51, 114, 130, 101, 253],
+      "accounts": [
+        { "name": "escrow", "writable": true },
+        { "name": "agent", "signer": true }
+      ],
+      "args": [{ "name": "work_hash", "type": { "array": ["u8", 32] } }]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "EscrowV3",
+      "discriminator": [145, 108, 37, 52, 197, 162, 232, 59]
+    }
+  ],
+  "events": [
+    { "name": "DeadlineExtended", "discriminator": [100, 53, 50, 91, 205, 71, 0, 103] },
+    { "name": "DisputeRaised", "discriminator": [246, 167, 109, 37, 142, 45, 38, 176] },
+    { "name": "DisputeResolved", "discriminator": [121, 64, 249, 153, 139, 128, 236, 187] },
+    { "name": "EscrowCancelled", "discriminator": [98, 241, 195, 122, 213, 0, 162, 161] },
+    { "name": "EscrowCreated", "discriminator": [70, 127, 105, 102, 92, 97, 7, 173] },
+    { "name": "EscrowPartiallyReleased", "discriminator": [168, 223, 8, 148, 130, 118, 196, 152] },
+    { "name": "EscrowReleased", "discriminator": [131, 7, 138, 104, 166, 190, 113, 112] },
+    { "name": "WorkSubmitted", "discriminator": [136, 185, 210, 174, 216, 140, 64, 125] }
+  ],
+  "types": [
+    {
+      "name": "EscrowStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          { "name": "Active" },
+          { "name": "WorkSubmitted" },
+          { "name": "Released" },
+          { "name": "Cancelled" },
+          { "name": "Disputed" },
+          { "name": "Resolved" }
+        ]
+      }
+    },
+    {
+      "name": "EscrowV3",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "client", "type": "pubkey" },
+          { "name": "agent", "type": "pubkey" },
+          { "name": "agent_id_hash", "type": { "array": ["u8", 32] } },
+          { "name": "amount", "type": "u64" },
+          { "name": "released_amount", "type": "u64" },
+          { "name": "description_hash", "type": { "array": ["u8", 32] } },
+          { "name": "deadline", "type": "i64" },
+          { "name": "nonce", "type": "u64" },
+          { "name": "status", "type": { "defined": { "name": "EscrowStatus" } } },
+          { "name": "min_verification_level", "type": "u8" },
+          { "name": "require_born", "type": "bool" },
+          { "name": "created_at", "type": "i64" },
+          { "name": "arbiter", "type": "pubkey" },
+          { "name": "work_hash", "type": { "option": { "array": ["u8", 32] } } },
+          { "name": "work_submitted_at", "type": { "option": "i64" } },
+          { "name": "dispute_reason_hash", "type": { "option": { "array": ["u8", 32] } } },
+          { "name": "disputed_at", "type": { "option": "i64" } },
+          { "name": "disputed_by", "type": { "option": "pubkey" } },
+          { "name": "bump", "type": "u8" }
+        ]
+      }
+    }
+  ],
+  "errors": [
+    { "code": 6000, "name": "ZeroAmount", "msg": "Amount must be greater than zero" },
+    { "code": 6001, "name": "DeadlinePassed", "msg": "Deadline has already passed" },
+    { "code": 6002, "name": "NotActive", "msg": "Escrow is not active" },
+    { "code": 6003, "name": "NotReleasable", "msg": "Escrow cannot be released" },
+    { "code": 6004, "name": "NotCancellable", "msg": "Escrow cannot be cancelled" },
+    { "code": 6005, "name": "NotDisputable", "msg": "Escrow cannot be disputed" },
+    { "code": 6006, "name": "NotDisputed", "msg": "Escrow is not disputed" },
+    { "code": 6007, "name": "NotCloseable", "msg": "Escrow cannot be closed" },
+    { "code": 6008, "name": "Unauthorized", "msg": "Unauthorized signer" },
+    { "code": 6009, "name": "WrongAgent", "msg": "Wrong agent wallet" },
+    { "code": 6010, "name": "DeadlineNotReached", "msg": "Deadline has not been reached" },
+    { "code": 6011, "name": "DeadlineNotExtended", "msg": "New deadline must extend the current deadline" },
+    { "code": 6012, "name": "AmountExceedsRemaining", "msg": "Amount exceeds remaining escrow balance" },
+    { "code": 6013, "name": "NothingToRelease", "msg": "No releasable balance remains" },
+    { "code": 6014, "name": "InvalidTrustRequirement", "msg": "Invalid trust requirement" }
+  ]
+}

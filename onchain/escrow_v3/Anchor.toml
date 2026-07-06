@@ -1,0 +1,19 @@
+[toolchain]
+anchor_version = "0.31.1"
+
+[features]
+seeds = false
+skip-lint = false
+
+[programs.devnet]
+escrow_v3 = "4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "node ../../scripts/verify-escrow-v3-source-idl.mjs"
