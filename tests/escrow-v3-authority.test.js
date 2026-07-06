@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { execFileSync, spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const satpClient = require('@brainai/satp-client');
 const {
@@ -13,12 +15,78 @@ test('escrow_v3 authority readback names the HQ-selected program id and fails cl
 
   assert.equal(readback.label, 'escrow_v3');
   assert.equal(readback.expectedProgramId, AUTHORITY_PROGRAM_ID);
-  assert.equal(AUTHORITY_PROGRAM_ID, '4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a');
+  assert.equal(AUTHORITY_PROGRAM_ID, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
+  assert.equal(readback.anchorToml.exists, true);
+  assert.equal(readback.programSource.exists, true);
+  assert.equal(readback.trackedIdl.exists, true);
+  assert.equal(readback.trackedIdl.address, AUTHORITY_PROGRAM_ID);
+  assert.equal(readback.trackedIdl.matchesExpectedProgramId, true);
   assert.equal(readback.status, 'blocked_pending_authoritative_source_idl');
   assert.equal(readback.releaseGate.liveEscrowWritesAllowed, false);
   assert.equal(readback.satpArtifact.runtime.available, true);
-  assert.equal(readback.satpArtifact.mainnetMatchesExpectedProgramId, false);
-  assert.equal(readback.satpArtifact.devnetMatchesExpectedProgramId, false);
+  assert.equal(readback.satpArtifact.mainnetMatchesExpectedProgramId, true);
+  assert.equal(readback.satpArtifact.devnetMatchesExpectedProgramId, true);
+});
+
+test('escrow_v3 source and IDL strict verifier confirms the pinned program id', () => {
+  const output = execFileSync(process.execPath, ['scripts/verify-escrow-v3-source-idl.mjs', '--strict'], {
+    cwd: require('node:path').resolve(__dirname, '..'),
+    encoding: 'utf8',
+  });
+  const evidence = JSON.parse(output);
+  assert.equal(evidence.expectedProgramId, AUTHORITY_PROGRAM_ID);
+  assert.equal(evidence.status, 'verified');
+  assert.equal(evidence.checks.anchorProgramIdMatches, true);
+  assert.equal(evidence.checks.declareIdMatches, true);
+  assert.equal(evidence.checks.idlAddressMatches, true);
+  assert.equal(evidence.checks.createEscrowValidatesIdentityBeforeFunding, true);
+  assert.equal(evidence.checks.createEscrowValidatesIdentityBeforeRecordingRequirements, true);
+  assert.equal(evidence.checks.identityPdaBoundToAgentIdHash, true);
+  assert.equal(evidence.checks.identityOwnedBySatpProgram, true);
+  assert.equal(evidence.checks.minVerificationLevelEnforced, true);
+  assert.equal(evidence.checks.requireBornEnforced, true);
+});
+
+test('escrow_v3 source binds dispute recipients and enforces SATP identity requirements', () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '..', 'onchain/escrow_v3/programs/escrow_v3/src/lib.rs'),
+    'utf8',
+  );
+  const resolveDispute = source.slice(
+    source.indexOf('pub fn resolve_dispute'),
+    source.indexOf('pub fn extend_deadline'),
+  );
+  const agentBinding = /require_keys_eq!\(\s*escrow\.agent,\s*ctx\.accounts\.agent\.key\(\),\s*EscrowError::WrongAgent\s*\)/;
+  const clientBinding = /require_keys_eq!\(\s*escrow\.client,\s*ctx\.accounts\.client\.key\(\),\s*EscrowError::Unauthorized\s*\)/;
+  const agentBindingMatch = resolveDispute.match(agentBinding);
+  const clientBindingMatch = resolveDispute.match(clientBinding);
+  const firstTransfer = resolveDispute.indexOf('transfer_from_escrow(');
+  const createEscrow = source.slice(
+    source.indexOf('pub fn create_escrow'),
+    source.indexOf('pub fn submit_work'),
+  );
+  const identityValidationIndex = createEscrow.indexOf('validate_agent_identity(');
+  const fundingTransferIndex = createEscrow.indexOf('system_instruction::transfer');
+  const minRequirementRecordIndex = createEscrow.indexOf('escrow.min_verification_level = min_verification_level');
+  const requireBornRecordIndex = createEscrow.indexOf('escrow.require_born = require_born');
+
+  assert.match(source, /validate_agent_identity\(/);
+  assert.match(source, /SATP_V3_IDENTITY_PROGRAM_ID/);
+  assert.match(source, /Pubkey::find_program_address\(\s*&\[b"genesis", agent_id_hash\]/);
+  assert.notEqual(identityValidationIndex, -1);
+  assert.notEqual(fundingTransferIndex, -1);
+  assert.notEqual(minRequirementRecordIndex, -1);
+  assert.notEqual(requireBornRecordIndex, -1);
+  assert.ok(identityValidationIndex < fundingTransferIndex);
+  assert.ok(identityValidationIndex < minRequirementRecordIndex);
+  assert.ok(identityValidationIndex < requireBornRecordIndex);
+  assert.ok(agentBindingMatch);
+  assert.ok(clientBindingMatch);
+  assert.notEqual(firstTransfer, -1);
+  assert.ok(agentBindingMatch.index < firstTransfer);
+  assert.ok(clientBindingMatch.index < firstTransfer);
+  assert.match(source, /EscrowError::AgentVerificationTooLow/);
+  assert.match(source, /EscrowError::AgentNotBorn/);
 });
 
 test('escrow_v3 authority verifier prints JSON evidence and reserves strict failure for release gate', () => {
