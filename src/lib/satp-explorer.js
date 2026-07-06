@@ -9,7 +9,7 @@ const SOLANA_RPC = 'api.mainnet-beta.solana.com';
 
 const PROGRAMS = {
   identity: 'CV5Wd9YGFX5A4dvuaFuEDuKQWp14NfnLrSdxY7EHFyeB',
-  escrow: '4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a'
+  escrow: 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C'
 };
 
 // In-memory cache with 10 minute TTL (was 60s — caused 429s)

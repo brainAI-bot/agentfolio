@@ -7,7 +7,7 @@ LOG_DIR="$HOME/clawd-brainchain/logs"
 LOG_FILE="$LOG_DIR/integrity-check.log"
 TOOL_DIR="/home/ubuntu/agentfolio/tools"
 HQ_API="https://brainai.bot/hq/api/comms/agent-push"
-HQ_KEY="8abe67cfdddd0152925a512175515820dabb7dfce8ebe258"
+HQ_KEY="${HQ_API_KEY:?HQ_API_KEY env var required}"
 
 mkdir -p "$LOG_DIR"
 

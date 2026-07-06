@@ -2,7 +2,7 @@ import { getAllAgents } from "@/lib/data";
 import { Shield, Database, FileCheck, Lock, ExternalLink } from "lucide-react";
 
 const IDENTITY_REGISTRY = "CV5Wd9YGFX5A4dvuaFuEDuKQWp14NfnLrSdxY7EHFyeB";
-const ESCROW_PROGRAM = "4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a";
+const ESCROW_PROGRAM = "HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C";
 
 const programs = [
   {

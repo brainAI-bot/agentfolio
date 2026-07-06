@@ -16,7 +16,7 @@ assertSolanaIrysWriteEnabled('Solana/Irys script write surface: scripts/push-v2-
 
 const satpClient = createSATPClient({
   network: process.env.SATP_NETWORK || 'mainnet',
-  rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb',
+  rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
 });
 const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/brainforge-personal.json';
 const PROFILES_DIR = path.join(__dirname, '../data/profiles');

@@ -1,7 +1,13 @@
 # On-Chain Wiring Plan — AgentFolio
 
 **Date:** 2026-02-17  
-**Status:** Audit complete, implementation pending
+**Status:** Historical audit, implementation pending
+
+> 2026-07-05 release-gate note: the escrow program IDs in this historical
+> wiring plan are not release authority for the current V3 escrow gate. Use
+> `docs/operational/ONCHAIN-ESCROW-PROGRAM-GATE-PACKET-2026-07-05.md` for the
+> current split-brain fix plan and keep live escrow writes disabled until
+> source, deployed program, IDL metadata, and runtime SDK constants match.
 
 ---
 

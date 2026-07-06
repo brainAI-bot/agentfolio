@@ -5,7 +5,7 @@ import { publicKey } from '@metaplex-foundation/umi';
 import fs from 'fs';
 
 const state = JSON.parse(fs.readFileSync('/home/ubuntu/agentfolio/boa-pipeline/candy-machine-data/candy-machine-state.json','utf8'));
-const RPC = process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+const RPC = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const umi = createUmi(RPC).use(mplTokenMetadata()).use(mplCandyMachine());
 
 const cmData = await fetchCandyMachine(umi, publicKey(state.candyMachine));

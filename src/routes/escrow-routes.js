@@ -12,13 +12,16 @@
  *   GET  /api/escrow/:pda      — Fetch escrow state from chain
  *   GET  /api/escrow/pda/derive — Derive escrow PDA from client + description
  * 
- * All POST endpoints return unsigned transactions (base64) for client-side wallet signing.
- * This keeps the server stateless — no private keys needed.
+ * Legacy POST endpoints are disabled because they do not enforce the SATP V3
+ * identity gate. Use /api/v3/escrow after release-gate clearance.
  */
 
 const { Router } = require('express');
 const { PublicKey } = require('@solana/web3.js');
 const crypto = require('crypto');
+const {
+  sendLegacyEscrowRouteDisabledResponse,
+} = require('../lib/write-surface-gate');
 
 // Import SATP SDK (adjust path for prod deployment)
 let SATPSDK;
@@ -44,6 +47,11 @@ function requireSDK(req, res, next) {
   }
   next();
 }
+
+router.use((req, res, next) => {
+  if (req.method !== 'POST') return next();
+  return sendLegacyEscrowRouteDisabledResponse(res, `legacy SATP escrow ${req.method} ${req.path}`);
+});
 
 /**
  * Helper: serialize a Transaction to base64 for client signing

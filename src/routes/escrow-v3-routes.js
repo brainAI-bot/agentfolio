@@ -31,14 +31,23 @@
  */
 
 const { Router } = require('express');
-const { PublicKey } = require('@solana/web3.js');
+const {
+  Connection,
+  PublicKey,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+} = require('@solana/web3.js');
 const crypto = require('crypto');
 const satpClient = require('@brainai/satp-client');
 const {
   liveEscrowGateStatus,
   sendLiveEscrowGateResponse,
 } = require('../lib/write-surface-gate');
-const { loadJob } = require('../lib/database');
+const {
+  getEscrowV3AuthorityReadback,
+} = require('../lib/escrow-v3-authority');
+const { loadJob, loadProfile } = require('../lib/database');
 const {
   buildCreateEscrowTx: buildUsdcCreateEscrowTx,
   deriveEscrowPDA: deriveUsdcEscrowPDA,
@@ -54,6 +63,7 @@ let SATPV3SDK;
 let sdkInstance = null;
 const getV3ProgramIds = satpClient.getV3ProgramIds;
 const getV3EscrowPDA = satpClient.getV3EscrowPDA;
+const getGenesisPDA = satpClient.getGenesisPDA;
 
 function normalizeNetwork(value) {
   return String(value || '').toLowerCase().includes('devnet') ? 'devnet' : 'mainnet';
@@ -72,6 +82,16 @@ try {
 
 const NETWORK = normalizeNetwork(process.env.SATP_NETWORK || process.env.SOLANA_NETWORK || 'mainnet');
 const RPC_URL = process.env.SOLANA_RPC_URL || null;
+const DEFAULT_SOLANA_RPC_URL = NETWORK === 'devnet'
+  ? 'https://api.devnet.solana.com'
+  : 'https://api.mainnet-beta.solana.com';
+const PLATFORM_FEE_BPS = 500;
+const BPS_DENOMINATOR = 10_000;
+const PLATFORM_TREASURY_WALLET = 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
+const ESCROW_V3_DISCRIMINATORS = {
+  release: Buffer.from([253, 249, 15, 206, 28, 127, 193, 241]),
+  partialRelease: Buffer.from([20, 4, 101, 245, 53, 131, 213, 8]),
+};
 
 function getSDK() {
   if (!sdkInstance && SATPV3SDK) {
@@ -119,11 +139,95 @@ function normalizeEscrowCurrency(value) {
   throw err;
 }
 
+function publicKeyToString(value) {
+  if (!value) return null;
+  return typeof value.toBase58 === 'function' ? value.toBase58() : String(value);
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function serializeTx(tx) {
   const serialized = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
   return Buffer.from(serialized).toString('base64');
+}
+
+function getEscrowProgramId() {
+  const ids = typeof getV3ProgramIds === 'function' ? getV3ProgramIds(NETWORK) : null;
+  const escrowId = ids?.ESCROW || ids?.escrow || ids?.ESCROW_V3 || ids?.escrowV3;
+  return new PublicKey(escrowId || 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
+}
+
+function encodeU64(value) {
+  const amount = BigInt(value);
+  const buffer = Buffer.alloc(8);
+  buffer.writeBigUInt64LE(amount);
+  return buffer;
+}
+
+function calculatePlatformFeeSplit(amountLamports) {
+  const amount = BigInt(amountLamports);
+  if (amount <= 0n) {
+    throw new Error('amountLamports must be a positive number');
+  }
+  const platformFee = (amount * BigInt(PLATFORM_FEE_BPS)) / BigInt(BPS_DENOMINATOR);
+  const agentAmount = amount - platformFee;
+  if (agentAmount <= 0n) {
+    throw new Error('release amount is too small after platform fee');
+  }
+  return {
+    grossAmountLamports: amount.toString(),
+    agentAmountLamports: agentAmount.toString(),
+    platformFeeLamports: platformFee.toString(),
+    platformFeeBps: PLATFORM_FEE_BPS,
+    treasuryWallet: PLATFORM_TREASURY_WALLET,
+    rounding: 'integer floor in lamports; sub-20-lamport releases produce 0 platform fee',
+  };
+}
+
+function validatePositiveLamports(value, fieldName) {
+  if (typeof value === 'bigint') {
+    if (value <= 0n) throw new Error(`${fieldName} must be a positive integer`);
+    return value;
+  }
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
+    return BigInt(value);
+  }
+  if (typeof value === 'string' && /^[1-9]\d*$/.test(value)) {
+    return BigInt(value);
+  }
+  throw new Error(`${fieldName} must be a positive integer`);
+}
+
+async function buildEscrowReleaseTx({ clientWallet, agentWallet, escrowPDA, amountLamports = null }) {
+  const connection = new Connection(RPC_URL || DEFAULT_SOLANA_RPC_URL, 'confirmed');
+  const client = new PublicKey(clientWallet);
+  const agent = new PublicKey(agentWallet);
+  const escrow = new PublicKey(escrowPDA);
+  const treasury = new PublicKey(PLATFORM_TREASURY_WALLET);
+  const programId = getEscrowProgramId();
+  const data = amountLamports === null
+    ? ESCROW_V3_DISCRIMINATORS.release
+    : Buffer.concat([ESCROW_V3_DISCRIMINATORS.partialRelease, encodeU64(amountLamports)]);
+
+  const instruction = new TransactionInstruction({
+    programId,
+    keys: [
+      { pubkey: escrow, isSigner: false, isWritable: true },
+      { pubkey: client, isSigner: true, isWritable: false },
+      { pubkey: agent, isSigner: false, isWritable: true },
+      { pubkey: treasury, isSigner: false, isWritable: true },
+    ],
+    data,
+  });
+
+  const { blockhash } = await connection.getLatestBlockhash();
+  const msg = new TransactionMessage({
+    payerKey: client,
+    recentBlockhash: blockhash,
+    instructions: [instruction],
+  }).compileToV0Message();
+
+  return new VersionedTransaction(msg);
 }
 
 function hashIfNeeded(input) {
@@ -150,6 +254,41 @@ function deriveEscrowPDA(client, descriptionOrHash, nonce) {
     descriptionHash: descriptionHash.toString('hex'),
     bump,
   };
+}
+
+function deriveSelectedAgentSatpReadback(agentId, network = NETWORK) {
+  if (!agentId || typeof getGenesisPDA !== 'function' || typeof getV3ProgramIds !== 'function') {
+    return null;
+  }
+
+  const [genesisPDA] = getGenesisPDA(agentId, network);
+  const programIds = getV3ProgramIds(network);
+
+  return {
+    agentId,
+    network,
+    genesisPDA: publicKeyToString(genesisPDA),
+    identityProgramId: publicKeyToString(programIds.IDENTITY),
+  };
+}
+
+function resolveProfileSolanaWallet(profile) {
+  if (!profile) return null;
+
+  const candidates = [
+    profile.wallets?.solana,
+    profile.wallet,
+    profile.verificationData?.solana?.address,
+    profile.verification_data?.solana?.address,
+  ];
+
+  const verifiedSolana = Array.isArray(profile.verifications)
+    ? profile.verifications.find((verification) => verification?.platform === 'solana')
+    : null;
+  candidates.push(verifiedSolana?.identifier);
+
+  const wallet = candidates.find((candidate) => typeof candidate === 'string' && candidate.trim());
+  return wallet ? wallet.trim() : null;
 }
 
 function resolveEscrowAgentId({ jobId, agentId }, loadJobById = loadJob) {
@@ -179,12 +318,68 @@ function resolveEscrowAgentId({ jobId, agentId }, loadJobById = loadJob) {
   return { agentId: selectedAgentId, job };
 }
 
+function resolveEscrowAgentBinding(
+  { jobId, agentId, agentWallet },
+  {
+    loadJobById = loadJob,
+    loadProfileById = loadProfile,
+    network = NETWORK,
+  } = {},
+) {
+  const { agentId: selectedAgentId, job } = resolveEscrowAgentId({ jobId, agentId }, loadJobById);
+  const satpIdentity = deriveSelectedAgentSatpReadback(selectedAgentId, network);
+
+  if (!jobId) {
+    return {
+      agentId: selectedAgentId,
+      agentWallet,
+      job,
+      selectedAgentWallet: null,
+      satpIdentity,
+    };
+  }
+
+  const selectedAgentProfile = loadProfileById(selectedAgentId);
+  if (!selectedAgentProfile) {
+    const err = new Error('Selected agent profile not found');
+    err.statusCode = 409;
+    err.details = { selectedAgentId };
+    throw err;
+  }
+
+  const selectedAgentWallet = resolveProfileSolanaWallet(selectedAgentProfile);
+  if (!selectedAgentWallet) {
+    const err = new Error('Selected agent has no Solana wallet for escrow payout binding');
+    err.statusCode = 409;
+    err.details = { selectedAgentId };
+    throw err;
+  }
+
+  if (agentWallet && agentWallet !== selectedAgentWallet) {
+    const err = new Error('agentWallet must match the selected job agent Solana wallet');
+    err.statusCode = 409;
+    err.details = { selectedAgentId, selectedAgentWallet };
+    throw err;
+  }
+
+  return {
+    agentId: selectedAgentId,
+    agentWallet: selectedAgentWallet,
+    job,
+    selectedAgentWallet,
+    satpIdentity,
+  };
+}
+
 router.get('/health', (req, res) => {
+  const agentId = getSingleQueryString(req.query.agentId);
   res.json({
     status: 'ok',
     network: NETWORK,
     sdkAvailable: Boolean(SATPV3SDK),
     liveEscrow: liveEscrowGateStatus(),
+    escrowAuthority: getEscrowV3AuthorityReadback({ satpClient }),
+    selectedAgentSatpIdentity: deriveSelectedAgentSatpReadback(agentId),
     timestamp: new Date().toISOString(),
   });
 });
@@ -223,10 +418,10 @@ router.post('/create', requireSDK, async (req, res) => {
     } = req.body;
     const escrowCurrency = normalizeEscrowCurrency(currency || (amountUSDC ? 'USDC' : 'SOL'));
 
-    const { agentId: escrowAgentId, job } = resolveEscrowAgentId({ jobId, agentId });
+    const agentBinding = resolveEscrowAgentBinding({ jobId, agentId, agentWallet });
 
     // Required fields
-    if (!clientWallet || !agentWallet || !escrowAgentId || !description || !deadlineUnix) {
+    if (!clientWallet || !agentBinding.agentWallet || !agentBinding.agentId || !description || !deadlineUnix) {
       return res.status(400).json({
         error: 'Missing required fields',
         required: ['clientWallet', 'agentWallet', 'agentId or jobId', 'description', 'deadlineUnix'],
@@ -238,7 +433,7 @@ router.post('/create', requireSDK, async (req, res) => {
     if (!validatePublicKey(clientWallet, 'clientWallet')) {
       return res.status(400).json({ error: 'Invalid clientWallet address' });
     }
-    if (!validatePublicKey(agentWallet, 'agentWallet')) {
+    if (!validatePublicKey(agentBinding.agentWallet, 'agentWallet')) {
       return res.status(400).json({ error: 'Invalid agentWallet address' });
     }
     if (arbiter && !validatePublicKey(arbiter, 'arbiter')) {
@@ -290,8 +485,10 @@ router.post('/create', requireSDK, async (req, res) => {
         currency: 'USDC',
         network: NETWORK,
         nonce: nonce || 0,
-        agentId: escrowAgentId,
-        jobId: job ? job.id : jobId,
+        agentId: agentBinding.agentId,
+        agentWallet: agentBinding.agentWallet,
+        jobId: agentBinding.job ? agentBinding.job.id : jobId,
+        selectedAgentSatpIdentity: agentBinding.satpIdentity,
         identityGateIncluded: true,
         liveEscrow: liveEscrowGateStatus(),
         message: 'Sign and submit to create a USDC escrow only after live-funds release gates are enabled',
@@ -305,7 +502,7 @@ router.post('/create', requireSDK, async (req, res) => {
     }
 
     const result = await req.sdk.buildCreateEscrow(
-      clientWallet, agentWallet, escrowAgentId, amount,
+      clientWallet, agentBinding.agentWallet, agentBinding.agentId, amount,
       description, deadline, nonce || 0, opts,
     );
 
@@ -316,8 +513,10 @@ router.post('/create', requireSDK, async (req, res) => {
       currency: 'SOL',
       network: NETWORK,
       nonce: nonce || 0,
-      agentId: escrowAgentId,
-      jobId: job ? job.id : undefined,
+      agentId: agentBinding.agentId,
+      agentWallet: agentBinding.agentWallet,
+      jobId: agentBinding.job ? agentBinding.job.id : undefined,
+      selectedAgentSatpIdentity: agentBinding.satpIdentity,
       identityGateIncluded: true,
       message: 'Sign and submit to create an identity-gated escrow after live-funds release gates are enabled',
     });
@@ -401,12 +600,18 @@ router.post('/release', requireSDK, async (req, res) => {
       return res.status(400).json({ error: 'Invalid escrowPDA address' });
     }
 
-    const result = await req.sdk.buildEscrowRelease(clientWallet, agentWallet, escrowPDA);
+    const transaction = await buildEscrowReleaseTx({ clientWallet, agentWallet, escrowPDA });
 
     res.json({
-      transaction: serializeTx(result.transaction),
+      transaction: serializeTx(transaction),
       network: NETWORK,
-      message: 'Client: sign and submit to release all remaining funds to agent',
+      platformFee: {
+        bps: PLATFORM_FEE_BPS,
+        treasuryWallet: PLATFORM_TREASURY_WALLET,
+        collection: 'on-chain',
+        rounding: 'integer floor in lamports; sub-20-lamport releases produce 0 platform fee',
+      },
+      message: 'Client: sign and submit to release all remaining funds with platform fee routed on-chain to treasury',
     });
   } catch (err) {
     console.error('[Escrow V3] release error:', err.message);
@@ -445,18 +650,27 @@ router.post('/partial-release', requireSDK, async (req, res) => {
       return res.status(400).json({ error: 'Invalid escrowPDA address' });
     }
 
-    const amount = Number(amountLamports);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({ error: 'amountLamports must be a positive number' });
+    let amount;
+    try {
+      amount = validatePositiveLamports(amountLamports, 'amountLamports');
+    } catch (validationError) {
+      return res.status(400).json({ error: validationError.message });
     }
+    const feeSplit = calculatePlatformFeeSplit(amount);
 
-    const result = await req.sdk.buildPartialRelease(clientWallet, agentWallet, escrowPDA, amount);
+    const transaction = await buildEscrowReleaseTx({
+      clientWallet,
+      agentWallet,
+      escrowPDA,
+      amountLamports: amount,
+    });
 
     res.json({
-      transaction: serializeTx(result.transaction),
-      milestoneAmount: amount,
+      transaction: serializeTx(transaction),
+      milestoneAmount: feeSplit.grossAmountLamports,
+      platformFee: feeSplit,
       network: NETWORK,
-      message: 'Client: sign and submit to release milestone payment to agent',
+      message: 'Client: sign and submit to release milestone payment with platform fee routed on-chain to treasury',
     });
   } catch (err) {
     console.error('[Escrow V3] partial-release error:', err.message);
@@ -913,6 +1127,11 @@ router.get('/by-agent-id/:agentId', requireSDK, async (req, res) => {
   }
 });
 
-router.__test = { resolveEscrowAgentId };
+router.__test = {
+  deriveSelectedAgentSatpReadback,
+  resolveEscrowAgentBinding,
+  resolveEscrowAgentId,
+  resolveProfileSolanaWallet,
+};
 
 module.exports = router;

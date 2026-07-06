@@ -7,6 +7,8 @@ const READ_ONLY_CODE = 'SOLANA_IRYS_WRITES_READ_ONLY';
 const BOA_READ_ONLY_CODE = 'BOA_WRITES_READ_ONLY';
 const LIVE_ESCROW_READ_ONLY_CODE = 'LIVE_ESCROW_WRITES_READ_ONLY';
 const ESCROW_KILL_SWITCH_CODE = 'ESCROW_KILL_SWITCH_ACTIVE';
+const CUSTODIAL_ESCROW_DISABLED_CODE = 'CUSTODIAL_ESCROW_DISABLED';
+const LEGACY_ESCROW_ROUTE_DISABLED_CODE = 'LEGACY_ESCROW_ROUTE_DISABLED';
 
 function envValueAllowsWrites(value) {
   return /^(1|true|yes|on)$/i.test(String(value || '').trim());
@@ -72,6 +74,26 @@ function liveEscrowWriteGatePayload(operation = 'live escrow write') {
     liveEscrow: liveEscrowGateStatus(),
     enableWith: ENABLE_LIVE_ESCROW_ENV,
     killSwitchEnv: ESCROW_KILL_SWITCH_ENV,
+  };
+}
+
+function custodialEscrowDisabledPayload(operation = 'custodial escrow write') {
+  return {
+    ok: false,
+    code: CUSTODIAL_ESCROW_DISABLED_CODE,
+    error: 'Custodial escrow writes are permanently disabled. Use SATP V3 identity-gated unsigned transaction routes after release-gate clearance.',
+    operation,
+    liveEscrow: liveEscrowGateStatus(),
+  };
+}
+
+function legacyEscrowRouteDisabledPayload(operation = 'legacy escrow write') {
+  return {
+    ok: false,
+    code: LEGACY_ESCROW_ROUTE_DISABLED_CODE,
+    error: 'Legacy escrow transaction builders are disabled because they bypass SATP V3 identity-gated escrow checks.',
+    operation,
+    liveEscrow: liveEscrowGateStatus(),
   };
 }
 
@@ -141,12 +163,40 @@ function sendLiveEscrowGateResponse(res, operation) {
   return true;
 }
 
+function sendCustodialEscrowDisabledResponse(res, operation) {
+  const payload = custodialEscrowDisabledPayload(operation);
+  if (typeof res.status === 'function') {
+    return res.status(423).json(payload);
+  }
+  res.writeHead(423, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+  });
+  res.end(JSON.stringify(payload));
+  return true;
+}
+
+function sendLegacyEscrowRouteDisabledResponse(res, operation) {
+  const payload = legacyEscrowRouteDisabledPayload(operation);
+  if (typeof res.status === 'function') {
+    return res.status(423).json(payload);
+  }
+  res.writeHead(423, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+  });
+  res.end(JSON.stringify(payload));
+  return true;
+}
+
 module.exports = {
   BOA_READ_ONLY_CODE,
+  CUSTODIAL_ESCROW_DISABLED_CODE,
   ENABLE_LIVE_ESCROW_ENV,
   ENABLE_WRITES_ENV,
   ESCROW_KILL_SWITCH_CODE,
   ESCROW_KILL_SWITCH_ENV,
+  LEGACY_ESCROW_ROUTE_DISABLED_CODE,
   LIVE_ESCROW_READ_ONLY_CODE,
   READ_ONLY_CODE,
   WriteSurfaceReadOnlyError,
@@ -156,9 +206,13 @@ module.exports = {
   isLiveEscrowEnabled,
   isSolanaIrysWriteEnabled,
   boaWriteGatePayload,
+  custodialEscrowDisabledPayload,
+  legacyEscrowRouteDisabledPayload,
   liveEscrowGateStatus,
   liveEscrowWriteGatePayload,
   sendBoaWriteGateResponse,
+  sendCustodialEscrowDisabledResponse,
+  sendLegacyEscrowRouteDisabledResponse,
   sendLiveEscrowGateResponse,
   sendSolanaIrysWriteGateResponse,
   solanaIrysWriteGatePayload,

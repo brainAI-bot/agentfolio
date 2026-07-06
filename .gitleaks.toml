@@ -1,5 +1,19 @@
 title = "AgentFolio Gitleaks config"
 
+[[rules]]
+id = "agentfolio-helius-rpc-api-key"
+description = "Helius RPC URLs with api-key query credentials must not be committed"
+regex = '''https://mainnet\.helius-rpc\.com/\?api[-]key=[A-Za-z0-9._-]+'''
+keywords = ["helius-rpc", "api-key"]
+tags = ["key", "helius", "rpc"]
+
+[[rules]]
+id = "agentfolio-legacy-hq-agent-key"
+description = "Legacy HQ agent key literals must not be committed"
+regex = '''(?i)(HQ[_-]?KEY\s*[:=]|X-(?:Agent|HQ)-Key['"]?\s*:)\s*["']?[A-Za-z0-9._-]{20,}["']?'''
+keywords = ["HQ_KEY", "X-Agent-Key", "X-HQ-Key"]
+tags = ["key", "hq"]
+
 [allowlist]
 description = "Allow checked-in placeholder env template"
 paths = [

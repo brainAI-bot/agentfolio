@@ -133,11 +133,10 @@ function createJob(data) {
     clientWallet: data.clientWallet || null
   };
   
-  const savedJob = db.saveJob(job);
-  
-  // Create escrow if budget > 0
-  if (requiresEscrow && !savedJob.error) {
-    const escrowRecord = escrow.createEscrow(savedJob.id, {
+  // Create escrow if budget > 0. Custodial escrow is disabled, so fail before
+  // persisting a draft job that cannot be funded or released safely.
+  if (requiresEscrow) {
+    const escrowRecord = escrow.createEscrow(job.id, {
       clientId: data.clientId,
       clientWallet: data.clientWallet || null,
       amount: budgetAmount,
@@ -145,12 +144,12 @@ function createJob(data) {
       expiresAt: data.expiresAt,
       burnPct: data.burnPct || 0
     });
+    if (escrowRecord.error) return escrowRecord;
     
-    savedJob.escrowId = escrowRecord.id;
-    db.saveJob(savedJob);
+    job.escrowId = escrowRecord.id;
   }
   
-  return savedJob;
+  return db.saveJob(job);
 }
 
 // Confirm escrow deposit and open job

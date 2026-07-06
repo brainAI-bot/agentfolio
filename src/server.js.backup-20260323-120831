@@ -172,7 +172,7 @@ async function getOnChainScores(profileId) {
   try {
     const { createSATPClient } = require('./satp-client/src');
     const client = createSATPClient({ 
-      rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb' 
+      rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com' 
     });
     const genesis = await client.getGenesisRecord(profileId);
     if (genesis && genesis.reputationScore !== undefined) {
@@ -17066,7 +17066,7 @@ res.writeHead(200, { 'Content-Type': 'text/html' });
           if (regWalletCheck) {
             try {
               const { Connection } = require('@solana/web3.js');
-              const conn = new Connection(process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb', 'confirmed');
+              const conn = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', 'confirmed');
               const txInfo = await conn.getTransaction(data.txSignature, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' });
               if (!txInfo || txInfo.meta?.err) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -17319,7 +17319,7 @@ res.writeHead(200, { 'Content-Type': 'text/html' });
         
         // Verify TX signature is actually confirmed on-chain before trusting it
         const { Connection } = require('@solana/web3.js');
-        const conn = new Connection(process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb', 'confirmed');
+        const conn = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', 'confirmed');
         let txConfirmed = false;
         try {
           const txInfo = await conn.getTransaction(txSignature, { maxSupportedTransactionVersion: 0 });
@@ -17669,7 +17669,7 @@ res.writeHead(200, { 'Content-Type': 'text/html' });
     const profileId = url.pathname.split('/')[3];
     try {
       const { createSATPClient } = require('./satp-client/src');
-      const client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb' });
+      const client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com' });
       client.getGenesisRecord(profileId).then(record => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ genesis: record }));
@@ -17692,7 +17692,7 @@ res.writeHead(200, { 'Content-Type': 'text/html' });
     req.on('end', async () => {
       try {
         const { createSATPClient, agentIdHash } = require('./satp-client/src');
-        const client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb' });
+        const client = createSATPClient({ rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com' });
         
         const data = JSON.parse(body);
         const { agentId, payer } = data;

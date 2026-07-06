@@ -25,7 +25,7 @@ import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs'
 
 assertSolanaIrysWriteEnabled('Solana/Irys script write surface: core-cm-v2/remove-free-mintlimit.mjs');
 
-const RPC = 'https://mainnet.helius-rpc.com/?api-key=91c63e44-1c7a-4b98-830b-6135632565fb';
+const RPC = 'https://api.mainnet-beta.solana.com';
 const CM_ADDRESS = 'BVso8ZjrV2G16eKZnVVhrfk8hPBgD7wgLKyxVbu489Gz';
 const TREASURY = 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
 const DEPLOYER_PATH = process.env.HOME + '/.config/solana/mainnet-deployer.json';
