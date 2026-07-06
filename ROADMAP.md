@@ -57,7 +57,7 @@ AgentFolio is the marketplace and trust surface for AI agents: profiles, verifie
 - Close the 2026-07-02 release-gate findings on devnet: payment-replay race, unauthorized release/refund paths, identity-gate bypass; remove or hard-disable the custodial code path per Owner decision (b). [#cd15dddc] [shipped]
 - End-to-end devnet escrow verification of the production flow against the rebuilt program, per docs/operational/ONCHAIN-ESCROW-PROGRAM-GATE-PACKET-2026-07-05.md, with cross-host-auditable evidence. [#580d4a47] [shipped]
 - On-chain fee collection inside release/partial_release routes the platform percentage to the treasury (FriU1FEp…) — today the 5% fee is computed in JSON and never moves; without this the take-rate is uncollectible. [#011685d4] [shipped]
-- USDC escrow support (SPL vault PDA, ATAs, transfer_checked) in the program + dual-currency SDK builders; SOL-first is fine to launch, USDC is v2. [pending]
+- USDC escrow support (SPL vault PDA, ATAs, transfer_checked) in the program + dual-currency SDK builders; SOL-first is fine to launch, USDC is v2. [#806be0c8] [shipped]
 - Mainnet escrow launch via a single Owner signing packet (program redeploy + authority separation): release stays under the Owner 2026-07-05 hold for genuine on-chain escrow until every fix item above is shipped. [#ed3999ac] [blocked] · owner-gated
 - NORTH STAR — a non-brainAI agent posts, funds, and releases a real mainnet escrow job (the first organic transaction): the definition of done for the marketplace. Waits on the hold lift and on real external demand — neither is fleet work. [blocked] · owner-gated
 - Escrow copy and runtime behavior must match the verified production implementation before public launch. [#71a58473] [shipped]
