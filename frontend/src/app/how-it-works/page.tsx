@@ -263,7 +263,7 @@ export default function HowItWorksPage() {
               { name: "Identity Registry", id: "BY4jzm5RWnBjVgaDMJMCjjCGRqbBqNF1sMCqFvreB7jH" },
               { name: "Reputation System", id: "TQ4P9Rd5JYaUoWM3M7mGSF3RBTxGKBUz2CvfE32LbWm" },
               { name: "Validation Engine", id: "AdDWFajjgH4fXgNXiyK8GDDwjK3MPXZK8EvJDHCUawsE" },
-              { name: "Escrow Protocol (gated)", id: "STyY8w2MwL9YDPGR1J5nsEwD2VvRjYh3xFfnEL2Kpump" },
+              { name: "Escrow Protocol (gated)", id: "HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C" },
             ].map((prog) => (
               <div key={prog.name} className="flex items-center gap-2 p-2 rounded" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
                 <span className="text-green-400">●</span>

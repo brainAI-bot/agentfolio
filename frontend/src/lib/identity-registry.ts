@@ -11,7 +11,7 @@ export const IDENTITY_REGISTRY_PROGRAM_ID = new PublicKey(
   "CV5Wd9YGFX5A4dvuaFuEDuKQWp14NfnLrSdxY7EHFyeB"
 );
 export const ESCROW_PROGRAM_ID = new PublicKey(
-  "4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a"
+  "HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C"
 );
 
 export const SOLANA_CLUSTER = process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "mainnet-beta";

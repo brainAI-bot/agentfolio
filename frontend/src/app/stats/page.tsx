@@ -10,7 +10,7 @@ import { BarChart3, Users, ShieldCheck, Fingerprint, Briefcase, DollarSign, Exte
 import ProtocolActivity from "./ProtocolActivity";
 
 const IDENTITY_REGISTRY = "CV5Wd9YGFX5A4dvuaFuEDuKQWp14NfnLrSdxY7EHFyeB";
-const ESCROW_PROGRAM = "4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a";
+const ESCROW_PROGRAM = "HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C";
 const TREASURY_WALLET = "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be";
 const DEPLOYER_WALLET = "Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
