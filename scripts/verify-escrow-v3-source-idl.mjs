@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
-const expectedProgramId = '4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a';
+const expectedProgramId = 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C';
 
 const paths = {
   anchorToml: 'onchain/escrow_v3/Anchor.toml',
