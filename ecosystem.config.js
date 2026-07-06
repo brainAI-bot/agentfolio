@@ -1,4 +1,18 @@
 const fs = require("fs");
+const { execSync } = require("child_process");
+
+function resolveCommitSha() {
+  try {
+    return execSync("git rev-parse HEAD", {
+      cwd: __dirname,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2000,
+    }).trim();
+  } catch (_) {
+    return "";
+  }
+}
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return {};
@@ -20,6 +34,8 @@ function loadEnvFile(filePath) {
 }
 
 const secretEnv = loadEnvFile(process.env.AGENTFOLIO_ENV_FILE || "/home/ubuntu/.config/agentfolio/production.env");
+const deployCommitSha = process.env.AGENTFOLIO_COMMIT_SHA || resolveCommitSha();
+const deployBuildTime = process.env.AGENTFOLIO_BUILD_TIME || new Date().toISOString();
 
 // Fail-closed (security review 2026-07-02): production.env is the ONLY intended source of the real network
 // selector and platform key. The env block below hardcodes MAINNET + the hot deployer keypair as fallbacks
@@ -56,6 +72,8 @@ module.exports = {
       X402_FACILITATOR: "https://facilitator.payai.network",
       X402_RECEIVE_ADDRESS: "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be",
       X402_RECEIVING_ADDRESS: "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be",
+      AGENTFOLIO_COMMIT_SHA: deployCommitSha,
+      AGENTFOLIO_BUILD_TIME: deployBuildTime,
       ...secretEnv,
     },
     kill_timeout: 5000,

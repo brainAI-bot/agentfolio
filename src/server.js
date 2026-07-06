@@ -10,6 +10,7 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
+const { getDeployProvenance } = require('./lib/deploy-provenance');
 
 // SATP Reviews integration
 const satpReviews = require('./satp-reviews');
@@ -1223,6 +1224,10 @@ app.get('/api/health', (req, res) => {
     farcaster_verification: farcasterVerify ? 'active' : 'fallback',
     providers: ['discord', 'telegram', 'domain', 'website', 'eth', 'ens', 'farcaster']
   });
+});
+
+app.get('/api/version', (req, res) => {
+  res.json(getDeployProvenance());
 });
 
 // Discord verification endpoints

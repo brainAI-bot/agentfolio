@@ -1,0 +1,22 @@
+{
+  "apps": [
+    {
+      "name": "agentfolio-deploy-drift-check",
+      "script": "tools/deploy-drift-check.js",
+      "interpreter": "node",
+      "args": "--write-evidence=reports/deploy-drift-latest.json",
+      "cwd": "/home/ubuntu/agentfolio",
+      "cron_restart": "17 3 * * *",
+      "autorestart": false,
+      "watch": false,
+      "env": {
+        "AGENTFOLIO_PROD_VERSION_URL": "https://agentfolio.bot/api/version",
+        "AGENTFOLIO_ORIGIN_REF": "origin/main"
+      },
+      "error_file": "/home/ubuntu/.pm2/logs/agentfolio-deploy-drift-error.log",
+      "out_file": "/home/ubuntu/.pm2/logs/agentfolio-deploy-drift-out.log",
+      "merge_logs": true,
+      "log_date_format": "YYYY-MM-DD HH:mm:ss Z"
+    }
+  ]
+}
