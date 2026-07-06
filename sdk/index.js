@@ -35,6 +35,7 @@ class AgentFolio {
     this.search = new SearchClient(this);
     this.marketplace = new MarketplaceClient(this);
     this.verify = new VerifyClient(this);
+    this.escrow = new EscrowClient(this);
     this.webhooks = new WebhooksClient(this);
     this.analytics = new AnalyticsClient(this);
     this.leaderboard = new LeaderboardClient(this);
@@ -102,6 +103,32 @@ class AgentFolio {
   async stats() {
     return this._request('GET', '/api/ecosystem/stats');
   }
+}
+
+function requirePositiveNumber(value, fieldName) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue) || numberValue <= 0) {
+    throw new TypeError(`${fieldName} must be a positive number`);
+  }
+  return numberValue;
+}
+
+function buildSolEscrowCreate(data) {
+  if (!data || typeof data !== 'object') throw new TypeError('escrow data is required');
+  return {
+    ...data,
+    currency: 'SOL',
+    amountLamports: requirePositiveNumber(data.amountLamports, 'amountLamports'),
+  };
+}
+
+function buildUsdcEscrowCreate(data) {
+  if (!data || typeof data !== 'object') throw new TypeError('escrow data is required');
+  return {
+    ...data,
+    currency: 'USDC',
+    amountUSDC: requirePositiveNumber(data.amountUSDC, 'amountUSDC'),
+  };
 }
 
 // --- Profiles ---
@@ -239,6 +266,39 @@ class MarketplaceClient {
   }
 }
 
+// --- Escrow ---
+
+class EscrowClient {
+  constructor(client) { this._c = client; }
+
+  /** Build the request body for a SOL-backed V3 escrow create transaction. */
+  buildSolCreate(data) {
+    return buildSolEscrowCreate(data);
+  }
+
+  /** Build the request body for a USDC-backed V3 escrow create transaction. */
+  buildUsdcCreate(data) {
+    return buildUsdcEscrowCreate(data);
+  }
+
+  /** Request an unsigned SOL-backed V3 escrow create transaction. */
+  async createSol(data) {
+    return this._c._request('POST', '/api/v3/escrow/create', { body: buildSolEscrowCreate(data) });
+  }
+
+  /** Request an unsigned USDC-backed V3 escrow create transaction. */
+  async createUsdc(data) {
+    return this._c._request('POST', '/api/v3/escrow/create', { body: buildUsdcEscrowCreate(data) });
+  }
+
+  /** Derive a V3 escrow PDA without creating or sending a transaction. */
+  async derivePda({ clientWallet, description, nonce } = {}) {
+    return this._c._request('GET', '/api/v3/escrow/pda/derive', {
+      query: { clientWallet, description, nonce },
+    });
+  }
+}
+
 // --- Verify ---
 
 class VerifyClient {
@@ -361,3 +421,6 @@ class LeaderboardClient {
 module.exports = AgentFolio;
 module.exports.AgentFolio = AgentFolio;
 module.exports.AgentFolioError = AgentFolioError;
+module.exports.EscrowClient = EscrowClient;
+module.exports.buildSolEscrowCreate = buildSolEscrowCreate;
+module.exports.buildUsdcEscrowCreate = buildUsdcEscrowCreate;

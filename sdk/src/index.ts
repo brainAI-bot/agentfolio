@@ -20,6 +20,8 @@ import {
   JobSearchParams,
   Escrow,
   EscrowCreate,
+  V3SolEscrowCreate,
+  V3UsdcEscrowCreate,
   Endorsement,
   EndorsementCreate,
   Review,
@@ -51,6 +53,30 @@ export * from './types';
 
 const DEFAULT_BASE_URL = 'https://agentfolio.bot';
 const DEFAULT_TIMEOUT = 30000;
+
+function requirePositiveNumber(value: unknown, fieldName: string): number {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue) || numberValue <= 0) {
+    throw new ValidationError(`${fieldName} must be a positive number`);
+  }
+  return numberValue;
+}
+
+export function buildSolEscrowCreate(data: V3SolEscrowCreate): V3SolEscrowCreate & { currency: 'SOL' } {
+  return {
+    ...data,
+    currency: 'SOL',
+    amountLamports: requirePositiveNumber(data.amountLamports, 'amountLamports'),
+  };
+}
+
+export function buildUsdcEscrowCreate(data: V3UsdcEscrowCreate): V3UsdcEscrowCreate & { currency: 'USDC' } {
+  return {
+    ...data,
+    currency: 'USDC',
+    amountUSDC: requirePositiveNumber(data.amountUSDC, 'amountUSDC'),
+  };
+}
 
 /**
  * AgentFolio SDK Client
@@ -478,6 +504,37 @@ class EscrowAPI {
       body: { reason },
       requireAuth: true,
     });
+  }
+
+  /** Build request body for a SOL-backed V3 escrow create transaction. */
+  buildSolCreate(data: V3SolEscrowCreate): V3SolEscrowCreate & { currency: 'SOL' } {
+    return buildSolEscrowCreate(data);
+  }
+
+  /** Build request body for a USDC-backed V3 escrow create transaction. */
+  buildUsdcCreate(data: V3UsdcEscrowCreate): V3UsdcEscrowCreate & { currency: 'USDC' } {
+    return buildUsdcEscrowCreate(data);
+  }
+
+  /** Request an unsigned SOL-backed V3 escrow create transaction. */
+  async createSol(data: V3SolEscrowCreate): Promise<unknown> {
+    return this.client.request('POST', '/api/v3/escrow/create', {
+      body: buildSolEscrowCreate(data),
+      requireAuth: true,
+    });
+  }
+
+  /** Request an unsigned USDC-backed V3 escrow create transaction. */
+  async createUsdc(data: V3UsdcEscrowCreate): Promise<unknown> {
+    return this.client.request('POST', '/api/v3/escrow/create', {
+      body: buildUsdcEscrowCreate(data),
+      requireAuth: true,
+    });
+  }
+
+  /** Derive a V3 escrow PDA without creating or sending a transaction. */
+  async derivePda(data: { clientWallet: string; description: string; nonce?: number }): Promise<unknown> {
+    return this.client.request('GET', '/api/v3/escrow/pda/derive', { params: data });
   }
 }
 

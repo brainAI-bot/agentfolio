@@ -213,6 +213,30 @@ export interface EscrowCreate {
   currency?: string;
 }
 
+export interface V3EscrowCreateBase {
+  clientWallet: string;
+  agentWallet: string;
+  agentId?: string;
+  jobId?: string;
+  description: string;
+  deadlineUnix: number;
+  nonce?: number;
+  arbiter?: string;
+  minVerificationLevel?: number;
+  requireBorn?: boolean;
+}
+
+export interface V3SolEscrowCreate extends V3EscrowCreateBase {
+  currency?: 'SOL';
+  amountLamports: number;
+}
+
+export interface V3UsdcEscrowCreate extends V3EscrowCreateBase {
+  currency?: 'USDC';
+  jobId: string;
+  amountUSDC: number;
+}
+
 // ==================== SOCIAL ====================
 
 export interface Endorsement {

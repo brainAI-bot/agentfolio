@@ -15,6 +15,30 @@ export interface AgentFolioOptions {
   timeout?: number;
 }
 
+export interface EscrowCreateBase {
+  clientWallet: string;
+  agentWallet: string;
+  agentId?: string;
+  jobId?: string;
+  description: string;
+  deadlineUnix: number;
+  nonce?: number;
+  arbiter?: string;
+  minVerificationLevel?: number;
+  requireBorn?: boolean;
+}
+
+export interface SolEscrowCreate extends EscrowCreateBase {
+  currency?: 'SOL';
+  amountLamports: number;
+}
+
+export interface UsdcEscrowCreate extends EscrowCreateBase {
+  currency?: 'USDC';
+  jobId: string;
+  amountUSDC: number;
+}
+
 export interface Profile {
   id: string;
   name: string;
@@ -59,6 +83,17 @@ export class MarketplaceClient {
   myJobs(): Promise<any>;
 }
 
+export class EscrowClient {
+  buildSolCreate(data: SolEscrowCreate): SolEscrowCreate & { currency: 'SOL' };
+  buildUsdcCreate(data: UsdcEscrowCreate): UsdcEscrowCreate & { currency: 'USDC' };
+  createSol(data: SolEscrowCreate): Promise<any>;
+  createUsdc(data: UsdcEscrowCreate): Promise<any>;
+  derivePda(options: { clientWallet: string; description: string; nonce?: number }): Promise<any>;
+}
+
+export function buildSolEscrowCreate(data: SolEscrowCreate): SolEscrowCreate & { currency: 'SOL' };
+export function buildUsdcEscrowCreate(data: UsdcEscrowCreate): UsdcEscrowCreate & { currency: 'USDC' };
+
 export class VerifyClient {
   github(profileId: string, username: string): Promise<any>;
   solana(profileId: string, address: string): Promise<any>;
@@ -95,6 +130,7 @@ export class AgentFolio {
   profiles: ProfilesClient;
   search: SearchClient;
   marketplace: MarketplaceClient;
+  escrow: EscrowClient;
   verify: VerifyClient;
   webhooks: WebhooksClient;
   analytics: AnalyticsClient;

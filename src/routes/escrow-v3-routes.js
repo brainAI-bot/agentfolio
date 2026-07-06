@@ -31,6 +31,7 @@
  */
 
 const { Router } = require('express');
+const rateLimit = require('express-rate-limit');
 const {
   Connection,
   PublicKey,
@@ -48,8 +49,23 @@ const {
   getEscrowV3AuthorityReadback,
 } = require('../lib/escrow-v3-authority');
 const { loadJob, loadProfile } = require('../lib/database');
+const {
+  buildCreateEscrowTx: buildUsdcCreateEscrowTx,
+  deriveEscrowPDA: deriveUsdcEscrowPDA,
+  deriveUsdcVaultATA,
+  deriveUsdcVaultAuthorityPDA,
+  USDC_MINT,
+} = require('../lib/escrow-onchain');
 
 const router = Router();
+
+const escrowV3CreateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many escrow create requests, please retry later' },
+});
 
 // ── SDK Setup ──────────────────────────────────────────────────────────────────
 let SATPV3SDK;
@@ -122,6 +138,14 @@ function validatePublicKey(value, fieldName) {
 
 function getSingleQueryString(value) {
   return typeof value === 'string' ? value : undefined;
+}
+
+function normalizeEscrowCurrency(value) {
+  const currency = String(value || 'SOL').trim().toUpperCase();
+  if (currency === 'SOL' || currency === 'USDC') return currency;
+  const err = new Error('currency must be SOL or USDC');
+  err.statusCode = 400;
+  throw err;
 }
 
 function publicKeyToString(value) {
@@ -383,7 +407,9 @@ router.use((req, res, next) => {
  *   agentWallet: string,            // Agent's wallet
  *   agentId?: string,               // Agent's SATP V3 identity ID (must match job when jobId is supplied)
  *   jobId?: string,                 // Marketplace job; selected_agent_id is authoritative for Genesis lookup
- *   amountLamports: number,         // SOL amount in lamports
+ *   currency?: 'SOL'|'USDC',        // Defaults to SOL
+ *   amountLamports?: number,        // SOL amount in lamports
+ *   amountUSDC?: number,            // USDC amount in token units
  *   description: string,            // Job description (hashed on-chain as [u8;32])
  *   deadlineUnix: number,           // Unix timestamp deadline
  *   nonce?: number,                 // Nonce for multiple escrows (default: 0)
@@ -392,22 +418,23 @@ router.use((req, res, next) => {
  *   requireBorn?: boolean           // Require agent has completed burn-to-become (default: false)
  * }
  */
-router.post('/create', requireSDK, async (req, res) => {
+router.post('/create', escrowV3CreateLimiter, requireSDK, async (req, res) => {
   try {
     const {
-      clientWallet, agentWallet, agentId, jobId, amountLamports,
+      clientWallet, agentWallet, agentId, jobId, amountLamports, amountUSDC, currency,
       description, deadlineUnix, nonce, arbiter,
       minVerificationLevel, requireBorn,
     } = req.body;
+    const escrowCurrency = normalizeEscrowCurrency(currency || (amountUSDC ? 'USDC' : 'SOL'));
 
     const agentBinding = resolveEscrowAgentBinding({ jobId, agentId, agentWallet });
 
     // Required fields
-    if (!clientWallet || !agentBinding.agentWallet || !agentBinding.agentId || !amountLamports || !description || !deadlineUnix) {
+    if (!clientWallet || !agentBinding.agentWallet || !agentBinding.agentId || !description || !deadlineUnix) {
       return res.status(400).json({
         error: 'Missing required fields',
-        required: ['clientWallet', 'agentWallet', 'agentId or jobId', 'amountLamports', 'description', 'deadlineUnix'],
-        optional: ['jobId', 'nonce', 'arbiter', 'minVerificationLevel', 'requireBorn'],
+        required: ['clientWallet', 'agentWallet', 'agentId or jobId', 'description', 'deadlineUnix'],
+        optional: ['currency', 'amountLamports', 'amountUSDC', 'jobId', 'nonce', 'arbiter', 'minVerificationLevel', 'requireBorn'],
       });
     }
 
@@ -420,12 +447,6 @@ router.post('/create', requireSDK, async (req, res) => {
     }
     if (arbiter && !validatePublicKey(arbiter, 'arbiter')) {
       return res.status(400).json({ error: 'Invalid arbiter address' });
-    }
-
-    // Validate amounts
-    const amount = Number(amountLamports);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({ error: 'amountLamports must be a positive number' });
     }
 
     // Validate deadline
@@ -447,6 +468,48 @@ router.post('/create', requireSDK, async (req, res) => {
     if (minLevel > 0) opts.minVerificationLevel = minLevel;
     if (requireBorn) opts.requireBorn = true;
 
+    if (escrowCurrency === 'USDC') {
+      if (!jobId) {
+        return res.status(400).json({ error: 'jobId is required for USDC escrow PDA derivation' });
+      }
+      const usdcAmount = Number(amountUSDC);
+      if (!Number.isFinite(usdcAmount) || usdcAmount <= 0) {
+        return res.status(400).json({ error: 'amountUSDC must be a positive number for USDC escrow' });
+      }
+
+      const result = await buildUsdcCreateEscrowTx(clientWallet, jobId, usdcAmount, deadline);
+      const [escrowPDA] = deriveUsdcEscrowPDA(jobId);
+      const [vaultPDA] = deriveUsdcVaultAuthorityPDA(jobId);
+      const vaultATA = await deriveUsdcVaultATA(jobId);
+
+      return res.json({
+        transaction: result.transaction,
+        escrowPDA: escrowPDA.toBase58(),
+        vaultPDA: vaultPDA.toBase58(),
+        vaultATA: vaultATA.toBase58(),
+        clientATA: result.clientATA,
+        usdcMint: USDC_MINT.toBase58(),
+        amountUSDC: usdcAmount,
+        amountRaw: result.amountRaw,
+        currency: 'USDC',
+        network: NETWORK,
+        nonce: nonce || 0,
+        agentId: agentBinding.agentId,
+        agentWallet: agentBinding.agentWallet,
+        jobId: agentBinding.job ? agentBinding.job.id : jobId,
+        selectedAgentSatpIdentity: agentBinding.satpIdentity,
+        identityGateIncluded: true,
+        liveEscrow: liveEscrowGateStatus(),
+        message: 'Sign and submit to create a USDC escrow only after live-funds release gates are enabled',
+      });
+    }
+
+    // Validate SOL amounts after currency selection so USDC callers are explicit.
+    const amount = Number(amountLamports);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: 'amountLamports must be a positive number for SOL escrow' });
+    }
+
     const result = await req.sdk.buildCreateEscrow(
       clientWallet, agentBinding.agentWallet, agentBinding.agentId, amount,
       description, deadline, nonce || 0, opts,
@@ -456,6 +519,7 @@ router.post('/create', requireSDK, async (req, res) => {
       transaction: serializeTx(result.transaction),
       escrowPDA: result.escrowPDA.toBase58(),
       descriptionHash: result.descriptionHash.toString('hex'),
+      currency: 'SOL',
       network: NETWORK,
       nonce: nonce || 0,
       agentId: agentBinding.agentId,
