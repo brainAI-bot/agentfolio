@@ -45,6 +45,12 @@ Classification: absence/mismatch. This PR can document that its local
 source was recovered from audited SATP history or that it matches the deployed
 program bytes.
 
+Security-hardening delta: the current PR-local source validates the supplied
+SATP V3 Genesis PDA against the selected agent-id hash, enforces minimum
+verification and birth requirements from that Genesis account, and requires
+dispute-resolution payout recipients to match the stored escrow client and
+agent. The tracked IDL changed only to include the new validation error codes.
+
 Safe next action for brainForge: review this absence/mismatch classification and
 choose either an owner-approved replacement devnet deploy from the audited SATP
 source, or provide the missing authoritative audited source commit/tree and IDL
@@ -55,7 +61,7 @@ Verification:
 
 ```sh
 node scripts/verify-escrow-v3-source-idl.mjs --strict
-node --test tests/escrow-v3-authority.test.js tests/escrow-v3-pda-query.test.js tests/satp-client-dependency-boundary.test.js
+node --test tests/escrow-v3-authority.test.js tests/escrow-v3-pda-query.test.js tests/escrow-v3-selected-agent.test.js tests/satp-client-dependency-boundary.test.js
 cd onchain/escrow_v3 && cargo check
 ```
 
@@ -64,7 +70,7 @@ Observed verification results:
 | Command | Result |
 | --- | --- |
 | `node scripts/verify-escrow-v3-source-idl.mjs --strict` | Pass; `status: verified`; Anchor.toml, `declare_id!`, and IDL address all match `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`. |
-| `node --test tests/escrow-v3-authority.test.js tests/escrow-v3-pda-query.test.js tests/satp-client-dependency-boundary.test.js` | Pass; 15 tests passed. |
+| `node --test tests/escrow-v3-authority.test.js tests/escrow-v3-pda-query.test.js tests/escrow-v3-selected-agent.test.js tests/satp-client-dependency-boundary.test.js` | Pass; 23 tests passed. |
 | `cd onchain/escrow_v3 && cargo check` | Pass with existing Anchor/Solana cfg/deprecation warnings. |
 
 Read-only devnet RPC readback for `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C` returned `exists: true`, `executable: true`, owner `BPFLoaderUpgradeab1e11111111111111111111111`, lamports `1141440`, and data length `36`.
