@@ -7,6 +7,7 @@
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
 
 let Database;
 let nacl;
@@ -209,12 +210,28 @@ function reviewerWalletMatchesProfile(db, { reviewerId, chain, walletAddress }) 
 // In-memory challenge store (TTL 30 min)
 const challenges = new Map();
 
+const reviewChallengeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many review challenge requests, please retry later' },
+});
+
+const reviewSubmitLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { verified: false, error: 'Too many review submissions, please retry later' },
+});
+
 function registerReviewChallengeRoutes(app, options = {}) {
   const dbPath = options.dbPath || DEFAULT_DB_PATH;
   const marketplaceDir = options.marketplaceDir || DEFAULT_MARKETPLACE_DIR;
 
   // POST /api/reviews/challenge
-  app.post('/api/reviews/challenge', (req, res) => {
+  app.post('/api/reviews/challenge', reviewChallengeLimiter, (req, res) => {
     try {
       const { reviewerId, revieweeId, rating, chain } = req.body;
       if (!reviewerId || !revieweeId || !rating) {
@@ -259,7 +276,7 @@ function registerReviewChallengeRoutes(app, options = {}) {
   });
 
   // POST /api/reviews/submit
-  app.post('/api/reviews/submit', async (req, res) => {
+  app.post('/api/reviews/submit', reviewSubmitLimiter, async (req, res) => {
     try {
       const { challengeId, signature, walletAddress, comment } = req.body;
       if (!challengeId || !signature || !walletAddress) {

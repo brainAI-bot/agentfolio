@@ -37,8 +37,9 @@ async function postReviewChallenge(marketplaceDir, body) {
 function registerChallengeTestRoutes(options) {
   const routes = new Map();
   const app = {
-    post(route, handler) {
-      routes.set(route, handler);
+    post(route, ...handlers) {
+      routes.set(route, handlers[handlers.length - 1]);
+      routes.set(`${route} handlers`, handlers);
     },
     get(route, handler) {
       routes.set(route, handler);
@@ -231,6 +232,18 @@ test('profile review form falls back to signed reviews when live Solana writes a
   );
   assert.match(source, /\{v3Available && v3WritesEnabled && \(/);
   assert.match(source, /setEscrowCheck\(\{ checking: false, hasEscrow: true, checked: true \}\);/);
+});
+
+test('signed review challenge and submit routes are rate limited', () => {
+  const routes = registerChallengeTestRoutes({});
+
+  const challengeHandlers = routes.get('/api/reviews/challenge handlers');
+  const submitHandlers = routes.get('/api/reviews/submit handlers');
+
+  assert.equal(challengeHandlers.length, 2, 'challenge route should include a limiter and handler');
+  assert.equal(submitHandlers.length, 2, 'submit route should include a limiter and handler');
+  assert.notEqual(challengeHandlers[0], challengeHandlers[1]);
+  assert.notEqual(submitHandlers[0], submitHandlers[1]);
 });
 
 test('signed review challenge fails closed without a completed released escrow job', async (t) => {
