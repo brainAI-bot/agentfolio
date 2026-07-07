@@ -8,6 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
 const { PublicKey } = require('@solana/web3.js');
 const nacl = require('tweetnacl');
 const bs58Module = require('bs58');
@@ -22,6 +23,13 @@ const bs58 = bs58Module.default || bs58Module;
 const DATA_DIR = process.env.MARKETPLACE_DATA_DIR || path.join(__dirname, '..', 'data', 'marketplace');
 const SAFE_JOB_ID_RE = /^job_[A-Za-z0-9_-]{1,80}$/;
 const SATP_IDENTITY_PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq');
+const marketplaceMutationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many marketplace mutation requests, please retry later' },
+});
 
 function validateJobId(jobId) {
   return typeof jobId === 'string' && SAFE_JOB_ID_RE.test(jobId);
@@ -514,7 +522,7 @@ function registerRoutes(app) {
   });
 
   // 3. POST /api/marketplace/applications/:id/accept — Accept an application
-  app.post('/api/marketplace/applications/:id/accept', (req, res) => {
+  app.post('/api/marketplace/applications/:id/accept', marketplaceMutationLimiter, (req, res) => {
     const appPath = path.join(DATA_DIR, 'applications', `${req.params.id}.json`);
     const application = readJSON(appPath);
     if (!application) return res.status(404).json({ error: 'Application not found' });
@@ -614,7 +622,7 @@ function registerRoutes(app) {
   });
 
   // 5. POST /api/marketplace/jobs/:id/deliver — Submit deliverables
-  app.post('/api/marketplace/jobs/:id/deliver', (req, res) => {
+  app.post('/api/marketplace/jobs/:id/deliver', marketplaceMutationLimiter, (req, res) => {
     const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
     const job = readJSON(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -652,7 +660,7 @@ function registerRoutes(app) {
   });
 
   // 6. POST /api/marketplace/escrow/:id/release — Release payment
-  app.post('/api/marketplace/escrow/:id/release', (req, res) => {
+  app.post('/api/marketplace/escrow/:id/release', marketplaceMutationLimiter, (req, res) => {
     const { releasedBy } = req.body || {};
     if (releasedBy) {
       const authResult = verifyMarketplaceMutationSignature({
@@ -735,7 +743,7 @@ function registerRoutes(app) {
 
   
   // POST /api/marketplace/jobs/:id/complete — Approve work and release payment
-  app.post('/api/marketplace/jobs/:id/complete', (req, res) => {
+  app.post('/api/marketplace/jobs/:id/complete', marketplaceMutationLimiter, (req, res) => {
     const jobPath = path.join(DATA_DIR, 'jobs', req.params.id + '.json');
     const job = readJSON(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
