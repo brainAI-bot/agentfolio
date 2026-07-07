@@ -8,6 +8,10 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
+const { PublicKey } = require('@solana/web3.js');
+const nacl = require('tweetnacl');
+const bs58Module = require('bs58');
 const { buildReputationSurface } = require('./lib/reputation-surface');
 const {
   sendCustodialEscrowDisabledResponse,
@@ -15,8 +19,17 @@ const {
 let addActivity;
 try { addActivity = require('./profile-store').addActivity; } catch { addActivity = () => {}; }
 
-const DATA_DIR = path.join(__dirname, '..', 'data', 'marketplace');
+const bs58 = bs58Module.default || bs58Module;
+const DATA_DIR = process.env.MARKETPLACE_DATA_DIR || path.join(__dirname, '..', 'data', 'marketplace');
 const SAFE_JOB_ID_RE = /^job_[A-Za-z0-9_-]{1,80}$/;
+const SATP_IDENTITY_PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq');
+const marketplaceMutationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many marketplace mutation requests, please retry later' },
+});
 
 function validateJobId(jobId) {
   return typeof jobId === 'string' && SAFE_JOB_ID_RE.test(jobId);
@@ -44,6 +57,178 @@ function safeJobReviewPath(jobId) {
     throw new Error('Invalid job id');
   }
   return safeMarketplacePath('reviews', jobId);
+}
+
+function parseMaybeJSON(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try { return JSON.parse(value); } catch { return {}; }
+}
+
+function decodeSignatureBytes(value) {
+  if (!value || typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  const decoders = [
+    () => bs58.decode(trimmed),
+    () => Buffer.from(trimmed, 'base64'),
+    () => (/^[0-9a-f]+$/i.test(trimmed) ? Buffer.from(trimmed, 'hex') : null),
+  ];
+
+  for (const decode of decoders) {
+    try {
+      const bytes = decode();
+      if (bytes && bytes.length === 64) return Uint8Array.from(bytes);
+    } catch (_) {}
+  }
+  return null;
+}
+
+function isSolanaAddress(value) {
+  try {
+    if (!value || typeof value !== 'string') return false;
+    new PublicKey(value);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function deriveSatpIdentityPDA(walletAddress) {
+  const wallet = new PublicKey(walletAddress);
+  const [identityPDA] = PublicKey.findProgramAddressSync(
+    [Buffer.from('identity'), wallet.toBuffer()],
+    SATP_IDENTITY_PROGRAM
+  );
+  return identityPDA.toBase58();
+}
+
+function pickProfileWallet(row) {
+  if (!row) return null;
+  if (isSolanaAddress(row.wallet)) return row.wallet;
+
+  const wallets = parseMaybeJSON(row.wallets);
+  if (isSolanaAddress(wallets.solana)) return wallets.solana;
+  if (isSolanaAddress(wallets.sol)) return wallets.sol;
+
+  const verificationData = parseMaybeJSON(row.verification_data || row.verificationData);
+  if (isSolanaAddress(verificationData.solana?.address)) return verificationData.solana.address;
+  if (isSolanaAddress(verificationData.solana?.walletAddress)) return verificationData.solana.walletAddress;
+  if (isSolanaAddress(verificationData.wallets?.solana)) return verificationData.wallets.solana;
+  return null;
+}
+
+function pickProfileSatpIdentityPDA(row) {
+  const verificationData = parseMaybeJSON(row?.verification_data || row?.verificationData);
+  const candidates = [
+    verificationData.satp?.identityPDA,
+    verificationData.satp?.identityPda,
+    verificationData.satp?.pda,
+    verificationData.satp_identity_pda,
+    row?.satp_identity_pda,
+  ];
+  return candidates.find(isSolanaAddress) || null;
+}
+
+function loadMarketplaceActorAuthority(actorId) {
+  if (!actorId) return null;
+  try {
+    const profileStore = require('./profile-store');
+    const db = profileStore.getDb();
+    const candidates = [actorId, 'agent_' + String(actorId).toLowerCase()];
+    let row = null;
+    for (const candidate of candidates) {
+      try {
+        row = db.prepare('SELECT id, name, wallet, wallets, verification_data FROM profiles WHERE id = ?').get(candidate);
+      } catch (_) {
+        row = db.prepare('SELECT id, name, verification_data, wallets FROM profiles WHERE id = ?').get(candidate);
+      }
+      if (row) break;
+    }
+    if (!row) {
+      row = db.prepare('SELECT id, name, wallet, wallets, verification_data FROM profiles WHERE LOWER(name) = ?')
+        .get(String(actorId).toLowerCase());
+    }
+    if (!row) return null;
+
+    const walletAddress = pickProfileWallet(row);
+    if (!walletAddress) return null;
+    return {
+      profileId: row.id || actorId,
+      walletAddress,
+      identityPDA: pickProfileSatpIdentityPDA(row) || deriveSatpIdentityPDA(walletAddress),
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function buildMarketplaceWalletChallenge({ action, resourceId, actorId, walletAddress, identityPDA }) {
+  return [
+    'AgentFolio Marketplace Wallet Challenge',
+    `action:${action}`,
+    `resource:${resourceId}`,
+    `actor:${actorId}`,
+    `wallet:${walletAddress}`,
+    `satpIdentityPDA:${identityPDA}`,
+  ].join('\n');
+}
+
+function getMarketplaceWalletChallenge(body = {}) {
+  return body.walletChallenge || body.walletAuthorization || body.satpWalletChallenge || {};
+}
+
+function verifyMarketplaceMutationSignature({ action, resourceId, actorId, body }) {
+  const authority = loadMarketplaceActorAuthority(actorId);
+  if (!authority) {
+    return { ok: false, error: 'SATP wallet authority not found for actor' };
+  }
+
+  const challenge = getMarketplaceWalletChallenge(body);
+  const walletAddress = challenge.walletAddress || challenge.wallet || challenge.publicKey;
+  const identityPDA = challenge.identityPDA || challenge.identityPda || challenge.satpIdentityPDA || challenge.satp_identity_pda;
+  const message = challenge.message || challenge.challenge;
+  const signature = decodeSignatureBytes(challenge.signature);
+
+  if (!walletAddress || !identityPDA || !message || !signature) {
+    return { ok: false, error: 'Signed SATP wallet challenge required' };
+  }
+  if (walletAddress !== authority.walletAddress) {
+    return { ok: false, error: 'Wallet challenge does not match actor authority' };
+  }
+  if (identityPDA !== authority.identityPDA) {
+    return { ok: false, error: 'Wallet challenge is not bound to actor SATP identity PDA' };
+  }
+
+  const expectedMessage = buildMarketplaceWalletChallenge({
+    action,
+    resourceId,
+    actorId,
+    walletAddress: authority.walletAddress,
+    identityPDA: authority.identityPDA,
+  });
+  if (message !== expectedMessage) {
+    return { ok: false, error: 'Wallet challenge message mismatch' };
+  }
+
+  const walletKey = new PublicKey(authority.walletAddress);
+  const verified = nacl.sign.detached.verify(
+    Buffer.from(message, 'utf8'),
+    signature,
+    walletKey.toBytes()
+  );
+  if (!verified) {
+    return { ok: false, error: 'Invalid wallet challenge signature' };
+  }
+
+  return { ok: true, authority };
+}
+
+function sendMarketplaceAuthFailure(res, result) {
+  return res.status(401).json({
+    ok: false,
+    code: 'MARKETPLACE_WALLET_CHALLENGE_REQUIRED',
+    error: result?.error || 'Signed SATP wallet challenge required',
+  });
 }
 
 
@@ -337,7 +522,7 @@ function registerRoutes(app) {
   });
 
   // 3. POST /api/marketplace/applications/:id/accept — Accept an application
-  app.post('/api/marketplace/applications/:id/accept', (req, res) => {
+  app.post('/api/marketplace/applications/:id/accept', marketplaceMutationLimiter, (req, res) => {
     const appPath = path.join(DATA_DIR, 'applications', `${req.params.id}.json`);
     const application = readJSON(appPath);
     if (!application) return res.status(404).json({ error: 'Application not found' });
@@ -349,7 +534,18 @@ function registerRoutes(app) {
 
     // Bug fix: Only job poster can accept applications
     const { acceptedBy } = req.body || {};
-    if (!acceptedBy || (acceptedBy !== job.postedBy && acceptedBy !== job.clientId)) {
+    if (!acceptedBy) {
+      return res.status(400).json({ error: 'acceptedBy required' });
+    }
+    const authResult = verifyMarketplaceMutationSignature({
+      action: 'accept',
+      resourceId: application.id,
+      actorId: acceptedBy,
+      body: req.body,
+    });
+    if (!authResult.ok) return sendMarketplaceAuthFailure(res, authResult);
+
+    if (acceptedBy !== job.postedBy && acceptedBy !== job.clientId) {
       return res.status(403).json({ error: 'Only the job poster can accept applications' });
     }
 
@@ -426,7 +622,7 @@ function registerRoutes(app) {
   });
 
   // 5. POST /api/marketplace/jobs/:id/deliver — Submit deliverables
-  app.post('/api/marketplace/jobs/:id/deliver', (req, res) => {
+  app.post('/api/marketplace/jobs/:id/deliver', marketplaceMutationLimiter, (req, res) => {
     const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
     const job = readJSON(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -434,6 +630,14 @@ function registerRoutes(app) {
 
     const { submittedBy, deliverableUrl, description, files } = req.body;
     if (!submittedBy || !description) return res.status(400).json({ error: 'submittedBy and description required' });
+    const authResult = verifyMarketplaceMutationSignature({
+      action: 'deliver',
+      resourceId: job.id,
+      actorId: submittedBy,
+      body: req.body,
+    });
+    if (!authResult.ok) return sendMarketplaceAuthFailure(res, authResult);
+
     if (submittedBy !== job.acceptedApplicant) return res.status(403).json({ error: 'Only the accepted worker can submit deliverables' });
 
     const deliverable = {
@@ -456,14 +660,24 @@ function registerRoutes(app) {
   });
 
   // 6. POST /api/marketplace/escrow/:id/release — Release payment
-  app.post('/api/marketplace/escrow/:id/release', (req, res) => {
+  app.post('/api/marketplace/escrow/:id/release', marketplaceMutationLimiter, (req, res) => {
+    const { releasedBy } = req.body || {};
+    if (releasedBy) {
+      const authResult = verifyMarketplaceMutationSignature({
+        action: 'release',
+        resourceId: req.params.id,
+        actorId: releasedBy,
+        body: req.body,
+      });
+      if (!authResult.ok) return sendMarketplaceAuthFailure(res, authResult);
+    }
     if (sendCustodialEscrowDisabledResponse(res, 'legacy marketplace custodial escrow release')) return;
     const escrowPath = path.join(DATA_DIR, 'escrow', `${req.params.id}.json`);
     const escrow = readJSON(escrowPath);
     if (!escrow) return res.status(404).json({ error: 'Escrow not found' });
     if (escrow.status !== 'funded') return res.status(400).json({ error: 'Escrow not in funded state' });
 
-    const { releasedBy, releaseTxHash } = req.body;
+    const { releaseTxHash } = req.body;
     if (!releasedBy) return res.status(400).json({ error: 'releasedBy required' });
     if (releasedBy !== escrow.fundedBy) return res.status(403).json({ error: 'Only the funder can release payment' });
 
@@ -529,13 +743,27 @@ function registerRoutes(app) {
 
   
   // POST /api/marketplace/jobs/:id/complete — Approve work and release payment
-  app.post('/api/marketplace/jobs/:id/complete', (req, res) => {
+  app.post('/api/marketplace/jobs/:id/complete', marketplaceMutationLimiter, (req, res) => {
     const jobPath = path.join(DATA_DIR, 'jobs', req.params.id + '.json');
     const job = readJSON(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
     if (job.status === 'completed') return res.json({ message: 'Already completed', job });
     
     const { approvedBy, completionNote, clientId, releaseTxSignature, v3Release } = req.body;
+    const releaseActor = approvedBy || clientId;
+    if (!releaseActor) {
+      return res.status(400).json({ error: 'approvedBy or clientId required' });
+    }
+    const authResult = verifyMarketplaceMutationSignature({
+      action: 'release',
+      resourceId: job.id,
+      actorId: releaseActor,
+      body: req.body,
+    });
+    if (!authResult.ok) return sendMarketplaceAuthFailure(res, authResult);
+    if (releaseActor !== job.postedBy && releaseActor !== job.clientId) {
+      return res.status(403).json({ error: 'Only the job poster can approve release' });
+    }
     
     // Mark as completed
     job.status = 'completed';
@@ -728,4 +956,9 @@ function registerRoutes(app) {
   console.log('✓ Marketplace routes registered');
 }
 
-module.exports = { registerRoutes };
+module.exports = {
+  registerRoutes,
+  buildMarketplaceWalletChallenge,
+  deriveSatpIdentityPDA,
+  verifyMarketplaceMutationSignature,
+};
