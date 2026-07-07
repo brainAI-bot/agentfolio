@@ -585,28 +585,11 @@ function getAgentApplications(agentId, status = null) {
 
 // Create review
 function createReview(data) {
-  const job = loadJob(data.jobId);
-  if (!job) return { error: 'Job not found' };
-  if (job.status !== JOB_STATUS.COMPLETED) return { error: 'Can only review completed jobs' };
-  
-  // Check if already reviewed
-  if (db.reviewExists(data.jobId, data.reviewerId, data.revieweeId)) {
-    return { error: 'You have already reviewed this job' };
-  }
-  
-  const review = {
-    id: generateId('review'),
-    jobId: data.jobId,
-    reviewerId: data.reviewerId,
-    revieweeId: data.revieweeId,
-    rating: Math.min(5, Math.max(1, data.rating || 5)),
-    comment: data.comment || '',
-    type: data.type, // 'client_to_agent' or 'agent_to_client'
-    createdAt: new Date().toISOString()
+  return {
+    error: 'Marketplace review writes require the signed released-escrow flow',
+    next: '/api/reviews/challenge then /api/reviews/submit',
+    status: 403,
   };
-  
-  db.saveReview(review);
-  return review;
 }
 
 // Load reviews for a profile

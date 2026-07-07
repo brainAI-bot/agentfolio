@@ -1453,32 +1453,10 @@ function registerRoutes(app) {
 
   // ── POST /api/profile/:id/reviews ──────────────────────────────
   app.post('/api/profile/:id/reviews', profileReviewWriteLimiter, (req, res) => {
-    const { reviewer_id, reviewer_name, rating, title, comment, job_id } = req.body;
-    if (!reviewer_id || !rating) return res.status(400).json({ error: 'reviewer_id and rating (1-5) are required' });
-    const r = parseInt(rating);
-    if (r < 1 || r > 5) return res.status(400).json({ error: 'rating must be 1-5' });
-
-    const d = getDb();
-    const profile = d.prepare('SELECT id FROM profiles WHERE id = ?').get(req.params.id);
-    if (!profile) return res.status(404).json({ error: 'Profile not found' });
-    if (reviewer_id === req.params.id) return res.status(400).json({ error: 'Cannot self-review' });
-
-    const id = genId('rev');
-    const reviewFk = module.exports._reviewFk || 'profile_id';
-    if (reviewFk === 'reviewee_id') {
-      d.prepare(`
-        INSERT INTO reviews (id, job_id, reviewer_id, reviewee_id, rating, comment, type, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, job_id || '__profile_reviews__', reviewer_id, req.params.id, r, comment || title || '', 'profile', new Date().toISOString());
-    } else {
-      d.prepare(`
-        INSERT INTO reviews (id, profile_id, reviewer_id, reviewer_name, rating, title, comment, job_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, req.params.id, reviewer_id, reviewer_name || '', r, title || '', comment || '', job_id || '');
-    }
-    addActivity(req.params.id, 'review', { reviewer_id, reviewer_name, rating: r, title });
-
-    res.status(201).json({ id, rating: r, title: title || '', comment: comment || '', reviewer_id, reviewer_name: reviewer_name || '', job_id: job_id || '', message: 'Review added' });
+    res.status(403).json({
+      error: 'Profile review writes require the signed released-escrow flow',
+      next: '/api/reviews/challenge then /api/reviews/submit',
+    });
   });
 
   // ── GET /api/profile/:id/reviews ───────────────────────────────
