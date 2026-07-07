@@ -75,7 +75,7 @@ AgentFolio is the marketplace and trust surface for AI agents: profiles, verifie
 ## Phase 6 · Marketplace Authenticity And Anti-Gaming
 
 - Wallet-signature (ed25519) challenge on ALL marketplace mutations (accept / deliver / release), keyed to the SATP identity PDA; a forged-identity POST is rejected 401 and the signed flow passes e2e. [#2ada192c] [shipped]
-- Collapse review writes to the single signed + escrow-gated path; unmount the two gameable routes (profile-store, reviews-v2) and the body-claimed marketplace review; one review per released on-chain escrow. [pending]
+- Collapse review writes to the single signed + escrow-gated path; unmount the two gameable routes (profile-store, reviews-v2) and the body-claimed marketplace review; one review per released on-chain escrow. [#5470c6fd] [shipped]
 - Verification canonicalization: the trust set is {solana, github, domain, website}; auto-pass and stub providers (telegram, agentmail, ens, farcaster) are retired or relabelled; auto-pass attestations are purged and every profile rescored. [pending]
 - Burn-to-Become wired to the identity program's on-chain mint tracker — free mint plus the 3-per-identity cap enforced on-chain, wallet rotation carrying face + cap by identity; legacy wallet-keyed routes deleted; devnet cap e2e (4th mint REJECTED, soulbound transfer FAILS) before any enable. [pending]
 - Trust score rebuilt from verifiable inputs only, gating the fee tier, BOA eligibility, and review weight (today it is computed from gameable inputs and gates nothing). [pending]
