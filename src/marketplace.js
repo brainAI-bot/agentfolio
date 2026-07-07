@@ -782,52 +782,10 @@ function registerRoutes(app) {
 
   // POST /api/marketplace/jobs/:id/review — Leave a review after release/completion
   app.post('/api/marketplace/jobs/:id/review', (req, res) => {
-    const jobId = req.params.id;
-    if (!validateJobId(jobId)) return res.status(400).json({ error: 'Invalid job id' });
-    const jobPath = safeJobPath(jobId);
-    const job = readJSON(jobPath);
-    if (!job) return res.status(404).json({ error: 'Job not found' });
-
-    const completeStatuses = new Set(['completed', 'release_complete', 'released']);
-    if (!completeStatuses.has(job.status)) {
-      return res.status(400).json({ error: 'Can only review completed or released jobs' });
-    }
-
-    const rating = parseInt(req.body.rating, 10);
-    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
-      return res.status(400).json({ error: 'rating must be 1-5' });
-    }
-
-    const reviewerId = req.body.reviewerId || req.body.reviewer_id || req.body.clientId || req.body.client_id || job.clientId || job.postedBy;
-    const revieweeId = req.body.revieweeId || req.body.reviewee_id || req.body.agentId || req.body.agent_id || job.selectedAgentId || job.acceptedApplicant;
-    if (!reviewerId || !revieweeId) {
-      return res.status(400).json({ error: 'reviewerId/reviewer_id and revieweeId/reviewee_id are required' });
-    }
-    if (reviewerId === revieweeId) {
-      return res.status(400).json({ error: 'Cannot review yourself' });
-    }
-
-    const reviews = readJobReviews(jobId);
-    if (reviews.some(r => r.reviewerId === reviewerId && r.revieweeId === revieweeId)) {
-      return res.status(409).json({ error: 'You have already reviewed this job' });
-    }
-
-    const review = {
-      id: genId('review'),
-      jobId,
-      reviewerId,
-      revieweeId,
-      rating,
-      comment: req.body.comment || req.body.text || req.body.review || '',
-      type: req.body.type || (reviewerId === (job.clientId || job.postedBy) ? 'client_to_agent' : 'agent_to_client'),
-      createdAt: new Date().toISOString(),
-    };
-
-    reviews.push(review);
-    writeJobReviews(jobId, reviews);
-    try { addActivity(revieweeId, 'review', { jobId, reviewerId, rating }); } catch(e) {}
-
-    res.status(201).json(review);
+    res.status(403).json({
+      error: 'Marketplace review writes require the signed released-escrow flow',
+      next: '/api/reviews/challenge then /api/reviews/submit',
+    });
   });
 
   // GET /api/marketplace/jobs/:id/reviews — Read job-scoped marketplace reviews

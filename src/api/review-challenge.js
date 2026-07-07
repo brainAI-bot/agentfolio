@@ -16,6 +16,7 @@ const DEFAULT_MARKETPLACE_DIR = path.join(__dirname, '..', '..', 'data', 'market
 const COMPLETED_JOB_STATUSES = new Set(['completed', 'release_complete', 'released', 'paid']);
 const RELEASED_ESCROW_STATUSES = new Set(['released', 'release_complete', 'paid']);
 const SELECTED_APPLICATION_STATUSES = new Set(['accepted', 'selected']);
+const ALLOWED_CHAINS = new Set(['solana', 'ethereum']);
 
 function getDb(readonly = true, dbPath = DEFAULT_DB_PATH) {
   if (!Database) Database = require('better-sqlite3');
@@ -103,27 +104,106 @@ function jobHasReleasedEscrow(job, marketplaceDir) {
   return Boolean(job.fundsReleased && hasRecordedEscrow);
 }
 
-function hasCompletedEscrowBetween(reviewerId, revieweeId, options = {}) {
+function findReleasedEscrowReviewContext(reviewerId, revieweeId, options = {}) {
   const marketplaceDir = options.marketplaceDir || DEFAULT_MARKETPLACE_DIR;
   try {
-    return listMarketplaceJobs(marketplaceDir).some(job => {
-      if (!COMPLETED_JOB_STATUSES.has(job.status)) return false;
-      if (!jobHasReleasedEscrow(job, marketplaceDir)) return false;
+    for (const job of listMarketplaceJobs(marketplaceDir)) {
+      if (!COMPLETED_JOB_STATUSES.has(job.status)) continue;
+      if (!jobHasReleasedEscrow(job, marketplaceDir)) continue;
 
       const { clients, workers } = getJobParticipants(job, marketplaceDir);
-      return (
+      const matched = (
         (clients.has(reviewerId) && workers.has(revieweeId)) ||
         (clients.has(revieweeId) && workers.has(reviewerId))
       );
-    });
+      if (matched) {
+        return {
+          jobId: job.id,
+          escrowId: job.escrowId || job.v3EscrowPDA || null,
+        };
+      }
+    }
+    return null;
   } catch (e) {
     console.error('[ReviewChallenge] escrow gate failed closed:', e.message);
-    return false;
+    return null;
   }
 }
 
 function escrowGateError() {
   return 'Reviews require a completed job with released escrow between these agents.';
+}
+
+function hasCompletedEscrowBetween(reviewerId, revieweeId, options = {}) {
+  return Boolean(findReleasedEscrowReviewContext(reviewerId, revieweeId, options));
+}
+
+function verifyEthereumSignature(message, signature, expectedAddress) {
+  try {
+    const ethers = require('ethers');
+    const recovered = ethers.verifyMessage
+      ? ethers.verifyMessage(message, signature)
+      : ethers.utils.verifyMessage(message, signature);
+    return recovered.toLowerCase() === expectedAddress.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+function findExistingReview(db, { jobId, reviewerId, revieweeId, useRevieweeId }) {
+  const revieweeColumn = useRevieweeId ? 'reviewee_id' : 'profile_id';
+  return db.prepare(`
+    SELECT id FROM reviews
+    WHERE job_id = ? AND reviewer_id = ? AND ${revieweeColumn} = ?
+    LIMIT 1
+  `).get(jobId, reviewerId, revieweeId);
+}
+
+function parseJSONField(value, fallback = {}) {
+  if (!value) return fallback;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeWallet(chain, wallet) {
+  const value = String(wallet || '').trim();
+  return chain === 'ethereum' ? value.toLowerCase() : value;
+}
+
+function reviewerWalletMatchesProfile(db, { reviewerId, chain, walletAddress }) {
+  try {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'profiles'").all();
+    if (tables.length === 0) return false;
+
+    const cols = db.prepare('PRAGMA table_info(profiles)').all().map(c => c.name);
+    const selectedCols = ['id', 'wallet', 'claimed_by', 'wallets', 'verification_data'].filter(col => cols.includes(col));
+    if (!selectedCols.includes('id')) return false;
+
+    const profile = db.prepare(`SELECT ${selectedCols.join(', ')} FROM profiles WHERE id = ?`).get(reviewerId);
+    if (!profile) return false;
+
+    const wallets = parseJSONField(profile.wallets);
+    const verificationData = parseJSONField(profile.verification_data);
+    const candidateWallets = [
+      profile.wallet,
+      profile.claimed_by,
+      wallets?.[chain],
+      chain === 'solana' ? wallets?.solana_wallet : null,
+      wallets?.wallet,
+      verificationData?.[chain]?.address,
+      verificationData?.[chain]?.wallet,
+    ].filter(Boolean);
+
+    const expected = normalizeWallet(chain, walletAddress);
+    return candidateWallets.some(candidate => normalizeWallet(chain, candidate) === expected);
+  } catch (e) {
+    console.error('[ReviewChallenge] reviewer identity lookup failed closed:', e.message);
+    return false;
+  }
 }
 
 // In-memory challenge store (TTL 30 min)
@@ -140,10 +220,14 @@ function registerReviewChallengeRoutes(app, options = {}) {
       if (!reviewerId || !revieweeId || !rating) {
         return res.status(400).json({ success: false, error: 'reviewerId, revieweeId, and rating required' });
       }
+      if (chain && !ALLOWED_CHAINS.has(chain)) {
+        return res.status(400).json({ success: false, error: 'chain must be solana or ethereum' });
+      }
       if (reviewerId === revieweeId) {
         return res.status(400).json({ success: false, error: 'Cannot review yourself' });
       }
-      if (!hasCompletedEscrowBetween(reviewerId, revieweeId, { marketplaceDir })) {
+      const escrowContext = findReleasedEscrowReviewContext(reviewerId, revieweeId, { marketplaceDir });
+      if (!escrowContext) {
         return res.status(403).json({ success: false, error: escrowGateError() });
       }
 
@@ -158,6 +242,8 @@ function registerReviewChallengeRoutes(app, options = {}) {
         chain: chain || 'solana',
         message,
         nonce,
+        jobId: escrowContext.jobId,
+        escrowId: escrowContext.escrowId,
         createdAt: Date.now(),
       });
 
@@ -205,38 +291,62 @@ function registerReviewChallengeRoutes(app, options = {}) {
         }
         const pubkeyBytes = bs58.decode(walletAddress);
         if (sigBytes.length !== 64 || pubkeyBytes.length !== 32) {
-          return res.status(400).json({ verified: false, error: 'Invalid signature or wallet format' });
+          return res.status(401).json({ verified: false, error: 'Invalid signature or wallet format' });
         }
         const valid = nacl.sign.detached.verify(messageBytes, sigBytes, pubkeyBytes);
         if (!valid) {
-          return res.status(400).json({ verified: false, error: 'Signature verification failed' });
+          return res.status(401).json({ verified: false, error: 'Signature verification failed' });
         }
       } else {
-        // ETH verification — simplified (ecrecover would go here)
-        // For now, accept it (frontend did the signing)
+        const valid = verifyEthereumSignature(challenge.message, signature, walletAddress);
+        if (!valid) {
+          return res.status(401).json({ verified: false, error: 'Signature verification failed' });
+        }
       }
 
-      if (!hasCompletedEscrowBetween(challenge.reviewerId, challenge.revieweeId, { marketplaceDir })) {
+      const escrowContext = findReleasedEscrowReviewContext(challenge.reviewerId, challenge.revieweeId, { marketplaceDir });
+      if (!escrowContext || escrowContext.jobId !== challenge.jobId) {
         challenges.delete(challengeId);
         return res.status(403).json({ verified: false, error: escrowGateError() });
       }
 
       // Save review
       const db = getDb(false, dbPath);
+      const signerMatchesReviewer = reviewerWalletMatchesProfile(db, {
+        reviewerId: challenge.reviewerId,
+        chain: challenge.chain,
+        walletAddress,
+      });
+      if (!signerMatchesReviewer) {
+        db.close();
+        return res.status(403).json({ verified: false, error: 'Signed wallet is not bound to the reviewer SATP identity' });
+      }
+
       const id = 'rev_' + Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
       
       // Detect FK column
       const reviewCols = db.prepare('PRAGMA table_info(reviews)').all().map(c => c.name);
       const useRevieweeId = reviewCols.includes('reviewee_id');
+      const existing = findExistingReview(db, {
+        jobId: challenge.jobId,
+        reviewerId: challenge.reviewerId,
+        revieweeId: challenge.revieweeId,
+        useRevieweeId,
+      });
+      if (existing) {
+        db.close();
+        challenges.delete(challengeId);
+        return res.status(409).json({ verified: false, error: 'Review already exists for this released escrow' });
+      }
       
       if (useRevieweeId) {
         db.prepare(`INSERT INTO reviews (id, job_id, reviewer_id, reviewee_id, rating, comment, type, created_at)
           VALUES (?,?,?,?,?,?,?,?)`)
-          .run(id, 'wallet-signed', challenge.reviewerId, challenge.revieweeId, challenge.rating, comment || '', 'review', new Date().toISOString());
+          .run(id, challenge.jobId, challenge.reviewerId, challenge.revieweeId, challenge.rating, comment || '', 'escrow_review', new Date().toISOString());
       } else {
-        db.prepare(`INSERT INTO reviews (id, profile_id, reviewer_id, reviewer_name, rating, comment, created_at)
-          VALUES (?,?,?,?,?,?,?)`)
-          .run(id, challenge.revieweeId, challenge.reviewerId, challenge.reviewerId, challenge.rating, comment || '', new Date().toISOString());
+        db.prepare(`INSERT INTO reviews (id, profile_id, reviewer_id, reviewer_name, rating, comment, job_id, created_at)
+          VALUES (?,?,?,?,?,?,?,?)`)
+          .run(id, challenge.revieweeId, challenge.reviewerId, challenge.reviewerId, challenge.rating, comment || '', challenge.jobId, new Date().toISOString());
       }
       db.close();
 
@@ -249,6 +359,8 @@ function registerReviewChallengeRoutes(app, options = {}) {
           id,
           reviewer: challenge.reviewerId,
           reviewee: challenge.revieweeId,
+          jobId: challenge.jobId,
+          escrowId: challenge.escrowId,
           rating: challenge.rating,
           comment: comment || '',
           walletAddress,
@@ -265,4 +377,5 @@ function registerReviewChallengeRoutes(app, options = {}) {
 module.exports = {
   registerReviewChallengeRoutes,
   hasCompletedEscrowBetween,
+  findReleasedEscrowReviewContext,
 };

@@ -1,6 +1,6 @@
 /**
- * Reviews v2 API — categories, weighted scoring, responses
- * Supplements existing /api/reviews endpoints with v2 fields
+ * Reviews v2 API — read-only categories, weighted scoring, responses
+ * Review creation is restricted to /api/reviews/challenge + /api/reviews/submit.
  */
 
 const Database = require('better-sqlite3');
@@ -42,47 +42,12 @@ function registerReviewsV2Routes(app, options = {}) {
   // Run migration on load
   try { migrateReviewsV2(dbPath); } catch (e) { console.error('[Reviews v2] Migration error:', e.message); }
 
-  // POST /api/reviews/v2 — submit review with categories
+  // POST /api/reviews/v2 — legacy body-claimed review writes are disabled.
   app.post('/api/reviews/v2', (req, res) => {
-    const { 
-      reviewer_id, reviewee_id, rating, text, job_id,
-      category_quality, category_reliability, category_communication,
-      reviewer_rep_weight, tx_signature 
-    } = req.body;
-    
-    if (!reviewer_id || !reviewee_id || !rating) {
-      return res.status(400).json({ error: 'reviewer_id, reviewee_id, and rating required' });
-    }
-    if (reviewer_id === reviewee_id) {
-      return res.status(400).json({ error: 'Cannot review yourself' });
-    }
-    
-    const r = Math.min(5, Math.max(1, parseInt(rating)));
-    const cq = Math.min(5, Math.max(0, parseInt(category_quality || 0)));
-    const cr = Math.min(5, Math.max(0, parseInt(category_reliability || 0)));
-    const cc = Math.min(5, Math.max(0, parseInt(category_communication || 0)));
-    
-    try {
-      const db = getDb(false, dbPath);
-      const id = 'rev_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      
-      db.prepare(`INSERT INTO reviews (id, job_id, reviewer_id, reviewee_id, rating, comment, type, created_at, 
-        category_quality, category_reliability, category_communication, reviewer_rep_weight, tx_signature)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(id, job_id || 'direct', reviewer_id, reviewee_id, r, text || '', 'review', 
-          new Date().toISOString(), cq, cr, cc, reviewer_rep_weight || 0, tx_signature || null);
-      db.close();
-      
-      res.status(201).json({ 
-        id, reviewer_id, reviewee_id, rating: r, comment: text || '',
-        category_quality: cq, category_reliability: cr, category_communication: cc,
-        reviewer_rep_weight: reviewer_rep_weight || 0,
-        tx_signature: tx_signature || null,
-        created_at: new Date().toISOString() 
-      });
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
+    res.status(403).json({
+      error: 'Reviews v2 writes require the signed released-escrow flow',
+      next: '/api/reviews/challenge then /api/reviews/submit',
+    });
   });
 
   // POST /api/reviews/:id/respond — reviewed party responds
