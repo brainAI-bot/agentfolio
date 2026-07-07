@@ -105,6 +105,28 @@ function summarize(evidence) {
   ].join(' ');
 }
 
+function describeHqWrite({ hqCli, hqTaskId, createHqTask }) {
+  const mode = hqTaskId ? 'deliver' : createHqTask ? 'create' : 'disabled';
+  const route = hqTaskId
+    ? `task deliver ${hqTaskId}`
+    : createHqTask
+      ? 'task create --project=agentfolio --agent=brainforge --priority=p1'
+      : null;
+
+  return {
+    enabled: mode !== 'disabled',
+    mode,
+    route,
+    cli: hqCli,
+    env: {
+      HQ_CLI: process.env.HQ_CLI ? 'set' : 'default',
+      HQ_TASK_ID: process.env.HQ_TASK_ID ? 'set' : 'unset',
+      AGENTFOLIO_DRIFT_HQ_TASK_ID: process.env.AGENTFOLIO_DRIFT_HQ_TASK_ID ? 'set' : 'unset',
+      AGENTFOLIO_CREATE_DRIFT_TASK: process.env.AGENTFOLIO_CREATE_DRIFT_TASK || 'unset',
+    },
+  };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const repo = path.resolve(args.repo || process.cwd());
@@ -112,6 +134,7 @@ async function main() {
   const originRef = args.originRef || process.env.AGENTFOLIO_ORIGIN_REF || 'origin/main';
   const hqCli = args.hqCli || process.env.HQ_CLI || '~/clawd/scripts/hq-env.zsh hq';
   const hqTaskId = args.hqTaskId || process.env.HQ_TASK_ID || process.env.AGENTFOLIO_DRIFT_HQ_TASK_ID;
+  const createHqTask = args.createHqTask || process.env.AGENTFOLIO_CREATE_DRIFT_TASK === 'true';
 
   runGit(repo, ['fetch', '--quiet', 'origin', 'main']);
   const originSha = normalizeSha(runGit(repo, ['rev-parse', originRef]));
@@ -136,6 +159,7 @@ async function main() {
       commitSha: originSha,
     },
     command: `node tools/deploy-drift-check.js --prod-url=${prodUrl} --origin-ref=${originRef}`,
+    hqWrite: describeHqWrite({ hqCli, hqTaskId, createHqTask }),
   };
 
   if (status === 'drift' || args.writeEvidence || process.env.AGENTFOLIO_DRIFT_EVIDENCE_FILE) {
@@ -148,7 +172,8 @@ async function main() {
 
   if (status === 'drift' && hqTaskId) {
     evidence.hqUpdate = runHq(hqCli, ['task', 'deliver', hqTaskId, summarize(evidence)]);
-  } else if (status === 'drift' && (args.createHqTask || process.env.AGENTFOLIO_CREATE_DRIFT_TASK === 'true')) {
+    evidence.hqReadback = runHq(hqCli, ['task', 'show', hqTaskId]);
+  } else if (status === 'drift' && createHqTask) {
     evidence.hqUpdate = runHq(hqCli, [
       'task',
       'create',

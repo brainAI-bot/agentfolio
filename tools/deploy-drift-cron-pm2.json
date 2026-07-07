@@ -11,7 +11,9 @@
       "watch": false,
       "env": {
         "AGENTFOLIO_PROD_VERSION_URL": "https://agentfolio.bot/api/version",
-        "AGENTFOLIO_ORIGIN_REF": "origin/main"
+        "AGENTFOLIO_ORIGIN_REF": "origin/main",
+        "AGENTFOLIO_CREATE_DRIFT_TASK": "true",
+        "HQ_CLI": "~/clawd/scripts/hq-env.zsh hq"
       },
       "error_file": "/home/ubuntu/.pm2/logs/agentfolio-deploy-drift-error.log",
       "out_file": "/home/ubuntu/.pm2/logs/agentfolio-deploy-drift-out.log",

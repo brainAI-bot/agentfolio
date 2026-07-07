@@ -41,13 +41,17 @@ function listenWithVersion(version) {
   });
 }
 
-function runDriftCheck(args) {
+function runDriftCheck(args, options = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [
       'tools/deploy-drift-check.js',
       ...args,
     ], {
       cwd: repoRoot,
+      env: {
+        ...process.env,
+        ...options.env,
+      },
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -103,6 +107,7 @@ describe('deploy provenance', () => {
       const result = await runDriftCheck([
         `--prod-url=${url}`,
         `--repo=${repoRoot}`,
+        `--origin-ref=${originSha}`,
         '--json',
       ]);
 
@@ -140,6 +145,73 @@ describe('deploy provenance', () => {
       assert.strictEqual(written.status, 'drift');
       assert.strictEqual(written.production.commitSha, driftSha);
       assert.ok(written.origin.commitSha);
+    } finally {
+      server.close();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('maps the committed PM2 drift cron to HQ task creation on drift', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-hq-drift-'));
+    const mockHqCli = path.join(tempDir, 'mock-hq.sh');
+    const hqArgsLog = path.join(tempDir, 'hq-args.log');
+    const driftSha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const pm2Config = JSON.parse(fs.readFileSync(
+      path.resolve(repoRoot, 'tools/deploy-drift-cron-pm2.json'),
+      'utf8'
+    ));
+    const app = pm2Config.apps.find((entry) => entry.name === 'agentfolio-deploy-drift-check');
+    const { server, url } = await listenWithVersion({
+      commitSha: driftSha,
+      buildTime: '2026-07-06T18:26:00.000Z',
+    });
+
+    fs.writeFileSync(mockHqCli, [
+      '#!/bin/sh',
+      'printf "%s\\n" "$*" >> "$HQ_ARGS_LOG"',
+      'echo "MOCK-HQ-TASK-ID"',
+      '',
+    ].join('\n'), { mode: 0o700 });
+
+    try {
+      assert.ok(app, 'PM2 drift-check app is committed');
+      assert.strictEqual(app.env.AGENTFOLIO_CREATE_DRIFT_TASK, 'true');
+      assert.strictEqual(app.env.HQ_CLI, '~/clawd/scripts/hq-env.zsh hq');
+
+      const result = await runDriftCheck([
+        `--prod-url=${url}`,
+        `--repo=${repoRoot}`,
+        '--json',
+      ], {
+        env: {
+          ...app.env,
+          HQ_CLI: mockHqCli,
+          HQ_ARGS_LOG: hqArgsLog,
+        },
+      });
+
+      assert.strictEqual(result.status, 0, result.stderr);
+      const payload = JSON.parse(result.stdout);
+      const hqArgs = fs.readFileSync(hqArgsLog, 'utf8');
+      assert.strictEqual(payload.status, 'drift');
+      assert.deepStrictEqual(payload.hqWrite, {
+        enabled: true,
+        mode: 'create',
+        route: 'task create --project=agentfolio --agent=brainforge --priority=p1',
+        cli: mockHqCli,
+        env: {
+          HQ_CLI: 'set',
+          HQ_TASK_ID: 'unset',
+          AGENTFOLIO_DRIFT_HQ_TASK_ID: 'unset',
+          AGENTFOLIO_CREATE_DRIFT_TASK: 'true',
+        },
+      });
+      assert.strictEqual(payload.hqUpdate.ok, true);
+      assert.match(hqArgs, /^task create /);
+      assert.match(hqArgs, /--project=agentfolio/);
+      assert.match(hqArgs, /--agent=brainforge/);
+      assert.match(hqArgs, /--priority=p1/);
+      assert.match(hqArgs, /AgentFolio deploy drift check: drift/);
     } finally {
       server.close();
       fs.rmSync(tempDir, { recursive: true, force: true });
