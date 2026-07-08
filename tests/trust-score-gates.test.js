@@ -108,6 +108,40 @@ test('generic on-chain attestation counts do not masquerade as SATP evidence', (
   assert.equal(result.trustScore, 0);
 });
 
+test('unsigned or unverified SATP verification records do not count as signed SATP evidence', () => {
+  const unsigned = computeTrustScore({
+    verifications: [{ platform: 'satp' }],
+  });
+
+  assert.equal(unsigned.breakdown.satpEvidence, 0);
+  assert.equal(unsigned.details.satpEvidence.evidenceCount, 0);
+  assert.equal(unsigned.trustScore, 0);
+
+  const verifiedUnsigned = computeTrustScore({
+    verifications: [{ platform: 'satp', verified: true }],
+  });
+
+  assert.equal(verifiedUnsigned.breakdown.satpEvidence, 0);
+  assert.equal(verifiedUnsigned.details.satpEvidence.evidenceCount, 0);
+  assert.equal(verifiedUnsigned.trustScore, 0);
+
+  const unverifiedSigned = computeTrustScore({
+    verifications: [{ platform: 'satp', verified: false, txSignature: 'satp-tx' }],
+  });
+
+  assert.equal(unverifiedSigned.breakdown.satpEvidence, 0);
+  assert.equal(unverifiedSigned.details.satpEvidence.evidenceCount, 0);
+  assert.equal(unverifiedSigned.trustScore, 0);
+
+  const verifiedSigned = computeTrustScore({
+    verifications: [{ platform: 'satp', verified: true, txSignature: 'satp-tx' }],
+  });
+
+  assert.equal(verifiedSigned.breakdown.satpEvidence, 40);
+  assert.equal(verifiedSigned.details.satpEvidence.evidenceCount, 1);
+  assert.equal(verifiedSigned.trustScore, 40);
+});
+
 test('unified trust score does not use legacy V3 reputation as a score floor', () => {
   const db = {
     prepare() {

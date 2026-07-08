@@ -62,6 +62,30 @@ function hasSignedEvidence(data = {}) {
   );
 }
 
+function hasSignedOrOnChainProof(data = {}) {
+  if (!data || typeof data !== 'object') return false;
+  return Boolean(
+    data.txSignature ||
+    data.signature ||
+    data.transactionSignature ||
+    data.attestationTx ||
+    data.attestationSignature ||
+    data.memoTx ||
+    data.memo_tx ||
+    data.proofSignature ||
+    data.reviewPda ||
+    data.review_pda ||
+    data.satpSignature ||
+    data.satpTxSignature ||
+    data.satpAttestationTx ||
+    data.satpPda ||
+    data.satpIdentityPda ||
+    data.tx_signature ||
+    data.onChain === true ||
+    data.verifiedOnChain === true
+  );
+}
+
 function hasSatpEvidence(data = {}) {
   if (!data || typeof data !== 'object') return false;
   return Boolean(
@@ -155,7 +179,10 @@ function computeSatpEvidenceScore(input = {}) {
 
   const signedSatpItems = candidates.filter((item) => {
     const platform = normalizeVerificationPlatform(item.platform);
-    return platform === 'satp' || hasSatpEvidence(item) || hasSatpEvidence(item.proof);
+    const isSatpCandidate = platform === 'satp' || hasSatpEvidence(item) || hasSatpEvidence(item.proof);
+    const isVerified = hasPositiveVerification(item) || hasPositiveVerification(item.proof);
+    const hasSignedProof = hasSignedOrOnChainProof(item) || hasSignedOrOnChainProof(item.proof);
+    return isSatpCandidate && isVerified && hasSignedProof;
   });
 
   const signedEvidenceCount = Number(input.signedSatpEvidenceCount ?? onchain.signedSatpEvidenceCount ?? 0);
