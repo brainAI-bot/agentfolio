@@ -3,13 +3,13 @@
  * Calculates a verificationScore based on specific verification actions.
  */
 
+const { filterCanonicalTrustData } = require('./canonical-verification-providers');
+
 const SCORE_TABLE = {
   github:           { points: 20, label: 'GitHub Verified',           icon: '💻' },
-  x:          { points: 15, label: 'Twitter/X Verified',        icon: '🐦' },
   solana:           { points: 20, label: 'Solana Wallet Verified',    icon: '◎' },
-  email:            { points: 10, label: 'Email Verified',            icon: '📧' },
-  custom:           { points: 10, label: 'Custom Provider Verified',  icon: '🔗' },
-  satp:             { points: 30, label: 'SATP On-Chain Identity',    icon: '⛓️' },
+  domain:           { points: 20, label: 'Domain Verified',           icon: '🔗' },
+  website:          { points: 20, label: 'Website Verified',          icon: '🌐' },
   marketplace_job:  { points: 25, label: 'Completed 1+ Job',         icon: '💼' },
   profile_complete: { points: 10, label: 'Profile Complete',          icon: '✅' },
 };
@@ -23,7 +23,7 @@ const MAX_SCORE = Object.values(SCORE_TABLE).reduce((sum, v) => sum + v.points, 
  * @returns {{ score: number, maxScore: number, breakdown: Array, missing: Array, percentage: number }}
  */
 function calculateVerificationScore(profile, opts = {}) {
-  const vd = profile.verificationData || {};
+  const vd = filterCanonicalTrustData(profile.verificationData || profile.verification_data || {});
   const breakdown = [];
   const missing = [];
   let score = 0;
@@ -42,35 +42,12 @@ function calculateVerificationScore(profile, opts = {}) {
   // GitHub
   if (vd.github?.verified) award('github'); else miss('github');
 
-  // Twitter
-  if (vd.twitter?.verified) award('twitter'); else miss('twitter');
-
   // Solana wallet
   if (vd.solana?.verified) award('solana'); else miss('solana');
 
-  // Email (check agentmail verification or email field)
-  if (vd.email?.verified || vd.agentmail?.verified || profile.links?.agentmail) {
-    award('email');
-  } else {
-    miss('email');
-  }
+  if (vd.domain?.verified) award('domain'); else miss('domain');
 
-  // Custom provider (any non-standard verification)
-  const standardKeys = new Set(['github', 'twitter', 'solana', 'email', 'agentmail', 'satp', 'onboardingDismissed', 'hyperliquid', 'polymarket', 'telegram']);
-  const customVerified = Object.entries(vd).some(([k, v]) => !standardKeys.has(k) && v?.verified);
-  // Also count hyperliquid/polymarket as custom
-  if (customVerified || vd.hyperliquid?.verified || vd.polymarket?.verified) {
-    award('custom');
-  } else {
-    miss('custom');
-  }
-
-  // SATP on-chain
-  if (vd.satp?.verified || profile.registeredOnChain) {
-    award('satp');
-  } else {
-    miss('satp');
-  }
+  if (vd.website?.verified) award('website'); else miss('website');
 
   // Marketplace job completed
   const mktStats = opts.marketplaceStats || {};

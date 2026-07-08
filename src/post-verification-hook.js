@@ -14,6 +14,13 @@
 
 const fs = require('fs');
 const path = require('path');
+const {
+  CANONICAL_TRUST_PROVIDERS,
+  isCanonicalTrustProvider,
+  normalizeTrustProvider,
+  filterCanonicalTrustData,
+  retiredProviderResponse,
+} = require('./lib/canonical-verification-providers');
 
 let satpWriteClient, profileStore, keypair, v3sdk;
 
@@ -52,27 +59,14 @@ function getPlatformKeypair() {
 }
 
 function platformToAttestationType(platform) {
+  platform = normalizeTrustProvider(platform);
   const map = {
     github: 'github_verification',
-    x: 'x_verification',
-    satp: 'satp',
     solana: 'solana_wallet_verification',
-    agentmail: 'agentmail_verification',
-    telegram: 'telegram_verification',
-    discord: 'discord_verification',
-    eth: 'eth_wallet_verification',
     domain: 'domain_verification',
     website: 'website_verification',
-    ens: 'ens_verification',
-    farcaster: 'farcaster_verification',
-    moltbook: 'moltbook_verification',
-    polymarket: 'polymarket_verification',
-    hyperliquid: 'hyperliquid_verification',
-    mcp: 'mcp_verification',
-    a2a: 'a2a_verification',
-    kalshi: 'kalshi_verification',
   };
-  return map[platform] || `${platform}_verification`;
+  return map[platform] || null;
 }
 
 function getProfileWallet(profileId) {
@@ -139,13 +133,14 @@ function recomputeDBScore(profileId) {
     const row = db.prepare('SELECT verification_data FROM profiles WHERE id = ?').get(profileId);
     if (!row) return;
 
-    const vd = JSON.parse(row.verification_data || '{}');
+    const vd = filterCanonicalTrustData(JSON.parse(row.verification_data || '{}'));
     const verifiedPlatforms = Object.entries(vd).filter(([_, v]) => v && v.verified).map(([k]) => k);
     
     const scoreMap = {
-      solana: 100, eth: 80, github: 60, x: 40, agentmail: 30,
-      telegram: 20, discord: 20, domain: 50, website: 40, ens: 50, farcaster: 30,
-      moltbook: 30, polymarket: 40, hyperliquid: 40, mcp: 30, a2a: 30, kalshi: 30,
+      solana: 100,
+      github: 60,
+      domain: 50,
+      website: 40,
     };
 
     let score = 0;
@@ -183,6 +178,8 @@ async function revalidateProfileCache(profileId) {
 
 function persistVerificationTx(profileId, platform, identifier, proof, bridgeResult) {
   try {
+    platform = normalizeTrustProvider(platform);
+    if (!isCanonicalTrustProvider(platform)) return;
     const txSignature = bridgeResult?.txSignature || null;
     const attestationPDA = bridgeResult?.attestationPDA || null;
     if (!txSignature && !attestationPDA) return;
@@ -277,12 +274,19 @@ function persistVerificationTx(profileId, platform, identifier, proof, bridgeRes
  * Fire-and-forget. Never throws to caller.
  */
 async function postVerificationHook(profileId, platform, identifier, proof) {
+  platform = normalizeTrustProvider(platform);
   console.log(`[PostVerify] ═══ Hook fired: ${profileId} verified ${platform} (${identifier}) ═══`);
+
+  if (!isCanonicalTrustProvider(platform)) {
+    console.warn(`[PostVerify] Skipped retired/non-verifying trust provider ${platform}; canonical providers: ${CANONICAL_TRUST_PROVIDERS.join(', ')}`);
+    return retiredProviderResponse(platform);
+  }
 
   // Step 1-3: On-chain work first via the V3 bridge. DB/cache update only after chain succeeds.
   let onchainWriteSucceeded = false;
   let bridgeResult = null;
   const attestationType = platformToAttestationType(platform);
+  if (!attestationType) return retiredProviderResponse(platform);
   const proofData = {
     platform,
     identifier,

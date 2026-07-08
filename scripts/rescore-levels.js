@@ -5,19 +5,23 @@
  */
 const Database = require('better-sqlite3');
 const path = require('path');
+const {
+  CANONICAL_TRUST_PROVIDERS,
+  isCanonicalTrustProvider,
+} = require('../src/lib/canonical-verification-providers');
 
 const DB_PATH = path.join(__dirname, '../data/agentfolio.db');
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 
 const CATEGORY_MAP = {
-  solana: 'wallets', ethereum: 'wallets', hyperliquid: 'wallets', polymarket: 'wallets',
-  moltbook: 'platforms', agentmail: 'platforms', github: 'platforms', x: 'platforms', twitter: 'platforms', discord: 'platforms', telegram: 'platforms',
-  domain: 'infrastructure', mcp: 'infrastructure', a2a: 'infrastructure', website: 'infrastructure',
-  satp: 'onchain',
+  solana: 'wallets',
+  github: 'platforms',
+  domain: 'infrastructure',
+  website: 'infrastructure',
 };
 
-const HUMAN_PLATFORMS = ['github', 'x', 'twitter'];
+const HUMAN_PLATFORMS = ['github'];
 const LEVEL_NAMES = ['Unregistered', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
 
 // Get all profiles with verifications
@@ -31,23 +35,25 @@ const profiles = db.prepare(`
 `).all();
 
 console.log('📊 Level Recalculation\n');
+console.log(`Canonical trust providers: ${CANONICAL_TRUST_PROVIDERS.join(', ')}\n`);
 
 for (const p of profiles) {
-  const platforms = (p.platforms || '').split(',').filter(Boolean);
+  const platforms = (p.platforms || '').split(',').filter(isCanonicalTrustProvider);
+  const verifCount = platforms.length;
   const categories = new Set(platforms.map(pl => CATEGORY_MAP[pl] || 'other'));
   const hasHumanProof = platforms.some(pl => HUMAN_PLATFORMS.includes(pl));
   
   let level = 0;
-  if (p.verif_count >= 8 && categories.size >= 3 && hasHumanProof) level = 5;
-  else if (p.verif_count >= 8 && categories.size >= 3) level = 4;
-  else if (p.verif_count >= 5 && categories.size >= 2) level = 3;
-  else if (p.verif_count >= 2) level = 2;
-  else if (p.verif_count >= 1) level = 1;
+  if (verifCount >= 8 && categories.size >= 3 && hasHumanProof) level = 5;
+  else if (verifCount >= 8 && categories.size >= 3) level = 4;
+  else if (verifCount >= 5 && categories.size >= 2) level = 3;
+  else if (verifCount >= 2) level = 2;
+  else if (verifCount >= 1) level = 1;
   
   const label = LEVEL_NAMES[level] || 'Unknown';
   const emoji = ['⚪', '🟡', '🔵', '🟢', '🟠', '👑'][level] || '?';
   
-  console.log(`  ${emoji} ${p.id}: L${level} ${label} (${p.verif_count} verifs, ${categories.size} cats${hasHumanProof ? ', human✓' : ''})`);
+  console.log(`  ${emoji} ${p.id}: L${level} ${label} (${verifCount} canonical verifs, ${categories.size} cats${hasHumanProof ? ', human✓' : ''})`);
   console.log(`     Platforms: ${platforms.join(', ')}`);
 }
 

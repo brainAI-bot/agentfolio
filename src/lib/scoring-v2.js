@@ -4,6 +4,7 @@
  */
 
 const { loadProfile } = require('./profile');
+const { filterCanonicalTrustData } = require('./canonical-verification-providers');
 
 // Verification Level Requirements
 const LEVEL_REQUIREMENTS = {
@@ -16,10 +17,10 @@ const LEVEL_REQUIREMENTS = {
 
 // Verification Categories
 const VERIFICATION_CATEGORIES = {
-  wallets: ['solana', 'ethereum', 'hyperliquid', 'polymarket', 'bitcoin'],
-  platforms: ['agentmail', 'moltbook', 'github', 'x', 'discord', 'telegram', 'farcaster'],
-  infrastructure: ['domain', 'mcp', 'a2a', 'website', 'openclaw', 'did'],
-  onchain: ['satp', 'ens', 'eas']
+  wallets: ['solana'],
+  platforms: ['github'],
+  infrastructure: ['domain', 'website'],
+  onchain: []
 };
 
 // Trust Score Maximums
@@ -38,7 +39,7 @@ const TRUST_SCORE_CAPS = {
 function calculateVerificationLevel(profile, activityData = {}) {
   if (!profile) return { level: 'L1', name: 'Registered' };
 
-  const verifications = profile.verificationData || {};
+  const verifications = filterCanonicalTrustData(profile.verificationData || {});
   const verifiedTypes = Object.keys(verifications).filter(type => 
     verifications[type] && verifications[type].verified
   );
@@ -73,10 +74,9 @@ function calculateVerificationLevel(profile, activityData = {}) {
   // Check other L4/L5 requirements
   const completedJobs = activityData.completedJobs || 0;
   const reviews = activityData.reviews || 0;
-  const burnedAvatar = !!(profile.verificationData?.satp?.burnedAvatar || profile.burnedAvatar);
+  const burnedAvatar = !!profile.burnedAvatar;
   const humanVerified = !!(
-    (verifications.github && verifications.github.verified) ||
-    (verifications.x && verifications.x.verified)
+    (verifications.github && verifications.github.verified)
   );
 
   // Determine level
@@ -172,12 +172,8 @@ function calculateTrustScore(profile, activityData = {}) {
   let onchainScore = 0;
   
   // SATP genesis (auto on registration)
-  if (profile.verificationData?.satp || profile.satpRegistered) {
-    onchainScore += 10;
-  }
-  
   // Burned avatar
-  if (profile.verificationData?.satp?.burnedAvatar || profile.burnedAvatar) {
+  if (profile.burnedAvatar) {
     onchainScore += 40;
   }
   
@@ -218,6 +214,7 @@ function getProfileScoring(profileId, activityData = {}) {
 
   const level = calculateVerificationLevel(profile, activityData);
   const trustScore = calculateTrustScore(profile, activityData);
+  const canonicalVerificationData = filterCanonicalTrustData(profile.verificationData || {});
 
   return {
     profileId,
@@ -225,8 +222,8 @@ function getProfileScoring(profileId, activityData = {}) {
     levelName: level.name,
     trustScore: trustScore.total,
     trustScoreBreakdown: trustScore.breakdown,
-    verificationCount: Object.keys(profile.verificationData || {}).filter(type => 
-      profile.verificationData[type] && profile.verificationData[type].verified
+    verificationCount: Object.keys(canonicalVerificationData).filter(type =>
+      canonicalVerificationData[type] && canonicalVerificationData[type].verified
     ).length,
     profile
   };

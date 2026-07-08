@@ -22,6 +22,13 @@ const rateLimit = require('express-rate-limit');
 const { sendWelcomeEmail } = require('./lib/welcome-email');
 const { assertSolanaIrysWriteEnabled, sendSolanaIrysWriteGateResponse } = require('./lib/write-surface-gate');
 const { buildReputationSurface, normalizeTrustScoreValue } = require('./lib/reputation-surface');
+const {
+  CANONICAL_TRUST_PROVIDERS,
+  isCanonicalTrustProvider,
+  filterCanonicalTrustVerifications,
+  filterCanonicalTrustData,
+  normalizeTrustProvider,
+} = require('./lib/canonical-verification-providers');
 
 function getHqPushHeaders() {
   const token = process.env.HQ_AGENT_TOKEN || process.env.HQ_KEY;
@@ -218,6 +225,12 @@ function parseJsonField(val, defaultVal = []) {
 }
 
 function addVerification(profileId, platform, identifier, proof, userPaidGenesis = false) {
+  platform = normalizeTrustProvider(platform);
+  if (!isCanonicalTrustProvider(platform)) {
+    console.warn(`[ProfileStore] Ignoring non-verifying trust provider ${platform} for ${profileId}; canonical trust providers are ${CANONICAL_TRUST_PROVIDERS.join(', ')}`);
+    return null;
+  }
+
   const d = getDb();
   const id = genId('ver');
   d.prepare(`
@@ -271,22 +284,24 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
         
         // Get all verifications for this profile
         const d = getDb();
-        const allVerifs = d.prepare('SELECT platform FROM verifications WHERE profile_id = ?').all(profileId);
+        const allVerifs = filterCanonicalTrustVerifications(
+          d.prepare('SELECT platform FROM verifications WHERE profile_id = ?').all(profileId)
+        );
         const verifCount = allVerifs.length;
         
         // Calculate new verification level with category awareness
         const CATEGORY_MAP = {
-          solana: 'wallets', ethereum: 'wallets', hyperliquid: 'wallets', polymarket: 'wallets',
-          moltbook: 'platforms', agentmail: 'platforms', github: 'platforms', x: 'platforms', twitter: 'platforms', discord: 'platforms', telegram: 'platforms',
-          domain: 'infrastructure', mcp: 'infrastructure', a2a: 'infrastructure', website: 'infrastructure',
-          satp: 'onchain',
+          solana: 'wallets',
+          github: 'platforms',
+          domain: 'infrastructure',
+          website: 'infrastructure',
         };
         const categories = new Set(allVerifs.map(v => CATEGORY_MAP[v.platform] || 'other'));
         const catCount = categories.size;
         
         // Verification level calculation: L0-L5
         // L5 Sovereign: L4 + human-proof verification (X or GitHub verified)
-        const HUMAN_PLATFORMS = ['github', 'x', 'twitter'];
+        const HUMAN_PLATFORMS = ['github'];
         const hasHumanProof = allVerifs.some(v => HUMAN_PLATFORMS.includes(v.platform));
         let newLevel = 0;
         if (verifCount >= 8 && catCount >= 3 && hasHumanProof) newLevel = 5; // L5 Sovereign
@@ -392,9 +407,11 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
 
         // Calculate new verification level based on platform count
         const d = getDb();
-        const verifs = d.prepare('SELECT platform FROM verifications WHERE profile_id = ?').all(profileId);
+        const verifs = filterCanonicalTrustVerifications(
+          d.prepare('SELECT platform FROM verifications WHERE profile_id = ?').all(profileId)
+        );
         const platforms = new Set(verifs.map(v => v.platform));
-        const HUMAN_PLATS = ['github', 'x', 'twitter'];
+        const HUMAN_PLATS = ['github'];
         const hasHuman = [...platforms].some(p => HUMAN_PLATS.includes(p));
         let newLevel = 0;
         if (platforms.size >= 8 && hasHuman) newLevel = 5;
@@ -426,7 +443,7 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
     let totalVerifs = 0;
     try {
       const vd = JSON.parse(vdRow?.verification_data || '{}');
-      totalVerifs = Object.values(vd).filter(v => v && v.verified).length;
+      totalVerifs = Object.values(filterCanonicalTrustData(vd)).filter(v => v && v.verified).length;
     } catch {}
     
     const notifData = JSON.stringify({
@@ -475,7 +492,9 @@ function enrichProfile(row) {
   if (!row) return null;
   const d = getDb();
   const endorsements = d.prepare('SELECT * FROM endorsements WHERE profile_id = ? ORDER BY created_at DESC').all(row.id);
-  const verifications = d.prepare('SELECT * FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id);
+  const verifications = filterCanonicalTrustVerifications(
+    d.prepare('SELECT * FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id)
+  );
   const activity = d.prepare('SELECT * FROM activity_feed WHERE profile_id = ? ORDER BY created_at DESC LIMIT 20').all(row.id);
   const rfk = module.exports._reviewFk || 'profile_id';
   const reviewStats = d.prepare(`
@@ -569,7 +588,7 @@ function enrichProfile(row) {
       // === Chain-cache attestations ONLY (on-chain source of truth) ===
       try {
         const chainCache = require('./lib/chain-cache');
-        const atts = chainCache.getVerifications(row.id);
+        const atts = filterCanonicalTrustVerifications(chainCache.getVerifications(row.id));
         // Build identifier lookup from profile wallets + links + verifications table
         const wallets = parseJsonField(row.wallets, {});
         const links = parseJsonField(row.links, {});
@@ -580,25 +599,15 @@ function enrichProfile(row) {
         }
         const identifierMap = {
           solana: wallets.solana || verifIdentifiers.solana || "",
-          ethereum: wallets.ethereum || verifIdentifiers.ethereum || "",
-          hyperliquid: wallets.hyperliquid || verifIdentifiers.hyperliquid || "",
-          polymarket: wallets.polymarket || links.polymarket || verifIdentifiers.polymarket || "",
           github: links.github || verifIdentifiers.github || "",
-          x: links.x || links.twitter || verifIdentifiers.x || verifIdentifiers.twitter || "",
-          twitter: links.x || links.twitter || verifIdentifiers.x || verifIdentifiers.twitter || "",
           website: links.website || verifIdentifiers.website || "",
           domain: links.website ? links.website.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : (verifIdentifiers.domain || ""),
-          agentmail: links.agentmail || verifIdentifiers.agentmail || "",
-          moltbook: links.moltbook || verifIdentifiers.moltbook || "",
-          mcp: links.mcp || verifIdentifiers.mcp || "MCP Protocol",
-          a2a: links.a2a || verifIdentifiers.a2a || "A2A Protocol",
-          satp: wallets.solana ? ("did:satp:sol:" + wallets.solana) : (verifIdentifiers.satp || ""),
         };
         for (const att of atts) {
           // Skip 'review' — reviews are attestations, not platform verifications
           if (!att.platform || att.platform === 'review') continue;
-          // Normalize twitter → x
-          const platform = att.platform === 'twitter' ? 'x' : att.platform;
+          const platform = normalizeTrustProvider(att.platform);
+          if (!isCanonicalTrustProvider(platform)) continue;
           if (vMap[platform]) continue; // first attestation wins (dedup twitter/x)
           const identifier = identifierMap[att.platform] || identifierMap[platform] || '';
           vMap[platform] = {
@@ -612,15 +621,9 @@ function enrichProfile(row) {
           };
           // Add platform-specific fields for frontend compatibility
           const entry = vMap[platform];
-          if (platform === 'x' || platform === 'twitter') entry.handle = identifier;
-          else if (platform === 'github') entry.username = identifier;
-          else if (platform === 'agentmail') entry.email = identifier;
-          else if (platform === 'moltbook') entry.username = identifier;
+          if (platform === 'github') entry.username = identifier;
           else if (platform === 'website') entry.url = identifier;
           else if (platform === 'domain') entry.domain = identifier;
-          else if (platform === 'satp') entry.did = identifier;
-          else if (platform === 'discord') entry.username = identifier;
-          else if (platform === 'telegram') entry.username = identifier;
         }
       } catch (e) { /* chain-cache not available */ }
       // Filter out verifications with empty/null identifiers (e.g. moltbook with no username)
@@ -1202,7 +1205,7 @@ function registerRoutes(app) {
           }
         }
         // Add verification count from chain-cache (on-chain source of truth)
-        const ccPlatforms = chainCache.getVerifiedPlatforms(p.id);
+        const ccPlatforms = chainCache.getVerifiedPlatforms(p.id).filter(isCanonicalTrustProvider);
         if (ccPlatforms.length > 0) {
           p.onchain_verification_count = ccPlatforms.length;
           p.onchain_platforms = ccPlatforms;
@@ -1220,7 +1223,7 @@ function registerRoutes(app) {
       const chainCache = require('./lib/chain-cache');
       for (const p of profiles) {
         // On-chain verification count (from attestation memos)
-        const ccVerifications = chainCache.getVerifications(p.id);
+        const ccVerifications = filterCanonicalTrustVerifications(chainCache.getVerifications(p.id));
         if (ccVerifications && ccVerifications.length > 0) {
           const ccPlatforms = [...new Set(ccVerifications.map(v => v.platform))];
           p.onchain_verification_count = ccPlatforms.length;
