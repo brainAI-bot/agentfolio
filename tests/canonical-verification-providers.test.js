@@ -5,6 +5,7 @@ const {
   CANONICAL_TRUST_PROVIDERS,
   filterCanonicalTrustData,
   filterCanonicalTrustVerifications,
+  hasVerifiedCanonicalTrustData,
   isCanonicalTrustProvider,
   retiredProviderResponse,
 } = require('../src/lib/canonical-verification-providers');
@@ -48,6 +49,32 @@ test('retired providers are filtered from profile verification data and rows', (
     ]),
     [{ platform: 'github' }, { platform: 'website' }]
   );
+});
+
+test('retired-only verification_data is not exposed or counted as claimed/verified', () => {
+  const retiredOnlyVerificationData = {
+    telegram: { verified: true, linked: true, handle: 'agent' },
+    agentmail: { verified: true, linked: true, address: 'agent@example.test' },
+    ens: { verified: true, success: true, name: 'agent.eth' },
+    farcaster: { verified: true, fid: 123 },
+  };
+
+  assert.deepEqual(filterCanonicalTrustData(retiredOnlyVerificationData), {});
+  assert.equal(hasVerifiedCanonicalTrustData(retiredOnlyVerificationData), false);
+});
+
+test('canonical verification_data survives exposure filtering and counts as claimed', () => {
+  const mixedVerificationData = {
+    telegram: { verified: true, linked: true },
+    solana_wallet: { verified: true, address: 'So11111111111111111111111111111111111111112' },
+    github: { verified: true, username: 'agentfolio' },
+  };
+
+  assert.deepEqual(filterCanonicalTrustData(mixedVerificationData), {
+    solana: { verified: true, address: 'So11111111111111111111111111111111111111112' },
+    github: { verified: true, username: 'agentfolio' },
+  });
+  assert.equal(hasVerifiedCanonicalTrustData(mixedVerificationData), true);
 });
 
 test('scoring ignores retired auto-pass providers', () => {

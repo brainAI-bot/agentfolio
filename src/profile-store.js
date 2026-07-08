@@ -566,6 +566,7 @@ function enrichProfile(row) {
     reviewSummary: reviewStats,
     jobHistory: jobStats,
   });
+  const canonicalVerificationData = filterCanonicalTrustData(parseJsonField(row.verification_data, {}));
 
   return {
     ...row,
@@ -576,7 +577,7 @@ function enrichProfile(row) {
     links: parseJsonField(row.links, {}),
     wallets: parseJsonField(row.wallets, {}),
     skills: parseJsonField(row.skills),
-    verification_data: parseJsonField(row.verification_data, {}),
+    verification_data: canonicalVerificationData,
     portfolio: parseJsonField(row.portfolio),
     endorsements_given: parseJsonField(row.endorsements_given),
     custom_badges: parseJsonField(row.custom_badges),
@@ -1121,12 +1122,14 @@ function registerRoutes(app) {
       }
       // P1: Determine claimed status (has at least one verified platform)
       let claimed = false;
+      let verificationData = {};
       try {
         const vd = typeof rest.verification_data === 'string' ? JSON.parse(rest.verification_data || '{}') : (rest.verification_data || {});
-        claimed = Object.values(vd).some(v => v && v.verified === true);
+        verificationData = filterCanonicalTrustData(vd);
+        claimed = Object.values(verificationData).some(v => v && v.verified === true);
       } catch (_) {}
       const { _trust_score: ts, ...cleanRest } = rest;
-      return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: parseJsonField(cleanRest.verification_data), portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: parseJsonField(cleanRest.metadata), nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, claimed };
+      return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: verificationData, portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: parseJsonField(cleanRest.metadata), nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, claimed };
     });
 
     // V3 on-chain score overlay — authoritative

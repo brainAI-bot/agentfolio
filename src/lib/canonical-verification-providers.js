@@ -57,6 +57,12 @@ function filterCanonicalTrustData(verificationData = {}) {
   return filtered;
 }
 
+function hasVerifiedCanonicalTrustData(verificationData = {}) {
+  return Object.values(filterCanonicalTrustData(verificationData)).some(
+    (data) => data && (data.verified === true || data.linked === true || data.success === true)
+  );
+}
+
 function retiredProviderResponse(platform) {
   const normalized = normalizeTrustProvider(platform);
   return {
@@ -76,5 +82,6 @@ module.exports = {
   isRetiredTrustProvider,
   filterCanonicalTrustVerifications,
   filterCanonicalTrustData,
+  hasVerifiedCanonicalTrustData,
   retiredProviderResponse,
 };

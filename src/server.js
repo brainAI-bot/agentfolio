@@ -30,7 +30,11 @@ const {
 // Scoring module
 const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainData } = require('./scoring');
 const { computeUnifiedTrustScore } = require('./lib/unified-trust-score');
-const { retiredProviderResponse } = require('./lib/canonical-verification-providers');
+const {
+  filterCanonicalTrustData,
+  hasVerifiedCanonicalTrustData,
+  retiredProviderResponse,
+} = require('./lib/canonical-verification-providers');
 const {
   LEVEL_LABELS,
   normalizeTrustScoreValue,
@@ -96,14 +100,15 @@ function normalizeDidProfile(row) {
   if (row.github && !links.github) links.github = row.github;
   if (row.twitter && !links.twitter && !links.x) links.twitter = row.twitter;
   if (row.website && !links.website) links.website = row.website;
+  const verificationData = filterCanonicalTrustData(parseJsonFieldSafe(row.verification_data, {}));
 
   return {
     ...row,
     bio: row.bio || row.description || '',
     wallets,
     links,
-    verification: parseJsonFieldSafe(row.verification || row.verification_data, {}),
-    verificationData: parseJsonFieldSafe(row.verification_data, {}),
+    verification: filterCanonicalTrustData(parseJsonFieldSafe(row.verification || row.verification_data, {})),
+    verificationData,
     skills: parseJsonFieldSafe(row.skills || row.capabilities, []),
   };
 }
@@ -193,7 +198,7 @@ function resolveLeaderboardAvatar(row) {
 function hasClaimedProfile(row) {
   if (row.claimed === 1 || row.claimed === true) return true;
   const verificationData = parseJsonFieldSafe(row.verification_data, {});
-  return Object.values(verificationData || {}).some((v) => v && (v.verified === true || v.linked === true || v.success === true));
+  return hasVerifiedCanonicalTrustData(verificationData);
 }
 
 const publicLeaderboardLimiter = rateLimit({
@@ -1123,7 +1128,9 @@ function getEcosystemStatsPayload() {
 
   for (const row of rows) {
     try {
-      const vd = typeof row.verification_data === 'string' ? JSON.parse(row.verification_data) : (row.verification_data || {});
+      const vd = filterCanonicalTrustData(
+        typeof row.verification_data === 'string' ? JSON.parse(row.verification_data) : (row.verification_data || {})
+      );
       const platforms = Object.keys(vd);
       let hasVerification = false;
       for (const platform of platforms) {
@@ -1133,7 +1140,7 @@ function getEcosystemStatsPayload() {
         }
       }
       if (hasVerification) verified++;
-      if (vd.satp?.verified || vd.solana?.verified) onChain++;
+      if (vd.solana?.verified) onChain++;
     } catch {}
   }
 
@@ -2071,7 +2078,7 @@ app.get('/api/satp/score/:id', async (req, res) => {
     // Parse verification_data
     if (row.verification_data) {
       try {
-        const vd = JSON.parse(row.verification_data);
+        const vd = filterCanonicalTrustData(JSON.parse(row.verification_data));
         for (const [type, data] of Object.entries(vd)) {
           if (data && (data.verified || data.linked || data.success)) profile.verifications.push({ type, ...data });
         }
