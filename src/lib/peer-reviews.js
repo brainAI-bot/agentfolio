@@ -6,6 +6,10 @@
  */
 
 const database = require('./database');
+const {
+  getReviewWeightForTrustScore,
+  resolveTrustScoreFromDb,
+} = require('./trust-score-gates');
 const db = database.db;
 
 // Ensure peer_reviews table exists
@@ -105,19 +109,31 @@ function getGivenReviews(profileId, { limit = 50, offset = 0 } = {}) {
  * Calculate aggregate review score for a profile
  */
 function getReviewScore(profileId) {
-  const row = db.prepare(`
-    SELECT COUNT(*) as count, AVG(rating) as avg, 
-           SUM(CASE WHEN rating >= 4 THEN 1 ELSE 0 END) as positive,
-           SUM(CASE WHEN rating <= 2 THEN 1 ELSE 0 END) as negative
-    FROM peer_reviews WHERE reviewee_id = ?
-  `).get(profileId);
+  const reviews = db.prepare('SELECT * FROM peer_reviews WHERE reviewee_id = ?').all(profileId);
+  let weightedTotal = 0;
+  let totalWeight = 0;
+  let positive = 0;
+  let negative = 0;
+
+  for (const review of reviews) {
+    const reviewerTrust = resolveTrustScoreFromDb(db, review.reviewer_id);
+    const weight = getReviewWeightForTrustScore(reviewerTrust.trustScore);
+    weightedTotal += Number(review.rating || 0) * weight;
+    totalWeight += weight;
+    if (review.rating >= 4) positive++;
+    if (review.rating <= 2) negative++;
+  }
+
+  const avg = totalWeight > 0 ? weightedTotal / totalWeight : 0;
 
   return {
-    count: row.count || 0,
-    average: row.avg ? Math.round(row.avg * 10) / 10 : 0,
-    positive: row.positive || 0,
-    negative: row.negative || 0,
-    score: row.count > 0 ? Math.round((row.avg / 5) * 100) : 0
+    count: reviews.length,
+    average: avg ? Math.round(avg * 10) / 10 : 0,
+    positive,
+    negative,
+    score: reviews.length > 0 ? Math.round((avg / 5) * 100) : 0,
+    weighted: true,
+    totalWeight,
   };
 }
 

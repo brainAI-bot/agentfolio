@@ -1,180 +1,271 @@
-const { computeProfileCompleteness } = require('./profile-completeness');
+const {
+  CANONICAL_TRUST_PROVIDERS,
+  isCanonicalTrustProvider,
+  normalizeTrustProvider,
+} = require('./canonical-verification-providers');
+const { normalizeVerificationPlatform } = require('./verification-categories');
+
+const TRUST_SCORE_CAPS = Object.freeze({
+  canonicalVerifications: 440,
+  satpEvidence: 200,
+  releasedEscrowEvidence: 120,
+  signedReviewEvidence: 40,
+  total: 800,
+});
+
+const CANONICAL_PROVIDER_POINTS = Object.freeze({
+  solana: 120,
+  github: 120,
+  domain: 100,
+  website: 100,
+});
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function countItems(value) {
-  if (Array.isArray(value)) return value.length;
-  if (Number.isFinite(Number(value))) return Number(value);
-  return 0;
-}
-
-function getWallet(profile = {}) {
-  if (profile.wallet) return profile.wallet;
-  const wallets = profile.wallets;
-  if (!wallets) return null;
-  if (typeof wallets === 'string') {
-    try {
-      return JSON.parse(wallets || '{}')?.solana || null;
-    } catch (_) {
-      return null;
-    }
+function parseJsonish(value, fallback = {}) {
+  if (!value) return fallback;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    return fallback;
   }
-  return wallets.solana || null;
 }
 
-function daysSince(dateValue) {
-  if (!dateValue) return 0;
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return 0;
-  return Math.floor((Date.now() - date.getTime()) / 86400000);
+function hasPositiveVerification(data = {}) {
+  return Boolean(data && (data.verified === true || data.success === true || data.linked === true));
 }
 
-function pointsForEndorserLevel(level) {
-  return ({ 1: 5, 2: 10, 3: 20, 4: 30, 5: 40 }[Number(level) || 0] || 0);
+function hasSignedEvidence(data = {}) {
+  if (!data || typeof data !== 'object') return false;
+  return Boolean(
+    data.txSignature ||
+    data.signature ||
+    data.transactionSignature ||
+    data.attestationTx ||
+    data.attestationSignature ||
+    data.memoTx ||
+    data.memo_tx ||
+    data.proofSignature ||
+    data.reviewPda ||
+    data.review_pda ||
+    data.satpSignature ||
+    data.tx_signature ||
+    data.signedAt ||
+    data.onChain === true ||
+    data.verifiedOnChain === true ||
+    data.source === 'satp' ||
+    data.source === 'signed' ||
+    data.source === 'on-chain'
+  );
 }
 
-function computeSocialProof(input = {}) {
+function hasSatpEvidence(data = {}) {
+  if (!data || typeof data !== 'object') return false;
+  return Boolean(
+    data.satpSignature ||
+    data.satpTxSignature ||
+    data.satpAttestationTx ||
+    data.satpPda ||
+    data.satpIdentityPda ||
+    data.source === 'satp' ||
+    data.source === 'satp_v3' ||
+    data.type === 'satp' ||
+    data.kind === 'satp'
+  );
+}
+
+function addVerificationCandidate(candidates, platform, rawData = {}) {
+  const normalized = normalizeVerificationPlatform(platform);
+  if (!normalized) return;
+
+  const data = parseJsonish(rawData, rawData || {});
+  candidates.push({
+    ...data,
+    platform: normalized,
+    proof: parseJsonish(data.proof, data.proof || {}),
+  });
+}
+
+function collectVerificationCandidates(input = {}) {
+  const candidates = [];
   const profile = input.profile || {};
-  const subjectWallet = getWallet(profile);
-  const endorsementsGiven = Array.isArray(input.endorsementsGiven) ? input.endorsementsGiven : new Array(Math.max(0, Number(input.endorsementsGivenCount || 0))).fill({});
-  const endorsementsReceived = Array.isArray(input.endorsementsReceived)
-    ? input.endorsementsReceived
-    : (Array.isArray(input.receivedEndorsements) ? input.receivedEndorsements : []);
 
-  const seenGivenPairs = new Set();
-  for (const endorsement of endorsementsGiven) {
-    const endorserId = endorsement.endorserId || endorsement.from || endorsement.endorser_id || profile.id || subjectWallet || null;
-    const subjectId = endorsement.subjectId || endorsement.to || endorsement.profile_id || endorsement.profileId || null;
-    const pairKey = `${String(endorserId || '')}->${String(subjectId || '')}`;
-    if (pairKey === '->') continue;
-    seenGivenPairs.add(pairKey);
+  for (const verification of input.verifications || []) {
+    addVerificationCandidate(candidates, verification?.platform || verification?.type, verification);
   }
 
-  const givenPoints = Math.min(5, seenGivenPairs.size) * 5;
-  const seenReceivedPairs = new Set();
-  let receivedPoints = 0;
+  const verificationData = {
+    ...parseJsonish(profile.verificationData, {}),
+    ...parseJsonish(profile.verification_data, {}),
+    ...parseJsonish(profile.verification, {}),
+    ...parseJsonish(input.verificationData, {}),
+  };
 
-  for (const endorsement of endorsementsReceived) {
-    const endorserWallet = endorsement.endorserWallet || endorsement.fromWallet || endorsement.wallet || null;
-    const endorserId = endorsement.endorserId || endorsement.from || endorsement.endorser_id || endorserWallet || null;
-    const subjectId = endorsement.subjectId || endorsement.to || endorsement.profile_id || profile.id || subjectWallet || 'subject';
-    if (subjectWallet && endorserWallet && subjectWallet === endorserWallet) continue;
-
-    const pairKey = `${String(endorserId || '')}->${String(subjectId || '')}`;
-    if (pairKey !== '->' && seenReceivedPairs.has(pairKey)) continue;
-    if (pairKey !== '->') seenReceivedPairs.add(pairKey);
-
-    receivedPoints += pointsForEndorserLevel(
-      endorsement.endorserLevel || endorsement.level || endorsement.endorser_level || endorsement.reviewerLevel
-    );
+  for (const [platform, data] of Object.entries(verificationData || {})) {
+    addVerificationCandidate(candidates, platform, data);
   }
 
-  const total = Math.min(200, givenPoints + receivedPoints);
+  return candidates;
+}
+
+function computeCanonicalVerificationScore(input = {}) {
+  const seen = new Set();
+  const verified = [];
+
+  for (const item of collectVerificationCandidates(input)) {
+    const platform = normalizeTrustProvider(item.platform);
+    if (!isCanonicalTrustProvider(platform) || seen.has(platform)) continue;
+    if (!hasPositiveVerification(item) && !hasPositiveVerification(item.proof)) continue;
+
+    seen.add(platform);
+    verified.push(platform);
+  }
+
+  const byProvider = {};
+  let total = 0;
+  for (const platform of CANONICAL_TRUST_PROVIDERS) {
+    const points = verified.includes(platform) ? CANONICAL_PROVIDER_POINTS[platform] : 0;
+    byProvider[platform] = points;
+    total += points;
+  }
+
+  return {
+    total: Math.min(total, TRUST_SCORE_CAPS.canonicalVerifications),
+    breakdown: byProvider,
+    verified,
+  };
+}
+
+function computeSatpEvidenceScore(input = {}) {
+  const profile = input.profile || {};
+  const onchain = input.onchain || {};
+  const candidates = collectVerificationCandidates(input);
+
+  const hasSatpIdentity = Boolean(
+    input.hasSatpIdentity ??
+    input.hasSatpGenesis ??
+    onchain.hasSatpIdentity ??
+    onchain.hasSatpGenesis ??
+    profile.hasSatpIdentity ??
+    profile.hasSatpGenesis
+  );
+
+  const signedSatpItems = candidates.filter((item) => {
+    const platform = normalizeVerificationPlatform(item.platform);
+    return platform === 'satp' || hasSatpEvidence(item) || hasSatpEvidence(item.proof);
+  });
+
+  const signedEvidenceCount = Number(input.signedSatpEvidenceCount ?? onchain.signedSatpEvidenceCount ?? 0);
+  const evidenceCount = Math.max(signedSatpItems.length, signedEvidenceCount);
+
+  const breakdown = {
+    satpIdentity: hasSatpIdentity ? 80 : 0,
+    signedSatpEvidence: Math.min(3, Math.max(0, evidenceCount)) * 40,
+  };
+
+  return {
+    total: Math.min(TRUST_SCORE_CAPS.satpEvidence, breakdown.satpIdentity + breakdown.signedSatpEvidence),
+    breakdown,
+    evidenceCount,
+  };
+}
+
+function isReleasedStatus(value) {
+  return ['released', 'auto_released', 'completed', 'settled'].includes(String(value || '').toLowerCase());
+}
+
+function countReleasedEscrowEvidence(input = {}) {
+  const activity = input.activity || {};
+  const escrows = [
+    ...(Array.isArray(input.escrows) ? input.escrows : []),
+    ...(Array.isArray(input.releasedEscrows) ? input.releasedEscrows : []),
+    ...(Array.isArray(activity.escrows) ? activity.escrows : []),
+    ...(Array.isArray(activity.releasedEscrows) ? activity.releasedEscrows : []),
+  ];
+
+  if (escrows.length > 0) {
+    return escrows.filter((escrow) => {
+      if (!isReleasedStatus(escrow?.status)) return false;
+      return Boolean(
+        escrow.txSignature ||
+        escrow.tx_signature ||
+        escrow.releaseTx ||
+        escrow.release_tx ||
+        escrow.releaseTxHash ||
+        escrow.release_tx_hash ||
+        escrow.escrowPda ||
+        escrow.escrow_pda ||
+        escrow.onChain === true ||
+        escrow.verifiedOnChain === true
+      );
+    }).length;
+  }
+
+  return Number(
+    input.releasedEscrowEvidenceCount ??
+    activity.releasedEscrowEvidenceCount ??
+    input.onchainReleasedEscrowEvidenceCount ??
+    activity.onchainReleasedEscrowEvidenceCount ??
+    0
+  );
+}
+
+function computeReleasedEscrowEvidenceScore(input = {}) {
+  const evidenceCount = Math.max(0, countReleasedEscrowEvidence(input));
+  const total = Math.min(TRUST_SCORE_CAPS.releasedEscrowEvidence, evidenceCount * 40);
   return {
     total,
-    breakdown: {
-      endorsementsGiven: givenPoints,
-      endorsementsReceived: Math.min(receivedPoints, Math.max(0, 200 - givenPoints)),
-    },
+    breakdown: { releasedEscrows: total },
+    evidenceCount,
   };
 }
 
-function reviewPoints(review = {}) {
-  const rating = Number(review.rating || review.stars || review.score || 0);
-  if (rating >= 5) return 50;
-  if (rating >= 4) return 30;
-  if (rating >= 3) return 10;
-  if (rating > 0) return -20;
-  return 0;
-}
-
-function computeMarketplaceActivity(input = {}) {
+function countSignedReviewEvidence(input = {}) {
   const activity = input.activity || {};
-  const jobsPosted = Number(input.jobsPosted ?? input.jobsPostedCount ?? activity.jobsPosted ?? 0);
-  const workerEscrows = Number(input.escrowsCompletedAsWorker ?? input.completedWorkerEscrowCount ?? activity.escrowsCompletedAsWorker ?? activity.completedEscrowJobsAsWorker ?? 0);
-  const posterEscrows = Number(input.escrowsCompletedAsPoster ?? input.completedPosterEscrowCount ?? activity.escrowsCompletedAsPoster ?? activity.completedEscrowJobsAsPoster ?? 0);
-  const reviewsReceived = Array.isArray(input.reviewsReceived)
-    ? input.reviewsReceived
-    : (Array.isArray(input.receivedReviews) ? input.receivedReviews : (Array.isArray(activity.reviewsReceived) ? activity.reviewsReceived : []));
-  const completionRate = Number.isFinite(Number(input.completionRate ?? activity.completionRate))
-    ? Number(input.completionRate ?? activity.completionRate)
-    : null;
-  const totalJobs = workerEscrows + posterEscrows;
+  const reviews = [
+    ...(Array.isArray(input.reviewsReceived) ? input.reviewsReceived : []),
+    ...(Array.isArray(input.receivedReviews) ? input.receivedReviews : []),
+    ...(Array.isArray(activity.reviewsReceived) ? activity.reviewsReceived : []),
+    ...(Array.isArray(activity.receivedReviews) ? activity.receivedReviews : []),
+  ];
 
-  const breakdown = {
-    jobsPosted: jobsPosted > 0 ? 10 : 0,
-    completedEscrowJobsAsWorker: workerEscrows * 30,
-    completedEscrowJobsAsPoster: posterEscrows * 15,
-    reviewsReceived: reviewsReceived.reduce((sum, review) => sum + reviewPoints(review), 0),
-    perfectCompletionBonus: totalJobs >= 3 && completionRate === 1 ? 50 : 0,
-  };
+  if (reviews.length > 0) {
+    return reviews.filter((review) => hasSignedEvidence(review) || hasSignedEvidence(parseJsonish(review?.proof, {}))).length;
+  }
 
-  const total = Math.min(300, breakdown.jobsPosted + breakdown.completedEscrowJobsAsWorker + breakdown.completedEscrowJobsAsPoster + breakdown.reviewsReceived + breakdown.perfectCompletionBonus);
-  return { total, breakdown };
+  return Number(input.signedReviewEvidenceCount ?? activity.signedReviewEvidenceCount ?? 0);
 }
 
-function computeOnChainActivity(input = {}) {
-  const onchain = input.onchain || {};
-  const hasSatpGenesis = Boolean(input.hasSatpIdentity ?? input.hasSatpGenesis ?? onchain.hasSatpGenesis ?? onchain.hasSatpIdentity);
-  const hasBoaAvatar = Boolean(input.hasBoaAvatar ?? onchain.hasBoaAvatar);
-  const onchainAttestationsReceived = Number(input.onchainAttestationsReceived ?? onchain.onchainAttestationsReceived ?? 0);
-
-  const breakdown = {
-    satpGenesis: hasSatpGenesis ? 10 : 0,
-    boaAvatar: hasBoaAvatar ? 40 : 0,
-    onchainAttestationsReceived: Math.min(2, Math.max(0, onchainAttestationsReceived)) * 25,
-  };
-
+function computeSignedReviewEvidenceScore(input = {}) {
+  const evidenceCount = Math.max(0, countSignedReviewEvidence(input));
+  const total = Math.min(TRUST_SCORE_CAPS.signedReviewEvidence, evidenceCount * 20);
   return {
-    total: Math.min(100, breakdown.satpGenesis + breakdown.boaAvatar + breakdown.onchainAttestationsReceived),
-    breakdown,
-  };
-}
-
-function computePlatformTenure(input = {}) {
-  const tenure = input.tenure || {};
-  const profile = input.profile || {};
-  const daysActive = Number.isFinite(Number(tenure.daysActive))
-    ? Number(tenure.daysActive)
-    : daysSince(profile.created_at || profile.createdAt || input.createdAt);
-  const referralsReachedL2 = Number(input.referralsReachedL2 ?? tenure.referralsReachedL2 ?? input.referralCount ?? 0);
-
-  const breakdown = {
-    days7: daysActive >= 7 ? 10 : 0,
-    days30: daysActive >= 30 ? 30 : 0,
-    days90: daysActive >= 90 ? 50 : 0,
-    referralsReachedL2: Math.min(4, Math.max(0, referralsReachedL2)) * 20,
-  };
-
-  return {
-    total: Math.min(170, breakdown.days7 + breakdown.days30 + breakdown.days90 + breakdown.referralsReachedL2),
-    breakdown,
-    daysActive,
+    total,
+    breakdown: { signedReviews: total },
+    evidenceCount,
   };
 }
 
 function computeTrustScore(input = {}) {
-  const profile = input.profile || {};
-  const profileComponent = computeProfileCompleteness(profile);
-  const socialComponent = computeSocialProof({ ...input, profile });
-  const marketplaceComponent = computeMarketplaceActivity({ ...input, profile });
-  const onchainComponent = computeOnChainActivity({ ...input, profile });
-  const tenureComponent = computePlatformTenure({ ...input, profile });
+  const canonical = computeCanonicalVerificationScore(input);
+  const satp = computeSatpEvidenceScore(input);
+  const releasedEscrow = computeReleasedEscrowEvidenceScore(input);
+  const signedReviews = computeSignedReviewEvidenceScore(input);
 
   const trustScore = clamp(
-    profileComponent.total + socialComponent.total + marketplaceComponent.total + onchainComponent.total + tenureComponent.total,
+    canonical.total + satp.total + releasedEscrow.total + signedReviews.total,
     0,
-    800
+    TRUST_SCORE_CAPS.total
   );
 
   const breakdown = {
-    profile: profileComponent.total,
-    social: socialComponent.total,
-    marketplace: marketplaceComponent.total,
-    onchain: onchainComponent.total,
-    tenure: tenureComponent.total,
+    canonicalVerifications: canonical.total,
+    satpEvidence: satp.total,
+    releasedEscrowEvidence: releasedEscrow.total,
+    signedReviewEvidence: signedReviews.total,
   };
 
   return {
@@ -182,20 +273,21 @@ function computeTrustScore(input = {}) {
     total: trustScore,
     breakdown,
     details: {
-      profile: profileComponent,
-      social: socialComponent,
-      marketplace: marketplaceComponent,
-      onchain: onchainComponent,
-      tenure: tenureComponent,
+      canonicalVerifications: canonical,
+      satpEvidence: satp,
+      releasedEscrowEvidence: releasedEscrow,
+      signedReviewEvidence: signedReviews,
     },
     componentTotals: breakdown,
   };
 }
 
 module.exports = {
+  TRUST_SCORE_CAPS,
+  CANONICAL_PROVIDER_POINTS,
   computeTrustScore,
-  computeSocialProof,
-  computeMarketplaceActivity,
-  computeOnChainActivity,
-  computePlatformTenure,
+  computeCanonicalVerificationScore,
+  computeSatpEvidenceScore,
+  computeReleasedEscrowEvidenceScore,
+  computeSignedReviewEvidenceScore,
 };
