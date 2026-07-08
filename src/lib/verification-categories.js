@@ -1,32 +1,19 @@
+const {
+  isCanonicalTrustProvider,
+  normalizeTrustProvider,
+} = require('./canonical-verification-providers');
+
 const CATEGORY_MAP = {
   satp: 'onchain',
   satp_v3: 'onchain',
   solana: 'wallet',
-  solana_wallet: 'wallet',
-  eth: 'wallet',
-  eth_wallet: 'wallet',
-  ethereum: 'wallet',
-  bitcoin: 'wallet',
   github: 'platform',
-  x: 'platform',
-  twitter: 'platform',
-  discord: 'platform',
-  telegram: 'platform',
-  agentmail: 'platform',
-  moltbook: 'platform',
-  hyperliquid: 'platform',
-  polymarket: 'platform',
   website: 'infra',
   domain: 'infra',
-  mcp: 'infra',
-  a2a: 'infra',
 };
 
 const PLATFORM_ALIASES = {
-  twitter: 'x',
-  solana: 'solana_wallet',
-  eth_wallet: 'eth',
-  ethereum: 'eth',
+  solana_wallet: 'solana',
   satp_v3: 'satp',
   satp_identity: 'satp',
   satp_verification: 'satp',
@@ -37,7 +24,7 @@ function normalizeVerificationPlatform(platform) {
   if (!value) return null;
   if (value.startsWith('verification_')) value = value.slice('verification_'.length);
   if (value.endsWith('_verification')) value = value.slice(0, -'_verification'.length);
-  return PLATFORM_ALIASES[value] || value;
+  return PLATFORM_ALIASES[value] || normalizeTrustProvider(value);
 }
 
 function isSatpPlatform(platform) {
@@ -45,7 +32,10 @@ function isSatpPlatform(platform) {
 }
 
 function getVerificationCategory(platform) {
-  return CATEGORY_MAP[normalizeVerificationPlatform(platform)] || null;
+  const normalized = normalizeVerificationPlatform(platform);
+  if (normalized === 'satp') return CATEGORY_MAP.satp;
+  if (!isCanonicalTrustProvider(normalized)) return null;
+  return CATEGORY_MAP[normalized] || null;
 }
 
 function normalizeVerifications(verifications = [], { includeSatp = false, dedupe = true } = {}) {
@@ -56,6 +46,7 @@ function normalizeVerifications(verifications = [], { includeSatp = false, dedup
     const platform = normalizeVerificationPlatform(raw?.platform || raw?.type);
     if (!platform || platform === 'review') continue;
     if (!includeSatp && platform === 'satp') continue;
+    if (platform !== 'satp' && !isCanonicalTrustProvider(platform)) continue;
 
     const item = {
       ...raw,

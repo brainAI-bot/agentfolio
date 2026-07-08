@@ -31,6 +31,11 @@ const {
 const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainData } = require('./scoring');
 const { computeUnifiedTrustScore } = require('./lib/unified-trust-score');
 const {
+  filterCanonicalTrustData,
+  hasVerifiedCanonicalTrustData,
+  retiredProviderResponse,
+} = require('./lib/canonical-verification-providers');
+const {
   LEVEL_LABELS,
   normalizeTrustScoreValue,
   normalizeLevel,
@@ -81,6 +86,10 @@ function getRequestBaseUrl(req) {
   return `${protocol}://${host}`;
 }
 
+function sendRetiredVerificationProvider(res, platform, status = 410) {
+  return res.status(status).json(retiredProviderResponse(platform));
+}
+
 function normalizeDidProfile(row) {
   if (!row) return null;
 
@@ -91,14 +100,15 @@ function normalizeDidProfile(row) {
   if (row.github && !links.github) links.github = row.github;
   if (row.twitter && !links.twitter && !links.x) links.twitter = row.twitter;
   if (row.website && !links.website) links.website = row.website;
+  const verificationData = filterCanonicalTrustData(parseJsonFieldSafe(row.verification_data, {}));
 
   return {
     ...row,
     bio: row.bio || row.description || '',
     wallets,
     links,
-    verification: parseJsonFieldSafe(row.verification || row.verification_data, {}),
-    verificationData: parseJsonFieldSafe(row.verification_data, {}),
+    verification: filterCanonicalTrustData(parseJsonFieldSafe(row.verification || row.verification_data, {})),
+    verificationData,
     skills: parseJsonFieldSafe(row.skills || row.capabilities, []),
   };
 }
@@ -188,7 +198,7 @@ function resolveLeaderboardAvatar(row) {
 function hasClaimedProfile(row) {
   if (row.claimed === 1 || row.claimed === true) return true;
   const verificationData = parseJsonFieldSafe(row.verification_data, {});
-  return Object.values(verificationData || {}).some((v) => v && (v.verified === true || v.linked === true || v.success === true));
+  return hasVerifiedCanonicalTrustData(verificationData);
 }
 
 const publicLeaderboardLimiter = rateLimit({
@@ -1118,7 +1128,9 @@ function getEcosystemStatsPayload() {
 
   for (const row of rows) {
     try {
-      const vd = typeof row.verification_data === 'string' ? JSON.parse(row.verification_data) : (row.verification_data || {});
+      const vd = filterCanonicalTrustData(
+        typeof row.verification_data === 'string' ? JSON.parse(row.verification_data) : (row.verification_data || {})
+      );
       const platforms = Object.keys(vd);
       let hasVerification = false;
       for (const platform of platforms) {
@@ -1128,7 +1140,7 @@ function getEcosystemStatsPayload() {
         }
       }
       if (hasVerification) verified++;
-      if (vd.satp?.verified || vd.solana?.verified) onChain++;
+      if (vd.solana?.verified) onChain++;
     } catch {}
   }
 
@@ -1256,48 +1268,15 @@ app.post('/api/verification/discord/initiate', async (req, res) => {
 
 // Telegram verification endpoints
 app.get('/api/verification/telegram/status', async (req, res) => {
-  const { challengeId } = req.query;
-  
-  if (!challengeId) {
-    return res.status(400).json({ error: 'Missing challengeId parameter' });
-  }
-  
-  try {
-    const status = await telegramVerify.getTelegramVerificationStatus(challengeId);
-    res.json(status);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  return sendRetiredVerificationProvider(res, 'telegram');
 });
 
 app.post('/api/verification/telegram/initiate', async (req, res) => {
-  const { profileId, telegramUsername } = req.body;
-  
-  if (!profileId || !telegramUsername) {
-    return res.status(400).json({ error: 'Missing profileId or telegramUsername' });
-  }
-
-  try {
-    const result = await telegramVerify.initiateTelegramVerification(profileId, telegramUsername);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  return sendRetiredVerificationProvider(res, 'telegram');
 });
 
 app.post('/api/verification/telegram/verify', async (req, res) => {
-  const { challengeId, messageUrl } = req.body;
-  
-  if (!challengeId || !messageUrl) {
-    return res.status(400).json({ error: 'Missing challengeId or messageUrl' });
-  }
-
-  try {
-    const result = await telegramVerify.verifyTelegramChallenge(challengeId, messageUrl);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  return sendRetiredVerificationProvider(res, 'telegram');
 });
 
 // Domain verification endpoints
@@ -1394,68 +1373,33 @@ app.post('/api/verification/website/verify', async (req, res) => {
 
 // ========== ETH WALLET VERIFICATION ==========
 app.post('/api/verification/eth/initiate', (req, res) => {
-  try {
-    const { profileId, walletAddress } = req.body;
-    if (!profileId || !walletAddress) return res.status(400).json({ error: 'profileId and walletAddress required' });
-    if (!/^0x[0-9a-fA-F]{40}$/.test(walletAddress)) return res.status(400).json({ error: 'Invalid ETH address' });
-    const challenge = ethVerify.generateChallenge(profileId, walletAddress);
-    res.json({ success: true, ...challenge, instructions: 'Sign the message with your ETH wallet, then POST signature to /api/verification/eth/verify' });
-  } catch (error) { res.status(500).json({ error: error.message }); }
+  return sendRetiredVerificationProvider(res, 'eth');
 });
 
 app.post('/api/verification/eth/verify', (req, res) => {
-  try {
-    const { challengeId, signature } = req.body;
-    if (!challengeId || !signature) return res.status(400).json({ error: 'challengeId and signature required' });
-    const result = ethVerify.verifySignature(challengeId, signature);
-    res.json(result);
-  } catch (error) { res.status(500).json({ error: error.message }); }
+  return sendRetiredVerificationProvider(res, 'eth');
 });
 
 // ========== ENS VERIFICATION ==========
 app.post('/api/verification/ens/initiate', (req, res) => {
-  try {
-    const { profileId, ensName } = req.body;
-    if (!profileId || !ensName) return res.status(400).json({ error: 'profileId and ensName required' });
-    if (!ensName.endsWith('.eth')) return res.status(400).json({ error: 'ENS name must end with .eth' });
-    const challenge = ensVerify.generateChallenge(profileId, ensName);
-    res.json({ success: true, ...challenge, instructions: 'Sign the message with the wallet that owns this ENS name, then POST to /api/verification/ens/verify' });
-  } catch (error) { res.status(500).json({ error: error.message }); }
+  return sendRetiredVerificationProvider(res, 'ens');
 });
 
 app.post('/api/verification/ens/verify', async (req, res) => {
-  try {
-    const { challengeId, signature } = req.body;
-    if (!challengeId || !signature) return res.status(400).json({ error: 'challengeId and signature required' });
-    const result = await ensVerify.verifyENSOwnership(challengeId, signature);
-    res.json(result);
-  } catch (error) { res.status(500).json({ error: error.message }); }
+  return sendRetiredVerificationProvider(res, 'ens');
 });
 
 app.get('/api/verification/ens/resolve/:name', async (req, res) => {
-  try {
-    const result = await ensVerify.resolveENS(req.params.name);
-    res.json(result);
-  } catch (error) { res.status(500).json({ error: error.message }); }
+  return sendRetiredVerificationProvider(res, 'ens');
 });
 
 // ========== FARCASTER VERIFICATION ==========
 app.post('/api/verification/farcaster/initiate', (req, res) => {
-  try {
-    const { profileId, fid } = req.body;
-    if (!profileId || !fid) return res.status(400).json({ error: 'profileId and fid required' });
-    const challenge = farcasterVerify.generateChallenge(profileId, fid);
-    res.json({ success: true, ...challenge });
-  } catch (error) { res.status(500).json({ error: error.message }); }
+  return sendRetiredVerificationProvider(res, 'farcaster');
 });
 
 app.post('/api/verification/farcaster/verify', async (req, res) => {
-  try {
-    const { challengeId, castHash } = req.body;
-    if (!challengeId || !castHash) return res.status(400).json({ error: 'challengeId and castHash required' });
-    const result = await farcasterVerify.verifyCast(challengeId, castHash);
-    res.json(result);
-  } catch (error) { res.status(500).json({ error: error.message }); }
+  return sendRetiredVerificationProvider(res, 'farcaster');
 });
 
 // ── Profile Store routes (register, profiles, endorsements, reviews) ──
@@ -1739,36 +1683,11 @@ app.post('/api/verify/github/confirm', async (req, res) => {
 
 // X/Twitter: challenge → user posts tweet → confirm
 app.post('/api/verify/x/challenge', async (req, res) => {
-  try {
-    const { profileId, xHandle } = req.body;
-    if (!profileId || !xHandle) return res.status(400).json({ error: 'profileId and xHandle required' });
-    const handle = xHandle.replace('@', '');
-    const challenge = verificationChallenges.generateChallenge(profileId, 'x', handle);
-    challenge.challengeData.instructions = `Post a tweet containing: agentfolio-verify:${challenge.id}`;
-    challenge.challengeData.expectedContent = `agentfolio-verify:${challenge.id}`;
-    await verificationChallenges.storeChallenge(challenge);
-    res.json({ challengeId: challenge.id, instructions: challenge.challengeData.instructions, expiresAt: challenge.challengeData.expiresAt });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  return sendRetiredVerificationProvider(res, 'x');
 });
 
 app.post('/api/verify/x/confirm', async (req, res) => {
-  try {
-    const { challengeId, tweetUrl } = req.body;
-    if (!challengeId || !tweetUrl) return res.status(400).json({ error: 'challengeId and tweetUrl required' });
-    const challenge = await verificationChallenges.getChallenge(challengeId);
-    if (!challenge) return res.status(404).json({ error: 'Challenge not found or expired' });
-    // Verify via vxtwitter API
-    const tweetId = tweetUrl.split('/').pop().split('?')[0];
-    const handle = challenge.challengeData.identifier;
-    const resp = await fetch(`https://api.vxtwitter.com/${handle}/status/${tweetId}`);
-    if (!resp.ok) return res.status(400).json({ error: 'Could not fetch tweet' });
-    const tweet = await resp.json();
-    if (!tweet.text?.includes(challenge.challengeData.expectedContent)) return res.status(400).json({ error: 'Tweet does not contain challenge code' });
-    const proof = { tweetUrl, tweetId, verifiedAt: new Date().toISOString() };
-    await verificationChallenges.completeChallenge(challengeId, proof);
-    profileStore.addVerification(challenge.profileId, 'x', handle, proof);
-    res.json({ verified: true, platform: 'x', identifier: handle, proof: { challengeId, tweetUrl } });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  return sendRetiredVerificationProvider(res, 'x');
 });
 
 // Solana: challenge → user signs message → confirm (ed25519 verified)
@@ -1813,30 +1732,11 @@ app.post('/api/verify/solana/confirm', async (req, res) => {
 
 // AgentMail: challenge → sends code to email → confirm
 app.post('/api/verify/agentmail/challenge', async (req, res) => {
-  try {
-    const { profileId, email } = req.body;
-    if (!profileId || !email) return res.status(400).json({ error: 'profileId and email required' });
-    if (!email.endsWith('@agentmail.to')) return res.status(400).json({ error: 'Only @agentmail.to addresses supported' });
-    const challenge = verificationChallenges.generateChallenge(profileId, 'agentmail', email);
-    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-    challenge.challengeData.code = code;
-    challenge.challengeData.instructions = `Check your ${email} inbox for verification code: ${code}`;
-    await verificationChallenges.storeChallenge(challenge);
-    // In production: send email with code via AgentMail API
-    res.json({ challengeId: challenge.id, instructions: `Enter the verification code sent to ${email}`, expiresAt: challenge.challengeData.expiresAt });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  return sendRetiredVerificationProvider(res, 'agentmail');
 });
 
 app.post('/api/verify/agentmail/confirm', async (req, res) => {
-  try {
-    const { challengeId, code } = req.body;
-    if (!challengeId || !code) return res.status(400).json({ error: 'challengeId and code required' });
-    const challenge = await verificationChallenges.getChallenge(challengeId);
-    if (!challenge) return res.status(404).json({ error: 'Challenge not found or expired' });
-    if (code.toUpperCase() !== challenge.challengeData.code) return res.status(400).json({ error: 'Invalid verification code' });
-    await verificationChallenges.completeChallenge(challengeId, { email: challenge.challengeData.identifier, verifiedAt: new Date().toISOString() });
-    res.json({ verified: true, platform: 'agentmail', identifier: challenge.challengeData.identifier, proof: { challengeId } });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  return sendRetiredVerificationProvider(res, 'agentmail');
 });
 
 // ===== END HARDENED VERIFICATION ENDPOINTS =====
@@ -2178,7 +2078,7 @@ app.get('/api/satp/score/:id', async (req, res) => {
     // Parse verification_data
     if (row.verification_data) {
       try {
-        const vd = JSON.parse(row.verification_data);
+        const vd = filterCanonicalTrustData(JSON.parse(row.verification_data));
         for (const [type, data] of Object.entries(vd)) {
           if (data && (data.verified || data.linked || data.success)) profile.verifications.push({ type, ...data });
         }

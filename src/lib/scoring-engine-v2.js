@@ -3,6 +3,7 @@
  * Replaces all existing scoring systems with clean 2D approach
  * Based on specs/scoring-redesign-v1.md
  */
+const { filterCanonicalTrustData } = require('./canonical-verification-providers');
 
 // Verification Level Requirements (0-5)
 const VERIFICATION_LEVELS = {
@@ -60,14 +61,14 @@ const VERIFICATION_LEVELS = {
 
 // Verification Categories for Level 3+ requirements
 const VERIFICATION_CATEGORIES = {
-  wallets: ['solana', 'ethereum', 'bitcoin', 'hyperliquid', 'polymarket'],
-  platforms: ['agentmail', 'moltbook', 'telegram', 'discord', 'farcaster', 'github', 'x'],
-  infrastructure: ['domain', 'mcp', 'a2a', 'openclaw', 'did', 'website'],
-  onchain: ['ens', 'eas', 'satp']
+  wallets: ['solana'],
+  platforms: ['github'],
+  infrastructure: ['domain', 'website'],
+  onchain: []
 };
 
 // Human-required verifications (for Level 5)
-const HUMAN_VERIFICATIONS = ['github', 'x', 'telegram', 'discord'];
+const HUMAN_VERIFICATIONS = ['github'];
 
 /**
  * Calculate Verification Level (0-5) - deterministic
@@ -141,10 +142,11 @@ function meetsLevelRequirements(profile, level) {
  * Count total verifications (excluding basic profile data)
  */
 function countVerifications(profile) {
-  if (!profile.verificationData) return 0;
+  const verificationData = filterCanonicalTrustData(profile.verificationData || {});
+  if (!verificationData) return 0;
   
   let count = 0;
-  for (const [provider, data] of Object.entries(profile.verificationData)) {
+  for (const [, data] of Object.entries(verificationData)) {
     if (data && (data.verified || data.success)) {
       count++;
     }
@@ -157,11 +159,12 @@ function countVerifications(profile) {
  * Count verification categories for Level 3+ requirement
  */
 function countVerificationCategories(profile) {
-  if (!profile.verificationData) return 0;
+  const verificationData = filterCanonicalTrustData(profile.verificationData || {});
+  if (!verificationData) return 0;
   
   const categoriesFound = new Set();
   
-  for (const [provider, data] of Object.entries(profile.verificationData)) {
+  for (const [provider, data] of Object.entries(verificationData)) {
     if (!data || !data.verified) continue;
     
     // Find which category this provider belongs to
@@ -222,10 +225,11 @@ function hasBurnToBecomeAvatar(profile) {
  * Check if has human-required verification (for Level 5)
  */
 function hasHumanVerification(profile) {
-  if (!profile.verificationData) return false;
+  const verificationData = filterCanonicalTrustData(profile.verificationData || {});
+  if (!verificationData) return false;
   
   for (const provider of HUMAN_VERIFICATIONS) {
-    if (profile.verificationData[provider]?.verified) {
+    if (verificationData[provider]?.verified) {
       return true;
     }
   }

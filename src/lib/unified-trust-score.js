@@ -5,6 +5,7 @@ const {
   normalizeVerificationPlatform,
   normalizeVerifications,
 } = require('./verification-categories');
+const { CANONICAL_TRUST_PROVIDERS } = require('./canonical-verification-providers');
 
 function queryAll(db, sql, params = []) {
   try {
@@ -59,7 +60,13 @@ function getStats(db, profileId) {
   const escrowsCompletedAsPoster = queryOne(db, "SELECT COUNT(*) AS c FROM escrows WHERE client_id = ? AND (status IN ('completed','released') OR released_at IS NOT NULL)", [profileId], { c: 0 }).c || 0;
   const totalEscrows = queryOne(db, 'SELECT COUNT(*) AS c FROM escrows WHERE agent_id = ? OR client_id = ?', [profileId, profileId], { c: 0 }).c || 0;
   const reviewsReceived = queryAll(db, 'SELECT * FROM reviews WHERE reviewee_id = ?', [profileId]);
-  const onchainAttestationsReceived = queryOne(db, "SELECT COUNT(*) AS c FROM attestations WHERE profile_id = ? AND tx_signature IS NOT NULL AND platform NOT IN ('satp', 'solana')", [profileId], { c: 0 }).c || 0;
+  const placeholders = CANONICAL_TRUST_PROVIDERS.map(() => '?').join(',');
+  const onchainAttestationsReceived = queryOne(
+    db,
+    `SELECT COUNT(*) AS c FROM attestations WHERE profile_id = ? AND tx_signature IS NOT NULL AND platform IN (${placeholders})`,
+    [profileId, ...CANONICAL_TRUST_PROVIDERS],
+    { c: 0 }
+  ).c || 0;
   const referralsReachedL2 = 0;
 
   return {

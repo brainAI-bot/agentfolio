@@ -8,6 +8,11 @@
 
 'use strict';
 
+const {
+  isCanonicalTrustProvider,
+  retiredProviderResponse,
+} = require('../lib/canonical-verification-providers');
+
 function registerRestoredRoutes(app) {
   const path = require('path');
   const fs = require('fs');
@@ -28,6 +33,10 @@ function registerRestoredRoutes(app) {
   const PROFILES_DIR = DATA_DIR;
 
   function upsertActiveVerification(profileId, platform, identifier, proof = {}) {
+    if (!isCanonicalTrustProvider(platform)) {
+      console.warn(`[RestoredRoutes] Ignoring retired/non-verifying provider ${platform} for ${profileId}`);
+      return;
+    }
     try {
       const Database = require('better-sqlite3');
       const db = new Database(path.join(__dirname, '..', '..', 'data', 'agentfolio.db'));
@@ -384,82 +393,22 @@ function registerRestoredRoutes(app) {
 
   // POST /api/verify/telegram/start
   app.post('/api/verify/telegram/start', express.json(), (req, res) => {
-    try {
-      const { profileId, telegramHandle } = req.body;
-      if (!profileId || !telegramHandle) {
-        return res.status(400).json({ error: 'profileId and telegramHandle are required' });
-      }
-      const profile = loadProfile(profileId, DATA_DIR);
-      if (!profile) return res.status(404).json({ error: 'Profile not found' });
-      const result = startTelegramVerification(profileId, telegramHandle);
-      res.status(result.success || result.alreadyVerified ? 200 : 400).json(result);
-    } catch (e) {
-      res.status(400).json({ error: 'Invalid JSON: ' + e.message });
-    }
+    return res.status(410).json(retiredProviderResponse('telegram'));
   });
 
   // POST /api/verify/telegram/confirm
   app.post('/api/verify/telegram/confirm', express.json(), async (req, res) => {
-    const authKey = req.headers['x-api-key'] || (req.headers['authorization'] || '').replace('Bearer ', '');
-    const ADMIN_KEY = process.env.ADMIN_API_KEY || 'agentfolio-admin-2026';
-    if (authKey !== ADMIN_KEY) {
-      return res.status(403).json({ error: 'Admin access required. Telegram confirmation must come from the verification bot.' });
-    }
-    try {
-      const { code, telegramUserId, telegramUsername } = req.body;
-      if (!code) return res.status(400).json({ error: 'code is required' });
-      const result = verifyTelegramCode(code, telegramUserId, telegramUsername);
-      if (result.verified) {
-        const profile = loadProfile(result.profileId);
-        let onchainSucceeded = true;
-        if (postVerificationHookFn) {
-          onchainSucceeded = await postVerificationHookFn(result.profileId, 'telegram', result.telegramHandle, { method: 'telegram-code' });
-        }
-        if (profile && onchainSucceeded) {
-          const updatedProfile = { ...profile };
-          updatedProfile.links = updatedProfile.links || {};
-          updatedProfile.links.telegram = result.telegramHandle;
-          updatedProfile.verificationData = updatedProfile.verificationData || {};
-          updatedProfile.verificationData.telegram = {
-            handle: result.telegramHandle,
-            telegramId: result.telegramId,
-            verified: true,
-            verifiedAt: new Date().toISOString()
-          };
-          updatedProfile.updatedAt = new Date().toISOString();
-          dbSaveProfileFn(updatedProfile);
-          upsertActiveVerification(result.profileId, 'telegram', result.telegramHandle, {
-            handle: result.telegramHandle,
-            telegramId: result.telegramId,
-            identifier: result.telegramHandle,
-            verifiedAt: updatedProfile.verificationData.telegram.verifiedAt
-          });
-          addActivityAndBroadcast(result.profileId, 'verification_telegram', { handle: result.telegramHandle }, DATA_DIR);
-          triggerWebhooks(WEBHOOK_EVENTS.VERIFICATION_COMPLETE || 'verification_complete', {
-            agentId: result.profileId, platform: 'telegram', handle: result.telegramHandle,
-            profileUrl: `https://agentfolio.bot/profile/${result.profileId}`
-          }).catch(e => logger.error('Webhook error', { error: e.message }));
-        }
-      }
-      res.status(result.verified ? 200 : 400).json(result);
-    } catch (e) {
-      res.status(400).json({ error: 'Invalid JSON: ' + e.message });
-    }
+    return res.status(410).json(retiredProviderResponse('telegram'));
   });
 
   // GET /api/verify/telegram/status
   app.get('/api/verify/telegram/status', (req, res) => {
-    const profileId = req.query.profileId;
-    if (!profileId) return res.status(400).json({ error: 'profileId query param required' });
-    const verified = getTelegramVerificationStatus(profileId);
-    const pending = getPendingTelegramVerification(profileId);
-    res.json({ profileId, verified: verified !== null, verificationData: verified, pendingVerification: pending });
+    return res.status(410).json(retiredProviderResponse('telegram'));
   });
 
   // GET /api/verify/telegram/all
   app.get('/api/verify/telegram/all', (req, res) => {
-    const verified = getAllTelegramVerified();
-    res.json({ count: Object.keys(verified).length, verifications: verified });
+    return res.status(410).json(retiredProviderResponse('telegram'));
   });
 
   // GET /api/verify/discord/status
