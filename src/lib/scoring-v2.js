@@ -5,6 +5,8 @@
 
 const { loadProfile } = require('./profile');
 const { filterCanonicalTrustData } = require('./canonical-verification-providers');
+const { computeTrustScore: computeVerifiableTrustScore } = require('./compute-trust-score');
+const { checkBoaEligibilityFromTrust } = require('./trust-score-gates');
 
 // Verification Level Requirements
 const LEVEL_REQUIREMENTS = {
@@ -236,17 +238,25 @@ function checkBoaEligibility(profileId, activityData = {}) {
   const scoring = getProfileScoring(profileId, activityData);
   if (!scoring) return { eligible: false, reason: 'Profile not found' };
 
-  const { level, trustScore, profile } = scoring;
-  
-  // L3+ required
-  if (!['L3', 'L4', 'L5'].includes(level)) {
-    return { eligible: false, reason: `Level ${level} insufficient (need L3+)` };
-  }
-  
-  // Trust Score >= 50
-  if (trustScore < 50) {
-    return { eligible: false, reason: `Trust Score ${trustScore} insufficient (need 50+)` };
-  }
+  const { level, profile } = scoring;
+  const levelNumber = Number(String(level || '').replace(/^L/i, '')) || 0;
+  const canonicalVerificationData = filterCanonicalTrustData(profile.verificationData || {});
+  const verifiableTrust = computeVerifiableTrustScore({
+    profile,
+    verifications: Object.entries(canonicalVerificationData).map(([platform, data]) => ({
+      platform,
+      ...(data || {}),
+    })),
+    activity: activityData,
+    ...activityData,
+  });
+
+  const eligibility = checkBoaEligibilityFromTrust({
+    verificationLevel: levelNumber,
+    trustScore: verifiableTrust.trustScore,
+  });
+
+  if (!eligibility.eligible) return eligibility;
   
   // Complete profile
   const profileComplete = !!(
@@ -259,7 +269,7 @@ function checkBoaEligibility(profileId, activityData = {}) {
     return { eligible: false, reason: 'Profile incomplete (need bio 50+ chars, avatar, 3+ skills)' };
   }
   
-  return { eligible: true, level, trustScore };
+  return { eligible: true, level: levelNumber, trustScore: verifiableTrust.trustScore };
 }
 
 module.exports = {

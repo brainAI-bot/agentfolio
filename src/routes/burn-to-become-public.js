@@ -25,6 +25,10 @@ const { getRateLimitDelay } = require('../lib/rate-limit-retry');
 const { loadNormalizedTrust } = require('../lib/normalized-trust');
 const { sendBoaWriteGateResponse } = require('../lib/write-surface-gate');
 const {
+  checkBoaEligibilityFromTrust,
+  resolveTrustScoreFromDb,
+} = require('../lib/trust-score-gates');
+const {
   IDENTITY_MINT_TRACKER_MAX_MINTS,
   getSatpV3GenesisPDA,
   getIdentityMintTrackerPDA,
@@ -969,7 +973,6 @@ function handleBurnToBecome(req, res, url) {
       try {
         const Database = require('better-sqlite3');
         const db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
-        const { getCompleteScore } = require('../lib/scoring-engine-v2'); const fs = require('fs');
         const LEVEL_NAMES = ['Unregistered', 'Registered', 'Verified', 'On-Chain', 'Trusted', 'Sovereign'];
         const LEVEL_BADGES = ['⚪', '🟡', '🔵', '🟢', '🟠', '👑'];
         const profiles = db.prepare('SELECT * FROM profiles').all();
@@ -982,44 +985,12 @@ function handleBurnToBecome(req, res, url) {
           db.close();
           return sendJson(200, { found: false, level: 0, levelName: 'Unregistered', badge: '⚪', reputation: score, eligible: false, message: 'No AgentFolio profile linked to this wallet. Register at agentfolio.bot first.' });
         }
-        const profileObj = {
-          id: matchedProfile.id, name: matchedProfile.name, handle: matchedProfile.handle,
-          bio: matchedProfile.bio, avatar: matchedProfile.avatar,
-          skills: JSON.parse(matchedProfile.skills || '[]'),
-          verification: JSON.parse(matchedProfile.verification || '{}'),
-          endorsements: JSON.parse(matchedProfile.endorsements || '[]'),
-          portfolio: JSON.parse(matchedProfile.portfolio || '[]'),
-          track_record: JSON.parse(matchedProfile.track_record || '{}'),
-        };
-        try {
-          const pPath = require('path').join(__dirname, '../../data/profiles', matchedProfile.id + '.json');
-          if (fs.existsSync(pPath)) {
-            const pf = JSON.parse(fs.readFileSync(pPath, 'utf8'));
-            profileObj.verificationData = pf.verificationData || {};
-            profileObj.stats = pf.stats || {};
-            profileObj.endorsements = pf.endorsements || profileObj.endorsements || [];
-            profileObj.moltbookStats = pf.moltbookStats || {};
-          }
-        } catch (e) {}
-        // Use best-of V3 on-chain + V2 computed scores (fixes stale Genesis Record bug)
-        let v3Lev = 0, v3Rp = 0, v2Lev = 0, v2Rp = 0;
-        try {
-          const { getV3Score } = require('../v3-score-service');
-          const v3 = await getV3Score(matchedProfile.id);
-          if (v3) {
-            v3Lev = v3.verificationLevel || 0;
-            v3Rp = v3.reputationScore || 0;
-          }
-        } catch {}
-        try {
-          const scoreResult = getCompleteScore(profileObj);
-          v2Lev = scoreResult.verificationLevel ? scoreResult.verificationLevel.level : 0;
-          v2Rp = scoreResult.reputationScore ? scoreResult.reputationScore.score : 0;
-        } catch {}
-        const level = Math.max(v3Lev, v2Lev);
-        const reputation = Math.max(v3Rp, v2Rp);
-        console.log('[ELIGIBILITY] Score for', matchedProfile.id, 'V3:', v3Lev+'/'+v3Rp, 'V2:', v2Lev+'/'+v2Rp, 'Final:', level+'/'+reputation);
-        const eligible = level >= 3 && reputation >= 50;
+        const trust = resolveTrustScoreFromDb(db, matchedProfile.id, { profile: matchedProfile });
+        const eligibility = checkBoaEligibilityFromTrust(trust);
+        const level = eligibility.level;
+        const reputation = eligibility.trustScore;
+        const eligible = eligibility.eligible;
+        console.log('[ELIGIBILITY] Trust gate for', matchedProfile.id, 'source:', trust.source, 'Final:', level+'/'+reputation);
         db.close();
         // Check isBorn from Genesis Record — free first mint only if not already born
         let isBorn = false;
@@ -1044,7 +1015,10 @@ function handleBurnToBecome(req, res, url) {
           levelName: LEVEL_NAMES[level] || 'Unknown',
           badge: LEVEL_BADGES[level] || '⚪',
           reputation,
+          trustScore: reputation,
+          trustSource: trust.source,
           eligible,
+          eligibilityReason: eligibility.reason || null,
           freeFirstMint: eligible && !trackerBlocksFree,
           isBorn: isBorn || !mintTracker.freeMintAvailable,
           freeMintUsed: !mintTracker.freeMintAvailable,

@@ -4,16 +4,16 @@
  * Dynamic platform fees based on agent performance metrics:
  * - Base fee: 5% (default for new/unverified agents)
  * - Reduced fees for high-performing agents (down to 1%)
- * - Fee tiers based on: completion rate, reputation score, earnings milestones, premium status
+ * - Fee tiers based on: completion rate, verifiable trust score, earnings milestones, premium status
  * - Custom fee schedules for enterprise/high-volume agents
  * - Fee history tracking and transparency
  * 
  * Fee Tiers:
  *   Tier 0 (New):        5.0% — < 5 completed jobs
  *   Tier 1 (Rising):     4.0% — 5+ jobs, 70%+ completion rate
- *   Tier 2 (Established): 3.0% — 20+ jobs, 80%+ completion, 70+ reputation
- *   Tier 3 (Expert):     2.0% — 50+ jobs, 90%+ completion, 85+ reputation
- *   Tier 4 (Elite):      1.5% — 100+ jobs, 95%+ completion, 90+ reputation
+ *   Tier 2 (Established): 3.0% — 20+ jobs, 80%+ completion, 240+ verifiable trust
+ *   Tier 3 (Expert):     2.0% — 50+ jobs, 90%+ completion, 400+ verifiable trust
+ *   Tier 4 (Elite):      1.5% — 100+ jobs, 95%+ completion, 560+ verifiable trust
  *   Tier 5 (Partner):    1.0% — Custom/negotiated (enterprise agents)
  * 
  * Premium discount: Pro = 0.5% off, Elite = 1.0% off (stacks with tier)
@@ -22,6 +22,10 @@
 
 const path = require('path');
 const crypto = require('crypto');
+const {
+  getFeeTierForTrustScore,
+  resolveTrustScoreFromDb,
+} = require('./trust-score-gates');
 
 let db;
 function getDb() {
@@ -71,12 +75,12 @@ function initSchema() {
 // ============ FEE TIER DEFINITIONS ============
 
 const FEE_TIERS = [
-  { tier: 0, name: 'New',         rate: 0.05, minJobs: 0,   minCompletion: 0,    minReputation: 0  },
-  { tier: 1, name: 'Rising',      rate: 0.04, minJobs: 5,   minCompletion: 0.70, minReputation: 0  },
-  { tier: 2, name: 'Established', rate: 0.03, minJobs: 20,  minCompletion: 0.80, minReputation: 70 },
-  { tier: 3, name: 'Expert',      rate: 0.02, minJobs: 50,  minCompletion: 0.90, minReputation: 85 },
-  { tier: 4, name: 'Elite',       rate: 0.015, minJobs: 100, minCompletion: 0.95, minReputation: 90 },
-  { tier: 5, name: 'Partner',     rate: 0.01, minJobs: null, minCompletion: null, minReputation: null } // custom only
+  { tier: 0, name: 'New',         rate: 0.05, minJobs: 0,   minCompletion: 0,    minTrustScore: 0   },
+  { tier: 1, name: 'Rising',      rate: 0.04, minJobs: 5,   minCompletion: 0.70, minTrustScore: 0   },
+  { tier: 2, name: 'Established', rate: 0.03, minJobs: 20,  minCompletion: 0.80, minTrustScore: 240 },
+  { tier: 3, name: 'Expert',      rate: 0.02, minJobs: 50,  minCompletion: 0.90, minTrustScore: 400 },
+  { tier: 4, name: 'Elite',       rate: 0.015, minJobs: 100, minCompletion: 0.95, minTrustScore: 560 },
+  { tier: 5, name: 'Partner',     rate: 0.01, minJobs: null, minCompletion: null, minTrustScore: null } // custom only
 ];
 
 const PREMIUM_DISCOUNTS = {
@@ -93,18 +97,17 @@ const MIN_FEE_RATE = 0.005; // 0.5% floor
  * Calculate the fee tier for an agent based on their performance metrics
  */
 function calculateTier(metrics) {
-  const { completedJobs = 0, completionRate = 0, reputationScore = 0 } = metrics;
+  const { completedJobs = 0, completionRate = 0, trustScore = 0 } = metrics;
   
   let bestTier = 0;
   for (const tier of FEE_TIERS) {
     if (tier.tier === 5) continue; // Partner is custom-only
     if (completedJobs >= tier.minJobs &&
-        completionRate >= tier.minCompletion &&
-        reputationScore >= tier.minReputation) {
+        completionRate >= tier.minCompletion) {
       bestTier = tier.tier;
     }
   }
-  return bestTier;
+  return Math.min(bestTier, getFeeTierForTrustScore(trustScore, FEE_TIERS));
 }
 
 /**
@@ -128,12 +131,8 @@ function getAgentMetrics(profileId) {
 
   const completionRate = totalJobs > 0 ? completedJobs / totalJobs : 0;
 
-  // Get reputation score
-  let reputationScore = 0;
-  try {
-    const profile = d.prepare('SELECT reputation_score FROM profiles WHERE id = ?').get(profileId);
-    reputationScore = profile?.reputation_score || 0;
-  } catch (e) {}
+  const trust = resolveTrustScoreFromDb(d, profileId);
+  const trustScore = trust.trustScore || 0;
 
   // Get premium tier
   let premiumTier = 'free';
@@ -152,7 +151,16 @@ function getAgentMetrics(profileId) {
     totalEarnings = earnings?.total || 0;
   } catch (e) {}
 
-  return { completedJobs, totalJobs, completionRate, reputationScore, premiumTier, totalEarnings };
+  return {
+    completedJobs,
+    totalJobs,
+    completionRate,
+    trustScore,
+    reputationScore: trustScore,
+    trustSource: trust.source,
+    premiumTier,
+    totalEarnings,
+  };
 }
 
 /**
@@ -342,11 +350,12 @@ function getFeeTiers() {
     ratePercent: (t.rate * 100).toFixed(1) + '%',
     requirements: t.tier === 5 ? 'By invitation' : 
       t.tier === 0 ? 'Default' :
-      `${t.minJobs}+ jobs, ${(t.minCompletion * 100)}%+ completion${t.minReputation ? `, ${t.minReputation}+ reputation` : ''}`
+      `${t.minJobs}+ jobs, ${(t.minCompletion * 100)}%+ completion${t.minTrustScore ? `, ${t.minTrustScore}+ verifiable trust` : ''}`
   }));
 }
 
 module.exports = {
+  calculateTier,
   calculateFeeRate,
   recalculateFeeSchedule,
   recordFee,

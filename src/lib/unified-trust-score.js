@@ -46,6 +46,7 @@ function buildVerificationList(db, profileId) {
   return normalizeVerifications(rows.map((row) => ({
     platform: normalizeVerificationPlatform(row.platform),
     identifier: row.identifier || null,
+    verified: true,
     txSignature: extractTxSignature(row.proof),
     timestamp: row.verified_at || null,
     proof: parseProof(row.proof),
@@ -58,8 +59,37 @@ function getStats(db, profileId) {
   const jobsPosted = queryOne(db, 'SELECT COUNT(*) AS c FROM jobs WHERE client_id = ?', [profileId], { c: 0 }).c || 0;
   const escrowsCompletedAsWorker = queryOne(db, "SELECT COUNT(*) AS c FROM escrows WHERE agent_id = ? AND (status IN ('completed','released') OR released_at IS NOT NULL)", [profileId], { c: 0 }).c || 0;
   const escrowsCompletedAsPoster = queryOne(db, "SELECT COUNT(*) AS c FROM escrows WHERE client_id = ? AND (status IN ('completed','released') OR released_at IS NOT NULL)", [profileId], { c: 0 }).c || 0;
+  const releasedEscrows = queryAll(
+    db,
+    `SELECT id, status, release_tx_hash, released_at
+     FROM escrows
+     WHERE (agent_id = ? OR client_id = ?)
+       AND (status IN ('released','auto_released','completed') OR released_at IS NOT NULL)
+       AND release_tx_hash IS NOT NULL`,
+    [profileId, profileId]
+  ).map((escrow) => ({
+    status: escrow.status,
+    releaseTxHash: escrow.release_tx_hash,
+    releasedAt: escrow.released_at,
+    escrowPda: escrow.id,
+  }));
   const totalEscrows = queryOne(db, 'SELECT COUNT(*) AS c FROM escrows WHERE agent_id = ? OR client_id = ?', [profileId, profileId], { c: 0 }).c || 0;
   const reviewsReceived = queryAll(db, 'SELECT * FROM reviews WHERE reviewee_id = ?', [profileId]);
+  const signedReviewsReceived = queryAll(
+    db,
+    `SELECT id, rating, verified, signature, memo_tx, chain, reviewer_wallet, created_at
+     FROM peer_reviews
+     WHERE reviewee_id = ? AND (memo_tx IS NOT NULL OR signature IS NOT NULL)`,
+    [profileId]
+  ).map((review) => ({
+    rating: review.rating,
+    verified: Number(review.verified || 0) === 1,
+    signature: review.signature || null,
+    memoTx: review.memo_tx || null,
+    chain: review.chain || null,
+    reviewerWallet: review.reviewer_wallet || null,
+    createdAt: review.created_at || null,
+  }));
   const placeholders = CANONICAL_TRUST_PROVIDERS.map(() => '?').join(',');
   const onchainAttestationsReceived = queryOne(
     db,
@@ -75,7 +105,9 @@ function getStats(db, profileId) {
     jobsPosted,
     escrowsCompletedAsWorker,
     escrowsCompletedAsPoster,
+    releasedEscrows,
     reviewsReceived,
+    signedReviewsReceived,
     completionRate: totalEscrows > 0 ? ((escrowsCompletedAsWorker + escrowsCompletedAsPoster) / totalEscrows) : null,
     onchainAttestationsReceived,
     referralsReachedL2,
@@ -126,7 +158,6 @@ function computeUnifiedTrustScore(db, profile, options = {}) {
   const hasSatpIdentity = Boolean(
     options.hasSatpIdentity ??
     profile?.hasSatpIdentity ??
-    (v3Score ? Number(v3Score.verificationLevel || 0) >= 1 : null) ??
     hasSatpVerification
   ) || hasSatpVerification;
   const hasBoaAvatar = Boolean(
@@ -148,6 +179,8 @@ function computeUnifiedTrustScore(db, profile, options = {}) {
       completedEscrowJobsAsWorker: stats.escrowsCompletedAsWorker,
       completedEscrowJobsAsPoster: stats.escrowsCompletedAsPoster,
       reviewsReceived: stats.reviewsReceived,
+      releasedEscrows: stats.releasedEscrows,
+      signedReviewEvidenceCount: stats.signedReviewsReceived.length,
       hasBoaAvatar,
     },
     hasHumanVerification: hasHumanVerificationCredential(verifications),
@@ -155,12 +188,16 @@ function computeUnifiedTrustScore(db, profile, options = {}) {
 
   const trust = computeTrustScore({
     profile: normalizedProfile,
+    verifications,
     endorsementsGiven: stats.endorsementsGiven,
     endorsementsReceived: stats.endorsementsReceived,
     jobsPosted: stats.jobsPosted,
     escrowsCompletedAsWorker: stats.escrowsCompletedAsWorker,
     escrowsCompletedAsPoster: stats.escrowsCompletedAsPoster,
-    reviewsReceived: stats.reviewsReceived,
+    reviewsReceived: [
+      ...stats.reviewsReceived,
+      ...stats.signedReviewsReceived,
+    ],
     completionRate: stats.completionRate,
     onchain: {
       hasSatpGenesis: hasSatpIdentity,
@@ -173,7 +210,7 @@ function computeUnifiedTrustScore(db, profile, options = {}) {
   });
 
   const normalizedV3Score = normalizeV3DisplayScore(v3Score);
-  const displayScore = Math.max(trust.trustScore || 0, normalizedV3Score);
+  const displayScore = trust.trustScore || 0;
 
   return {
     score: displayScore,
@@ -199,7 +236,7 @@ function computeUnifiedTrustScore(db, profile, options = {}) {
     })),
     hasSatpIdentity,
     hasBoaAvatar,
-    source: normalizedV3Score > (trust.trustScore || 0) ? 'scoring-v2-phase-a+v3-floor' : 'scoring-v2-phase-a',
+    source: 'verifiable-trust-score',
   };
 }
 
