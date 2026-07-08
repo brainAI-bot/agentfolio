@@ -24,6 +24,14 @@ const { buildBurnToBecomeForWallet } = require('./prepare-birth-endpoint');
 const { getRateLimitDelay } = require('../lib/rate-limit-retry');
 const { loadNormalizedTrust } = require('../lib/normalized-trust');
 const { sendBoaWriteGateResponse } = require('../lib/write-surface-gate');
+const {
+  IDENTITY_MINT_TRACKER_MAX_MINTS,
+  getSatpV3GenesisPDA,
+  getIdentityMintTrackerPDA,
+  parseIdentityMintTrackerAccount,
+  getIdentityMintTrackerStatus: readIdentityMintTrackerStatus,
+  requireIdentityMintCapacity: requireIdentityMintCapacityFromTracker,
+} = require('../lib/identity-mint-tracker');
 
 const DEFAULT_SOLANA_RPC_URL = 'https://api.mainnet-beta.solana.com';
 const RPC_URL = process.env.SOLANA_RPC_URL || process.env.SOLANA_RPC || DEFAULT_SOLANA_RPC_URL;
@@ -242,6 +250,37 @@ async function checkSatpOnChain(wallet) {
 const TOKEN_METADATA_PROGRAM = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 const MINT_PRICE_LAMPORTS = 1_000_000_000; // 1 SOL
 const FREE_SCORE_THRESHOLD = 100;
+
+function getIdentityMintTrackerStatus(agentId, conn = connection) {
+  return readIdentityMintTrackerStatus(agentId, conn);
+}
+
+function requireIdentityMintCapacity(agentId, options = {}) {
+  return requireIdentityMintCapacityFromTracker(agentId, {
+    ...options,
+    connection: options.connection || connection,
+  });
+}
+
+function sendIdentityTrackerError(sendJson, error) {
+  if (error?.code === 'IDENTITY_MINT_CAP_REACHED') {
+    return sendJson(error.statusCode || 403, {
+      error: error.message,
+      currentMints: error.tracker?.mintCount,
+      maxMints: error.tracker?.maxMints || IDENTITY_MINT_TRACKER_MAX_MINTS,
+      mintTracker: error.tracker,
+    });
+  }
+  if (error?.code === 'IDENTITY_FREE_MINT_USED') {
+    return sendJson(error.statusCode || 403, {
+      error: error.message,
+      currentMints: error.tracker?.mintCount,
+      maxMints: error.tracker?.maxMints || IDENTITY_MINT_TRACKER_MAX_MINTS,
+      mintTracker: error.tracker,
+    });
+  }
+  return sendJson(503, { error: 'Unable to read identity mint tracker', detail: error?.message || String(error) });
+}
 /**
  * Check if wallet owns any Metaplex Core NFTs from our BOA candy machine collection.
  * Uses Helius DAS API (getAssetsByOwner with grouping filter).
@@ -989,7 +1028,31 @@ function handleBurnToBecome(req, res, url) {
           const v3Data = await getV3Score(matchedProfile.id);
           if (v3Data && v3Data.isBorn) isBorn = true;
         } catch {}
-        sendJson(200, { found: true, agent: matchedProfile.id, name: matchedProfile.name, level, levelName: LEVEL_NAMES[level] || 'Unknown', badge: LEVEL_BADGES[level] || '⚪', reputation, eligible, freeFirstMint: eligible && !isBorn, isBorn });
+        let mintTracker;
+        try {
+          mintTracker = await getIdentityMintTrackerStatus(matchedProfile.id);
+        } catch (trackerErr) {
+          console.warn('[ELIGIBILITY] identity mint tracker read failed:', trackerErr.message);
+          return sendIdentityTrackerError(sendJson, trackerErr);
+        }
+        const trackerBlocksFree = !mintTracker.freeMintAvailable || mintTracker.capReached;
+        sendJson(200, {
+          found: true,
+          agent: matchedProfile.id,
+          name: matchedProfile.name,
+          level,
+          levelName: LEVEL_NAMES[level] || 'Unknown',
+          badge: LEVEL_BADGES[level] || '⚪',
+          reputation,
+          eligible,
+          freeFirstMint: eligible && !trackerBlocksFree,
+          isBorn: isBorn || !mintTracker.freeMintAvailable,
+          freeMintUsed: !mintTracker.freeMintAvailable,
+          capReached: mintTracker.capReached,
+          currentMints: mintTracker.mintCount,
+          maxMints: mintTracker.maxMints,
+          mintTracker,
+        });
       } catch (e) { console.error('[BurnPublic] eligibility error:', e); sendJson(500, { error: e.message }); }
     })();
     return true;
@@ -1681,6 +1744,12 @@ function handleBurnToBecome(req, res, url) {
             if (v3) { level = v3.verificationLevel || 0; rep = v3.reputationScore || 0; isBorn = !!v3.isBorn; }
           } catch {}
           if (level < 3 || rep < 50) return sendJson(403, { error: "Free mint requires Level 3+ and Rep 50+", level, rep });
+          try {
+            await requireIdentityMintCapacity(profileId, { requireFree: true });
+          } catch (trackerErr) {
+            console.warn("[PrepareMint] identity mint tracker gate failed:", trackerErr.message);
+            return sendIdentityTrackerError(sendJson, trackerErr);
+          }
           if (isBorn) return sendJson(403, { error: "Already used free burn-to-become", isBorn: true });
         }
 
@@ -1736,14 +1805,25 @@ function handleBurnToBecome(req, res, url) {
           // They can still do paid mints, just not free
         }
 
-        // === ON-CHAIN MINT GATING (V3 Genesis Record isBorn) ===
-        // Free mint: ONE per Genesis Record PDA. isBorn=true means already minted.
-        // This is wallet-rotation proof — Genesis Record PDA is permanent identity.
+        // === ON-CHAIN MINT GATING (V3 identity MintTracker) ===
+        // Free mint and the 3-mint cap are sourced from the identity-program tracker.
+        // This is wallet-rotation proof because the tracker is seeded by the identity PDA.
         let v3IsBorn = false;
         const countDb = new Database(dbPath, { readonly: true });
         const allProfiles = countDb.prepare("SELECT * FROM profiles").all();
         const agentIdForCount = findProfileIdByWallet(allProfiles, wallet);
         countDb.close();
+        if (!agentIdForCount) {
+          return sendJson(403, { error: "No AgentFolio profile linked to this wallet. Register at agentfolio.bot first.", wallet });
+        }
+
+        let mintTracker;
+        try {
+          mintTracker = await requireIdentityMintCapacity(agentIdForCount);
+        } catch (trackerErr) {
+          console.warn("[MintBOA] identity mint tracker gate failed:", trackerErr.message);
+          return sendIdentityTrackerError(sendJson, trackerErr);
+        }
         
         // Check V3 Genesis Record isBorn (on-chain source of truth)
         if (agentIdForCount) {
@@ -1761,13 +1841,12 @@ function handleBurnToBecome(req, res, url) {
           const onChainResult = await checkOnChainMints(wallet);
           onChainCount = onChainResult.count || 0;
         } catch (e) { console.warn("[MintBOA] On-chain mint check failed:", e.message); }
-        // On-chain isBorn overrides: if born on-chain, count is at least 1
-        const effectiveMintCount = Math.max(onChainCount, v3IsBorn ? 1 : 0);
-        console.log("[MintBOA] Effective mint count:", effectiveMintCount, "(onChain:", onChainCount, "v3IsBorn:", v3IsBorn, ")");
+        const effectiveMintCount = mintTracker.mintCount;
+        console.log("[MintBOA] Identity tracker mint count:", effectiveMintCount, "(tracker:", mintTracker.pda, "onChainCollection:", onChainCount, "v3IsBorn:", v3IsBorn, ")");
 
         // === HARD CAP: Max 3 mints per agent ===
         if (effectiveMintCount >= 3) {
-          return sendJson(403, { error: "Maximum 3 mints per agent reached.", currentMints: effectiveMintCount, maxMints: 3 });
+          return sendJson(403, { error: "Maximum 3 mints per identity reached.", currentMints: effectiveMintCount, maxMints: 3, mintTracker });
         }
 
         // === 2. Unified eligibility check (DB level + rep) ===
@@ -1814,13 +1893,8 @@ function handleBurnToBecome(req, res, url) {
         }
         checkDb.close();
 
-        // === HARD GATE: Profile required for ALL mints ===
-        if (!profileId) {
-          return sendJson(403, { error: "No AgentFolio profile linked to this wallet. Register at agentfolio.bot first.", wallet });
-        }
-
         // === 3. Determine pricing ===
-        // On-chain check: does wallet already own Core NFTs from our collection?
+        // Collection ownership remains diagnostic; identity MintTracker is the gating source of truth.
         let onChainMintCount = 0;
         try {
           const onChainResult = await checkOnChainMints(wallet);
@@ -1829,10 +1903,10 @@ function handleBurnToBecome(req, res, url) {
         } catch (e) {
           console.error('[BURN] On-chain mint check failed, falling back to DB count:', e.message);
         }
-        const isFirstMint = effectiveMintCount === 0 && onChainMintCount === 0;
+        const isFirstMint = mintTracker.freeMintAvailable;
         const isFree = isFirstMint && isEligibleFree;
         // Override: if already has soulbound attestation, no free mint
-        const actuallyFree = isFree && !satpCheck.hasBoaSoulbound && !v3IsBorn;
+        const actuallyFree = isFree && !satpCheck.hasBoaSoulbound;
         const price = actuallyFree ? 0 : 1; // 1 SOL for paid mints
 
         // === 4. Verify SOL payment for paid mints ===
@@ -2129,7 +2203,17 @@ try {
 
 }
 
-module.exports = { handleBurnToBecome };
+module.exports = {
+  handleBurnToBecome,
+  _test: {
+    getSatpV3GenesisPDA,
+    getIdentityMintTrackerPDA,
+    parseIdentityMintTrackerAccount,
+    getIdentityMintTrackerStatus,
+    requireIdentityMintCapacity,
+    IDENTITY_MINT_TRACKER_MAX_MINTS,
+  },
+};
 
 // Register as Express middleware  
 module.exports.registerRoutes = function(app) {

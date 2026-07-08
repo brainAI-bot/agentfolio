@@ -86,6 +86,16 @@ function loadBurnModule() {
     }
     if (request === 'fs') return fakeFs;
     if (request === 'bs58') return {};
+    if (request === '@brainai/satp-client') {
+      return {
+        getGenesisPDA() {
+          return [new PublicKey('Genesis111111111111111111111111111111111111'), 255];
+        },
+        deserializeGenesisRecord() {
+          return { authority: 'Authority1111111111111111111111111111111111', isBorn: false };
+        },
+      };
+    }
     if (request === './safe-burn-to-become') {
       return { safeBurnToBecome: async () => ({ success: true }) };
     }
@@ -168,5 +178,87 @@ describe('burn submit handler regression guard', () => {
     );
 
     assert.strictEqual(handled, false);
+  });
+});
+
+describe('identity mint tracker gating', () => {
+  function trackerData(mintCount) {
+    return Buffer.concat([
+      Buffer.from([217, 230, 22, 187, 250, 88, 11, 174]),
+      Buffer.alloc(32, 7),
+      Buffer.from([mintCount]),
+      Buffer.alloc(8, 0),
+      Buffer.from([254]),
+    ]);
+  }
+
+  it('treats a missing identity tracker as zero mints for first free admission', async () => {
+    const loaded = loadBurnModule();
+    cleanup = loaded.restore;
+
+    const tracker = await loaded.mod._test.requireIdentityMintCapacity('agent_first', {
+      requireFree: true,
+      connection: { getAccountInfo: async () => null },
+    });
+
+    assert.strictEqual(tracker.exists, false);
+    assert.strictEqual(tracker.mintCount, 0);
+    assert.strictEqual(tracker.freeMintAvailable, true);
+    assert.strictEqual(tracker.capReached, false);
+  });
+
+  it('rejects free admission once the identity tracker has minted', async () => {
+    const loaded = loadBurnModule();
+    cleanup = loaded.restore;
+
+    await assert.rejects(
+      loaded.mod._test.requireIdentityMintCapacity('agent_used_free', {
+        requireFree: true,
+        connection: { getAccountInfo: async () => ({ data: trackerData(1) }) },
+      }),
+      (err) => {
+        assert.strictEqual(err.code, 'IDENTITY_FREE_MINT_USED');
+        assert.strictEqual(err.tracker.mintCount, 1);
+        return true;
+      }
+    );
+  });
+
+  it('rejects all mint admission at the three-per-identity cap', async () => {
+    const loaded = loadBurnModule();
+    cleanup = loaded.restore;
+
+    await assert.rejects(
+      loaded.mod._test.requireIdentityMintCapacity('agent_capped', {
+        connection: { getAccountInfo: async () => ({ data: trackerData(3) }) },
+      }),
+      (err) => {
+        assert.strictEqual(err.code, 'IDENTITY_MINT_CAP_REACHED');
+        assert.strictEqual(err.tracker.mintCount, 3);
+        assert.strictEqual(err.tracker.capReached, true);
+        return true;
+      }
+    );
+  });
+
+  it('fails closed on malformed identity tracker data', () => {
+    const loaded = loadBurnModule();
+    cleanup = loaded.restore;
+    const [trackerPda, genesisPda] = loaded.mod._test.getIdentityMintTrackerPDA('agent_malformed');
+
+    assert.throws(
+      () => loaded.mod._test.parseIdentityMintTrackerAccount(
+        { data: Buffer.alloc(50) },
+        { trackerPda, genesisPda }
+      ),
+      /discriminator mismatch/
+    );
+    assert.throws(
+      () => loaded.mod._test.parseIdentityMintTrackerAccount(
+        { data: Buffer.alloc(41) },
+        { trackerPda, genesisPda }
+      ),
+      /too small/
+    );
   });
 });
