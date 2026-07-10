@@ -5,21 +5,23 @@ const { Connection, PublicKey, Keypair, Transaction } = require('@solana/web3.js
 const { getAssociatedTokenAddress, createTransferInstruction, getAccount, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } = require('@solana/spl-token');
 const fs = require('fs');
 const path = require('path');
-const { assertSolanaIrysWriteEnabled } = require('./write-surface-gate');
+const { assertLiveEscrowWriteEnabled } = require('./write-surface-gate');
 
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 const USDC_DECIMALS = 6;
 const RPC_URL = 'https://api.mainnet-beta.solana.com';
 
 // Load escrow wallet keypair
-function getEscrowKeypair() {
+function getEscrowKeypair(operation = 'custodial escrow signer load') {
+  assertLiveEscrowWriteEnabled(operation);
   const walletPath = path.join(__dirname, '../../data/escrow-wallet.json');
   const data = JSON.parse(fs.readFileSync(walletPath, 'utf8'));
   return Keypair.fromSecretKey(Uint8Array.from(data.secretKey));
 }
 
 // Load client wallet (brainKID) keypair
-function getClientKeypair() {
+function getClientKeypair(operation = 'custodial client signer load') {
+  assertLiveEscrowWriteEnabled(operation);
   const bip39 = require('bip39');
   const { derivePath } = require('ed25519-hd-key');
   const seedPhrase = fs.readFileSync('/home/ubuntu/clawd/brainKID/.solana-seed', 'utf8').trim();
@@ -47,10 +49,10 @@ async function getUSDCBalance(walletPubkey) {
  * Deposit USDC from client wallet to escrow wallet
  */
 async function depositToEscrow(amountUSDC) {
-  assertSolanaIrysWriteEnabled('Solana escrow deposit');
+  assertLiveEscrowWriteEnabled('custodial Solana escrow deposit');
   const connection = await getConnection();
-  const clientKeypair = getClientKeypair();
-  const escrowKeypair = getEscrowKeypair();
+  const clientKeypair = getClientKeypair('custodial Solana escrow deposit client signer load');
+  const escrowKeypair = getEscrowKeypair('custodial Solana escrow deposit escrow signer load');
   
   const amountRaw = Math.floor(amountUSDC * Math.pow(10, USDC_DECIMALS));
   
@@ -102,9 +104,9 @@ async function depositToEscrow(amountUSDC) {
  * Release USDC from escrow to agent wallet
  */
 async function releaseFromEscrow(agentWalletAddress, amountUSDC) {
-  assertSolanaIrysWriteEnabled('Solana escrow release');
+  assertLiveEscrowWriteEnabled('custodial Solana escrow release');
   const connection = await getConnection();
-  const escrowKeypair = getEscrowKeypair();
+  const escrowKeypair = getEscrowKeypair('custodial Solana escrow release signer load');
   const agentPubkey = new PublicKey(agentWalletAddress);
   
   const amountRaw = Math.floor(amountUSDC * Math.pow(10, USDC_DECIMALS));
@@ -157,7 +159,7 @@ async function releaseFromEscrow(agentWalletAddress, amountUSDC) {
  * Get escrow wallet balance
  */
 async function getEscrowBalance() {
-  const escrowKeypair = getEscrowKeypair();
+  const escrowKeypair = getEscrowKeypair('custodial Solana escrow balance signer load');
   return await getUSDCBalance(escrowKeypair.publicKey);
 }
 
@@ -165,7 +167,7 @@ async function getEscrowBalance() {
  * Get client wallet balance
  */
 async function getClientBalance() {
-  const clientKeypair = getClientKeypair();
+  const clientKeypair = getClientKeypair('custodial Solana client balance signer load');
   return await getUSDCBalance(clientKeypair.publicKey);
 }
 
@@ -174,8 +176,9 @@ async function getClientBalance() {
  * Checks that txHash is a real confirmed tx sending >= expectedAmount USDC to escrow wallet
  */
 async function verifyDeposit(txHash, expectedAmount) {
+  assertLiveEscrowWriteEnabled('custodial Solana escrow deposit verification');
   const connection = await getConnection();
-  const escrowKeypair = getEscrowKeypair();
+  const escrowKeypair = getEscrowKeypair('custodial Solana escrow deposit verification signer load');
   const escrowAddress = escrowKeypair.publicKey.toBase58();
   
   try {
@@ -243,6 +246,7 @@ const TREASURY_ADDRESS = 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
  * Release escrow with fee split - sends payout to agent, fee to treasury
  */
 async function releaseWithFeeSplit(agentWalletAddress, totalAmount, feePct = 5) {
+  assertLiveEscrowWriteEnabled('custodial Solana escrow release with fee split');
   const fee = Math.round(totalAmount * (feePct / 100) * 1e6) / 1e6;
   const agentPayout = Math.round((totalAmount - fee) * 1e6) / 1e6;
   

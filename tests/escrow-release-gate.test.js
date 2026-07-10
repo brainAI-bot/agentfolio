@@ -1,9 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 
 const {
   CUSTODIAL_ESCROW_DISABLED_CODE,
+  ENABLE_LIVE_ESCROW_ENV,
+  ENABLE_WRITES_ENV,
+  ESCROW_KILL_SWITCH_CODE,
+  ESCROW_KILL_SWITCH_ENV,
   LEGACY_ESCROW_ROUTE_DISABLED_CODE,
   LIVE_ESCROW_READ_ONLY_CODE,
 } = require('../src/lib/write-surface-gate');
@@ -29,6 +35,36 @@ function freshEscrowModule() {
   return escrow;
 }
 
+function freshSolanaEscrowModule() {
+  const modulePath = require.resolve('../src/lib/solana-escrow');
+  delete require.cache[modulePath];
+  return require('../src/lib/solana-escrow');
+}
+
+async function withEnv(overrides, callback) {
+  const previous = new Map();
+  for (const key of Object.keys(overrides)) {
+    previous.set(key, process.env[key]);
+    if (overrides[key] === undefined) delete process.env[key];
+    else process.env[key] = overrides[key];
+  }
+
+  try {
+    return await callback();
+  } finally {
+    for (const [key, value] of previous.entries()) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+function assertLiveEscrowBlocked(err, code = LIVE_ESCROW_READ_ONLY_CODE) {
+  assert.equal(err.code, code);
+  assert.equal(err.statusCode, 423);
+  return true;
+}
+
 function withMarketplaceDbStub(dbStub, callback) {
   const dbPath = require.resolve('../src/lib/database');
   const marketplacePath = require.resolve('../src/lib/marketplace');
@@ -52,6 +88,72 @@ function withMarketplaceDbStub(dbStub, callback) {
     else delete require.cache[dbPath];
   }
 }
+
+test('dormant Solana custodial signer path is gated by live escrow flag, not Solana/Irys flag', async () => {
+  await withEnv({
+    [ENABLE_WRITES_ENV]: '1',
+    [ENABLE_LIVE_ESCROW_ENV]: undefined,
+    [ESCROW_KILL_SWITCH_ENV]: undefined,
+  }, async () => {
+    const escrow = freshSolanaEscrowModule();
+
+    assert.throws(
+      () => escrow.getEscrowKeypair(),
+      (err) => assertLiveEscrowBlocked(err),
+    );
+    assert.throws(
+      () => escrow.getClientKeypair(),
+      (err) => assertLiveEscrowBlocked(err),
+    );
+    await assert.rejects(
+      () => escrow.depositToEscrow(1),
+      (err) => assertLiveEscrowBlocked(err),
+    );
+    await assert.rejects(
+      () => escrow.releaseFromEscrow('11111111111111111111111111111111', 1),
+      (err) => assertLiveEscrowBlocked(err),
+    );
+    await assert.rejects(
+      () => escrow.getEscrowBalance(),
+      (err) => assertLiveEscrowBlocked(err),
+    );
+    await assert.rejects(
+      () => escrow.getClientBalance(),
+      (err) => assertLiveEscrowBlocked(err),
+    );
+    await assert.rejects(
+      () => escrow.verifyDeposit('not-a-signature', 1),
+      (err) => assertLiveEscrowBlocked(err),
+    );
+  });
+});
+
+test('custodial Solana escrow honors the live escrow kill switch', async () => {
+  await withEnv({
+    [ENABLE_WRITES_ENV]: '1',
+    [ENABLE_LIVE_ESCROW_ENV]: '1',
+    [ESCROW_KILL_SWITCH_ENV]: '1',
+  }, async () => {
+    const escrow = freshSolanaEscrowModule();
+    await assert.rejects(
+      () => escrow.depositToEscrow(1),
+      (err) => assertLiveEscrowBlocked(err, ESCROW_KILL_SWITCH_CODE),
+    );
+  });
+});
+
+test('admin escrow wallet setup is gated before keypair generation', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '../scripts/admin/setup-escrow-wallet.js'),
+    'utf8',
+  );
+  const gateIndex = source.indexOf("assertLiveEscrowWriteEnabled('custodial escrow wallet setup')");
+  const generateIndex = source.indexOf('Keypair.generate');
+
+  assert.ok(gateIndex >= 0, 'setup script is missing live escrow gate');
+  assert.ok(generateIndex >= 0, 'setup script is missing keypair generation marker');
+  assert.ok(gateIndex < generateIndex, 'setup script must gate before keypair generation');
+});
 
 test('custodial escrow library fails closed before keypair or funds state changes', async () => {
   const escrow = freshEscrowModule();
