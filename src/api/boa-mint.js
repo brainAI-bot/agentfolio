@@ -15,6 +15,11 @@ const fs = require('fs');
 const path = require('path');
 const { sendBoaWriteGateResponse } = require('../lib/write-surface-gate');
 const Database = require('better-sqlite3');
+const {
+  completeBoaMintReservation,
+  failBoaMintReservation,
+  reserveBoaMintPayment,
+} = require('../lib/boa-mint-reservations');
 
 const PROGRAM_ID = new PublicKey('4JUGpKNdhAbQPQc9EG1q25NyaJidziszMMQ4phtg5S4o');
 const TREASURY = new PublicKey('FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be');
@@ -25,6 +30,10 @@ const mintRateLimit = new Map(); // ip -> timestamp
 
 function getDb() {
   return new Database(path.join(__dirname, '..', '..', 'data', 'agentfolio.db'), { readonly: true });
+}
+
+function getWritableBoaMintDb() {
+  return new Database(path.join(__dirname, '..', '..', 'data', 'agentfolio.db'));
 }
 
 function loadAuthorityKeypair() {
@@ -331,6 +340,26 @@ function registerBoaMintCompleteRoute(app) {
       const nftNumber = totalMinted;
       
       console.log(`[BOA MINT COMPLETE] wallet=${wallet} tx=${txSignature} nft=#${nftNumber}`);
+
+      try {
+        const db = getWritableBoaMintDb();
+        const reservation = reserveBoaMintPayment(db, { nftNumber, wallet, paymentTx: txSignature });
+        db.close();
+        if (reservation.idempotent) {
+          return res.status(409).json({
+            error: reservation.record?.status === 'completed'
+              ? 'NFT already minted'
+              : 'payment_tx is already reserved for a BOA mint',
+            code: 'BOA_PAYMENT_TX_ALREADY_RESERVED',
+            mint: reservation.record?.mint_address,
+          });
+        }
+      } catch (reserveErr) {
+        return res.status(reserveErr.statusCode || 409).json({
+          error: reserveErr.message,
+          code: reserveErr.code,
+        });
+      }
       
       // Check if assets exist for this number
       // fs already at top level // const fs = require('fs');
@@ -339,6 +368,13 @@ function registerBoaMintCompleteRoute(app) {
       const imagePath = `${assetsDir}/images/${nftNumber}.jpg`;
       
       if (!fs.existsSync(metadataPath) || !fs.existsSync(imagePath)) {
+        try {
+          const db = getWritableBoaMintDb();
+          failBoaMintReservation(db, nftNumber);
+          db.close();
+        } catch (recordErr) {
+          console.warn('[BOA MINT COMPLETE] DB missing-assets record failed:', recordErr.message);
+        }
         return res.status(500).json({ error: `Assets not found for NFT #${nftNumber}. Contact support.` });
       }
       
@@ -362,6 +398,18 @@ function registerBoaMintCompleteRoute(app) {
       });
       
       console.log(`[BOA MINT COMPLETE] NFT #${nftNumber} minted: ${result.mint}`);
+      try {
+        const db = getWritableBoaMintDb();
+        completeBoaMintReservation(db, {
+          nftNumber,
+          mintAddress: result.mint || '',
+          metadataUri: result.metadataUri || '',
+          imageUri: result.imageUri || '',
+        });
+        db.close();
+      } catch (recordErr) {
+        console.warn('[BOA MINT COMPLETE] DB completion record failed:', recordErr.message);
+      }
       
       // Save mint record
       const mintRecordsDir = '/home/ubuntu/agentfolio/data/boa-mints';
@@ -387,6 +435,16 @@ function registerBoaMintCompleteRoute(app) {
       
     } catch (e) {
       console.error('[BOA MINT COMPLETE ERROR]', e);
+      try {
+        if (req.body?.txSignature) {
+          const db = getWritableBoaMintDb();
+          const row = db.prepare('SELECT nft_number FROM boa_mints WHERE payment_tx = ?').get(String(req.body.txSignature).trim());
+          if (row) failBoaMintReservation(db, row.nft_number);
+          db.close();
+        }
+      } catch (recordErr) {
+        console.warn('[BOA MINT COMPLETE] DB failure record failed:', recordErr.message);
+      }
       res.status(500).json({ error: e.message });
     }
   });

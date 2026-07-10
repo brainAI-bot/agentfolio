@@ -11,6 +11,12 @@ const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
 const { sendBoaWriteGateResponse } = require('../lib/write-surface-gate');
+const {
+  completeBoaMintReservation,
+  ensureBoaMintReservationSchema,
+  failBoaMintReservation,
+  reserveBoaMintPayment,
+} = require('../lib/boa-mint-reservations');
 
 const PIPELINE_DIR = path.join(__dirname, '..', 'boa-pipeline');
 const DB_PATH = '/home/ubuntu/agentfolio/data/agentfolio.db';
@@ -23,18 +29,7 @@ function registerBoaMintFinalizeRoutes(app) {
   // Ensure mint records table exists
   try {
     const db = new Database(DB_PATH);
-    db.exec(`CREATE TABLE IF NOT EXISTS boa_mints (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nft_number INTEGER NOT NULL UNIQUE,
-      wallet TEXT NOT NULL,
-      mint_address TEXT,
-      payment_tx TEXT,
-      metadata_uri TEXT,
-      image_uri TEXT,
-      status TEXT DEFAULT 'pending',
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      completed_at TEXT
-    )`);
+    ensureBoaMintReservationSchema(db);
     db.close();
     console.log('[BOA Mint] boa_mints table ready');
   } catch (e) {
@@ -46,60 +41,66 @@ function registerBoaMintFinalizeRoutes(app) {
     if (sendBoaWriteGateResponse(res, 'BOA mint finalization')) return;
     const { wallet, payment_tx, nft_number } = req.body;
     
-    if (!wallet || !nft_number) {
-      return res.status(400).json({ error: 'wallet and nft_number required' });
+    if (!wallet || !payment_tx || !nft_number) {
+      return res.status(400).json({ error: 'wallet, payment_tx and nft_number required' });
+    }
+    const nftNumber = parseInt(nft_number, 10);
+    if (!Number.isInteger(nftNumber) || nftNumber < 1) {
+      return res.status(400).json({ error: 'nft_number must be a positive integer' });
     }
     
     // Prevent double-mint
-    if (pendingMints.has(nft_number)) {
+    if (pendingMints.has(nftNumber)) {
       return res.status(409).json({ error: 'Mint already in progress for this NFT number' });
     }
     
-    // Check if already minted
-    try {
-      const db = new Database(DB_PATH, { readonly: true });
-      const existing = db.prepare('SELECT * FROM boa_mints WHERE nft_number = ?').get(nft_number);
-      db.close();
-      if (existing && existing.status === 'completed') {
-        return res.status(409).json({ error: 'NFT already minted', mint: existing.mint_address });
-      }
-    } catch (e) { /* continue */ }
-    
-    pendingMints.add(nft_number);
-    
-    // Record pending mint
+    // Reserve payment_tx and nft_number before any mint side effects.
     try {
       const db = new Database(DB_PATH);
-      db.prepare('INSERT OR REPLACE INTO boa_mints (nft_number, wallet, payment_tx, status) VALUES (?,?,?,?)')
-        .run(nft_number, wallet, payment_tx || '', 'pending');
+      const reservation = reserveBoaMintPayment(db, { nftNumber, wallet, paymentTx: payment_tx });
       db.close();
-    } catch (e) { /* continue */ }
+      if (reservation.idempotent) {
+        return res.status(409).json({
+          error: reservation.record?.status === 'completed'
+            ? 'NFT already minted'
+            : 'payment_tx is already reserved for a BOA mint',
+          code: 'BOA_PAYMENT_TX_ALREADY_RESERVED',
+          mint: reservation.record?.mint_address,
+        });
+      }
+    } catch (e) {
+      return res.status(e.statusCode || 409).json({
+        error: e.message,
+        code: e.code,
+      });
+    }
+    
+    pendingMints.add(nftNumber);
     
     const cluster = process.env.BOA_CLUSTER || 'mainnet';
     
-    console.log(`[BOA MINT] Starting mint #${nft_number} for ${wallet} (${cluster})`);
+    console.log(`[BOA MINT] Starting mint #${nftNumber} for ${wallet} (${cluster})`);
     
     // Run the ESM mint pipeline as a subprocess
     const mintScript = path.join(PIPELINE_DIR, 'mint-nft.mjs');
     
-    const cmd = `node ${JSON.stringify(mintScript)} ${nft_number} ${wallet || ''}`;
+    const cmd = `node ${JSON.stringify(mintScript)} ${nftNumber} ${wallet || ''}`;
     exec(cmd, {
       cwd: PIPELINE_DIR,
       env: { ...process.env, CLUSTER: cluster },
       timeout: 120000,
       maxBuffer: 1024 * 1024,
     }, (error, stdout, stderr) => {
-      pendingMints.delete(nft_number);
+      pendingMints.delete(nftNumber);
       
       if (error) {
-        console.error(`[BOA MINT] Failed #${nft_number}:`, error.message);
+        console.error(`[BOA MINT] Failed #${nftNumber}:`, error.message);
         console.error('[BOA MINT] stderr:', stderr);
         
         // Update DB
         try {
           const db = new Database(DB_PATH);
-          db.prepare('UPDATE boa_mints SET status = ? WHERE nft_number = ?')
-            .run('failed', nft_number);
+          failBoaMintReservation(db, nftNumber);
           db.close();
         } catch (e) { /* ignore */ }
         
@@ -131,16 +132,20 @@ function registerBoaMintFinalizeRoutes(app) {
         // Update DB with completed mint
         try {
           const db = new Database(DB_PATH);
-          db.prepare('UPDATE boa_mints SET mint_address = ?, metadata_uri = ?, image_uri = ?, status = ?, completed_at = ? WHERE nft_number = ?')
-            .run(result.mint || '', result.metadataUri || '', result.imageUri || '', 'completed', new Date().toISOString(), nft_number);
+          completeBoaMintReservation(db, {
+            nftNumber,
+            mintAddress: result.mint || '',
+            metadataUri: result.metadataUri || '',
+            imageUri: result.imageUri || '',
+          });
           db.close();
         } catch (e) { /* ignore */ }
         
-        console.log(`[BOA MINT] ✅ #${nft_number} minted: ${result.mint}`);
+        console.log(`[BOA MINT] ✅ #${nftNumber} minted: ${result.mint}`);
         
         res.json({
           success: true,
-          nft_number,
+          nft_number: nftNumber,
           mint: result.mint,
           collection: result.collection,
           metadata_uri: result.metadataUri,
@@ -150,7 +155,7 @@ function registerBoaMintFinalizeRoutes(app) {
         
       } catch (parseErr) {
         console.log('[BOA MINT] Output:', stdout);
-        res.json({ success: true, nft_number, output: stdout.slice(-500) });
+        res.json({ success: true, nft_number: nftNumber, output: stdout.slice(-500) });
       }
     });
   });
