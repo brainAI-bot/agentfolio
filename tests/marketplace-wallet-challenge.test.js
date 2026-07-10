@@ -314,3 +314,87 @@ test('legacy escrow release checks signed actor challenges when a release actor 
     loaded.restore();
   }
 });
+
+test('AF17/AF23 escrow funding routes require signed actor auth before paused 423 gate', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-marketplace-wallet-'));
+  const client = Keypair.generate();
+  const { marketplace, restore } = freshMarketplace(dataDir, []);
+  const clientIdentity = marketplace.deriveSatpIdentityPDA(client.publicKey.toBase58());
+
+  restore();
+  const loaded = freshMarketplace(dataDir, [
+    {
+      id: 'client_agent',
+      name: 'Client Agent',
+      wallet: client.publicKey.toBase58(),
+      wallets: JSON.stringify({ solana: client.publicKey.toBase58() }),
+      verification_data: JSON.stringify({ solana: { verified: true, address: client.publicKey.toBase58() }, satp: { identityPDA: clientIdentity } }),
+    },
+  ]);
+
+  writeJSON(dataDir, 'jobs', 'job_af17_af23', {
+    id: 'job_af17_af23',
+    postedBy: 'client_agent',
+    clientId: 'client_agent',
+    status: 'in_progress',
+    escrowId: 'escrow_af17_af23',
+  });
+  writeJSON(dataDir, 'escrow', 'escrow_af17_af23', {
+    id: 'escrow_af17_af23',
+    jobId: 'job_af17_af23',
+    depositConfirmed: false,
+  });
+
+  const app = express();
+  app.use(express.json());
+  loaded.marketplace.registerRoutes(app);
+  const server = await listen(app);
+
+  try {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    const bodyOnlyConfirm = await postJSON(baseUrl, '/api/marketplace/jobs/job_af17_af23/confirm-deposit', {
+      txHash: 'sig_body_only',
+      confirmedBy: 'client_agent',
+    });
+    assert.equal(bodyOnlyConfirm.status, 401);
+
+    const signedConfirm = await postJSON(baseUrl, '/api/marketplace/jobs/job_af17_af23/confirm-deposit', {
+      txHash: 'sig_signed',
+      confirmedBy: 'client_agent',
+      walletChallenge: signedChallenge(loaded.marketplace, client, {
+        action: 'confirm_deposit',
+        resourceId: 'job_af17_af23',
+        actorId: 'client_agent',
+        identityPDA: clientIdentity,
+      }),
+    });
+    assert.equal(signedConfirm.status, 423);
+    assert.equal(readJSON(dataDir, 'escrow', 'escrow_af17_af23').depositConfirmed, false);
+
+    const bodyOnlyV3 = await postJSON(baseUrl, '/api/marketplace/jobs/job_af17_af23/v3-escrow-funded', {
+      clientId: 'client_agent',
+      escrowPDA: 'pda_body_only',
+      txSignature: 'tx_body_only',
+    });
+    assert.equal(bodyOnlyV3.status, 401);
+
+    const signedV3 = await postJSON(baseUrl, '/api/marketplace/jobs/job_af17_af23/v3-escrow-funded', {
+      clientId: 'client_agent',
+      escrowPDA: 'pda_signed',
+      txSignature: 'tx_signed',
+      walletChallenge: signedChallenge(loaded.marketplace, client, {
+        action: 'v3_escrow_funded',
+        resourceId: 'job_af17_af23',
+        actorId: 'client_agent',
+        identityPDA: clientIdentity,
+      }),
+    });
+    assert.equal(signedV3.status, 423);
+    const job = readJSON(dataDir, 'jobs', 'job_af17_af23');
+    assert.equal(job.v3EscrowPDA, undefined);
+    assert.equal(job.escrowFunded, undefined);
+  } finally {
+    await close(server);
+    loaded.restore();
+  }
+});
