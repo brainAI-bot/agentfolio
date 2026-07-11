@@ -15,6 +15,7 @@ const bs58Module = require('bs58');
 const { buildReputationSurface } = require('./lib/reputation-surface');
 const {
   sendCustodialEscrowDisabledResponse,
+  sendLiveEscrowGateResponse,
 } = require('./lib/write-surface-gate');
 let addActivity;
 try { addActivity = require('./profile-store').addActivity; } catch { addActivity = () => {}; }
@@ -822,7 +823,7 @@ function registerRoutes(app) {
   });
 
   // POST /api/marketplace/jobs/:id/confirm-deposit — Confirm on-chain escrow deposit
-  app.post('/api/marketplace/jobs/:id/confirm-deposit', (req, res) => {
+  app.post('/api/marketplace/jobs/:id/confirm-deposit', marketplaceMutationLimiter, (req, res) => {
     const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
     const job = readJSON(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -832,20 +833,33 @@ function registerRoutes(app) {
     const escrow = readJSON(escrowPath);
     if (!escrow) return res.status(404).json({ error: 'Escrow record not found' });
 
-    const { txHash, confirmedBy } = req.body;
+    const { txHash, confirmedBy, clientId } = req.body;
     if (!txHash) return res.status(400).json({ error: 'txHash required' });
+    const depositActor = confirmedBy || clientId;
+    if (!depositActor) return res.status(400).json({ error: 'confirmedBy or clientId required' });
+    const authResult = verifyMarketplaceMutationSignature({
+      action: 'confirm_deposit',
+      resourceId: job.id,
+      actorId: depositActor,
+      body: req.body,
+    });
+    if (!authResult.ok) return sendMarketplaceAuthFailure(res, authResult);
+    if (depositActor !== job.postedBy && depositActor !== job.clientId) {
+      return res.status(403).json({ error: 'Only the job poster can confirm deposit' });
+    }
+    if (sendLiveEscrowGateResponse(res, 'marketplace confirm-deposit')) return;
 
     escrow.txHash = txHash;
     escrow.depositConfirmed = true;
     escrow.depositConfirmedAt = new Date().toISOString();
-    escrow.depositConfirmedBy = confirmedBy || null;
+    escrow.depositConfirmedBy = depositActor;
     writeJSON(escrowPath, escrow);
 
     res.json({ message: 'Deposit confirmed', escrow });
   });
 
   // POST /api/marketplace/jobs/:id/v3-escrow-funded — Record V3 on-chain escrow creation
-  app.post("/api/marketplace/jobs/:id/v3-escrow-funded", (req, res) => {
+  app.post("/api/marketplace/jobs/:id/v3-escrow-funded", marketplaceMutationLimiter, (req, res) => {
     const jobPath = path.join(DATA_DIR, "jobs", `${req.params.id}.json`);
     const job = readJSON(jobPath);
     if (!job) return res.status(404).json({ error: "Job not found" });
@@ -854,6 +868,18 @@ function registerRoutes(app) {
     if (!escrowPDA || !txSignature) {
       return res.status(400).json({ error: "escrowPDA and txSignature required" });
     }
+    if (!clientId) return res.status(400).json({ error: "clientId required" });
+    const authResult = verifyMarketplaceMutationSignature({
+      action: 'v3_escrow_funded',
+      resourceId: job.id,
+      actorId: clientId,
+      body: req.body,
+    });
+    if (!authResult.ok) return sendMarketplaceAuthFailure(res, authResult);
+    if (clientId !== job.postedBy && clientId !== job.clientId) {
+      return res.status(403).json({ error: "Only the job poster can record V3 escrow funding" });
+    }
+    if (sendLiveEscrowGateResponse(res, 'marketplace v3-escrow-funded')) return;
 
     // Store V3 escrow data on the job
     job.v3EscrowPDA = escrowPDA;
