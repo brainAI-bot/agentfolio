@@ -1,6 +1,9 @@
-const { Keypair, Connection } = require('@solana/web3.js');
+const { Keypair } = require('@solana/web3.js');
 const fs = require('fs');
 const path = require('path');
+const { assertLiveEscrowWriteEnabled } = require('../../src/lib/write-surface-gate');
+
+assertLiveEscrowWriteEnabled('custodial escrow wallet setup');
 
 // Generate new keypair for escrow wallet
 const escrowKeypair = Keypair.generate();

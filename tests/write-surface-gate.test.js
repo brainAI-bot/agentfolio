@@ -9,8 +9,10 @@ const {
   ESCROW_KILL_SWITCH_CODE,
   ESCROW_KILL_SWITCH_ENV,
   LIVE_ESCROW_READ_ONLY_CODE,
+  LiveEscrowReadOnlyError,
   READ_ONLY_CODE,
   WriteSurfaceReadOnlyError,
+  assertLiveEscrowWriteEnabled,
   envValueAllowsWrites,
   isEscrowKillSwitchActive,
   isLiveEscrowEnabled,
@@ -76,11 +78,26 @@ test('live escrow write gate requires explicit opt-in and honors kill switch', (
     killSwitchEnv: ESCROW_KILL_SWITCH_ENV,
   });
 
-  const gatedPayload = liveEscrowWriteGatePayload('escrow release');
-  assert.equal(gatedPayload.code, LIVE_ESCROW_READ_ONLY_CODE);
-  assert.equal(gatedPayload.liveEscrow.runtimeNetwork, 'devnet');
-  assert.equal(gatedPayload.liveEscrow.mainnetLiveFundsCleared, false);
+  const previousEnable = process.env[ENABLE_LIVE_ESCROW_ENV];
   const previousKill = process.env[ESCROW_KILL_SWITCH_ENV];
+  delete process.env[ENABLE_LIVE_ESCROW_ENV];
+  delete process.env[ESCROW_KILL_SWITCH_ENV];
+  try {
+    const gatedPayload = liveEscrowWriteGatePayload('escrow release');
+    assert.equal(gatedPayload.code, LIVE_ESCROW_READ_ONLY_CODE);
+    assert.equal(gatedPayload.liveEscrow.runtimeNetwork, 'devnet');
+    assert.equal(gatedPayload.liveEscrow.mainnetLiveFundsCleared, false);
+    assert.throws(
+      () => assertLiveEscrowWriteEnabled('escrow release'),
+      (err) => err instanceof LiveEscrowReadOnlyError && err.code === LIVE_ESCROW_READ_ONLY_CODE && err.statusCode === 423,
+    );
+  } finally {
+    if (previousEnable === undefined) delete process.env[ENABLE_LIVE_ESCROW_ENV];
+    else process.env[ENABLE_LIVE_ESCROW_ENV] = previousEnable;
+    if (previousKill === undefined) delete process.env[ESCROW_KILL_SWITCH_ENV];
+    else process.env[ESCROW_KILL_SWITCH_ENV] = previousKill;
+  }
+
   process.env[ESCROW_KILL_SWITCH_ENV] = '1';
   try {
     assert.equal(liveEscrowWriteGatePayload('escrow release').code, ESCROW_KILL_SWITCH_CODE);
@@ -116,7 +133,7 @@ test('runtime Solana/Irys write entry points are wired through the gate', () => 
     ['src/lib/memo-attestation.js', 'assertSolanaIrysWriteEnabled'],
     ['src/lib/memo-trust-score.js', 'assertSolanaIrysWriteEnabled'],
     ['src/lib/verification-onchain.js', 'assertSolanaIrysWriteEnabled'],
-    ['src/lib/solana-escrow.js', 'assertSolanaIrysWriteEnabled'],
+    ['src/lib/solana-escrow.js', 'assertLiveEscrowWriteEnabled'],
     ['src/lib/escrow-onchain.js', 'assertSolanaIrysWriteEnabled'],
     ['src/lib/satp-reviews.js', 'assertSolanaIrysWriteEnabled'],
     ['src/lib/satp-reviews-onchain.js', 'assertSolanaIrysWriteEnabled'],
@@ -143,7 +160,7 @@ test('runtime Solana/Irys write entry points are wired through the gate', () => 
 test('executable Solana/Irys write surfaces are covered by the read-only gate', () => {
   const roots = ['src', 'frontend', 'scripts', 'boa-pipeline', 'core-cm', 'core-cm-v2'];
   const writePattern = /send(Transaction|RawTransaction)|sendAndConfirm|create(Burn|MintTo|Transfer)Instruction|uploadFolder|uploadJson|\.upload\(|\.fund\(|mintV1|createNft|irysUploader|Irys\(/;
-  const gatePattern = /write-surface-gate|assertSolanaIrysWriteEnabled|sendSolanaIrysWriteGateResponse|sendBoaWriteGateResponse|assertFrontendSolanaIrysWriteEnabled|AGENTFOLIO_ENABLE_SOLANA_IRYS_WRITES/;
+  const gatePattern = /write-surface-gate|assertSolanaIrysWriteEnabled|assertLiveEscrowWriteEnabled|sendSolanaIrysWriteGateResponse|sendBoaWriteGateResponse|assertFrontendSolanaIrysWriteEnabled|AGENTFOLIO_ENABLE_SOLANA_IRYS_WRITES/;
   const missing = [];
 
   function walk(dir) {

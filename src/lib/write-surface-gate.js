@@ -116,9 +116,27 @@ class WriteSurfaceReadOnlyError extends Error {
   }
 }
 
+class LiveEscrowReadOnlyError extends Error {
+  constructor(operation = 'live escrow write') {
+    const payload = liveEscrowWriteGatePayload(operation);
+    super(payload.error);
+    this.name = 'LiveEscrowReadOnlyError';
+    this.code = payload.code;
+    this.statusCode = 423;
+    this.operation = operation;
+    this.liveEscrow = payload.liveEscrow;
+  }
+}
+
 function assertSolanaIrysWriteEnabled(operation) {
   if (!isSolanaIrysWriteEnabled()) {
     throw new WriteSurfaceReadOnlyError(operation);
+  }
+}
+
+function assertLiveEscrowWriteEnabled(operation) {
+  if (!isLiveEscrowEnabled()) {
+    throw new LiveEscrowReadOnlyError(operation);
   }
 }
 
@@ -198,8 +216,10 @@ module.exports = {
   ESCROW_KILL_SWITCH_ENV,
   LEGACY_ESCROW_ROUTE_DISABLED_CODE,
   LIVE_ESCROW_READ_ONLY_CODE,
+  LiveEscrowReadOnlyError,
   READ_ONLY_CODE,
   WriteSurfaceReadOnlyError,
+  assertLiveEscrowWriteEnabled,
   assertSolanaIrysWriteEnabled,
   envValueAllowsWrites,
   isEscrowKillSwitchActive,
