@@ -11,6 +11,7 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 const { getDeployProvenance } = require('./lib/deploy-provenance');
+const { writeJsonAtomicSync } = require('./lib/atomic-file');
 
 // SATP Reviews integration
 const satpReviews = require('./satp-reviews');
@@ -1623,7 +1624,9 @@ app.post('/api/burn-to-become/collections', (req, res) => {
     createdAt: new Date().toISOString()
   };
   collections.push(collection);
-  fs.writeFileSync(burnCollectionsFile, JSON.stringify(collections, null, 2));
+  writeJsonAtomicSync(burnCollectionsFile, collections, {
+    baseDir: path.join(__dirname, '..', 'data', 'burn-to-become'),
+  });
   res.status(201).json({ message: 'Collection created', collection });
 });
 
@@ -2047,11 +2050,51 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Graceful shutdown
-process.on('SIGINT', () => {
-  console.log(`[${new Date().toISOString()}] info: SIGINT received, shutting down gracefully...`, {service: "agentfolio"});
-  console.log(`[${new Date().toISOString()}] info: Server closed`, {service: "agentfolio"});
-  process.exit(0);
+let server;
+let shuttingDown = false;
+
+function shutdown(reason, error) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  if (error) {
+    console.error(`[${new Date().toISOString()}] error: ${reason}`, {
+      service: 'agentfolio',
+      message: error.message,
+      stack: NODE_ENV === 'development' ? error.stack : undefined,
+    });
+  } else {
+    console.log(`[${new Date().toISOString()}] info: ${reason}, shutting down gracefully...`, { service: 'agentfolio' });
+  }
+
+  const exitCode = error ? 1 : 0;
+  const forceExit = setTimeout(() => process.exit(exitCode), 10000);
+  if (forceExit.unref) forceExit.unref();
+
+  const closeDb = () => {
+    try { profileStore.closeDb?.(); } catch (e) {
+      console.error(`[${new Date().toISOString()}] error: failed to close profile DB`, { service: 'agentfolio', message: e.message });
+    }
+  };
+
+  if (!server) {
+    closeDb();
+    process.exit(exitCode);
+    return;
+  }
+
+  server.close(() => {
+    closeDb();
+    console.log(`[${new Date().toISOString()}] info: Server closed`, { service: 'agentfolio' });
+    process.exit(exitCode);
+  });
+}
+
+process.on('SIGINT', () => shutdown('SIGINT received'));
+process.on('SIGTERM', () => shutdown('SIGTERM received'));
+process.on('uncaughtException', (err) => shutdown('uncaughtException', err));
+process.on('unhandledRejection', (reason) => {
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  shutdown('unhandledRejection', err);
 });
 
 // ============================================================
@@ -2270,7 +2313,7 @@ console.log(`[${new Date().toISOString()}] info: x402 payment layer initialized`
 });
 
 // Start server
-app.listen(PORT, () => {
+server = app.listen(PORT, () => {
   console.log(`[${new Date().toISOString()}] info: AgentFolio server started`, { 
     service: "agentfolio",
     port: PORT, 

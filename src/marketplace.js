@@ -17,6 +17,7 @@ const {
   sendCustodialEscrowDisabledResponse,
   sendLiveEscrowGateResponse,
 } = require('./lib/write-surface-gate');
+const { writeJsonAtomicSync } = require('./lib/atomic-file');
 let addActivity;
 try { addActivity = require('./profile-store').addActivity; } catch { addActivity = () => {}; }
 
@@ -381,7 +382,7 @@ function readJob(filepath) {
 }
 
 function writeJSON(filepath, data) {
-  fs.writeFileSync(filepath, JSON.stringify(data, null, 2));
+  writeJsonAtomicSync(filepath, data, { baseDir: DATA_DIR });
 }
 
 function getAllFiles(dir) {

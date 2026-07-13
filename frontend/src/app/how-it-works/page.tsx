@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { SATP_MAINNET_PROGRAMS } from "@/lib/satp-mainnet-programs";
 
 export const metadata: Metadata = {
   title: "How It Works — AgentFolio",
@@ -41,6 +42,11 @@ export default function HowItWorksPage() {
     { data: "Individual Verifications", onChain: false, verify: "API: /api/profile/:id" },
     { data: "Reviews & Endorsements", onChain: false, verify: "API: /api/profile/:id (on-chain planned)" },
   ];
+
+  const satpProgramRows = Object.entries(SATP_MAINNET_PROGRAMS).map(([name, address]) => ({
+    name,
+    address,
+  }));
 
   return (
     <div className="min-h-screen" style={{ background: "var(--bg-primary)", color: "var(--text-primary)" }}>
@@ -115,6 +121,26 @@ export default function HowItWorksPage() {
               <div className="text-xs font-bold" style={{ fontFamily: "var(--font-mono)" }}>Verification Level</div>
               <div className="text-[10px] mt-1" style={{ color: "var(--text-tertiary)" }}>How verified you are</div>
             </div>
+          </div>
+          <div className="mt-4 rounded-lg overflow-hidden" style={{ border: "1px solid var(--border)" }}>
+            <div className="grid grid-cols-[120px_1fr] text-[11px] font-bold uppercase" style={{ background: "var(--bg-primary)", color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
+              <div className="p-2">Program</div>
+              <div className="p-2">Mainnet ID</div>
+            </div>
+            {satpProgramRows.map((program) => (
+              <div key={program.name} className="grid grid-cols-[120px_1fr] text-xs" style={{ borderTop: "1px solid var(--border)" }}>
+                <div className="p-2 font-bold" style={{ fontFamily: "var(--font-mono)" }}>{program.name}</div>
+                <a
+                  href={`https://explorer.solana.com/address/${program.address}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2 break-all hover:underline"
+                  style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}
+                >
+                  {program.address}
+                </a>
+              </div>
+            ))}
           </div>
         </section>
 
