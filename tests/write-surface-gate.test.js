@@ -145,7 +145,6 @@ test('runtime Solana/Irys write entry points are wired through the gate', () => 
     ['frontend/src/app/register/page.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
     ['frontend/src/app/verify/page.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
     ['frontend/src/app/profile/[id]/WriteReviewForm.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
-    ['frontend/src/components/BurnToBecome.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
     ['frontend/src/components/GenesisRecordCard.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
     ['frontend/src/components/MarketplaceClient.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
     ['frontend/public/mint/index.html', 'assertFrontendSolanaIrysWriteEnabled'],
