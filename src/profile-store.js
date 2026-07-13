@@ -29,6 +29,7 @@ const {
   filterCanonicalTrustData,
   normalizeTrustProvider,
 } = require('./lib/canonical-verification-providers');
+const { resolveContainedPath, writeJsonAtomicSync } = require('./lib/atomic-file');
 
 function getHqPushHeaders() {
   const token = process.env.HQ_AGENT_TOKEN || process.env.HQ_KEY;
@@ -129,6 +130,15 @@ function getDb() {
   return db;
 }
 
+function closeDb() {
+  if (!db) return;
+  try {
+    db.close();
+  } finally {
+    db = null;
+  }
+}
+
 function initSchema() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS profiles (
@@ -224,6 +234,10 @@ function parseJsonField(val, defaultVal = []) {
   try { return JSON.parse(val); } catch { return defaultVal; }
 }
 
+function profileJsonPathFor(profilesDir, profileId) {
+  return resolveContainedPath(profilesDir, path.join(profilesDir, `${profileId}.json`)).target;
+}
+
 function addVerification(profileId, platform, identifier, proof, userPaidGenesis = false) {
   platform = normalizeTrustProvider(platform);
   if (!isCanonicalTrustProvider(platform)) {
@@ -253,12 +267,13 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
 
   // Sync verification_data to JSON file so frontend (SSR) picks it up
   try {
-    const profileJsonPath = require('path').join('/home/ubuntu/agentfolio/data/profiles', profileId + '.json');
+    const prodProfilesDir = '/home/ubuntu/agentfolio/data/profiles';
+    const profileJsonPath = profileJsonPathFor(prodProfilesDir, profileId);
     if (require('fs').existsSync(profileJsonPath)) {
       const profileJson = JSON.parse(require('fs').readFileSync(profileJsonPath, 'utf-8'));
       if (!profileJson.verificationData) profileJson.verificationData = {};
       profileJson.verificationData[platform] = { address: identifier, verified: true, linked: true, verifiedAt: new Date().toISOString() };
-      require('fs').writeFileSync(profileJsonPath, JSON.stringify(profileJson, null, 2));
+      writeJsonAtomicSync(profileJsonPath, profileJson, { baseDir: prodProfilesDir });
     }
   } catch (syncErr) {
     console.error('Failed to sync verification to JSON file:', syncErr.message);
@@ -822,7 +837,7 @@ function registerRoutes(app) {
         createdAt: now,
         updatedAt: now,
       };
-      fs.writeFileSync(path.join(profilesDir, `${id}.json`), JSON.stringify(profileJson, null, 2));
+      writeJsonAtomicSync(path.join(profilesDir, `${id}.json`), profileJson, { baseDir: profilesDir });
       console.log(`[ProfileStore] JSON profile written: ${profilesDir}/${id}.json`);
 
       // Fire-and-forget: create SATP V3 Genesis Record (skip if user will pay)
@@ -1402,7 +1417,7 @@ function registerRoutes(app) {
     // Also update the JSON file for Next.js SSR
     try {
       const profilesDir = require('path').join(__dirname, '..', 'data', 'profiles');
-      const existingPath = require('path').join(profilesDir, `${req.params.id}.json`);
+      const existingPath = profileJsonPathFor(profilesDir, req.params.id);
       if (require('fs').existsSync(existingPath)) {
         const existing = JSON.parse(require('fs').readFileSync(existingPath, 'utf-8'));
         // Merge updated fields
@@ -1413,7 +1428,7 @@ function registerRoutes(app) {
         if (req.body.name !== undefined) existing.name = req.body.name;
         if (req.body.skills !== undefined) existing.skills = req.body.skills;
         existing.updatedAt = new Date().toISOString();
-        require('fs').writeFileSync(existingPath, JSON.stringify(existing, null, 2));
+        writeJsonAtomicSync(existingPath, existing, { baseDir: profilesDir });
       }
     } catch (jsonErr) {
       console.error('[PATCH] Failed to update JSON file:', jsonErr.message);
@@ -1611,4 +1626,4 @@ function registerRoutes(app) {
   });
 }
 
-module.exports = { registerRoutes, getDb, addVerification, addActivity };
+module.exports = { registerRoutes, getDb, closeDb, addVerification, addActivity };
