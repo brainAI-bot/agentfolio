@@ -1,0 +1,40 @@
+name: AgentFolio CI On Merge
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agentfolio-ci-on-merge-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  merge-gate:
+    name: AF6 AF10 merge gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate roadmap ledger
+        run: npm run lint:roadmap
+
+      - name: Run deep-audit regression ledger
+        run: node --test tests/deepaudit-af-surface-remediation.test.js
+
+      - name: Check committed diff hygiene
+        run: git diff --check
