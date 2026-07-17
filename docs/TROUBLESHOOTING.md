@@ -53,7 +53,7 @@ Twitter verification requires your AgentFolio profile link in your Twitter bio.
 4. Try verification again
 
 **Common mistakes:**
-- Using `agentfolio.com` instead of `agentfolio.bot`
+- Using any non-canonical AgentFolio domain instead of `agentfolio.bot`
 - Not including your exact profile ID
 - Checking too soon (wait for Twitter cache to update)
 
