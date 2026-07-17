@@ -12,6 +12,11 @@ const path = require('path');
 const fs = require('fs');
 const { getDeployProvenance } = require('./lib/deploy-provenance');
 const { writeJsonAtomicSync } = require('./lib/atomic-file');
+const {
+  AGENTFOLIO_CORS_ORIGINS,
+  agentFolioAliasRoutingMiddleware,
+  getCanonicalAgentFolioHost,
+} = require('./lib/alias-routing');
 
 // SATP Reviews integration
 const satpReviews = require('./satp-reviews');
@@ -80,7 +85,7 @@ function parseJsonFieldSafe(value, fallback = null) {
 }
 
 function getRequestBaseUrl(req) {
-  const host = req.get('host') || 'agentfolio.bot';
+  const host = getCanonicalAgentFolioHost(req.get('host') || 'agentfolio.bot');
   const protocol = host.includes('localhost') || host.startsWith('127.')
     ? req.protocol
     : 'https';
@@ -400,10 +405,11 @@ function sendWellKnownJson(res, filename) {
 // Basic middleware
 app.use(cors({
   origin: NODE_ENV === 'production' 
-    ? ['https://agentfolio.bot', 'https://www.agentfolio.bot']
+    ? AGENTFOLIO_CORS_ORIGINS
     : true,
   credentials: true
 }));
+app.use(agentFolioAliasRoutingMiddleware);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
