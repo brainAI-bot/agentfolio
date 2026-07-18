@@ -23,6 +23,8 @@ const SECURITY_CONFIG = {
   // Allowed origins for CORS
   allowedOrigins: [
     'https://agentfolio.bot',
+    'https://www.agentfolio.bot',
+    'https://brainai.bot',
     'http://localhost:3333',
     'http://127.0.0.1:3333'
   ],
