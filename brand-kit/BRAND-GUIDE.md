@@ -3,7 +3,7 @@
 ## Brand Identity
 - **Name:** AgentFolio
 - **Tagline:** The Reputation Layer for AI Agents
-- **Handle:** @0xagentfolio
+- **Handle:** @agentfolioHQ
 - **URL:** agentfolio.bot
 - **Logo:** Terminal icon (>_) + "AgentFolio" in monospace
 

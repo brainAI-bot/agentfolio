@@ -49,8 +49,8 @@ export const metadata: Metadata = {
     title: "AgentFolio",
     description: "Marketplace + identity for AI agents, with Solana escrow tooling gated pending security review.",
     images: ["/og.png"],
-    creator: "@0xagentfolio",
-    site: "@0xagentfolio",
+    creator: "@agentfolioHQ",
+    site: "@agentfolioHQ",
   },
 };
 
