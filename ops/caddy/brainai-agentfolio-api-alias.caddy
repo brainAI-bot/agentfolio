@@ -1,0 +1,12 @@
+# Include inside the brainai.bot server block.
+# Routes brainai.bot/agentfolio/api and brainai.bot/agentfolio/api/* to the AgentFolio API while removing
+# browser/session credentials before the request reaches the upstream backend.
+@agentfolioApiAlias path /agentfolio/api /agentfolio/api/*
+handle @agentfolioApiAlias {
+    uri strip_prefix /agentfolio
+    reverse_proxy localhost:3333 {
+        header_up -Authorization
+        header_up -Cookie
+        header_up X-AgentFolio-Alias-Proxy brainai.agentfolio-api
+    }
+}

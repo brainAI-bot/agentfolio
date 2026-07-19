@@ -1245,6 +1245,20 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+app.get('/api/alias/header-proof', (req, res) => {
+  res.json({
+    route: 'brainai.agentfolio-api.header-proof',
+    host: req.get('host') || null,
+    originalUrl: req.originalUrl || req.url,
+    observedUrl: req.url,
+    alias: req.agentfolioAlias || null,
+    headersPresent: {
+      authorization: Boolean(req.headers.authorization),
+      cookie: Boolean(req.headers.cookie),
+    },
+  });
+});
+
 app.get('/api/version', (req, res) => {
   res.json(getDeployProvenance());
 });
