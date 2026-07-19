@@ -10,6 +10,7 @@ const AGENTFOLIO_CORS_ORIGINS = [
 ];
 
 const BRAINI_AGENTFOLIO_API_PREFIX = '/agentfolio/api';
+const CANONICAL_API_PREFIX = '/api';
 
 function normalizeHost(rawHost) {
   return String(rawHost || '')
@@ -36,6 +37,13 @@ function normalizeAgentFolioAliasPath(rawUrl) {
   return null;
 }
 
+function isCanonicalApiPath(rawUrl) {
+  const value = String(rawUrl || '');
+  const queryIndex = value.indexOf('?');
+  const path = queryIndex === -1 ? value : value.slice(0, queryIndex);
+  return path === CANONICAL_API_PREFIX || path.startsWith(`${CANONICAL_API_PREFIX}/`);
+}
+
 function stripAliasForwardedHeaders(req) {
   const strippedHeaders = [];
   for (const headerName of ['authorization', 'cookie']) {
@@ -58,10 +66,20 @@ function agentFolioAliasRoutingMiddleware(req, res, next) {
     req.agentfolioAlias = {
       originalUrl: req.originalUrl || req.url,
       canonicalUrl: normalizedUrl,
+      source: 'app-prefix-rewrite',
       strippedHeaders,
     };
     req.url = normalizedUrl;
     res.setHeader('X-AgentFolio-Alias-Route', 'brainai.agentfolio-api');
+  } else if (isCanonicalApiPath(req.url)) {
+    const strippedHeaders = stripAliasForwardedHeaders(req);
+    req.agentfolioAlias = {
+      originalUrl: req.originalUrl || req.url,
+      canonicalUrl: req.url,
+      source: 'proxy-stripped-prefix',
+      strippedHeaders,
+    };
+    res.setHeader('X-AgentFolio-Alias-Route', 'brainai.agentfolio-api.proxy-stripped');
   }
   next();
 }
@@ -71,6 +89,7 @@ module.exports = {
   CANONICAL_AGENTFOLIO_HOST,
   agentFolioAliasRoutingMiddleware,
   getCanonicalAgentFolioHost,
+  isCanonicalApiPath,
   normalizeAgentFolioAliasPath,
   stripAliasForwardedHeaders,
 };

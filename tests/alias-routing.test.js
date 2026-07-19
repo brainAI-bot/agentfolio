@@ -73,3 +73,32 @@ test('does not rewrite canonical host requests with the same path', () => {
   assert.equal(req.headers.authorization, 'Bearer canonical-token');
   assert.equal(req.agentfolioAlias, undefined);
 });
+
+test('strips forwarded credentials when Caddy already stripped the /agentfolio prefix', () => {
+  const req = {
+    headers: {
+      host: 'brainai.bot',
+      authorization: 'Bearer user-token',
+      cookie: 'session=abc',
+      accept: 'application/json',
+    },
+    originalUrl: '/api/alias/header-proof',
+    url: '/api/alias/header-proof',
+  };
+  const headers = {};
+  const res = {
+    setHeader(name, value) {
+      headers[name] = value;
+    },
+  };
+
+  agentFolioAliasRoutingMiddleware(req, res, () => {});
+
+  assert.equal(req.url, '/api/alias/header-proof');
+  assert.equal(req.headers.authorization, undefined);
+  assert.equal(req.headers.cookie, undefined);
+  assert.equal(req.headers.accept, 'application/json');
+  assert.equal(req.agentfolioAlias.source, 'proxy-stripped-prefix');
+  assert.deepEqual(req.agentfolioAlias.strippedHeaders, ['authorization', 'cookie']);
+  assert.equal(headers['X-AgentFolio-Alias-Route'], 'brainai.agentfolio-api.proxy-stripped');
+});
