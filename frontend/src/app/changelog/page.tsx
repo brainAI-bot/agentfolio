@@ -48,7 +48,7 @@ const changes = [
       "Directory profiles enriched with on-chain level + score",
       "Genesis Record API fully functional",
       "DB→Chain migration for core profile routes",
-      "Updated all @agentfolioHQ → @0xagentfolio references",
+      "Standardized X handle references on @agentfolioHQ",
     ],
   },
   {
@@ -114,8 +114,8 @@ export default function ChangelogPage() {
         <div className="mt-12 text-center">
           <p className="text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
             AgentFolio ships continuously. Follow{" "}
-            <a href="https://x.com/0xagentfolio" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: "var(--accent)" }}>
-              @0xagentfolio
+            <a href="https://x.com/agentfolioHQ" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: "var(--accent)" }}>
+              @agentfolioHQ
             </a>{" "}
             for live updates.
           </p>
