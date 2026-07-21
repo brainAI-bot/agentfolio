@@ -9,6 +9,8 @@ const VALID_TAG_RE = '(shipped|in flight|pending|blocked|deferred|withdrawn)';
 const ITEM_RE = new RegExp(`^\\s*-\\s+.+\\s\\[${VALID_TAG_RE}\\](\\s·\\sowner-gated)?\\s*$`);
 const ANY_TAG_RE = /\[[^\]]+\](\s·\sowner-gated)?\s*$/;
 const META_SECTIONS = new Set(['status taxonomy', 'current state snapshot']);
+const PRODUCTION_SHIPPED_CLAIM_RE = /\b(production|prod|live|endpoint|endpoints|health|smoke|launch)\b/i;
+const PROBE_EVIDENCE_RE = /\b(probe|probed|evidence|verified|readback|smoke|non-error|available in the repository|repo-local|documented|documentation|docs?)\b|\[#[-a-f0-9]+\]/i;
 
 function cleanSection(value) {
   return String(value || '')
@@ -86,6 +88,10 @@ function lintRoadmap(file) {
     }
     if (!ITEM_RE.test(line)) {
       errors.push(`line ${index + 1}: invalid roadmap tag; valid tags are ${VALID_ROADMAP_TAGS.join(', ')}`);
+      continue;
+    }
+    if (!section.includes('decisions') && /\[shipped\]/.test(line) && PRODUCTION_SHIPPED_CLAIM_RE.test(line) && !PROBE_EVIDENCE_RE.test(line)) {
+      errors.push(`line ${index + 1}: production-facing shipped item requires live probe, proof marker, or evidence wording`);
     }
   }
 
@@ -105,16 +111,22 @@ const defaultTargets = ['ROADMAP.md', 'docs/planning/ROADMAP.md'].filter((file) 
 const targets = files.length ? files : defaultTargets;
 let failed = false;
 
-for (const file of targets) {
-  const errors = lintRoadmap(file);
-  if (!errors.length) {
-    console.log(`roadmap lint passed: ${path.relative(process.cwd(), file)}`);
-    continue;
+if (require.main === module) {
+  for (const file of targets) {
+    const errors = lintRoadmap(file);
+    if (!errors.length) {
+      console.log(`roadmap lint passed: ${path.relative(process.cwd(), file)}`);
+      continue;
+    }
+
+    failed = true;
+    console.error(`roadmap lint failed: ${path.relative(process.cwd(), file)}`);
+    for (const error of errors) console.error(`- ${error}`);
   }
 
-  failed = true;
-  console.error(`roadmap lint failed: ${path.relative(process.cwd(), file)}`);
-  for (const error of errors) console.error(`- ${error}`);
+  if (failed) process.exit(1);
 }
 
-if (failed) process.exit(1);
+module.exports = {
+  lintRoadmap,
+};
