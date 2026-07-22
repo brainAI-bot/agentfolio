@@ -28,11 +28,39 @@ try {
   console.warn('[SATP API] V3 SDK not available:', e.message);
 }
 
-const normalizeAgentLookupKey = (value) => String(value || '')
-  .trim()
-  .toLowerCase()
-  .replace(/[^a-z0-9]+/g, '_')
-  .replace(/^_+|_+$/g, '');
+const MAX_AGENT_LOOKUP_KEY_INPUT_LENGTH = 256;
+
+function normalizeAgentLookupKey(value) {
+  const raw = String(value || '').trim();
+  const capped = raw.length > MAX_AGENT_LOOKUP_KEY_INPUT_LENGTH
+    ? raw.slice(0, MAX_AGENT_LOOKUP_KEY_INPUT_LENGTH)
+    : raw;
+  let normalized = '';
+  let pendingSeparator = false;
+
+  for (let index = 0; index < capped.length; index += 1) {
+    const code = capped.charCodeAt(index);
+    let char = '';
+
+    if (code >= 48 && code <= 57) {
+      char = capped[index];
+    } else if (code >= 97 && code <= 122) {
+      char = capped[index];
+    } else if (code >= 65 && code <= 90) {
+      char = String.fromCharCode(code + 32);
+    }
+
+    if (char) {
+      if (pendingSeparator && normalized) normalized += '_';
+      normalized += char;
+      pendingSeparator = false;
+    } else if (normalized) {
+      pendingSeparator = true;
+    }
+  }
+
+  return normalized;
+}
 
 function getV3AgentIdCandidates(agentId) {
   const raw = String(agentId || '').trim();
