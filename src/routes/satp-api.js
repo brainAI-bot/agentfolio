@@ -9,6 +9,9 @@ const satpReviewsOnchain = require('../satp-reviews-onchain');
 const { client: satpAdapter } = require('../adapters/satp');
 const satpClient = satpAdapter.loadSatpClient();
 const { getGenesisPDA } = satpClient;
+const v3ScoreService = require('../v3-score-service');
+let v3Explorer;
+try { v3Explorer = require('../v3-explorer'); } catch (_) { v3Explorer = null; }
 
 // V3 SDK (using SATPV3SDK directly for all V3 operations)
 let satpV3Client;
@@ -23,6 +26,137 @@ try {
   console.log('[SATP API] V3 SDK loaded (SATPV3SDK + createSATPClient)');
 } catch (e) {
   console.warn('[SATP API] V3 SDK not available:', e.message);
+}
+
+const MAX_AGENT_LOOKUP_KEY_INPUT_LENGTH = 256;
+
+function normalizeAgentLookupKey(value) {
+  const raw = String(value || '').trim();
+  const capped = raw.length > MAX_AGENT_LOOKUP_KEY_INPUT_LENGTH
+    ? raw.slice(0, MAX_AGENT_LOOKUP_KEY_INPUT_LENGTH)
+    : raw;
+  let normalized = '';
+  let pendingSeparator = false;
+
+  for (let index = 0; index < capped.length; index += 1) {
+    const code = capped.charCodeAt(index);
+    let char = '';
+
+    if (code >= 48 && code <= 57) {
+      char = capped[index];
+    } else if (code >= 97 && code <= 122) {
+      char = capped[index];
+    } else if (code >= 65 && code <= 90) {
+      char = String.fromCharCode(code + 32);
+    }
+
+    if (char) {
+      if (pendingSeparator && normalized) normalized += '_';
+      normalized += char;
+      pendingSeparator = false;
+    } else if (normalized) {
+      pendingSeparator = true;
+    }
+  }
+
+  return normalized;
+}
+
+function getV3AgentIdCandidates(agentId) {
+  const raw = String(agentId || '').trim();
+  const normalized = normalizeAgentLookupKey(raw);
+  const candidates = new Set([raw, raw.toLowerCase(), normalized].filter(Boolean));
+  if (normalized && !normalized.startsWith('agent_')) candidates.add(`agent_${normalized}`);
+  if (normalized.startsWith('agent_')) candidates.add(normalized.slice('agent_'.length));
+  return [...candidates].filter(Boolean);
+}
+
+function deriveProfileIdFromV3Name(name) {
+  const normalized = normalizeAgentLookupKey(name);
+  if (!normalized) return '';
+  return normalized.startsWith('agent_') ? normalized : `agent_${normalized}`;
+}
+
+function normalizeV3GenesisRecord(record, requestedAgentId, source, resolvedAgentId = requestedAgentId) {
+  if (!record) return null;
+  const pda = record.pda || (() => {
+    try {
+      return typeof v3ScoreService.getGenesisPDA === 'function'
+        ? v3ScoreService.getGenesisPDA(resolvedAgentId).toBase58()
+        : null;
+    } catch (_) {
+      return null;
+    }
+  })();
+
+  return {
+    ...record,
+    agentId: requestedAgentId,
+    resolvedAgentId,
+    agentName: record.agentName || record.name || resolvedAgentId,
+    pda,
+    reputationScore: Number(record.reputationScore || 0),
+    rawReputationScore: Number(record.rawReputationScore || record.reputationScore || 0),
+    reputationPct: record.reputationPct || (Number(record.rawReputationScore || record.reputationScore || 0) / 10000).toFixed(2),
+    verificationLevel: Number(record.verificationLevel || 0),
+    verificationLabel: record.verificationLabel || record.tierLabel || record.tier || 'Unverified',
+    isBorn: !!record.isBorn,
+    isActive: record.isActive !== false,
+    onChainRegistered: true,
+    trustEvidenceBacked: true,
+    statusContract: 'v3_genesis_record',
+    source,
+  };
+}
+
+async function resolveV3GenesisRecord(agentId) {
+  const candidates = getV3AgentIdCandidates(agentId);
+
+  if (typeof v3ScoreService.getV3Score === 'function') {
+    for (const candidate of candidates) {
+      const record = await v3ScoreService.getV3Score(candidate);
+      if (record) return normalizeV3GenesisRecord(record, agentId, 'v3-score-service', candidate);
+    }
+  }
+
+  if (typeof v3Explorer?.fetchAllV3Agents === 'function') {
+    const candidateKeys = new Set(candidates.map(normalizeAgentLookupKey).filter(Boolean));
+    const candidateRawKeys = new Set(candidates.map((value) => String(value).trim().toLowerCase()).filter(Boolean));
+    const agents = await v3Explorer.fetchAllV3Agents();
+    const best = (Array.isArray(agents) ? agents : []).reduce((current, agent) => {
+      const agentName = agent?.agentName || agent?.name || '';
+      const profileId = deriveProfileIdFromV3Name(agentName);
+      const rawKeys = [
+        agent?.agentId,
+        agent?.profileId,
+        agent?.id,
+        agent?.pda,
+        agent?.authority,
+        agentName,
+      ].map((value) => String(value || '').trim().toLowerCase()).filter(Boolean);
+      const normalizedKeys = [
+        ...rawKeys,
+        profileId,
+        normalizeAgentLookupKey(agentName),
+      ].map(normalizeAgentLookupKey).filter(Boolean);
+
+      const matchedRaw = rawKeys.some((key) => candidateRawKeys.has(key));
+      const matchedNormalized = normalizedKeys.some((key) => candidateKeys.has(key));
+      if (!matchedRaw && !matchedNormalized) return current;
+
+      const score = (matchedRaw ? 1000000 : 0)
+        + (candidateKeys.has(normalizeAgentLookupKey(profileId)) ? 100000 : 0)
+        + Number(agent?.rawReputationScore || agent?.reputationScore || 0);
+      if (!current || score > current.score) return { score, agent, profileId: profileId || agentName };
+      return current;
+    }, null);
+
+    if (best?.agent) {
+      return normalizeV3GenesisRecord(best.agent, agentId, 'v3-explorer-scan', best.profileId || agentId);
+    }
+  }
+
+  return null;
 }
 
 function registerSATPRoutes(app) {
@@ -368,11 +502,10 @@ function registerSATPRoutes(app) {
    * Returns V3 Genesis Record by agent_id (not wallet)
    */
   app.get('/api/satp/v3/agent/:agentId', async (req, res) => {
-    if (!satpV3Client) return res.status(503).json({ error: 'V3 SDK not available' });
     try {
-      const record = await satpV3Client.getGenesisRecord(req.params.agentId);
+      const record = await resolveV3GenesisRecord(req.params.agentId);
       if (!record) return res.status(404).json({ error: 'No Genesis Record', agentId: req.params.agentId });
-      res.json({ ok: true, source: 'satp_v3_onchain', data: record });
+      res.json({ ok: true, source: 'satp_v3_genesis_contract', data: record });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
@@ -383,19 +516,23 @@ function registerSATPRoutes(app) {
    * Returns on-chain reputation + verification from V3 Genesis Record
    */
   app.get('/api/satp/v3/agent/:agentId/scores', async (req, res) => {
-    if (!satpV3Client) return res.status(503).json({ error: 'V3 SDK not available' });
     try {
-      const record = await satpV3Client.getGenesisRecord(req.params.agentId);
+      const record = await resolveV3GenesisRecord(req.params.agentId);
       if (!record) return res.status(404).json({ error: 'No Genesis Record', agentId: req.params.agentId });
       res.json({
         ok: true,
-        source: 'satp_v3_onchain',
+        source: 'satp_v3_genesis_contract',
         data: {
+          agentId: req.params.agentId,
+          resolvedAgentId: record.resolvedAgentId,
           reputationScore: record.reputationScore,
           reputationPct: record.reputationPct,
           verificationLevel: record.verificationLevel,
           verificationLabel: record.verificationLabel,
           isBorn: record.isBorn,
+          isActive: record.isActive,
+          onChainRegistered: record.onChainRegistered,
+          trustEvidenceBacked: record.trustEvidenceBacked,
           pda: record.pda,
         }
       });
@@ -481,4 +618,8 @@ function registerSATPRoutes(app) {
   });
 }
 
-module.exports = { registerSATPRoutes };
+module.exports = {
+  registerSATPRoutes,
+  resolveV3GenesisRecord,
+  normalizeV3GenesisRecord,
+};
