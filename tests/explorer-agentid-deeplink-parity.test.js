@@ -413,6 +413,8 @@ describe('explorer agent deep-link parity regression guard', () => {
     assert.strictEqual(githubVerification.txSignature, GITHUB_SIG);
     assert.ok(githubVerification.solscanUrl.endsWith(GITHUB_SIG));
     assert.ok(!jsonBody.platforms.includes('satp'));
+    assert.strictEqual(jsonBody.onChainRegistered, true);
+    assert.strictEqual(jsonBody.trustEvidenceBacked, true);
     assert.strictEqual(jsonBody.v3.reputationScore, 800);
     assert.strictEqual(jsonBody.v3.verificationLevel, 4);
     assert.strictEqual(jsonBody.authority, 'Auth11111111111111111111111111111111111111111');

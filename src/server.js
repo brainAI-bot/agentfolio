@@ -654,6 +654,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       return best;
     }, null)?.agent || null;
     const v3Score = matchedV3 || await getV3Score(profile.id).catch(() => null);
+    const hasV3Evidence = !!v3Score;
     const unified = computeUnifiedTrustScore(db, profile, { v3Score });
     const parsedNftAvatar = parseJsonFieldSafe(profile.nft_avatar, null);
     const resolvedAvatar = parsedNftAvatar?.image || parsedNftAvatar?.arweaveUrl || profile.avatar || matchedV3?.faceImage || null;
@@ -749,7 +750,8 @@ app.get('/api/explorer/:agentId', async (req, res) => {
       wallets: parsedWallets,
       tags: parseJsonFieldSafe(profile.tags, []),
       skills: parseJsonFieldSafe(profile.skills, []),
-      onChainRegistered: unified.hasSatpIdentity,
+      onChainRegistered: hasV3Evidence || unified.hasSatpIdentity,
+      trustEvidenceBacked: hasV3Evidence,
       v3: {
         reputationScore: onChainReputationScore,
         verificationLevel: reputationSurface.verificationLevel,
