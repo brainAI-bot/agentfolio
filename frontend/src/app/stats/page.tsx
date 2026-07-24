@@ -46,7 +46,7 @@ function parseBudgetAmount(budget: string): number {
 
 async function getSolBalance(address: string): Promise<number> {
   try {
-    const res = await fetch('https://api.mainnet-beta.solana.com', {
+    const res = await fetch(SOLANA_RPC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getBalance', params: [address] }),
@@ -59,7 +59,7 @@ async function getSolBalance(address: string): Promise<number> {
 
 async function getUsdcBalance(ownerAddress: string): Promise<number> {
   try {
-    const res = await fetch('https://api.mainnet-beta.solana.com', {
+    const res = await fetch(SOLANA_RPC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
