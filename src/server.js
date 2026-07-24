@@ -23,6 +23,7 @@ const satpReviews = require('./satp-reviews');
 // SATP On-Chain API (read + write)
 const { registerSATPRoutes } = require('./routes/satp-api');
 const { registerSATPWriteRoutes } = require('./routes/satp-write-api');
+const { registerBoaStatusRoutes } = require('./routes/boa-status');
 
 // Profile Store (SQLite-backed persistent profiles, endorsements, reviews)
 const profileStore = require('./profile-store');
@@ -1993,9 +1994,10 @@ try {
 
 // Mint/BOA Eligibility — /api/mint/eligibility, /api/boa/eligibility
 try {
+  registerBoaStatusRoutes(app);
   const { registerEligibilityRoutes } = require("./api/eligibility");
   registerEligibilityRoutes(app);
-  console.log("[Eligibility API] Mounted — /api/mint/eligibility, /api/boa/eligibility");
+  console.log("[Eligibility API] Mounted — /api/boa/status, /api/mint/eligibility, /api/boa/eligibility");
 } catch (e) {
   console.warn("[Eligibility API] Failed to mount:", e.message);
 }
