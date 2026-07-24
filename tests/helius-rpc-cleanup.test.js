@@ -41,6 +41,34 @@ test('/solana-rpc does not expose configured upstream URLs in error responses', 
   assert.match(routeSource, /RPC proxy failed/);
 });
 
+test('/solana-rpc labels Helius only after parsed hostname validation', () => {
+  assert.doesNotMatch(routeSource, /upstreamUrl\.includes\(["']helius-rpc\.com["']\)/);
+  assert.match(routeSource, /parsedUpstream\.hostname/);
+
+  const hostConstMatch = routeSource.match(/const HELIUS_RPC_HOST = "helius-rpc\.com";/);
+  const helperMatch = routeSource.match(
+    /function isHeliusRpcHost[\s\S]+?\n}\n\nfunction getRpcProviderLabel[\s\S]+?\n}/
+  );
+  assert.ok(hostConstMatch, 'Helius host constant should be present');
+  assert.ok(helperMatch, 'provider label helpers should be present');
+
+  const helperSource = `${hostConstMatch[0]}\n${helperMatch[0]}`
+    .replace(/: string/g, '')
+    .replace(/: URL/g, '');
+  const { getRpcProviderLabel } = new Function(`${helperSource}; return { getRpcProviderLabel };`)();
+
+  assert.equal(getRpcProviderLabel(new URL('https://mainnet.helius-rpc.com/')), 'helius');
+  assert.equal(getRpcProviderLabel(new URL('https://helius-rpc.com/')), 'helius');
+  assert.equal(
+    getRpcProviderLabel(new URL('https://helius-rpc.com.evil.example/rpc')),
+    'solana-rpc'
+  );
+  assert.equal(
+    getRpcProviderLabel(new URL('https://evil.example/helius-rpc.com')),
+    'solana-rpc'
+  );
+});
+
 test('stats Solana reads use the application RPC proxy', () => {
   assert.match(statsSource, /const SOLANA_RPC_URL = `\$\{API_BASE \|\| SITE_URL\}\/solana-rpc`/);
   assert.doesNotMatch(statsSource, /fetch\('https:\/\/api\.mainnet-beta\.solana\.com'/);
