@@ -16,7 +16,7 @@ const { assertSolanaIrysWriteEnabled } = require('../../src/lib/write-surface-ga
 assertSolanaIrysWriteEnabled('Solana/Irys script write surface: scripts/one-off/backfill-v3-verifications.js');
 
 // Config
-const DEPLOYER_KEY_PATH = '/home/ubuntu/.config/solana/mainnet-deployer.json';
+const DEPLOYER_KEY_PATH = process.env.DEPLOYER_KEY_PATH;
 const DB_PATH = path.join(__dirname, 'data', 'agentfolio.db');
 const RPC = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 
@@ -24,6 +24,7 @@ async function main() {
   // Load SDK + signer
   const { createSATPClient } = require('./src/satp-client/src');
   const client = createSATPClient({ rpcUrl: RPC });
+  if (!DEPLOYER_KEY_PATH) throw new Error('DEPLOYER_KEY_PATH is required');
   const signer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(DEPLOYER_KEY_PATH, 'utf8'))));
   console.log(`Signer: ${signer.publicKey.toBase58()}`);
 

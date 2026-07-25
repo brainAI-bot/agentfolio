@@ -42,14 +42,15 @@ const RPC_URL = process.env.SOLANA_RPC_URL || process.env.SOLANA_RPC || DEFAULT_
 const connection = new Connection(RPC_URL, 'confirmed');
 
 // Deployer keypair (for minting soulbound tokens server-side)
-const DEPLOYER_KEY_PATH = process.env.DEPLOYER_KEY_PATH || '/home/ubuntu/.config/solana/devnet-deployer.json';
+const DEPLOYER_KEY_PATH = process.env.DEPLOYER_KEY_PATH;
 let deployerKeypair;
 try {
+  if (!DEPLOYER_KEY_PATH) throw new Error('DEPLOYER_KEY_PATH is required');
   const keyData = JSON.parse(fs.readFileSync(DEPLOYER_KEY_PATH));
   deployerKeypair = Keypair.fromSecretKey(Uint8Array.from(keyData));
   console.log('[BurnPublic] Deployer loaded:', deployerKeypair.publicKey.toBase58());
 } catch (e) {
-  console.warn('[BurnPublic] No deployer key found at', DEPLOYER_KEY_PATH);
+  console.warn('[BurnPublic] Deployer key unavailable:', e.message);
 }
 
 const TREASURY = new PublicKey('FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be');

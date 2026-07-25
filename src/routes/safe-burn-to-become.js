@@ -11,13 +11,14 @@ const { Connection, Keypair } = require('@solana/web3.js');
 const fs = require('fs');
 const { assertSolanaIrysWriteEnabled } = require('../lib/write-surface-gate');
 
-const DEPLOYER_KEY_PATH = '/home/ubuntu/.config/solana/mainnet-deployer.json';
+const DEPLOYER_KEY_PATH = process.env.DEPLOYER_KEY_PATH;
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 
 let _deployerPubkey = null;
 function getDeployerPubkey() {
   if (!_deployerPubkey) {
     try {
+      if (!DEPLOYER_KEY_PATH) throw new Error('DEPLOYER_KEY_PATH is required');
       const keyData = JSON.parse(fs.readFileSync(DEPLOYER_KEY_PATH));
       const kp = Keypair.fromSecretKey(Uint8Array.from(keyData));
       _deployerPubkey = kp.publicKey.toBase58();

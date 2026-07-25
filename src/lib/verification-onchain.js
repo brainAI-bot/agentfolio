@@ -22,7 +22,7 @@ function shouldSkipOnchainOp(ownerWallet) {
 }
 
 const PROGRAM_ID = new PublicKey('CV5Wd9YGFX5A4dvuaFuEDuKQWp14NfnLrSdxY7EHFyeB');
-const KEYPAIR_PATH = '/home/ubuntu/.config/solana/devnet-deployer.json';
+const KEYPAIR_PATH = process.env.DEPLOYER_KEY_PATH;
 const RPC_URL = process.env.SOLANA_RPC || 'https://api.mainnet-beta.solana.com';
 
 // Instruction discriminators from IDL
@@ -34,6 +34,7 @@ const DISCRIMINATORS = {
 let _keypair = null;
 function getKeypair() {
   if (!_keypair) {
+    if (!KEYPAIR_PATH) throw new Error('DEPLOYER_KEY_PATH is required');
     const raw = JSON.parse(fs.readFileSync(KEYPAIR_PATH, 'utf-8'));
     _keypair = Keypair.fromSecretKey(Uint8Array.from(raw));
   }

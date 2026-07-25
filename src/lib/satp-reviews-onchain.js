@@ -7,7 +7,7 @@ const { Connection, Keypair, PublicKey, Transaction, TransactionInstruction, Sys
 const { assertSolanaIrysWriteEnabled } = require('./write-surface-gate');
 
 const RPC_URL = process.env.RPC_URL || 'https://api.mainnet-beta.solana.com';
-const WALLET_PATH = process.env.REVIEWS_WALLET_PATH || '/home/ubuntu/.config/solana/devnet-deployer.json';
+const WALLET_PATH = process.env.REVIEWS_WALLET_PATH;
 
 const PROGRAMS = {
   IDENTITY: new PublicKey('BY4jzmnrui1K5gZ5z5xRQkVfEEMXYHYugtH1Ua867eyr'),
@@ -23,6 +23,7 @@ function init() {
   if (connection) return;
   connection = new Connection(RPC_URL, 'confirmed');
   try {
+    if (!WALLET_PATH) throw new Error('REVIEWS_WALLET_PATH is required');
     const fs = require('fs');
     const keyData = JSON.parse(fs.readFileSync(WALLET_PATH, 'utf8'));
     signer = Keypair.fromSecretKey(Uint8Array.from(keyData));
