@@ -7,7 +7,9 @@ import { assertSolanaIrysWriteEnabled } from '../src/lib/write-surface-gate.mjs'
 assertSolanaIrysWriteEnabled('Solana/Irys script write surface: boa-pipeline/burn-dupes.mjs');
 
 const umi = createUmi("https://api.mainnet-beta.solana.com").use(mplTokenMetadata());
-const raw = JSON.parse(fs.readFileSync("/home/ubuntu/.config/solana/mainnet-deployer.json"));
+const deployerKeyPath = process.env.DEPLOYER_KEY_PATH;
+if (!deployerKeyPath) throw new Error("DEPLOYER_KEY_PATH is required");
+const raw = JSON.parse(fs.readFileSync(deployerKeyPath));
 const kp = umi.eddsa.createKeypairFromSecretKey(new Uint8Array(raw));
 umi.use(keypairIdentity(kp));
 

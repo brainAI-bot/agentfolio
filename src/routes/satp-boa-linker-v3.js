@@ -50,7 +50,7 @@ const RPC_URL = NETWORK === 'devnet'
   ? 'https://api.devnet.solana.com'
   : (process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
 
-const DEPLOYER_KEY_PATH = process.env.DEPLOYER_KEY_PATH || '/home/ubuntu/.config/solana/devnet-deployer.json';
+const DEPLOYER_KEY_PATH = process.env.DEPLOYER_KEY_PATH;
 
 const connection = new Connection(RPC_URL, 'confirmed');
 
@@ -354,6 +354,7 @@ async function createBoaAttestation(agentId, walletAddress, soulboundMint, burnT
   assertSolanaIrysWriteEnabled('SATP BOA attestation creation');
   let deployerKeypair;
   try {
+    if (!DEPLOYER_KEY_PATH) throw new Error('DEPLOYER_KEY_PATH is required');
     const keyData = JSON.parse(fs.readFileSync(DEPLOYER_KEY_PATH));
     deployerKeypair = Keypair.fromSecretKey(Uint8Array.from(keyData));
   } catch (e) {

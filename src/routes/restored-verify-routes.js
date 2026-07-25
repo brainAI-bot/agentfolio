@@ -896,7 +896,8 @@ function registerRestoredRoutes(app) {
       const { PublicKey, Keypair } = require('@solana/web3.js');
       const payerKey = new PublicKey(payer);
 
-      const KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/mainnet-deployer.json';
+      const KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || process.env.DEPLOYER_KEY_PATH;
+      if (!KEYPAIR_PATH) throw new Error('SATP_PLATFORM_KEYPAIR or DEPLOYER_KEY_PATH is required');
       const deployerKey = JSON.parse(fs.readFileSync(KEYPAIR_PATH, 'utf-8'));
       const deployer = Keypair.fromSecretKey(Uint8Array.from(deployerKey));
 

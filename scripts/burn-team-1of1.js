@@ -37,7 +37,9 @@ async function main() {
   }
 
   // Load keys
-  const deployerKey = JSON.parse(fs.readFileSync("/home/ubuntu/.config/solana/devnet-deployer.json"));
+  const deployerKeyPath = process.env.DEPLOYER_KEY_PATH;
+  if (!deployerKeyPath) throw new Error("DEPLOYER_KEY_PATH is required");
+  const deployerKey = JSON.parse(fs.readFileSync(deployerKeyPath));
   const deployer = Keypair.fromSecretKey(Uint8Array.from(deployerKey));
   const agentKey = JSON.parse(fs.readFileSync(walletKeyPath));
   const agentWallet = Keypair.fromSecretKey(Uint8Array.from(agentKey));

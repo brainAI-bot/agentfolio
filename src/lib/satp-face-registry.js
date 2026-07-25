@@ -30,7 +30,8 @@ let _deployerKeypair = null;
 
 function getDeployer() {
   if (!_deployerKeypair) {
-    const keyPath = process.env.DEPLOYER_KEY_PATH || "/home/ubuntu/.config/solana/devnet-deployer.json";
+    const keyPath = process.env.DEPLOYER_KEY_PATH;
+    if (!keyPath) throw new Error("DEPLOYER_KEY_PATH is required");
     const keyData = JSON.parse(fs.readFileSync(keyPath));
     _deployerKeypair = Keypair.fromSecretKey(Uint8Array.from(keyData));
   }

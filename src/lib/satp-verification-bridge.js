@@ -28,16 +28,14 @@ const [ATTESTATIONS_AUTHORITY] = PublicKey.findProgramAddressSync(
 );
 const [VALIDATION_AUTHORITY] = getV3ValidationAuthorityPDA('mainnet');
 
-const CONFIGURED_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/satp-mainnet-platform.json';
-const KEYPAIR_PATH = CONFIGURED_KEYPAIR_PATH === '/home/ubuntu/.config/solana/satp-mainnet-platform.json'
-  ? '/home/ubuntu/.config/solana/mainnet-deployer.json'
-  : CONFIGURED_KEYPAIR_PATH;
+const KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || process.env.DEPLOYER_KEY_PATH;
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 
 let _keypair = null;
 function getKeypair() {
   if (!_keypair) {
     try {
+      if (!KEYPAIR_PATH) throw new Error('SATP_PLATFORM_KEYPAIR or DEPLOYER_KEY_PATH is required');
       const raw = JSON.parse(fs.readFileSync(KEYPAIR_PATH, 'utf-8'));
       _keypair = Keypair.fromSecretKey(Uint8Array.from(raw));
     } catch (e) {
