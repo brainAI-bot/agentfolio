@@ -35,7 +35,7 @@ assertSolanaIrysWriteEnabled('Solana/Irys script write surface: scripts/sync-sco
 
 const PROFILES_DIR = '/home/ubuntu/agentfolio/data/profiles';
 const DB_PATH = '/home/ubuntu/agentfolio/data/agentfolio.db';
-const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/brainforge-personal.json';
+const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR;
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const SINGLE_AGENT = process.argv.find(a => a.startsWith('--agent='))?.split('=')[1] || 
@@ -108,6 +108,10 @@ function calcVerificationLevel(verifications) {
 async function main() {
   console.log(`[ScoreSync] Starting ${DRY_RUN ? '(DRY RUN)' : '(LIVE)'}`);
   if (SINGLE_AGENT) console.log(`[ScoreSync] Single agent: ${SINGLE_AGENT}`);
+  if (!PLATFORM_KEYPAIR_PATH) {
+    console.error('[ScoreSync] SATP_PLATFORM_KEYPAIR is required');
+    process.exit(1);
+  }
 
   // Load SATP client
   const client = createSATPClient({

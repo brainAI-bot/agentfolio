@@ -42,11 +42,21 @@ function recordScoreHistory(agentId, score, tier, breakdown, reason) {
 }
 
 
-// Available authority keypairs on prod
-const AUTHORITY_KEYS = {
-  'JAbcYnKy4p2c5SYV3bHu14VtD6EDDpzj44uGYW8BMud4': '/home/ubuntu/.config/solana/brainforge-personal.json',
-  'Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc': '/home/ubuntu/.config/solana/mainnet-deployer.json',
-};
+function loadAuthorityKeyPaths() {
+  const raw = process.env.SCORE_SYNC_AUTHORITY_KEY_PATHS;
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('expected a JSON object');
+    }
+    return parsed;
+  } catch (e) {
+    throw new Error(`SCORE_SYNC_AUTHORITY_KEY_PATHS must be a JSON object mapping authority pubkey to keypair path: ${e.message}`);
+  }
+}
+
+const AUTHORITY_KEY_PATHS = loadAuthorityKeyPaths();
 
 // Known agents
 const AGENTS = [
@@ -396,7 +406,7 @@ async function main() {
     const scoreDiff = expectedScore - onChain.reputationScore;
 
     const needsUpdate = forceAll || (scoreUp && scoreDiff > THRESHOLD) || levelUp;
-    const canUpdate = !!AUTHORITY_KEYS[onChain.authority];
+    const canUpdate = !!AUTHORITY_KEY_PATHS[onChain.authority];
 
     let status;
     if (expectedScore < onChain.reputationScore) {
@@ -447,7 +457,7 @@ async function main() {
 
     for (const u of updates) {
       try {
-        const keyPath = AUTHORITY_KEYS[u.authority];
+        const keyPath = AUTHORITY_KEY_PATHS[u.authority];
         const raw = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
         const signer = Keypair.fromSecretKey(Uint8Array.from(raw));
 

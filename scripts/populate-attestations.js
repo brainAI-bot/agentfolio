@@ -11,8 +11,7 @@ const Database = require('better-sqlite3');
 const satpWrite = require('../src/satp-write-client');
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'agentfolio.db');
-const KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || 
-  path.join(require('os').homedir(), '.config/solana/satp-mainnet-platform.json');
+const KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR;
 const NETWORK = process.env.SATP_NETWORK || 'mainnet';
 const DRY_RUN = !process.argv.includes('--apply');
 
@@ -31,7 +30,7 @@ const PLATFORM_TO_ATTESTATION = {
 
 async function main() {
   console.log(`\n📊 SATP Attestation Population ${DRY_RUN ? '(DRY RUN)' : ''}`);
-  console.log(`   Keypair: ${KEYPAIR_PATH}`);
+  console.log(`   Keypair: ${KEYPAIR_PATH || '(required for --apply)'}`);
   console.log(`   Network: ${NETWORK}`);
   console.log('─'.repeat(70));
 
@@ -45,6 +44,10 @@ async function main() {
   let signer;
 
   if (!DRY_RUN) {
+    if (!KEYPAIR_PATH) {
+      console.error('❌ SATP_PLATFORM_KEYPAIR is required for --apply');
+      process.exit(1);
+    }
     try {
       signer = satpWrite.loadKeypair(KEYPAIR_PATH);
       console.log(`   Signer: ${signer.publicKey.toBase58()}\n`);

@@ -18,10 +18,13 @@ const satpClient = createSATPClient({
   network: process.env.SATP_NETWORK || 'mainnet',
   rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
 });
-const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/brainforge-personal.json';
+const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR;
 const PROFILES_DIR = path.join(__dirname, '../data/profiles');
 
 async function main() {
+  if (!PLATFORM_KEYPAIR_PATH) {
+    throw new Error('SATP_PLATFORM_KEYPAIR is required');
+  }
   const signer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'))));
   console.log(`Signer: ${signer.publicKey.toBase58()}\n`);
 

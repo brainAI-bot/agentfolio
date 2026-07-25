@@ -1,6 +1,6 @@
 # SATP Keypair Cleanup Canary
 
-Tasks: `TASK-51a49704`, `TASK-c628f54f`
+Tasks: `TASK-51a49704`, `TASK-c628f54f`, `TASK-0302a173`
 
 Scope: read-only inventory and source guardrails for SATP keypair cleanup relevant to the AgentFolio deploy gate. This branch does not rotate keys, change keypairs, send Solana transactions, deploy, publish, or mutate production.
 
@@ -12,9 +12,9 @@ The canary script `scripts/satp-keypair-inventory.js` scans tracked source only.
 | --- | --- | --- |
 | `trackedSecretPaths` | Real keypair-style JSON paths accidentally committed. | Must stay empty; test fails if a matching tracked path appears. |
 | `env-configured-signer` | Runtime can be pointed at signer files through environment variables. | Keep, but document the required secret manager or host path owner before deploy. |
-| `hardcoded-mainnet-deployer-path` | Code assumes the legacy host mainnet deployer JSON path. | Runtime and gated one-off script defaults were replaced with explicit env configuration in `TASK-c628f54f`; remaining references are deployment config/docs or legacy authority maps and are owner-gated. |
-| `hardcoded-devnet-deployer-path` | Code assumes the legacy host devnet deployer JSON path. | Runtime and gated script defaults were removed in `TASK-c628f54f`; remaining references are documentation only and require a deploy/keypair owner decision before editing. |
-| `platform-key-filename` | Known SATP platform key filenames appear in source. | Keep filenames ignored and migrate runtime docs to non-repo secret storage. |
+| `hardcoded-mainnet-deployer-path` | Code assumes the legacy host mainnet deployer JSON path. | Must stay at zero; runtime signer paths come from owner-managed environment. |
+| `hardcoded-devnet-deployer-path` | Code assumes the legacy host devnet deployer JSON path. | Must stay at zero; historical docs use non-path owner-managed wording. |
+| `platform-key-filename` | Known SATP platform key filenames appear in source. | Runtime defaults were removed; remaining references are `.gitignore`, inventory patterns, and canary assertions only. |
 | `legacy-authority-pubkey` | Public deployer/legacy signer addresses are embedded as assumptions. | Separate display/reference usage from signer-authority logic before deploy gate close. |
 | `secret-key-loader` | Source loads local secret-key arrays into Solana/UMI signers. | Require explicit env, read-only dry-run tests, and owner approval before changing signer behavior. |
 
@@ -37,6 +37,21 @@ Not-safe / owner-gated in this task:
 - `tools/score-sync.js`: legacy public-authority-to-keypath map needs a signer-authority decision before changing behavior.
 - `docs/ONCHAIN-WIRING-PLAN.md`: historical/deployment documentation, not runtime signer loading.
 - `platform-key-filename`, `legacy-authority-pubkey`, and `secret-key-loader`: tracked as follow-up inventory categories; this task only removed default local path assumptions where safe.
+
+## `TASK-0302a173` final residual cleanup classification
+
+Safe cleanup completed:
+
+- `ecosystem.config.js` no longer embeds a SATP platform signer path. It still requires `production.env`, and now fails closed when `SATP_PLATFORM_KEYPAIR` is absent from owner-managed runtime config.
+- `tools/score-sync.js` no longer embeds public-authority-to-keypath mappings. Live writes must provide `SCORE_SYNC_AUTHORITY_KEY_PATHS` as a JSON object mapping authority pubkeys to owner-managed keypair paths.
+- `docs/ONCHAIN-WIRING-PLAN.md` no longer names a concrete devnet deployer keypair path.
+- SATP signer-loading scripts and runtime modules that previously fell back to local platform-key filenames now require `SATP_PLATFORM_KEYPAIR` explicitly.
+
+Remaining classified residuals:
+
+- `platform-key-filename`: intentionally limited to guardrails (`.gitignore`, inventory patterns, and the canary test). Removing those would weaken tracked-secret prevention.
+- `legacy-authority-pubkey`: intentionally retained where public addresses are part of historical JSON state, demo/reference UI, docs, verification checks, or authority comparisons. Blocker for further cleanup: keypair/authority ownership decision is still closed, and changing those addresses could alter identity, BOA, burn, or verification behavior.
+- `secret-key-loader`: intentionally retained because the loaders are the mechanisms that deserialize owner-provided signer files for gated write surfaces. Blocker for further cleanup: replacing them requires a broader signer abstraction or wallet-provider design and explicit owner approval; this task cannot change keypairs or write behavior.
 
 ## Read-only verification
 

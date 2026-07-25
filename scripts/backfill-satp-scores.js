@@ -33,8 +33,11 @@ try {
 const d = new Database(path.join(__dirname, "../data/agentfolio.db"));
 
 // Initialize SATP platform signer (same as in profile-store.js)
-const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR ||
-  '/home/ubuntu/.config/solana/brainforge-personal.json';
+const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR;
+if (!PLATFORM_KEYPAIR_PATH) {
+  console.error('❌ SATP_PLATFORM_KEYPAIR is required');
+  process.exit(1);
+}
 const signerKey = JSON.parse(fs.readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'));
 const platformSigner = Keypair.fromSecretKey(Uint8Array.from(signerKey));
 

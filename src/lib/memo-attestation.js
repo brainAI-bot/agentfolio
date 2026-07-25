@@ -15,13 +15,14 @@ const Database = require('better-sqlite3');
 const { assertSolanaIrysWriteEnabled } = require('./write-surface-gate');
 
 const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
-const KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/brainforge-personal.json';
+const KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR;
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const DB_PATH = path.join(__dirname, '..', '..', 'data', 'agentfolio.db');
 
 let _keypair = null;
 function getKeypair() {
   if (!_keypair) {
+    if (!KEYPAIR_PATH) throw new Error('SATP_PLATFORM_KEYPAIR is required');
     const raw = JSON.parse(fs.readFileSync(KEYPAIR_PATH, 'utf-8'));
     _keypair = Keypair.fromSecretKey(Uint8Array.from(raw));
   }

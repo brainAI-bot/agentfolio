@@ -9,6 +9,7 @@ const fs = require('fs');
 const { Keypair, PublicKey } = require('@solana/web3.js');
 const { assertSolanaIrysWriteEnabled } = require('../src/lib/write-surface-gate');
 
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 assertSolanaIrysWriteEnabled('Solana/Irys script write surface: scripts/push-onchain-levels.js');
 
 // Load SATP V3 SDK
@@ -29,7 +30,7 @@ try {
 }
 
 const DB_PATH = path.join(__dirname, '../data/agentfolio.db');
-const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/brainforge-personal.json';
+const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR;
 
 const CATEGORY_MAP = {
   solana: 'wallets', ethereum: 'wallets', hyperliquid: 'wallets', polymarket: 'wallets',
@@ -41,7 +42,9 @@ const HUMAN_PLATFORMS = ['github', 'x', 'twitter'];
 const LEVEL_NAMES = ['Unregistered', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
 
 async function main() {
-  require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+  if (!PLATFORM_KEYPAIR_PATH) {
+    throw new Error('SATP_PLATFORM_KEYPAIR is required');
+  }
   
   const db = new Database(DB_PATH);
   const signer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'))));
