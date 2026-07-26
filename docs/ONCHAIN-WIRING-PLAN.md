@@ -19,7 +19,7 @@
 | Escrow | `4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a` | `onchain/target/idl/agentfolio_escrow.json` |
 
 **Deployer wallet:** `Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc` (~8 SOL)  
-**Keypair:** `/home/ubuntu/.config/solana/devnet-deployer.json`
+**Keypair:** owner-approved signer path from production secret configuration.
 
 ---
 
@@ -223,5 +223,5 @@ Cost: program upgrade is free (deployer authority), new account rent ~0.002 SOL 
 - `@coral-xyz/anchor` — for Anchor client (may need to `npm install`)
 - `@solana/web3.js` — already installed
 - `@solana/spl-token` — already installed
-- Deployer keypair at `/home/ubuntu/.config/solana/devnet-deployer.json` — needed for authority-gated instructions
+- Owner-approved deployer keypair path from production secret configuration — needed for authority-gated instructions
 - USDC token accounts for treasury wallet

@@ -12,8 +12,8 @@ The canary script `scripts/satp-keypair-inventory.js` scans tracked source only.
 | --- | --- | --- |
 | `trackedSecretPaths` | Real keypair-style JSON paths accidentally committed. | Must stay empty; test fails if a matching tracked path appears. |
 | `env-configured-signer` | Runtime can be pointed at signer files through environment variables. | Keep, but document the required secret manager or host path owner before deploy. |
-| `hardcoded-mainnet-deployer-path` | Code assumes the legacy host mainnet deployer JSON path. | Runtime and gated one-off script defaults were replaced with explicit env configuration in `TASK-c628f54f`; remaining references are deployment config/docs or legacy authority maps and are owner-gated. |
-| `hardcoded-devnet-deployer-path` | Code assumes the legacy host devnet deployer JSON path. | Runtime and gated script defaults were removed in `TASK-c628f54f`; remaining references are documentation only and require a deploy/keypair owner decision before editing. |
+| `hardcoded-mainnet-deployer-path` | Code assumes the legacy host mainnet deployer JSON path. | Must stay empty; PM2 and score-sync now require owner-provided secret configuration instead of built-in host paths. |
+| `hardcoded-devnet-deployer-path` | Code assumes the legacy host devnet deployer JSON path. | Must stay empty; historical docs should describe owner-provided signer configuration without naming legacy host paths. |
 | `platform-key-filename` | Known SATP platform key filenames appear in source. | Keep filenames ignored and migrate runtime docs to non-repo secret storage. |
 | `legacy-authority-pubkey` | Public deployer/legacy signer addresses are embedded as assumptions. | Separate display/reference usage from signer-authority logic before deploy gate close. |
 | `secret-key-loader` | Source loads local secret-key arrays into Solana/UMI signers. | Require explicit env, read-only dry-run tests, and owner approval before changing signer behavior. |
@@ -33,10 +33,13 @@ Safe cleanup completed:
 
 Not-safe / owner-gated in this task:
 
-- `ecosystem.config.js`: PM2 production config belongs to the HQ deploy-truth/keypair decision and should not be changed without owner approval.
-- `tools/score-sync.js`: legacy public-authority-to-keypath map needs a signer-authority decision before changing behavior.
-- `docs/ONCHAIN-WIRING-PLAN.md`: historical/deployment documentation, not runtime signer loading.
 - `platform-key-filename`, `legacy-authority-pubkey`, and `secret-key-loader`: tracked as follow-up inventory categories; this task only removed default local path assumptions where safe.
+
+`TASK-0302a173` final residual cleanup:
+
+- `ecosystem.config.js`: production PM2 startup now fails closed unless `production.env` provides `SATP_PLATFORM_KEYPAIR`; no built-in deployer path remains.
+- `tools/score-sync.js`: authority key paths now come from `SCORE_SYNC_AUTHORITY_KEYS_JSON`, keyed by authority public key; no built-in deployer path remains.
+- `docs/ONCHAIN-WIRING-PLAN.md`: historical keypair references now describe owner-approved secret configuration without naming legacy host paths.
 
 ## Read-only verification
 

@@ -38,15 +38,17 @@ const deployCommitSha = process.env.AGENTFOLIO_COMMIT_SHA || resolveCommitSha();
 const deployBuildTime = process.env.AGENTFOLIO_BUILD_TIME || new Date().toISOString();
 
 // Fail-closed (security review 2026-07-02): production.env is the ONLY intended source of the real network
-// selector and platform key. The env block below hardcodes MAINNET + the hot deployer keypair as fallbacks
-// (masked by `...secretEnv`). If production.env fails to load — missing / unreadable / empty — those fallbacks
-// would silently start agentfolio on MAINNET with the hot deployer key: the worst case for a funds-handling app
-// (the escrow live-funds path is meant to stay gated). Refuse to start instead of running with unsafe defaults.
+// selector and platform key. Refuse to start if those values are missing instead of relying on deployer-key defaults.
 if (!secretEnv || typeof secretEnv.SATP_NETWORK !== "string" || secretEnv.SATP_NETWORK.length === 0) {
   throw new Error(
-    "[ecosystem] refusing to start: production.env did not provide SATP_NETWORK, so the hardcoded fallbacks " +
-    "would run MAINNET + the hot deployer key. Provide AGENTFOLIO_ENV_FILE / " +
+    "[ecosystem] refusing to start: production.env did not provide SATP_NETWORK. Provide AGENTFOLIO_ENV_FILE / " +
     "/home/ubuntu/.config/agentfolio/production.env with the intended network before starting."
+  );
+}
+if (!secretEnv || typeof secretEnv.SATP_PLATFORM_KEYPAIR !== "string" || secretEnv.SATP_PLATFORM_KEYPAIR.length === 0) {
+  throw new Error(
+    "[ecosystem] refusing to start: production.env did not provide SATP_PLATFORM_KEYPAIR. Provide an owner-approved " +
+    "signer path through AGENTFOLIO_ENV_FILE / /home/ubuntu/.config/agentfolio/production.env before starting."
   );
 }
 
@@ -65,7 +67,6 @@ module.exports = {
       BOA_CLUSTER: "mainnet",
       SATP_NETWORK: "mainnet",
       SOLANA_RPC_URL: "https://api.mainnet-beta.solana.com",
-      SATP_PLATFORM_KEYPAIR: "/home/ubuntu/.config/solana/mainnet-deployer.json",
       X402_ENABLED: "true",
       X402_SCHEME: "svm",
       X402_NETWORK: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",

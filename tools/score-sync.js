@@ -42,11 +42,27 @@ function recordScoreHistory(agentId, score, tier, breakdown, reason) {
 }
 
 
-// Available authority keypairs on prod
-const AUTHORITY_KEYS = {
-  'JAbcYnKy4p2c5SYV3bHu14VtD6EDDpzj44uGYW8BMud4': '/home/ubuntu/.config/solana/brainforge-personal.json',
-  'Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc': '/home/ubuntu/.config/solana/mainnet-deployer.json',
-};
+function loadAuthorityKeys() {
+  if (!process.env.SCORE_SYNC_AUTHORITY_KEYS_JSON) return {};
+  try {
+    const parsed = JSON.parse(process.env.SCORE_SYNC_AUTHORITY_KEYS_JSON);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('expected a JSON object');
+    }
+    for (const [authority, keyPath] of Object.entries(parsed)) {
+      new PublicKey(authority);
+      if (typeof keyPath !== 'string' || keyPath.length === 0) {
+        throw new Error(`missing key path for ${authority}`);
+      }
+    }
+    return parsed;
+  } catch (e) {
+    throw new Error(`Invalid SCORE_SYNC_AUTHORITY_KEYS_JSON: ${e.message}`);
+  }
+}
+
+// Owner-provided authority key paths, keyed by authority public key.
+const AUTHORITY_KEYS = loadAuthorityKeys();
 
 // Known agents
 const AGENTS = [

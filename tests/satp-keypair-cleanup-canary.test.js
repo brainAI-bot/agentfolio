@@ -48,4 +48,10 @@ describe('SATP keypair cleanup canary', () => {
       assert.ok(Number.isInteger(inventory.categories[category].count));
     }
   });
+
+  it('keeps hardcoded deployer host paths out of tracked source', () => {
+    const inventory = runInventory();
+    assert.strictEqual(inventory.categories['hardcoded-mainnet-deployer-path'].count, 0);
+    assert.strictEqual(inventory.categories['hardcoded-devnet-deployer-path'].count, 0);
+  });
 });
