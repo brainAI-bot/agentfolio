@@ -2,6 +2,8 @@
 
 const ENABLE_WRITES_ENV = 'AGENTFOLIO_ENABLE_SOLANA_IRYS_WRITES';
 const ENABLE_LIVE_ESCROW_ENV = 'AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES';
+const LIVE_ESCROW_OWNER_AUTHORIZATION_ENV = 'AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION';
+const LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE = 'owner-approved-live-escrow-writes';
 const ESCROW_KILL_SWITCH_ENV = 'AGENTFOLIO_ESCROW_KILL_SWITCH';
 const READ_ONLY_CODE = 'SOLANA_IRYS_WRITES_READ_ONLY';
 const BOA_READ_ONLY_CODE = 'BOA_WRITES_READ_ONLY';
@@ -22,8 +24,14 @@ function isEscrowKillSwitchActive(env = process.env) {
   return envValueAllowsWrites(env[ESCROW_KILL_SWITCH_ENV]);
 }
 
+function hasLiveEscrowOwnerAuthorization(env = process.env) {
+  return String(env[LIVE_ESCROW_OWNER_AUTHORIZATION_ENV] || '').trim() === LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE;
+}
+
 function isLiveEscrowEnabled(env = process.env) {
-  return envValueAllowsWrites(env[ENABLE_LIVE_ESCROW_ENV]) && !isEscrowKillSwitchActive(env);
+  return envValueAllowsWrites(env[ENABLE_LIVE_ESCROW_ENV])
+    && hasLiveEscrowOwnerAuthorization(env)
+    && !isEscrowKillSwitchActive(env);
 }
 
 function solanaIrysWriteGatePayload(operation = 'Solana/Irys write') {
@@ -37,26 +45,43 @@ function solanaIrysWriteGatePayload(operation = 'Solana/Irys write') {
 }
 
 function liveEscrowGateStatus(env = process.env) {
+  const requested = envValueAllowsWrites(env[ENABLE_LIVE_ESCROW_ENV]);
+  const ownerAuthorized = hasLiveEscrowOwnerAuthorization(env);
   const enabled = isLiveEscrowEnabled(env);
   const killSwitchActive = isEscrowKillSwitchActive(env);
   return {
     enabled,
+    requested,
+    ownerAuthorized,
     killSwitchActive,
     status: enabled
       ? 'live_funds_enabled_by_environment'
       : killSwitchActive
         ? 'live_funds_blocked_by_kill_switch'
-        : 'live_funds_gated_pending_security_review',
+        : requested && !ownerAuthorized
+          ? 'live_funds_gated_pending_owner_authorization'
+          : 'live_funds_gated_pending_security_review',
     liveFundsCleared: enabled,
+    ownerAuthorization: {
+      required: true,
+      env: LIVE_ESCROW_OWNER_AUTHORIZATION_ENV,
+      expectedValue: LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE,
+      status: ownerAuthorized ? 'owner_authorized' : 'missing_owner_authorization',
+    },
     verifiedRuntime: {
       network: 'devnet',
       pdaDerive: 'verified',
     },
     runtimeNetwork: 'devnet',
     mainnetLiveFundsCleared: enabled,
+    readOnlyPosture: 'GET health and PDA derivation routes remain read-only HTTP 200 when program IDs resolve; live-funds POST routes fail closed.',
     publicCopy: enabled
       ? 'Live escrow writes are enabled by deployment environment.'
-      : 'Devnet-safe escrow runtime smoke is verified; mainnet/live-funds escrow remains gated pending security re-review.',
+      : killSwitchActive
+        ? 'Live escrow writes are disabled by the escrow kill switch.'
+        : requested && !ownerAuthorized
+          ? 'Devnet-safe escrow runtime smoke is verified; mainnet/live-funds escrow remains gated pending explicit Owner authorization.'
+          : 'Devnet-safe escrow runtime smoke is verified; mainnet/live-funds escrow remains gated pending security re-review.',
     enableWith: ENABLE_LIVE_ESCROW_ENV,
     killSwitchEnv: ESCROW_KILL_SWITCH_ENV,
   };
@@ -214,6 +239,8 @@ module.exports = {
   ENABLE_WRITES_ENV,
   ESCROW_KILL_SWITCH_CODE,
   ESCROW_KILL_SWITCH_ENV,
+  LIVE_ESCROW_OWNER_AUTHORIZATION_ENV,
+  LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE,
   LEGACY_ESCROW_ROUTE_DISABLED_CODE,
   LIVE_ESCROW_READ_ONLY_CODE,
   LiveEscrowReadOnlyError,
@@ -222,6 +249,7 @@ module.exports = {
   assertLiveEscrowWriteEnabled,
   assertSolanaIrysWriteEnabled,
   envValueAllowsWrites,
+  hasLiveEscrowOwnerAuthorization,
   isEscrowKillSwitchActive,
   isLiveEscrowEnabled,
   isSolanaIrysWriteEnabled,

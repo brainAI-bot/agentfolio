@@ -3,9 +3,13 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const {
+  liveEscrowGateStatus,
+} = require('./write-surface-gate');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const AUTHORITY_PROGRAM_ID = 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C';
+const AUTHORITY_PROGRAM_ID_PROVENANCE = 'H2/D1 AgentFolio runtime record carried by git-pinned @brainai/satp-client commit 2752dcc99b7ece9f5452c7273123232a92d7067f; preserved by published @brainai/satp-client mainnet ESCROW constant';
 const AUTHORITY_LABEL = 'escrow_v3';
 const AUTHORITY_SOURCE_WORKSPACE = 'onchain/escrow_v3';
 const AUTHORITY_ANCHOR_TOML = 'onchain/escrow_v3/Anchor.toml';
@@ -78,7 +82,7 @@ function readSatpRuntimeIds(satpClient) {
   };
 }
 
-function getEscrowV3AuthorityReadback({ satpClient } = {}) {
+function getEscrowV3AuthorityReadback({ satpClient, env = process.env } = {}) {
   const sourceWorkspace = fileInfo(AUTHORITY_SOURCE_WORKSPACE);
   const anchorToml = fileInfo(AUTHORITY_ANCHOR_TOML);
   const programSource = fileInfo(AUTHORITY_PROGRAM_SOURCE);
@@ -96,10 +100,13 @@ function getEscrowV3AuthorityReadback({ satpClient } = {}) {
   const satpDevnetMatches = satpRuntime.devnetEscrowProgramId === AUTHORITY_PROGRAM_ID;
   const packagedIdlMatches = packagedIdlAddress === AUTHORITY_PROGRAM_ID;
   const verified = sourceComplete && trackedIdlMatches && satpMainnetMatches && satpDevnetMatches && packagedIdlMatches;
+  const liveEscrow = liveEscrowGateStatus(env);
+  const liveEscrowWritesAllowed = verified && liveEscrow.enabled;
 
   return {
     label: AUTHORITY_LABEL,
     expectedProgramId: AUTHORITY_PROGRAM_ID,
+    expectedProgramIdProvenance: AUTHORITY_PROGRAM_ID_PROVENANCE,
     status: verified ? 'verified' : 'blocked_pending_authoritative_source_idl',
     sourceWorkspace,
     anchorToml,
@@ -121,10 +128,14 @@ function getEscrowV3AuthorityReadback({ satpClient } = {}) {
       devnetMatchesExpectedProgramId: satpDevnetMatches,
     },
     releaseGate: {
-      liveEscrowWritesAllowed: verified,
-      reason: verified
-        ? 'escrow_v3 source, IDL, SATP runtime, and packaged IDL agree on the expected program id'
-        : 'escrow_v3 authoritative source/IDL path is not yet fully tracked or does not match the expected program id',
+      liveEscrowWritesAllowed,
+      ownerAuthorizationRequired: true,
+      ownerAuthorizationStatus: liveEscrow.ownerAuthorization.status,
+      ownerAuthorizationEnv: liveEscrow.ownerAuthorization.env,
+      readOnlyPosture: liveEscrow.readOnlyPosture,
+      reason: liveEscrowWritesAllowed
+        ? 'escrow_v3 source, IDL, SATP runtime, packaged IDL, live escrow flag, and explicit Owner authorization all agree'
+        : 'escrow_v3 PDA reads may derive from the published SATP client, but live escrow writes stay read-only until source/IDL provenance, release gating, and explicit Owner authorization all clear',
     },
   };
 }
@@ -134,6 +145,7 @@ module.exports = {
   AUTHORITY_IDL_PATH,
   AUTHORITY_LABEL,
   AUTHORITY_PROGRAM_ID,
+  AUTHORITY_PROGRAM_ID_PROVENANCE,
   AUTHORITY_PROGRAM_SOURCE,
   AUTHORITY_SOURCE_WORKSPACE,
   SATP_ESCROW_IDL_PACKAGE_PATH,

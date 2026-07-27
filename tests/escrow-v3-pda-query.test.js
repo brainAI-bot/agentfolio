@@ -59,8 +59,10 @@ test('GET /api/v3/escrow/pda/derive derives a mainnet escrow PDA', async () => {
 
 test('POST /api/v3/escrow/create is gated before live-funds release', async () => {
   const previousEnable = process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
+  const previousOwnerAuthorization = process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
   const previousKill = process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
   delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
+  delete process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
   delete process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
 
   const app = express();
@@ -87,6 +89,8 @@ test('POST /api/v3/escrow/create is gated before live-funds release', async () =
     assert.equal(res.status, 423);
     assert.equal(body.code, 'LIVE_ESCROW_WRITES_READ_ONLY');
     assert.equal(body.liveEscrow.status, 'live_funds_gated_pending_security_review');
+    assert.equal(body.liveEscrow.ownerAuthorization.required, true);
+    assert.equal(body.liveEscrow.ownerAuthorization.status, 'missing_owner_authorization');
     assert.equal(body.liveEscrow.verifiedRuntime.network, 'devnet');
     assert.equal(body.liveEscrow.mainnetLiveFundsCleared, false);
     assert.equal(body.enableWith, 'AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES');
@@ -94,6 +98,8 @@ test('POST /api/v3/escrow/create is gated before live-funds release', async () =
   } finally {
     if (previousEnable === undefined) delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
     else process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = previousEnable;
+    if (previousOwnerAuthorization === undefined) delete process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
+    else process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION = previousOwnerAuthorization;
     if (previousKill === undefined) delete process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
     else process.env.AGENTFOLIO_ESCROW_KILL_SWITCH = previousKill;
     await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
@@ -102,8 +108,10 @@ test('POST /api/v3/escrow/create is gated before live-funds release', async () =
 
 test('GET /api/v3/escrow/health exposes live escrow gate status', async () => {
   const previousEnable = process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
+  const previousOwnerAuthorization = process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
   const previousKill = process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
   process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = '1';
+  delete process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
   process.env.AGENTFOLIO_ESCROW_KILL_SWITCH = '1';
 
   const app = express();
@@ -117,8 +125,13 @@ test('GET /api/v3/escrow/health exposes live escrow gate status', async () => {
 
     assert.equal(res.status, 200);
     assert.equal(body.liveEscrow.enabled, false);
+    assert.equal(body.liveEscrow.requested, true);
+    assert.equal(body.liveEscrow.ownerAuthorized, false);
     assert.equal(body.liveEscrow.killSwitchActive, true);
     assert.equal(body.liveEscrow.status, 'live_funds_blocked_by_kill_switch');
+    assert.equal(body.liveEscrow.ownerAuthorization.env, 'AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION');
+    assert.equal(body.liveEscrow.ownerAuthorization.status, 'missing_owner_authorization');
+    assert.match(body.liveEscrow.readOnlyPosture, /GET health and PDA derivation routes remain read-only HTTP 200/);
     assert.equal(body.liveEscrow.verifiedRuntime.network, 'devnet');
     assert.equal(body.liveEscrow.mainnetLiveFundsCleared, false);
     assert.equal(body.liveEscrow.enableWith, 'AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES');
@@ -126,9 +139,14 @@ test('GET /api/v3/escrow/health exposes live escrow gate status', async () => {
     assert.equal(body.escrowAuthority.expectedProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
     assert.equal(body.escrowAuthority.status, 'blocked_pending_authoritative_source_idl');
     assert.equal(body.escrowAuthority.releaseGate.liveEscrowWritesAllowed, false);
+    assert.equal(body.escrowAuthority.releaseGate.ownerAuthorizationRequired, true);
+    assert.equal(body.escrowAuthority.releaseGate.ownerAuthorizationStatus, 'missing_owner_authorization');
+    assert.match(body.escrowAuthority.releaseGate.reason, /PDA reads may derive/);
   } finally {
     if (previousEnable === undefined) delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
     else process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = previousEnable;
+    if (previousOwnerAuthorization === undefined) delete process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
+    else process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION = previousOwnerAuthorization;
     if (previousKill === undefined) delete process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
     else process.env.AGENTFOLIO_ESCROW_KILL_SWITCH = previousKill;
     await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));

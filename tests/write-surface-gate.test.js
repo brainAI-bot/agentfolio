@@ -6,6 +6,8 @@ const test = require('node:test');
 const {
   ENABLE_WRITES_ENV,
   ENABLE_LIVE_ESCROW_ENV,
+  LIVE_ESCROW_OWNER_AUTHORIZATION_ENV,
+  LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE,
   ESCROW_KILL_SWITCH_CODE,
   ESCROW_KILL_SWITCH_ENV,
   LIVE_ESCROW_READ_ONLY_CODE,
@@ -14,6 +16,7 @@ const {
   WriteSurfaceReadOnlyError,
   assertLiveEscrowWriteEnabled,
   envValueAllowsWrites,
+  hasLiveEscrowOwnerAuthorization,
   isEscrowKillSwitchActive,
   isLiveEscrowEnabled,
   isSolanaIrysWriteEnabled,
@@ -52,10 +55,21 @@ test('Solana/Irys write gate allows explicit opt-in env values', () => {
 
 test('live escrow write gate requires explicit opt-in and honors kill switch', () => {
   assert.equal(isLiveEscrowEnabled({}), false);
-  assert.equal(isLiveEscrowEnabled({ [ENABLE_LIVE_ESCROW_ENV]: '1' }), true);
+  assert.equal(isLiveEscrowEnabled({ [ENABLE_LIVE_ESCROW_ENV]: '1' }), false);
+  assert.equal(hasLiveEscrowOwnerAuthorization({
+    [LIVE_ESCROW_OWNER_AUTHORIZATION_ENV]: LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE,
+  }), true);
+  assert.equal(isLiveEscrowEnabled({
+    [ENABLE_LIVE_ESCROW_ENV]: '1',
+    [LIVE_ESCROW_OWNER_AUTHORIZATION_ENV]: LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE,
+  }), true);
+  assert.equal(liveEscrowGateStatus({
+    [ENABLE_LIVE_ESCROW_ENV]: '1',
+  }).status, 'live_funds_gated_pending_owner_authorization');
   assert.equal(isEscrowKillSwitchActive({ [ESCROW_KILL_SWITCH_ENV]: 'on' }), true);
   assert.equal(isLiveEscrowEnabled({
     [ENABLE_LIVE_ESCROW_ENV]: '1',
+    [LIVE_ESCROW_OWNER_AUTHORIZATION_ENV]: LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE,
     [ESCROW_KILL_SWITCH_ENV]: '1',
   }), false);
 
@@ -64,16 +78,25 @@ test('live escrow write gate requires explicit opt-in and honors kill switch', (
     [ESCROW_KILL_SWITCH_ENV]: '1',
   }), {
     enabled: false,
+    requested: true,
+    ownerAuthorized: false,
     killSwitchActive: true,
     status: 'live_funds_blocked_by_kill_switch',
     liveFundsCleared: false,
+    ownerAuthorization: {
+      required: true,
+      env: LIVE_ESCROW_OWNER_AUTHORIZATION_ENV,
+      expectedValue: LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE,
+      status: 'missing_owner_authorization',
+    },
     verifiedRuntime: {
       network: 'devnet',
       pdaDerive: 'verified',
     },
     runtimeNetwork: 'devnet',
     mainnetLiveFundsCleared: false,
-    publicCopy: 'Devnet-safe escrow runtime smoke is verified; mainnet/live-funds escrow remains gated pending security re-review.',
+    readOnlyPosture: 'GET health and PDA derivation routes remain read-only HTTP 200 when program IDs resolve; live-funds POST routes fail closed.',
+    publicCopy: 'Live escrow writes are disabled by the escrow kill switch.',
     enableWith: ENABLE_LIVE_ESCROW_ENV,
     killSwitchEnv: ESCROW_KILL_SWITCH_ENV,
   });
