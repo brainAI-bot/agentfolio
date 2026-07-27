@@ -24,8 +24,13 @@ test('escrow_v3 authority readback names the HQ-selected program id and fails cl
   assert.equal(readback.status, 'blocked_pending_authoritative_source_idl');
   assert.equal(readback.releaseGate.liveEscrowWritesAllowed, false);
   assert.equal(readback.satpArtifact.runtime.available, true);
-  assert.equal(readback.satpArtifact.mainnetMatchesExpectedProgramId, true);
-  assert.equal(readback.satpArtifact.devnetMatchesExpectedProgramId, true);
+  assert.match(
+    readback.satpArtifact.runtime.mainnetEscrowProgramId.error,
+    /mainnet program IDs are not configured/,
+  );
+  assert.equal(readback.satpArtifact.runtime.devnetEscrowProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
+  assert.equal(readback.satpArtifact.mainnetMatchesExpectedProgramId, false);
+  assert.equal(readback.satpArtifact.devnetMatchesExpectedProgramId, false);
 });
 
 test('escrow_v3 source and IDL strict verifier confirms the pinned program id', () => {

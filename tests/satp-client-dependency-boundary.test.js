@@ -20,20 +20,25 @@ test('SATP adapter resolves extracted @brainai/satp-client dependency without em
   assert.equal(typeof satpClient.prepareIdentityAttestationRequest, 'function');
 });
 
-test('SATP client exposes D1 V3 mainnet program IDs for escrow runtime', () => {
+test('SATP client exposes V3 devnet IDs and fails closed for mainnet IDs', () => {
   const satpClient = client.loadSatpClient();
-  const mainnetIds = satpClient.getV3ProgramIds('mainnet');
-  const expected = {
+  assert.throws(
+    () => satpClient.getV3ProgramIds('mainnet'),
+    /mainnet program IDs are not configured/,
+  );
+
+  const devnetIds = satpClient.getV3ProgramIds('devnet');
+  const expectedDevnet = {
     IDENTITY: 'GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG',
     REVIEWS: 'r9XX4frcqxxAZ6Au9V5PA3EAxs1zoNckqLLmoSRcNr4',
     REPUTATION: '2Lz7KzMvKdrGeAuS8WPHu7jK2yScrnKVgacpYVEuDjkJ',
     ATTESTATIONS: '6Xd1dAQJPvQRJ4Ntr6LtPTjDjPUZ8nfnmYLZaZ2DtrdD',
     VALIDATION: '6rYRiCYidJYV7QvKrzKGgNu4oMh6BAvynked69R7xMbV',
-    ESCROW: 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C',
+    ESCROW: 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg',
   };
 
-  for (const [name, address] of Object.entries(expected)) {
-    assert.equal(mainnetIds[name].toBase58(), address);
+  for (const [name, address] of Object.entries(expectedDevnet)) {
+    assert.equal(devnetIds[name].toBase58(), address);
   }
 });
 
