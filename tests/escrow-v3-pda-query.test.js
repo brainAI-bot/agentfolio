@@ -32,7 +32,7 @@ test('GET /api/v3/escrow/pda/derive rejects duplicate query params before hashin
   }
 });
 
-test('GET /api/v3/escrow/pda/derive derives a PDA from scalar query params', async () => {
+test('GET /api/v3/escrow/pda/derive fails closed when mainnet program IDs are unavailable', async () => {
   const app = express();
   app.use('/api/v3/escrow', escrowV3Router);
   const server = await listen(app);
@@ -44,11 +44,10 @@ test('GET /api/v3/escrow/pda/derive derives a PDA from scalar query params', asy
     );
     const body = await res.json();
 
-    assert.equal(res.status, 200);
-    assert.match(body.escrowPDA, /^[1-9A-HJ-NP-Za-km-z]+$/);
-    assert.equal(body.client, VALID_CLIENT);
-    assert.equal(body.nonce, 0);
+    assert.equal(res.status, 503);
+    assert.equal(body.code, 'SATP_V3_PROGRAM_IDS_UNAVAILABLE');
     assert.equal(body.network, 'mainnet');
+    assert.match(body.error, /mainnet program IDs are not configured/);
   } finally {
     await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
   }

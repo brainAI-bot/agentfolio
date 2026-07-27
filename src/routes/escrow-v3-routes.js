@@ -160,10 +160,32 @@ function serializeTx(tx) {
   return Buffer.from(serialized).toString('base64');
 }
 
-function getEscrowProgramId() {
-  const ids = typeof getV3ProgramIds === 'function' ? getV3ProgramIds(NETWORK) : null;
+function satpProgramIdUnavailable(message) {
+  const err = new Error(message);
+  err.statusCode = 503;
+  err.code = 'SATP_V3_PROGRAM_IDS_UNAVAILABLE';
+  return err;
+}
+
+function readV3ProgramIds(network = NETWORK) {
+  if (typeof getV3ProgramIds !== 'function') {
+    throw satpProgramIdUnavailable('@brainai/satp-client missing required export: getV3ProgramIds');
+  }
+
+  try {
+    return getV3ProgramIds(network);
+  } catch (err) {
+    throw satpProgramIdUnavailable(err.message);
+  }
+}
+
+function getEscrowProgramId(network = NETWORK) {
+  const ids = readV3ProgramIds(network);
   const escrowId = ids?.ESCROW || ids?.escrow || ids?.ESCROW_V3 || ids?.escrowV3;
-  return new PublicKey(escrowId || 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
+  if (!escrowId) {
+    throw satpProgramIdUnavailable(`SATP V3 escrow program ID is not configured for ${network}`);
+  }
+  return new PublicKey(escrowId);
 }
 
 function encodeU64(value) {
@@ -257,27 +279,63 @@ function deriveEscrowPDA(client, descriptionOrHash, nonce) {
     throw new Error('@brainai/satp-client missing required export: getV3EscrowPDA');
   }
   const descriptionHash = hashIfNeeded(descriptionOrHash);
-  const [escrowPDA, bump] = getV3EscrowPDA(client, descriptionHash, nonce, NETWORK);
-  return {
-    escrowPDA: escrowPDA.toBase58(),
-    descriptionHash: descriptionHash.toString('hex'),
-    bump,
-  };
+  try {
+    const [escrowPDA, bump] = getV3EscrowPDA(client, descriptionHash, nonce, NETWORK);
+    return {
+      escrowPDA: escrowPDA.toBase58(),
+      descriptionHash: descriptionHash.toString('hex'),
+      bump,
+    };
+  } catch (err) {
+    if (/mainnet program IDs are not configured|Invalid network/i.test(err.message)) {
+      throw satpProgramIdUnavailable(err.message);
+    }
+    throw err;
+  }
 }
 
 function deriveSelectedAgentSatpReadback(agentId, network = NETWORK) {
-  if (!agentId || typeof getGenesisPDA !== 'function' || typeof getV3ProgramIds !== 'function') {
+  if (!agentId || typeof getGenesisPDA !== 'function') {
     return null;
   }
 
-  const [genesisPDA] = getGenesisPDA(agentId, network);
-  const programIds = getV3ProgramIds(network);
+  try {
+    const [genesisPDA] = getGenesisPDA(agentId, network);
+    const programIds = readV3ProgramIds(network);
+    return {
+      agentId,
+      network,
+      genesisPDA: publicKeyToString(genesisPDA),
+      identityProgramId: publicKeyToString(programIds.IDENTITY),
+    };
+  } catch (err) {
+    return {
+      agentId,
+      network,
+      available: false,
+      error: err.message,
+      code: err.code || 'SATP_V3_PROGRAM_IDS_UNAVAILABLE',
+    };
+  }
+}
 
+function sendSatpProgramIdError(res, err) {
+  return res.status(err.statusCode || 500).json({
+    error: err.message,
+    code: err.code,
+    network: NETWORK,
+  });
+}
+
+function currentEscrowProgramId() {
+  return getEscrowProgramId(NETWORK);
+}
+
+function getEscrowPdaReadback(client, descriptionOrHash, nonce) {
+  const result = deriveEscrowPDA(client, descriptionOrHash, nonce);
   return {
-    agentId,
-    network,
-    genesisPDA: publicKeyToString(genesisPDA),
-    identityProgramId: publicKeyToString(programIds.IDENTITY),
+    ...result,
+    network: NETWORK,
   };
 }
 
@@ -1002,7 +1060,7 @@ router.get('/pda/derive', async (req, res) => {
       return res.status(400).json({ error: 'nonce must be a non-negative safe integer' });
     }
 
-    const result = deriveEscrowPDA(client, description, normalizedNonce);
+    const result = getEscrowPdaReadback(client, description, normalizedNonce);
 
     res.json({
       escrowPDA: result.escrowPDA,
@@ -1010,19 +1068,16 @@ router.get('/pda/derive', async (req, res) => {
       bump: result.bump,
       client,
       nonce: normalizedNonce,
-      network: NETWORK,
+      network: result.network,
     });
   } catch (err) {
     console.error('[Escrow V3] derive PDA error:', err.message);
-    res.status(500).json({ error: err.message });
+    sendSatpProgramIdError(res, err);
   }
 });
 
 
 // ── Constants for query routes ─────────────────────────────────────────────────
-const ESCROW_V3_PROGRAM_ID = getV3ProgramIds
-  ? getV3ProgramIds(NETWORK).ESCROW
-  : new PublicKey('HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
 const ESCROW_V3_ACCOUNT_SIZE = 339; // 8 discriminator + 331 data
 
 // ── GET /by-client/:wallet ─────────────────────────────────────────────────────
@@ -1039,8 +1094,9 @@ router.get('/by-client/:wallet', requireSDK, async (req, res) => {
 
     const connection = req.sdk.connection;
     const clientKey = new PublicKey(wallet);
+    const escrowProgramId = currentEscrowProgramId();
 
-    const accounts = await connection.getProgramAccounts(ESCROW_V3_PROGRAM_ID, {
+    const accounts = await connection.getProgramAccounts(escrowProgramId, {
       filters: [
         { dataSize: ESCROW_V3_ACCOUNT_SIZE },
         { memcmp: { offset: 8, bytes: clientKey.toBase58() } },
@@ -1056,7 +1112,7 @@ router.get('/by-client/:wallet', requireSDK, async (req, res) => {
     res.json({ escrows, count: escrows.length, network: NETWORK });
   } catch (err) {
     console.error('[Escrow V3] by-client error:', err.message);
-    res.status(500).json({ error: err.message });
+    sendSatpProgramIdError(res, err);
   }
 });
 
@@ -1074,8 +1130,9 @@ router.get('/by-agent/:wallet', requireSDK, async (req, res) => {
 
     const connection = req.sdk.connection;
     const agentKey = new PublicKey(wallet);
+    const escrowProgramId = currentEscrowProgramId();
 
-    const accounts = await connection.getProgramAccounts(ESCROW_V3_PROGRAM_ID, {
+    const accounts = await connection.getProgramAccounts(escrowProgramId, {
       filters: [
         { dataSize: ESCROW_V3_ACCOUNT_SIZE },
         { memcmp: { offset: 40, bytes: agentKey.toBase58() } },
@@ -1091,7 +1148,7 @@ router.get('/by-agent/:wallet', requireSDK, async (req, res) => {
     res.json({ escrows, count: escrows.length, network: NETWORK });
   } catch (err) {
     console.error('[Escrow V3] by-agent error:', err.message);
-    res.status(500).json({ error: err.message });
+    sendSatpProgramIdError(res, err);
   }
 });
 
@@ -1109,8 +1166,9 @@ router.get('/by-agent-id/:agentId', requireSDK, async (req, res) => {
 
     const connection = req.sdk.connection;
     const agentIdHash = crypto.createHash('sha256').update(agentId).digest();
+    const escrowProgramId = currentEscrowProgramId();
 
-    const accounts = await connection.getProgramAccounts(ESCROW_V3_PROGRAM_ID, {
+    const accounts = await connection.getProgramAccounts(escrowProgramId, {
       filters: [
         { dataSize: ESCROW_V3_ACCOUNT_SIZE },
         { memcmp: { offset: 72, bytes: require('bs58').default.encode(agentIdHash) } },
@@ -1132,7 +1190,7 @@ router.get('/by-agent-id/:agentId', requireSDK, async (req, res) => {
     });
   } catch (err) {
     console.error('[Escrow V3] by-agent-id error:', err.message);
-    res.status(500).json({ error: err.message });
+    sendSatpProgramIdError(res, err);
   }
 });
 
