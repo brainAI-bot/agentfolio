@@ -7,14 +7,17 @@ const path = require('node:path');
 const satpClient = require('@brainai/satp-client');
 const {
   AUTHORITY_PROGRAM_ID,
+  AUTHORITY_PROGRAM_ID_PROVENANCE,
   getEscrowV3AuthorityReadback,
 } = require('../src/lib/escrow-v3-authority');
 
-test('escrow_v3 authority readback names the HQ-selected program id and fails closed on mismatch', () => {
+test('escrow_v3 authority readback names the HQ-selected program id from SATP mainnet runtime', () => {
   const readback = getEscrowV3AuthorityReadback({ satpClient });
 
   assert.equal(readback.label, 'escrow_v3');
   assert.equal(readback.expectedProgramId, AUTHORITY_PROGRAM_ID);
+  assert.equal(readback.expectedProgramIdProvenance, AUTHORITY_PROGRAM_ID_PROVENANCE);
+  assert.match(readback.expectedProgramIdProvenance, /2752dcc99b7ece9f5452c7273123232a92d7067f/);
   assert.equal(AUTHORITY_PROGRAM_ID, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
   assert.equal(readback.anchorToml.exists, true);
   assert.equal(readback.programSource.exists, true);
@@ -23,13 +26,14 @@ test('escrow_v3 authority readback names the HQ-selected program id and fails cl
   assert.equal(readback.trackedIdl.matchesExpectedProgramId, true);
   assert.equal(readback.status, 'blocked_pending_authoritative_source_idl');
   assert.equal(readback.releaseGate.liveEscrowWritesAllowed, false);
+  assert.equal(readback.releaseGate.ownerAuthorizationRequired, true);
+  assert.equal(readback.releaseGate.ownerAuthorizationStatus, 'missing_owner_authorization');
+  assert.equal(readback.releaseGate.ownerAuthorizationEnv, 'AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION');
+  assert.match(readback.releaseGate.readOnlyPosture, /PDA derivation routes remain read-only HTTP 200/);
   assert.equal(readback.satpArtifact.runtime.available, true);
-  assert.match(
-    readback.satpArtifact.runtime.mainnetEscrowProgramId.error,
-    /mainnet program IDs are not configured/,
-  );
+  assert.equal(readback.satpArtifact.runtime.mainnetEscrowProgramId, AUTHORITY_PROGRAM_ID);
   assert.equal(readback.satpArtifact.runtime.devnetEscrowProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
-  assert.equal(readback.satpArtifact.mainnetMatchesExpectedProgramId, false);
+  assert.equal(readback.satpArtifact.mainnetMatchesExpectedProgramId, true);
   assert.equal(readback.satpArtifact.devnetMatchesExpectedProgramId, false);
 });
 

@@ -305,6 +305,7 @@ function deriveSelectedAgentSatpReadback(agentId, network = NETWORK) {
     return {
       agentId,
       network,
+      available: true,
       genesisPDA: publicKeyToString(genesisPDA),
       identityProgramId: publicKeyToString(programIds.IDENTITY),
     };

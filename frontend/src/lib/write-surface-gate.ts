@@ -4,6 +4,9 @@ export const ENABLE_WRITES_ENV = "NEXT_PUBLIC_AGENTFOLIO_ENABLE_SOLANA_IRYS_WRIT
 export const SERVER_ENABLE_WRITES_ENV = "AGENTFOLIO_ENABLE_SOLANA_IRYS_WRITES";
 export const ENABLE_LIVE_ESCROW_ENV = "NEXT_PUBLIC_AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES";
 export const SERVER_ENABLE_LIVE_ESCROW_ENV = "AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES";
+export const LIVE_ESCROW_OWNER_AUTHORIZATION_ENV = "NEXT_PUBLIC_AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION";
+export const SERVER_LIVE_ESCROW_OWNER_AUTHORIZATION_ENV = "AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION";
+export const LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE = "owner-approved-live-escrow-writes";
 export const ESCROW_KILL_SWITCH_ENV = "NEXT_PUBLIC_AGENTFOLIO_ESCROW_KILL_SWITCH";
 export const SERVER_ESCROW_KILL_SWITCH_ENV = "AGENTFOLIO_ESCROW_KILL_SWITCH";
 export const READ_ONLY_CODE = "SOLANA_IRYS_WRITES_READ_ONLY";
@@ -57,11 +60,21 @@ export function isFrontendEscrowKillSwitchActive(
   return envValueAllowsWrites(env[ESCROW_KILL_SWITCH_ENV] || env[SERVER_ESCROW_KILL_SWITCH_ENV]);
 }
 
+export function hasFrontendLiveEscrowOwnerAuthorization(
+  env: Record<string, string | undefined> = typeof process === "undefined" ? {} : process.env,
+): boolean {
+  return (
+    (env[LIVE_ESCROW_OWNER_AUTHORIZATION_ENV] || env[SERVER_LIVE_ESCROW_OWNER_AUTHORIZATION_ENV] || "").trim() ===
+    LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE
+  );
+}
+
 export function isFrontendLiveEscrowEnabled(
   env: Record<string, string | undefined> = typeof process === "undefined" ? {} : process.env,
 ): boolean {
   return (
     envValueAllowsWrites(env[ENABLE_LIVE_ESCROW_ENV] || env[SERVER_ENABLE_LIVE_ESCROW_ENV]) &&
+    hasFrontendLiveEscrowOwnerAuthorization(env) &&
     !isFrontendEscrowKillSwitchActive(env)
   );
 }
