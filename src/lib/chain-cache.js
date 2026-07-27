@@ -11,6 +11,7 @@
 
 const { Connection, PublicKey } = require('@solana/web3.js');
 const crypto = require('crypto');
+const { getRequiredSatpPlatformKeypairPath } = require('./satp-keypair-config');
 const {
   SatpV3Client,
   deriveGenesisPda,
@@ -172,7 +173,7 @@ async function refreshIdentities() {
 async function refreshAttestationsFromChain() {
   try {
     const conn = getConnection();
-    const keypairPath = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/brainforge-personal.json';
+    const keypairPath = getRequiredSatpPlatformKeypairPath('chain cache attestation scan signer');
     const raw = JSON.parse(require('fs').readFileSync(keypairPath, 'utf-8'));
     const { Keypair } = require('@solana/web3.js');
     const kp = Keypair.fromSecretKey(Uint8Array.from(raw));

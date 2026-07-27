@@ -49,6 +49,15 @@ describe('SATP keypair cleanup canary', () => {
     }
   });
 
+  it('keeps legacy SATP platform key filenames out of runtime source', () => {
+    const inventory = runInventory();
+    assert.deepStrictEqual(inventory.categories['platform-key-filename'].paths, [
+      '.gitignore',
+      'scripts/satp-keypair-inventory.js',
+      'tests/satp-keypair-cleanup-canary.test.js',
+    ]);
+  });
+
   it('keeps hardcoded deployer host paths out of tracked source', () => {
     const inventory = runInventory();
     assert.strictEqual(inventory.categories['hardcoded-mainnet-deployer-path'].count, 0);

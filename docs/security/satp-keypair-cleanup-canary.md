@@ -41,6 +41,12 @@ Not-safe / owner-gated in this task:
 - `tools/score-sync.js`: authority key paths now come from `SCORE_SYNC_AUTHORITY_KEYS_JSON`, keyed by authority public key; no built-in deployer path remains.
 - `docs/ONCHAIN-WIRING-PLAN.md`: historical keypair references now describe owner-approved secret configuration without naming legacy host paths.
 
+GitHub issue #104 follow-through:
+
+- Removed remaining stale SATP platform key filename defaults from runtime/scripts.
+- Added `src/lib/satp-keypair-config.js` so signer-bearing flows resolve owner-approved paths from explicit environment configuration.
+- Tightened the canary so known legacy platform key filenames may remain only in `.gitignore`, the inventory scanner, and its regression test.
+
 ## Read-only verification
 
 ```bash

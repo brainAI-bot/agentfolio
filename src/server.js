@@ -12,6 +12,7 @@ const path = require('path');
 const fs = require('fs');
 const { getDeployProvenance } = require('./lib/deploy-provenance');
 const { writeJsonAtomicSync } = require('./lib/atomic-file');
+const { getRequiredSatpPlatformKeypairPath } = require('./lib/satp-keypair-config');
 const {
   AGENTFOLIO_CORS_ORIGINS,
   agentFolioAliasRoutingMiddleware,
@@ -469,8 +470,7 @@ app.get('/.well-known/did.json', (req, res) => {
   let publicKeyB58 = null;
   let publicKeyMultibase = null;
   try {
-    const keypairPath = process.env.SATP_PLATFORM_KEYPAIR ||
-      '/home/ubuntu/.config/solana/brainforge-personal.json';
+    const keypairPath = getRequiredSatpPlatformKeypairPath('DID document signer');
     const raw = JSON.parse(fs.readFileSync(keypairPath, 'utf8'));
     const fullKey = Uint8Array.from(raw);
     const publicKey = fullKey.slice(32, 64);

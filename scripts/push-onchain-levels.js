@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const { Keypair, PublicKey } = require('@solana/web3.js');
 const { assertSolanaIrysWriteEnabled } = require('../src/lib/write-surface-gate');
+const { getRequiredSatpPlatformKeypairPath } = require('../src/lib/satp-keypair-config');
 
 assertSolanaIrysWriteEnabled('Solana/Irys script write surface: scripts/push-onchain-levels.js');
 
@@ -29,7 +30,7 @@ try {
 }
 
 const DB_PATH = path.join(__dirname, '../data/agentfolio.db');
-const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/brainforge-personal.json';
+const PLATFORM_KEYPAIR_PATH = getRequiredSatpPlatformKeypairPath('SATP verification level push signer');
 
 const CATEGORY_MAP = {
   solana: 'wallets', ethereum: 'wallets', hyperliquid: 'wallets', polymarket: 'wallets',

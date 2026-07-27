@@ -9,10 +9,10 @@
 const path = require('path');
 const Database = require('better-sqlite3');
 const satpWrite = require('../src/satp-write-client');
+const { getRequiredSatpPlatformKeypairPath } = require('../src/lib/satp-keypair-config');
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'agentfolio.db');
-const KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || 
-  path.join(require('os').homedir(), '.config/solana/satp-mainnet-platform.json');
+const KEYPAIR_PATH = getRequiredSatpPlatformKeypairPath('SATP attestation population signer');
 const NETWORK = process.env.SATP_NETWORK || 'mainnet';
 const DRY_RUN = !process.argv.includes('--apply');
 

@@ -21,6 +21,7 @@ const {
   filterCanonicalTrustData,
   retiredProviderResponse,
 } = require('./lib/canonical-verification-providers');
+const { getRequiredSatpPlatformKeypairPath } = require('./lib/satp-keypair-config');
 
 let satpWriteClient, profileStore, keypair, v3sdk;
 
@@ -43,16 +44,22 @@ function getProfileStore() {
   return profileStore;
 }
 
-const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/agentfolio/config/platform-keypair.json';
-
 function getPlatformKeypair() {
   if (!keypair) {
-    if (!fs.existsSync(PLATFORM_KEYPAIR_PATH)) {
-      console.warn('[PostVerify] No platform keypair at', PLATFORM_KEYPAIR_PATH, '— on-chain skipped');
+    let platformKeypairPath;
+    try {
+      platformKeypairPath = getRequiredSatpPlatformKeypairPath('post-verification SATP signer');
+    } catch (err) {
+      console.warn('[PostVerify]', err.message, '- on-chain skipped');
+      return null;
+    }
+
+    if (!fs.existsSync(platformKeypairPath)) {
+      console.warn('[PostVerify] No platform keypair at', platformKeypairPath, '— on-chain skipped');
       return null;
     }
     const { Keypair } = require('@solana/web3.js');
-    const raw = JSON.parse(fs.readFileSync(PLATFORM_KEYPAIR_PATH, 'utf8'));
+    const raw = JSON.parse(fs.readFileSync(platformKeypairPath, 'utf8'));
     keypair = Keypair.fromSecretKey(Uint8Array.from(raw));
   }
   return keypair;

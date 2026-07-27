@@ -18,18 +18,17 @@ const _bs58 = require('bs58');
 const bs58 = _bs58.default || _bs58;
 const fs = require('fs');
 const path = require('path');
+const { getRequiredKeypairPath } = require('../lib/satp-keypair-config');
 
 // ─── Key Management ─────────────────────────────────────
-const KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR ||
-  process.env.SATP_KEYPAIR_PATH || './config/platform-keypair.json';
-
 let cachedKeyPair = null;
 
 function getSigningKey() {
   if (cachedKeyPair) return cachedKeyPair;
 
   try {
-    const raw = JSON.parse(fs.readFileSync(KEYPAIR_PATH, 'utf8'));
+    const keypairPath = getRequiredKeypairPath(['SATP_PLATFORM_KEYPAIR', 'SATP_KEYPAIR_PATH'], 'trust credential signer');
+    const raw = JSON.parse(fs.readFileSync(keypairPath, 'utf8'));
     const fullKey = Uint8Array.from(raw);
     // Solana keypair: first 32 bytes = secret, last 32 = public
     const secretKey = fullKey.slice(0, 32);

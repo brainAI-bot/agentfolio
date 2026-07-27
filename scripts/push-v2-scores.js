@@ -11,6 +11,7 @@ const { Keypair } = require('@solana/web3.js');
 const { createSATPClient, agentIdHash } = require('@brainai/satp-client');
 const scoringV2 = require('../src/lib/scoring-engine-v2');
 const { assertSolanaIrysWriteEnabled } = require('../src/lib/write-surface-gate');
+const { getRequiredSatpPlatformKeypairPath } = require('../src/lib/satp-keypair-config');
 
 assertSolanaIrysWriteEnabled('Solana/Irys script write surface: scripts/push-v2-scores.js');
 
@@ -18,7 +19,7 @@ const satpClient = createSATPClient({
   network: process.env.SATP_NETWORK || 'mainnet',
   rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
 });
-const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/brainforge-personal.json';
+const PLATFORM_KEYPAIR_PATH = getRequiredSatpPlatformKeypairPath('SATP V2 score push signer');
 const PROFILES_DIR = path.join(__dirname, '../data/profiles');
 
 async function main() {

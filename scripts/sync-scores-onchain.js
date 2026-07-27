@@ -30,12 +30,13 @@ const path = require('path');
 const { Keypair } = require('@solana/web3.js');
 const { createSATPClient, agentIdHash } = require('@brainai/satp-client');
 const { assertSolanaIrysWriteEnabled } = require('../src/lib/write-surface-gate');
+const { getRequiredSatpPlatformKeypairPath } = require('../src/lib/satp-keypair-config');
 
 assertSolanaIrysWriteEnabled('Solana/Irys script write surface: scripts/sync-scores-onchain.js');
 
 const PROFILES_DIR = '/home/ubuntu/agentfolio/data/profiles';
 const DB_PATH = '/home/ubuntu/agentfolio/data/agentfolio.db';
-const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/brainforge-personal.json';
+const PLATFORM_KEYPAIR_PATH = getRequiredSatpPlatformKeypairPath('SATP on-chain score sync signer');
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const SINGLE_AGENT = process.argv.find(a => a.startsWith('--agent='))?.split('=')[1] || 

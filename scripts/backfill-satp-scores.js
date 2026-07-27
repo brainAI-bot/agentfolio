@@ -11,6 +11,7 @@ const path = require("path");
 const { Keypair } = require('@solana/web3.js');
 const fs = require('fs');
 const { assertSolanaIrysWriteEnabled } = require('../src/lib/write-surface-gate');
+const { getRequiredSatpPlatformKeypairPath } = require('../src/lib/satp-keypair-config');
 
 assertSolanaIrysWriteEnabled('Solana/Irys script write surface: scripts/backfill-satp-scores.js');
 // Initialize SATP v3 client (same as in profile-store.js)
@@ -33,8 +34,7 @@ try {
 const d = new Database(path.join(__dirname, "../data/agentfolio.db"));
 
 // Initialize SATP platform signer (same as in profile-store.js)
-const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR ||
-  '/home/ubuntu/.config/solana/brainforge-personal.json';
+const PLATFORM_KEYPAIR_PATH = getRequiredSatpPlatformKeypairPath('SATP score backfill signer');
 const signerKey = JSON.parse(fs.readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'));
 const platformSigner = Keypair.fromSecretKey(Uint8Array.from(signerKey));
 
