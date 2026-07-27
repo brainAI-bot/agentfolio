@@ -59,9 +59,8 @@ test('V3 escrow create binds job-backed payout wallet to selected agent profile'
   assert.equal(result.selectedAgentWallet, 'AgentWallet111111111111111111111111111111111');
   assert.equal(result.satpIdentity.agentId, 'agent_selected');
   assert.equal(result.satpIdentity.network, 'mainnet');
-  assert.equal(result.satpIdentity.available, false);
-  assert.equal(result.satpIdentity.code, 'SATP_V3_PROGRAM_IDS_UNAVAILABLE');
-  assert.match(result.satpIdentity.error, /mainnet program IDs are not configured/);
+  assert.match(result.satpIdentity.genesisPDA, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+  assert.equal(result.satpIdentity.identityProgramId, 'GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
 });
 
 test('V3 escrow create rejects job-backed payout wallet drift', () => {
@@ -108,12 +107,11 @@ test('V3 escrow helper resolves Solana wallet across profile storage shapes', ()
   );
 });
 
-test('V3 escrow selected SATP readback reports unavailable mainnet Genesis evidence', () => {
+test('V3 escrow selected SATP readback derives mainnet Genesis evidence', () => {
   const readback = deriveSelectedAgentSatpReadback('agent_selected', 'mainnet');
 
   assert.equal(readback.agentId, 'agent_selected');
   assert.equal(readback.network, 'mainnet');
-  assert.equal(readback.available, false);
-  assert.equal(readback.code, 'SATP_V3_PROGRAM_IDS_UNAVAILABLE');
-  assert.match(readback.error, /mainnet program IDs are not configured/);
+  assert.match(readback.genesisPDA, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+  assert.equal(readback.identityProgramId, 'GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
 });
