@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const express = require('express');
 
 const escrowV3Router = require('../src/routes/escrow-v3-routes');
@@ -32,7 +33,7 @@ test('GET /api/v3/escrow/pda/derive rejects duplicate query params before hashin
   }
 });
 
-test('GET /api/v3/escrow/pda/derive fails closed when mainnet program IDs are unavailable', async () => {
+test('GET /api/v3/escrow/pda/derive derives a mainnet escrow PDA', async () => {
   const app = express();
   app.use('/api/v3/escrow', escrowV3Router);
   const server = await listen(app);
@@ -44,10 +45,13 @@ test('GET /api/v3/escrow/pda/derive fails closed when mainnet program IDs are un
     );
     const body = await res.json();
 
-    assert.equal(res.status, 503);
-    assert.equal(body.code, 'SATP_V3_PROGRAM_IDS_UNAVAILABLE');
+    assert.equal(res.status, 200);
     assert.equal(body.network, 'mainnet');
-    assert.match(body.error, /mainnet program IDs are not configured/);
+    assert.equal(body.client, VALID_CLIENT);
+    assert.equal(body.nonce, 0);
+    assert.equal(body.descriptionHash, crypto.createHash('sha256').update('one').digest('hex'));
+    assert.match(body.escrowPDA, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+    assert.equal(Number.isInteger(body.bump), true);
   } finally {
     await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
   }

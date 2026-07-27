@@ -20,25 +20,33 @@ test('SATP adapter resolves extracted @brainai/satp-client dependency without em
   assert.equal(typeof satpClient.prepareIdentityAttestationRequest, 'function');
 });
 
-test('SATP client exposes V3 devnet IDs and fails closed for mainnet IDs', () => {
+test('SATP client exposes V3 devnet and mainnet IDs from the published package', () => {
   const satpClient = client.loadSatpClient();
-  assert.throws(
-    () => satpClient.getV3ProgramIds('mainnet'),
-    /mainnet program IDs are not configured/,
-  );
 
   const devnetIds = satpClient.getV3ProgramIds('devnet');
   const expectedDevnet = {
+    IDENTITY: '7qmfg4CgiXVDZGBeUkSkMsacKjCRty2xEAugPK4nfvZQ',
+    REVIEWS: '3yVFrWCpBnQdWNqmiCG9EpoZq7WYeQ421Gx5sUh41Kwk',
+    REPUTATION: 'CtmZ1fHaypt3R6wbeiGawiRnjzRK9T8jsECk9mET9AK9',
+    ATTESTATIONS: '55aS2y5Lhe427iW4cgo2nmZPrxwH3F7BWkw6MnoEm4zw',
+    VALIDATION: 'DLB76DzAFY8KNuvnP79BZW3cehGreEQTeGDvFCNd2Ekj',
+    ESCROW: 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg',
+  };
+  const mainnetIds = satpClient.getV3ProgramIds('mainnet');
+  const expectedMainnet = {
     IDENTITY: 'GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG',
     REVIEWS: 'r9XX4frcqxxAZ6Au9V5PA3EAxs1zoNckqLLmoSRcNr4',
     REPUTATION: '2Lz7KzMvKdrGeAuS8WPHu7jK2yScrnKVgacpYVEuDjkJ',
     ATTESTATIONS: '6Xd1dAQJPvQRJ4Ntr6LtPTjDjPUZ8nfnmYLZaZ2DtrdD',
     VALIDATION: '6rYRiCYidJYV7QvKrzKGgNu4oMh6BAvynked69R7xMbV',
-    ESCROW: 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg',
+    ESCROW: 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C',
   };
 
   for (const [name, address] of Object.entries(expectedDevnet)) {
     assert.equal(devnetIds[name].toBase58(), address);
+  }
+  for (const [name, address] of Object.entries(expectedMainnet)) {
+    assert.equal(mainnetIds[name].toBase58(), address);
   }
 });
 

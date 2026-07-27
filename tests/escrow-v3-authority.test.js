@@ -10,7 +10,7 @@ const {
   getEscrowV3AuthorityReadback,
 } = require('../src/lib/escrow-v3-authority');
 
-test('escrow_v3 authority readback names the HQ-selected program id and fails closed on mismatch', () => {
+test('escrow_v3 authority readback names the HQ-selected program id from SATP mainnet runtime', () => {
   const readback = getEscrowV3AuthorityReadback({ satpClient });
 
   assert.equal(readback.label, 'escrow_v3');
@@ -24,12 +24,9 @@ test('escrow_v3 authority readback names the HQ-selected program id and fails cl
   assert.equal(readback.status, 'blocked_pending_authoritative_source_idl');
   assert.equal(readback.releaseGate.liveEscrowWritesAllowed, false);
   assert.equal(readback.satpArtifact.runtime.available, true);
-  assert.match(
-    readback.satpArtifact.runtime.mainnetEscrowProgramId.error,
-    /mainnet program IDs are not configured/,
-  );
+  assert.equal(readback.satpArtifact.runtime.mainnetEscrowProgramId, AUTHORITY_PROGRAM_ID);
   assert.equal(readback.satpArtifact.runtime.devnetEscrowProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
-  assert.equal(readback.satpArtifact.mainnetMatchesExpectedProgramId, false);
+  assert.equal(readback.satpArtifact.mainnetMatchesExpectedProgramId, true);
   assert.equal(readback.satpArtifact.devnetMatchesExpectedProgramId, false);
 });
 
