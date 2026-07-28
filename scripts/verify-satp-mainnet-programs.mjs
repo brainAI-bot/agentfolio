@@ -8,6 +8,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 const registryPath = path.join(repoRoot, 'frontend/src/lib/satp-mainnet-programs.ts');
 const expectedOwner = 'BPFLoaderUpgradeab1e11111111111111111111111';
+const args = new Set(process.argv.slice(2));
+const strictMode = args.has('--strict');
+const ciMode = Boolean(process.env.CI);
+const allowEnvOverrides = args.has('--allow-env-overrides') && !strictMode && !ciMode;
 const rpcUrl =
   process.env.SOLANA_RPC_URL
   || process.env.SOLANA_MAINNET_RPC_URL
@@ -24,10 +28,12 @@ function loadRegistry() {
   const rows = [...match[1].matchAll(/^\s*([A-Z0-9_]+):\s*"([^"]+)"\s*,?\s*$/gm)]
     .map(([, name, registryAddress]) => {
       const envKey = `SATP_MAINNET_${name}_PROGRAM_ID`;
+      const override = process.env[envKey];
       return {
         name,
-        id: process.env[envKey] || registryAddress,
-        provenance: process.env[envKey] ? envKey : 'frontend/src/lib/satp-mainnet-programs.ts',
+        id: allowEnvOverrides && override ? override : registryAddress,
+        provenance: allowEnvOverrides && override ? envKey : 'frontend/src/lib/satp-mainnet-programs.ts',
+        overrideEnvKey: override ? envKey : null,
       };
     });
 
@@ -79,6 +85,33 @@ function readFixture() {
 
 async function main() {
   const programs = loadRegistry();
+  const overrideEnvKeys = programs
+    .filter((program) => program.overrideEnvKey)
+    .map((program) => program.overrideEnvKey);
+
+  if ((strictMode || ciMode) && overrideEnvKeys.length > 0) {
+    console.log(JSON.stringify({
+      label: 'satp_mainnet_program_registry_onchain',
+      registryPath: 'frontend/src/lib/satp-mainnet-programs.ts',
+      network: 'mainnet-beta',
+      expectedOwner,
+      status: 'blocked_env_override_in_strict_mode',
+      mode: {
+        strict: strictMode,
+        ci: ciMode,
+        allowEnvOverrides: false,
+      },
+      overrideEnvKeys,
+      programs: programs.map((program) => ({
+        name: program.name,
+        id: program.id,
+        provenance: program.provenance,
+      })),
+    }, null, 2));
+    process.exitCode = 1;
+    return;
+  }
+
   const fixture = readFixture();
   const results = fixture
     ? programs.map((program) => ({ ...program, ...fixture[program.name] }))
@@ -96,6 +129,11 @@ async function main() {
     network: 'mainnet-beta',
     expectedOwner,
     status: verified ? 'verified' : 'blocked_onchain_program_mismatch',
+    mode: {
+      strict: strictMode,
+      ci: ciMode,
+      allowEnvOverrides,
+    },
     programs: results.map((program) => ({
       name: program.name,
       id: program.id,
@@ -110,7 +148,7 @@ async function main() {
 
   console.log(JSON.stringify(evidence, null, 2));
 
-  if (process.argv.includes('--strict') && !verified) {
+  if (strictMode && !verified) {
     process.exitCode = 1;
   }
 }

@@ -11,6 +11,16 @@ const {
   getEscrowV3AuthorityReadback,
 } = require('../src/lib/escrow-v3-authority');
 
+function verifierEnv(extra = {}) {
+  const env = { ...process.env, ...extra };
+  for (const key of Object.keys(env)) {
+    if (/^SATP_MAINNET_[A-Z0-9_]+_PROGRAM_ID$/.test(key)) {
+      delete env[key];
+    }
+  }
+  return { ...env, ...extra };
+}
+
 test('escrow_v3 authority readback names the HQ-selected program id from SATP mainnet runtime', () => {
   const readback = getEscrowV3AuthorityReadback({ satpClient });
 
@@ -73,10 +83,9 @@ test('SATP mainnet program verifier checks every registry id and can fail closed
 
   const output = execFileSync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs', '--strict'], {
     cwd: require('node:path').resolve(__dirname, '..'),
-    env: {
-      ...process.env,
+    env: verifierEnv({
       AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE: fixturePath,
-    },
+    }),
     encoding: 'utf8',
   });
   const evidence = JSON.parse(output);
@@ -101,14 +110,45 @@ test('SATP mainnet program verifier checks every registry id and can fail closed
 
   const red = spawnSync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs', '--strict'], {
     cwd: require('node:path').resolve(__dirname, '..'),
-    env: {
-      ...process.env,
+    env: verifierEnv({
       AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE: fixturePath,
-    },
+    }),
     encoding: 'utf8',
   });
   assert.equal(red.status, 1);
   assert.match(red.stdout, /blocked_onchain_program_mismatch/);
+});
+
+test('SATP mainnet strict verifier rejects env overrides before checking accounts', () => {
+  const owner = 'BPFLoaderUpgradeab1e11111111111111111111111';
+  const fixture = {
+    IDENTITY: { slot: 100, owner, exists: true, executable: true, status: 'verified' },
+    REVIEWS: { slot: 101, owner, exists: true, executable: true, status: 'verified' },
+    REPUTATION: { slot: 102, owner, exists: true, executable: true, status: 'verified' },
+    ATTESTATIONS: { slot: 103, owner, exists: true, executable: true, status: 'verified' },
+    VALIDATION: { slot: 104, owner, exists: true, executable: true, status: 'verified' },
+    ESCROW: { slot: 105, owner, exists: true, executable: true, status: 'verified' },
+  };
+  const fixturePath = path.join(fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'af-satp-programs-')), 'accounts.json');
+  const override = '11111111111111111111111111111111';
+  fs.writeFileSync(fixturePath, JSON.stringify(fixture));
+
+  const strict = spawnSync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs', '--strict'], {
+    cwd: require('node:path').resolve(__dirname, '..'),
+    env: verifierEnv({
+      AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE: fixturePath,
+      SATP_MAINNET_IDENTITY_PROGRAM_ID: override,
+    }),
+    encoding: 'utf8',
+  });
+  const evidence = JSON.parse(strict.stdout);
+  const identity = evidence.programs.find((program) => program.name === 'IDENTITY');
+
+  assert.equal(strict.status, 1);
+  assert.equal(evidence.status, 'blocked_env_override_in_strict_mode');
+  assert.deepEqual(evidence.overrideEnvKeys, ['SATP_MAINNET_IDENTITY_PROGRAM_ID']);
+  assert.notEqual(identity.id, override);
+  assert.equal(identity.provenance, 'frontend/src/lib/satp-mainnet-programs.ts');
 });
 
 test('escrow_v3 source binds dispute recipients and enforces SATP identity requirements', () => {
