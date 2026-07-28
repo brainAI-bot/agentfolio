@@ -1,125 +1,96 @@
 #!/usr/bin/env node
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Connection, PublicKey } from '@solana/web3.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
-const registryPath = path.join(repoRoot, 'frontend/src/lib/satp-mainnet-programs.ts');
-const expectedOwner = 'BPFLoaderUpgradeab1e11111111111111111111111';
-const rpcUrl =
-  process.env.SOLANA_RPC_URL
-  || process.env.SOLANA_MAINNET_RPC_URL
-  || process.env.RPC_URL
-  || 'https://api.mainnet-beta.solana.com';
+const expectedProgramId = 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C';
 
-function loadRegistry() {
-  const source = fs.readFileSync(registryPath, 'utf8');
-  const match = source.match(/export\s+const\s+SATP_MAINNET_PROGRAMS\s*=\s*\{([\s\S]*?)\}\s+as\s+const\s*;/);
-  if (!match) {
-    throw new Error('SATP_MAINNET_PROGRAMS export not found');
-  }
+const paths = {
+  anchorToml: 'onchain/escrow_v3/Anchor.toml',
+  programSource: 'onchain/escrow_v3/programs/escrow_v3/src/lib.rs',
+  idl: 'onchain/escrow_v3/target/idl/escrow_v3.json',
+};
 
-  const rows = [...match[1].matchAll(/^\s*([A-Z0-9_]+):\s*"([^"]+)"\s*,?\s*$/gm)]
-    .map(([, name, registryAddress]) => {
-      const envKey = `SATP_MAINNET_${name}_PROGRAM_ID`;
-      return {
-        name,
-        id: process.env[envKey] || registryAddress,
-        provenance: process.env[envKey] ? envKey : 'frontend/src/lib/satp-mainnet-programs.ts',
-      };
-    });
-
-  if (rows.length === 0) {
-    throw new Error('SATP_MAINNET_PROGRAMS contains no parseable program ids');
-  }
-
-  return rows;
+function read(relativePath) {
+  return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
 }
 
-async function readProgram(connection, program) {
-  let publicKey;
-  try {
-    publicKey = new PublicKey(program.id);
-  } catch (error) {
-    return {
-      ...program,
-      slot: null,
-      exists: false,
-      executable: false,
-      owner: null,
-      status: 'invalid_public_key',
-      error: error.message,
-    };
-  }
-
-  const { context, value } = await connection.getAccountInfoAndContext(publicKey, {
-    commitment: 'confirmed',
-  });
-
-  return {
-    ...program,
-    slot: context.slot,
-    exists: Boolean(value),
-    executable: Boolean(value?.executable),
-    owner: value?.owner?.toBase58() || null,
-    status: value
-      && value.executable
-      && value.owner.toBase58() === expectedOwner
-      ? 'verified'
-      : 'blocked_onchain_program_mismatch',
-  };
+function sha256(relativePath) {
+  const body = fs.readFileSync(path.join(repoRoot, relativePath));
+  return crypto.createHash('sha256').update(body).digest('hex');
 }
 
-function readFixture() {
-  if (!process.env.AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE) return null;
-  return JSON.parse(fs.readFileSync(process.env.AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE, 'utf8'));
+const anchorToml = read(paths.anchorToml);
+const programSource = read(paths.programSource);
+const idl = JSON.parse(read(paths.idl));
+
+function sliceBetween(source, startNeedle, endNeedle) {
+  const start = source.indexOf(startNeedle);
+  const end = source.indexOf(endNeedle, start + startNeedle.length);
+  if (start === -1 || end === -1 || end <= start) return '';
+  return source.slice(start, end);
 }
 
-async function main() {
-  const programs = loadRegistry();
-  const fixture = readFixture();
-  const results = fixture
-    ? programs.map((program) => ({ ...program, ...fixture[program.name] }))
-    : await Promise.all(programs.map((program) => readProgram(new Connection(rpcUrl, 'confirmed'), program)));
+const createEscrowSource = sliceBetween(programSource, 'pub fn create_escrow', 'pub fn submit_work');
+const validateIdentitySource = sliceBetween(programSource, 'fn validate_agent_identity', 'fn read_u32_le');
+const validateIdentityCall = createEscrowSource.indexOf('validate_agent_identity(');
+const escrowFunding = createEscrowSource.indexOf('system_instruction::transfer');
+const minVerificationRecord = createEscrowSource.indexOf('escrow.min_verification_level = min_verification_level');
+const requireBornRecord = createEscrowSource.indexOf('escrow.require_born = require_born');
 
-  const verified = results.every((program) => (
-    program.exists === true
-    && program.executable === true
-    && program.owner === expectedOwner
-  ));
+const checks = {
+  anchorProgramIdMatches: new RegExp(`escrow_v3\\s*=\\s*"${expectedProgramId}"`).test(anchorToml),
+  declareIdMatches: programSource.includes(`declare_id!("${expectedProgramId}")`),
+  idlAddressMatches: idl.address === expectedProgramId,
+  idlNameMatches: idl.metadata?.name === 'escrow_v3',
+  createEscrowValidatesIdentityBeforeFunding:
+    validateIdentityCall !== -1 && escrowFunding !== -1 && validateIdentityCall < escrowFunding,
+  createEscrowValidatesIdentityBeforeRecordingRequirements:
+    validateIdentityCall !== -1
+    && minVerificationRecord !== -1
+    && requireBornRecord !== -1
+    && validateIdentityCall < minVerificationRecord
+    && validateIdentityCall < requireBornRecord,
+  identityPdaBoundToAgentIdHash:
+    /Pubkey::find_program_address\(\s*&\[b"genesis", agent_id_hash\]/.test(validateIdentitySource)
+    && /require_keys_eq!\(\s*agent_identity\.key\(\),\s*expected_identity,\s*EscrowError::WrongAgentIdentity\s*\)/.test(validateIdentitySource),
+  identityOwnedBySatpProgram:
+    /require_keys_eq!\(\s*\*agent_identity\.owner,\s*SATP_V3_IDENTITY_PROGRAM_ID,\s*EscrowError::InvalidAgentIdentity\s*\)/.test(validateIdentitySource),
+  minVerificationLevelEnforced:
+    /verification_level\s*>=\s*min_verification_level/.test(validateIdentitySource)
+    && /EscrowError::AgentVerificationTooLow/.test(validateIdentitySource),
+  requireBornEnforced:
+    /if\s+require_born\s*\{[\s\S]*genesis_record\s*>\s*0[\s\S]*EscrowError::AgentNotBorn[\s\S]*\}/.test(validateIdentitySource),
+};
 
-  const evidence = {
-    label: 'satp_mainnet_program_registry_onchain',
-    registryPath: 'frontend/src/lib/satp-mainnet-programs.ts',
-    network: 'mainnet-beta',
-    expectedOwner,
-    status: verified ? 'verified' : 'blocked_onchain_program_mismatch',
-    programs: results.map((program) => ({
-      name: program.name,
-      id: program.id,
-      provenance: program.provenance,
-      slot: program.slot ?? null,
-      owner: program.owner ?? null,
-      exists: program.exists === true,
-      executable: program.executable === true,
-      status: program.status,
-    })),
-  };
+const verified = Object.values(checks).every(Boolean);
+const evidence = {
+  label: 'escrow_v3_source_idl',
+  expectedProgramId,
+  status: verified ? 'verified' : 'blocked_source_idl_mismatch',
+  checks,
+  artifacts: {
+    anchorToml: {
+      path: paths.anchorToml,
+      sha256: sha256(paths.anchorToml),
+    },
+    programSource: {
+      path: paths.programSource,
+      sha256: sha256(paths.programSource),
+    },
+    idl: {
+      path: paths.idl,
+      address: idl.address,
+      sha256: sha256(paths.idl),
+    },
+  },
+};
 
-  console.log(JSON.stringify(evidence, null, 2));
+console.log(JSON.stringify(evidence, null, 2));
 
-  if (process.argv.includes('--strict') && !verified) {
-    process.exitCode = 1;
-  }
-}
-
-main().catch((error) => {
-  console.error(JSON.stringify({
-    label: 'satp_mainnet_program_registry_onchain',
-    status: 'blocked_verifier_error',
-    error: error.message,
-  }, null, 2));
+if (process.argv.includes('--strict') && !verified) {
   process.exitCode = 1;
-});
+}

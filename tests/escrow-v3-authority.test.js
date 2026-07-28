@@ -37,6 +37,27 @@ test('escrow_v3 authority readback names the HQ-selected program id from SATP ma
   assert.equal(readback.satpArtifact.devnetMatchesExpectedProgramId, false);
 });
 
+test('escrow_v3 source and IDL strict verifier confirms the pinned program id', () => {
+  const output = execFileSync(process.execPath, ['scripts/verify-escrow-v3-source-idl.mjs', '--strict'], {
+    cwd: require('node:path').resolve(__dirname, '..'),
+    encoding: 'utf8',
+  });
+  const evidence = JSON.parse(output);
+  assert.equal(evidence.label, 'escrow_v3_source_idl');
+  assert.equal(evidence.expectedProgramId, AUTHORITY_PROGRAM_ID);
+  assert.equal(evidence.status, 'verified');
+  assert.equal(evidence.checks.anchorProgramIdMatches, true);
+  assert.equal(evidence.checks.declareIdMatches, true);
+  assert.equal(evidence.checks.idlAddressMatches, true);
+  assert.equal(evidence.checks.idlNameMatches, true);
+  assert.equal(evidence.checks.createEscrowValidatesIdentityBeforeFunding, true);
+  assert.equal(evidence.checks.createEscrowValidatesIdentityBeforeRecordingRequirements, true);
+  assert.equal(evidence.checks.identityPdaBoundToAgentIdHash, true);
+  assert.equal(evidence.checks.identityOwnedBySatpProgram, true);
+  assert.equal(evidence.checks.minVerificationLevelEnforced, true);
+  assert.equal(evidence.checks.requireBornEnforced, true);
+});
+
 test('SATP mainnet program verifier checks every registry id and can fail closed', () => {
   const owner = 'BPFLoaderUpgradeab1e11111111111111111111111';
   const fixture = {
@@ -50,7 +71,7 @@ test('SATP mainnet program verifier checks every registry id and can fail closed
   const fixturePath = path.join(fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'af-satp-programs-')), 'accounts.json');
   fs.writeFileSync(fixturePath, JSON.stringify(fixture));
 
-  const output = execFileSync(process.execPath, ['scripts/verify-escrow-v3-source-idl.mjs', '--strict'], {
+  const output = execFileSync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs', '--strict'], {
     cwd: require('node:path').resolve(__dirname, '..'),
     env: {
       ...process.env,
@@ -78,7 +99,7 @@ test('SATP mainnet program verifier checks every registry id and can fail closed
   };
   fs.writeFileSync(fixturePath, JSON.stringify(fixture));
 
-  const red = spawnSync(process.execPath, ['scripts/verify-escrow-v3-source-idl.mjs', '--strict'], {
+  const red = spawnSync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs', '--strict'], {
     cwd: require('node:path').resolve(__dirname, '..'),
     env: {
       ...process.env,
