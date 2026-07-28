@@ -263,6 +263,7 @@ test('AF6 and AF10: CI-on-merge workflow runs explicit PR and main-branch merge 
   assert.match(workflow, /^\s{2}push:\n\s{4}branches:\n\s{6}- main\n\s{6}- master$/m);
   assert.match(workflow, /^\s{2}workflow_dispatch:$/m);
   assert.match(workflow, /name: AF6 AF10 merge gate/);
+  assert.match(workflow, /npm ci/);
   assert.match(workflow, /npm run lint:roadmap/);
   assert.match(workflow, /node --test tests\/deepaudit-af-surface-remediation\.test\.js/);
   assert.match(workflow, /git diff --check/);
