@@ -1196,10 +1196,12 @@ router.get('/by-agent-id/:agentId', requireSDK, async (req, res) => {
 });
 
 router.__test = {
+  calculatePlatformFeeSplit,
   deriveSelectedAgentSatpReadback,
   resolveEscrowAgentBinding,
   resolveEscrowAgentId,
   resolveProfileSolanaWallet,
+  validatePositiveLamports,
 };
 
 module.exports = router;
