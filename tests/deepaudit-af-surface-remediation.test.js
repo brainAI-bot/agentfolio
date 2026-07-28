@@ -132,7 +132,7 @@ test('AF2: how-it-works exposes non-empty SATP mainnet program ids', () => {
   assert.match(pageSource, /explorer\.solana\.com\/address/);
 });
 
-test('AF25: escrow refund remains fail-closed at the custodial gate without state mutation', async () => {
+test('AF25: escrow refund authorizes before remaining fail-closed without state mutation', async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-escrow-refund-auth-'));
   const client = Keypair.generate();
   const nonOwner = Keypair.generate();
@@ -185,8 +185,8 @@ test('AF25: escrow refund remains fail-closed at the custodial gate without stat
       refundedBy: 'client_agent',
       reason: 'body-only refund',
     });
-    assert.equal(unsigned.status, 423);
-    assert.equal(unsigned.body.code, 'CUSTODIAL_ESCROW_DISABLED');
+    assert.equal(unsigned.status, 401);
+    assert.equal(unsigned.body.code, 'MARKETPLACE_WALLET_CHALLENGE_REQUIRED');
     assert.equal(readFixtureJSON(dataDir, 'escrow', 'escrow_refund_auth').status, 'funded');
     assert.equal(readFixtureJSON(dataDir, 'jobs', 'job_refund_auth').status, 'in_progress');
 
@@ -200,8 +200,7 @@ test('AF25: escrow refund remains fail-closed at the custodial gate without stat
         identityPDA: nonOwnerIdentity,
       }),
     });
-    assert.equal(signedNonOwner.status, 423);
-    assert.equal(signedNonOwner.body.code, 'CUSTODIAL_ESCROW_DISABLED');
+    assert.equal(signedNonOwner.status, 403);
     assert.equal(readFixtureJSON(dataDir, 'escrow', 'escrow_refund_auth').status, 'funded');
     assert.equal(readFixtureJSON(dataDir, 'jobs', 'job_refund_auth').status, 'in_progress');
 
@@ -225,7 +224,7 @@ test('AF25: escrow refund remains fail-closed at the custodial gate without stat
   }
 });
 
-test('AF25: refund route keeps limiter and auth checks below the custodial escrow gate', () => {
+test('AF25: refund route keeps limiter, auth, actor check, and custodial gate before writes', () => {
   const source = fs.readFileSync(path.join(repoRoot, 'src/marketplace.js'), 'utf8');
   const routeStart = source.indexOf("app.post('/api/marketplace/escrow/:id/refund', marketplaceMutationLimiter");
   assert.notEqual(routeStart, -1);
@@ -241,9 +240,9 @@ test('AF25: refund route keeps limiter and auth checks below the custodial escro
   const authIndex = routeSource.indexOf('verifyMarketplaceMutationSignature');
   const actorIndex = routeSource.indexOf('refundedBy !== job.postedBy');
   const writeIndex = routeSource.indexOf('writeJSON(escrowPath, escrow)');
-  assert.ok(gateIndex < authIndex);
   assert.ok(authIndex < actorIndex);
-  assert.ok(actorIndex < writeIndex);
+  assert.ok(actorIndex < gateIndex);
+  assert.ok(gateIndex < writeIndex);
 });
 
 test('AF8: JSON state writes use atomic temp-write and rename', () => {
@@ -302,6 +301,6 @@ test('AF6 and AF10: CI-on-merge workflow runs explicit PR and main-branch merge 
   assert.match(workflow, /name: AF6 AF10 merge gate/);
   assert.match(workflow, /npm ci/);
   assert.match(workflow, /npm run lint:roadmap/);
-  assert.match(workflow, /node --test tests\/deepaudit-af-surface-remediation\.test\.js/);
+  assert.match(workflow, /node --test tests\/deepaudit-af-surface-remediation\.test\.js tests\/escrow-release-gate\.test\.js/);
   assert.match(workflow, /git diff --check/);
 });

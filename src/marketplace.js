@@ -719,14 +719,7 @@ function registerRoutes(app) {
 
   // POST /api/marketplace/escrow/:id/refund — Refund escrow
   app.post('/api/marketplace/escrow/:id/refund', marketplaceMutationLimiter, (req, res) => {
-    if (sendCustodialEscrowDisabledResponse(res, 'legacy marketplace custodial escrow refund')) return;
-
-    const escrowPath = path.join(DATA_DIR, 'escrow', `${req.params.id}.json`);
-    const escrow = readJSON(escrowPath);
-    if (!escrow) return res.status(404).json({ error: 'Escrow not found' });
-    if (escrow.status !== 'funded') return res.status(400).json({ error: 'Escrow not in funded state' });
-
-    const { refundedBy, reason } = req.body;
+    const { refundedBy, reason } = req.body || {};
     if (!refundedBy) return res.status(400).json({ error: 'refundedBy required' });
     const authResult = verifyMarketplaceMutationSignature({
       action: 'refund',
@@ -736,12 +729,19 @@ function registerRoutes(app) {
     });
     if (!authResult.ok) return sendMarketplaceAuthFailure(res, authResult);
 
+    const escrowPath = path.join(DATA_DIR, 'escrow', `${req.params.id}.json`);
+    const escrow = readJSON(escrowPath);
+    if (!escrow) return res.status(404).json({ error: 'Escrow not found' });
+    if (escrow.status !== 'funded') return res.status(400).json({ error: 'Escrow not in funded state' });
+
     const jobPath = path.join(DATA_DIR, 'jobs', `${escrow.jobId}.json`);
     const job = readJSON(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
     if (refundedBy !== job.postedBy && refundedBy !== job.clientId) {
       return res.status(403).json({ error: 'Only the job poster can refund escrow' });
     }
+
+    if (sendCustodialEscrowDisabledResponse(res, 'legacy marketplace custodial escrow refund')) return;
 
     escrow.status = 'refunded';
     escrow.refundedBy = refundedBy;

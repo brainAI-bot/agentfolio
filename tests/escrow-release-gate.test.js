@@ -2,7 +2,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const express = require('express');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const nacl = require('tweetnacl');
+const bs58Module = require('bs58');
+const { Keypair } = require('@solana/web3.js');
 
 const {
   CUSTODIAL_ESCROW_DISABLED_CODE,
@@ -13,6 +17,8 @@ const {
   LEGACY_ESCROW_ROUTE_DISABLED_CODE,
   LIVE_ESCROW_READ_ONLY_CODE,
 } = require('../src/lib/write-surface-gate');
+
+const bs58 = bs58Module.default || bs58Module;
 
 function listen(app) {
   return new Promise((resolve) => {
@@ -87,6 +93,82 @@ function withMarketplaceDbStub(dbStub, callback) {
     if (previousDbModule) require.cache[dbPath] = previousDbModule;
     else delete require.cache[dbPath];
   }
+}
+
+function writeFixtureJSON(root, kind, id, value) {
+  const dir = path.join(root, kind);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(value, null, 2));
+}
+
+function makeProfileStoreStub(rows) {
+  return {
+    addActivity() {},
+    getDb() {
+      return {
+        prepare(sql) {
+          return {
+            get(value) {
+              if (/LOWER\(name\)/.test(sql)) {
+                return rows.find((row) => String(row.name || '').toLowerCase() === String(value).toLowerCase()) || null;
+              }
+              return rows.find((row) => row.id === value) || null;
+            },
+            all() {
+              return rows;
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
+function freshRouteMarketplace(dataDir, profiles) {
+  const marketplacePath = require.resolve('../src/marketplace');
+  const profileStorePath = require.resolve('../src/profile-store');
+  const previousDataDir = process.env.MARKETPLACE_DATA_DIR;
+  const previousMarketplace = require.cache[marketplacePath];
+  const previousProfileStore = require.cache[profileStorePath];
+
+  process.env.MARKETPLACE_DATA_DIR = dataDir;
+  delete require.cache[marketplacePath];
+  require.cache[profileStorePath] = {
+    id: profileStorePath,
+    filename: profileStorePath,
+    loaded: true,
+    exports: makeProfileStoreStub(profiles),
+  };
+
+  const marketplace = require('../src/marketplace');
+
+  function restore() {
+    delete require.cache[marketplacePath];
+    if (previousMarketplace) require.cache[marketplacePath] = previousMarketplace;
+    if (previousProfileStore) require.cache[profileStorePath] = previousProfileStore;
+    else delete require.cache[profileStorePath];
+    if (previousDataDir === undefined) delete process.env.MARKETPLACE_DATA_DIR;
+    else process.env.MARKETPLACE_DATA_DIR = previousDataDir;
+  }
+
+  return { marketplace, restore };
+}
+
+function signedChallenge(marketplace, keypair, { action, resourceId, actorId, identityPDA }) {
+  const walletAddress = keypair.publicKey.toBase58();
+  const message = marketplace.buildMarketplaceWalletChallenge({
+    action,
+    resourceId,
+    actorId,
+    walletAddress,
+    identityPDA,
+  });
+  return {
+    walletAddress,
+    identityPDA,
+    message,
+    signature: bs58.encode(nacl.sign.detached(Buffer.from(message, 'utf8'), keypair.secretKey)),
+  };
 }
 
 test('dormant Solana custodial signer path is gated by live escrow flag, not Solana/Irys flag', async () => {
@@ -205,24 +287,70 @@ test('marketplace job creation does not persist required custodial escrow drafts
 });
 
 test('legacy marketplace custodial escrow endpoints return the release gate blocker', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-release-gate-'));
+  const client = Keypair.generate();
+  const wallet = client.publicKey.toBase58();
+  const { marketplace, restore } = freshRouteMarketplace(dataDir, [
+    {
+      id: 'client_agent',
+      name: 'Client Agent',
+      wallet,
+      wallets: JSON.stringify({ solana: wallet }),
+    },
+  ]);
+  const identityPDA = marketplace.deriveSatpIdentityPDA(wallet);
+
+  writeFixtureJSON(dataDir, 'jobs', 'job_gate', {
+    id: 'job_gate',
+    status: 'in_progress',
+    postedBy: 'client_agent',
+    clientId: 'client_agent',
+    escrowId: 'escrow_gate',
+  });
+  writeFixtureJSON(dataDir, 'escrow', 'escrow_gate', {
+    id: 'escrow_gate',
+    jobId: 'job_gate',
+    status: 'funded',
+    fundedBy: 'client_agent',
+    workerPayout: 90,
+    platformFee: 10,
+  });
+
   const app = express();
   app.use(express.json());
-  require('../src/marketplace').registerRoutes(app);
+  marketplace.registerRoutes(app);
   const server = await listen(app);
 
   try {
     const { port } = server.address();
-    const paths = [
-      '/api/marketplace/jobs/job_gate/escrow',
-      '/api/marketplace/escrow/escrow_gate/release',
-      '/api/marketplace/escrow/escrow_gate/refund',
+    const probes = [
+      {
+        path: '/api/marketplace/jobs/job_gate/escrow',
+        body: {},
+      },
+      {
+        path: '/api/marketplace/escrow/escrow_gate/release',
+        body: {},
+      },
+      {
+        path: '/api/marketplace/escrow/escrow_gate/refund',
+        body: {
+          refundedBy: 'client_agent',
+          walletChallenge: signedChallenge(marketplace, client, {
+            action: 'refund',
+            resourceId: 'escrow_gate',
+            actorId: 'client_agent',
+            identityPDA,
+          }),
+        },
+      },
     ];
 
-    for (const path of paths) {
-      const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+    for (const probe of probes) {
+      const res = await fetch(`http://127.0.0.1:${port}${probe.path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify(probe.body),
       });
       const body = await res.json();
       assert.equal(res.status, 423);
@@ -230,6 +358,7 @@ test('legacy marketplace custodial escrow endpoints return the release gate bloc
     }
   } finally {
     await close(server);
+    restore();
   }
 });
 
