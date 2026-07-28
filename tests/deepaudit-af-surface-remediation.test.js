@@ -4,10 +4,114 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const express = require('express');
+const nacl = require('tweetnacl');
+const bs58Module = require('bs58');
+const { Keypair } = require('@solana/web3.js');
 
 const { writeJsonAtomicSync } = require('../src/lib/atomic-file');
 
 const repoRoot = path.resolve(__dirname, '..');
+const bs58 = bs58Module.default || bs58Module;
+
+function listen(app) {
+  return new Promise((resolve) => {
+    const server = app.listen(0, () => resolve(server));
+  });
+}
+
+function close(server) {
+  return new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+}
+
+function writeFixtureJSON(root, kind, id, value) {
+  const dir = path.join(root, kind);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(value, null, 2));
+}
+
+function readFixtureJSON(root, kind, id) {
+  return JSON.parse(fs.readFileSync(path.join(root, kind, `${id}.json`), 'utf8'));
+}
+
+function makeProfileStoreStub(rows) {
+  return {
+    addActivity() {},
+    getDb() {
+      return {
+        prepare(sql) {
+          return {
+            get(value) {
+              if (/LOWER\(name\)/.test(sql)) {
+                return rows.find((row) => String(row.name || '').toLowerCase() === String(value).toLowerCase()) || null;
+              }
+              return rows.find((row) => row.id === value) || null;
+            },
+            all() {
+              return rows;
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
+function freshMarketplace(dataDir, profiles) {
+  const marketplacePath = require.resolve('../src/marketplace');
+  const profileStorePath = require.resolve('../src/profile-store');
+  const previousDataDir = process.env.MARKETPLACE_DATA_DIR;
+  const previousMarketplace = require.cache[marketplacePath];
+  const previousProfileStore = require.cache[profileStorePath];
+
+  process.env.MARKETPLACE_DATA_DIR = dataDir;
+  delete require.cache[marketplacePath];
+  require.cache[profileStorePath] = {
+    id: profileStorePath,
+    filename: profileStorePath,
+    loaded: true,
+    exports: makeProfileStoreStub(profiles),
+  };
+
+  const marketplace = require('../src/marketplace');
+
+  function restore() {
+    delete require.cache[marketplacePath];
+    if (previousMarketplace) require.cache[marketplacePath] = previousMarketplace;
+    if (previousProfileStore) require.cache[profileStorePath] = previousProfileStore;
+    else delete require.cache[profileStorePath];
+    if (previousDataDir === undefined) delete process.env.MARKETPLACE_DATA_DIR;
+    else process.env.MARKETPLACE_DATA_DIR = previousDataDir;
+  }
+
+  return { marketplace, restore };
+}
+
+function signedChallenge(marketplace, keypair, { action, resourceId, actorId, identityPDA }) {
+  const walletAddress = keypair.publicKey.toBase58();
+  const message = marketplace.buildMarketplaceWalletChallenge({
+    action,
+    resourceId,
+    actorId,
+    walletAddress,
+    identityPDA,
+  });
+  return {
+    walletAddress,
+    identityPDA,
+    message,
+    signature: bs58.encode(nacl.sign.detached(Buffer.from(message, 'utf8'), keypair.secretKey)),
+  };
+}
+
+async function postJSON(baseUrl, route, body) {
+  const res = await fetch(`${baseUrl}${route}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, body: await res.json() };
+}
 
 test('AF2: how-it-works exposes non-empty SATP mainnet program ids', () => {
   const programsSource = fs.readFileSync(
@@ -26,6 +130,119 @@ test('AF2: how-it-works exposes non-empty SATP mainnet program ids', () => {
   }
   assert.match(pageSource, /SATP_MAINNET_PROGRAMS/);
   assert.match(pageSource, /explorer\.solana\.com\/address/);
+});
+
+test('AF25: escrow refund authorizes before remaining fail-closed without state mutation', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-escrow-refund-auth-'));
+  const client = Keypair.generate();
+  const nonOwner = Keypair.generate();
+  const { marketplace, restore } = freshMarketplace(dataDir, []);
+  const clientIdentity = marketplace.deriveSatpIdentityPDA(client.publicKey.toBase58());
+  const nonOwnerIdentity = marketplace.deriveSatpIdentityPDA(nonOwner.publicKey.toBase58());
+
+  restore();
+  const loaded = freshMarketplace(dataDir, [
+    {
+      id: 'client_agent',
+      name: 'Client Agent',
+      wallet: client.publicKey.toBase58(),
+      wallets: JSON.stringify({ solana: client.publicKey.toBase58() }),
+      verification_data: JSON.stringify({ solana: { verified: true, address: client.publicKey.toBase58() }, satp: { identityPDA: clientIdentity } }),
+    },
+    {
+      id: 'other_agent',
+      name: 'Other Agent',
+      wallet: nonOwner.publicKey.toBase58(),
+      wallets: JSON.stringify({ solana: nonOwner.publicKey.toBase58() }),
+      verification_data: JSON.stringify({ solana: { verified: true, address: nonOwner.publicKey.toBase58() }, satp: { identityPDA: nonOwnerIdentity } }),
+    },
+  ]);
+
+  writeFixtureJSON(dataDir, 'jobs', 'job_refund_auth', {
+    id: 'job_refund_auth',
+    status: 'in_progress',
+    postedBy: 'client_agent',
+    clientId: 'client_agent',
+    escrowId: 'escrow_refund_auth',
+  });
+  writeFixtureJSON(dataDir, 'escrow', 'escrow_refund_auth', {
+    id: 'escrow_refund_auth',
+    jobId: 'job_refund_auth',
+    status: 'funded',
+    fundedBy: 'client_agent',
+    workerPayout: 90,
+    platformFee: 10,
+  });
+
+  const app = express();
+  app.use(express.json());
+  loaded.marketplace.registerRoutes(app);
+  const server = await listen(app);
+
+  try {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    const unsigned = await postJSON(baseUrl, '/api/marketplace/escrow/escrow_refund_auth/refund', {
+      refundedBy: 'client_agent',
+      reason: 'body-only refund',
+    });
+    assert.equal(unsigned.status, 401);
+    assert.equal(unsigned.body.code, 'MARKETPLACE_WALLET_CHALLENGE_REQUIRED');
+    assert.equal(readFixtureJSON(dataDir, 'escrow', 'escrow_refund_auth').status, 'funded');
+    assert.equal(readFixtureJSON(dataDir, 'jobs', 'job_refund_auth').status, 'in_progress');
+
+    const signedNonOwner = await postJSON(baseUrl, '/api/marketplace/escrow/escrow_refund_auth/refund', {
+      refundedBy: 'other_agent',
+      reason: 'signed non-owner refund',
+      walletChallenge: signedChallenge(loaded.marketplace, nonOwner, {
+        action: 'refund',
+        resourceId: 'escrow_refund_auth',
+        actorId: 'other_agent',
+        identityPDA: nonOwnerIdentity,
+      }),
+    });
+    assert.equal(signedNonOwner.status, 403);
+    assert.equal(readFixtureJSON(dataDir, 'escrow', 'escrow_refund_auth').status, 'funded');
+    assert.equal(readFixtureJSON(dataDir, 'jobs', 'job_refund_auth').status, 'in_progress');
+
+    const signedOwner = await postJSON(baseUrl, '/api/marketplace/escrow/escrow_refund_auth/refund', {
+      refundedBy: 'client_agent',
+      reason: 'signed owner refund',
+      walletChallenge: signedChallenge(loaded.marketplace, client, {
+        action: 'refund',
+        resourceId: 'escrow_refund_auth',
+        actorId: 'client_agent',
+        identityPDA: clientIdentity,
+      }),
+    });
+    assert.equal(signedOwner.status, 423);
+    assert.equal(signedOwner.body.code, 'CUSTODIAL_ESCROW_DISABLED');
+    assert.equal(readFixtureJSON(dataDir, 'escrow', 'escrow_refund_auth').status, 'funded');
+    assert.equal(readFixtureJSON(dataDir, 'jobs', 'job_refund_auth').status, 'in_progress');
+  } finally {
+    await close(server);
+    loaded.restore();
+  }
+});
+
+test('AF25: refund route keeps limiter, auth, actor check, and custodial gate before writes', () => {
+  const source = fs.readFileSync(path.join(repoRoot, 'src/marketplace.js'), 'utf8');
+  const routeStart = source.indexOf("app.post('/api/marketplace/escrow/:id/refund', marketplaceMutationLimiter");
+  assert.notEqual(routeStart, -1);
+  const routeEnd = source.indexOf("app.post('/api/marketplace/jobs/:id/complete'", routeStart);
+  assert.notEqual(routeEnd, -1);
+  const routeSource = source.slice(routeStart, routeEnd);
+
+  assert.match(routeSource, /sendCustodialEscrowDisabledResponse\(res, 'legacy marketplace custodial escrow refund'\)/);
+  assert.match(routeSource, /verifyMarketplaceMutationSignature\(\{\s*action: 'refund'/);
+  assert.match(routeSource, /refundedBy !== job\.postedBy && refundedBy !== job\.clientId/);
+
+  const gateIndex = routeSource.indexOf('sendCustodialEscrowDisabledResponse');
+  const authIndex = routeSource.indexOf('verifyMarketplaceMutationSignature');
+  const actorIndex = routeSource.indexOf('refundedBy !== job.postedBy');
+  const writeIndex = routeSource.indexOf('writeJSON(escrowPath, escrow)');
+  assert.ok(authIndex < actorIndex);
+  assert.ok(actorIndex < gateIndex);
+  assert.ok(gateIndex < writeIndex);
 });
 
 test('AF8: JSON state writes use atomic temp-write and rename', () => {
@@ -82,7 +299,8 @@ test('AF6 and AF10: CI-on-merge workflow runs explicit PR and main-branch merge 
   assert.match(workflow, /^\s{2}push:\n\s{4}branches:\n\s{6}- main\n\s{6}- master$/m);
   assert.match(workflow, /^\s{2}workflow_dispatch:$/m);
   assert.match(workflow, /name: AF6 AF10 merge gate/);
+  assert.match(workflow, /npm ci/);
   assert.match(workflow, /npm run lint:roadmap/);
-  assert.match(workflow, /node --test tests\/deepaudit-af-surface-remediation\.test\.js/);
+  assert.match(workflow, /node --test tests\/deepaudit-af-surface-remediation\.test\.js tests\/escrow-release-gate\.test\.js/);
   assert.match(workflow, /git diff --check/);
 });

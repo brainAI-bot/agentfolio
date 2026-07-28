@@ -30,11 +30,14 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install dependencies
+        run: npm ci
+
       - name: Validate roadmap ledger
         run: npm run lint:roadmap
 
       - name: Run deep-audit regression ledger
-        run: node --test tests/deepaudit-af-surface-remediation.test.js
+        run: node --test tests/deepaudit-af-surface-remediation.test.js tests/escrow-release-gate.test.js
 
       - name: Check committed diff hygiene
         run: git diff --check
