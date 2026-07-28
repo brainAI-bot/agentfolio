@@ -219,6 +219,23 @@ test('AF25: escrow refund remains fail-closed at the custodial gate without stat
     assert.equal(signedOwner.body.code, 'CUSTODIAL_ESCROW_DISABLED');
     assert.equal(readFixtureJSON(dataDir, 'escrow', 'escrow_refund_auth').status, 'funded');
     assert.equal(readFixtureJSON(dataDir, 'jobs', 'job_refund_auth').status, 'in_progress');
+
+    for (let attempt = 0; attempt < 61; attempt += 1) {
+      const overLimitOwner = await postJSON(baseUrl, '/api/marketplace/escrow/escrow_refund_auth/refund', {
+        refundedBy: 'client_agent',
+        reason: `signed owner refund over limit ${attempt}`,
+        walletChallenge: signedChallenge(loaded.marketplace, client, {
+          action: 'refund',
+          resourceId: 'escrow_refund_auth',
+          actorId: 'client_agent',
+          identityPDA: clientIdentity,
+        }),
+      });
+      assert.equal(overLimitOwner.status, 423);
+      assert.equal(overLimitOwner.body.code, 'CUSTODIAL_ESCROW_DISABLED');
+    }
+    assert.equal(readFixtureJSON(dataDir, 'escrow', 'escrow_refund_auth').status, 'funded');
+    assert.equal(readFixtureJSON(dataDir, 'jobs', 'job_refund_auth').status, 'in_progress');
   } finally {
     await close(server);
     loaded.restore();
@@ -227,21 +244,24 @@ test('AF25: escrow refund remains fail-closed at the custodial gate without stat
 
 test('AF25: refund route keeps limiter and auth checks below the custodial escrow gate', () => {
   const source = fs.readFileSync(path.join(repoRoot, 'src/marketplace.js'), 'utf8');
-  const routeStart = source.indexOf("app.post('/api/marketplace/escrow/:id/refund', marketplaceMutationLimiter");
+  const routeStart = source.indexOf("app.post('/api/marketplace/escrow/:id/refund'");
   assert.notEqual(routeStart, -1);
   const routeEnd = source.indexOf("app.post('/api/marketplace/jobs/:id/complete'", routeStart);
   assert.notEqual(routeEnd, -1);
   const routeSource = source.slice(routeStart, routeEnd);
 
   assert.match(routeSource, /sendCustodialEscrowDisabledResponse\(res, 'legacy marketplace custodial escrow refund'\)/);
+  assert.match(routeSource, /marketplaceMutationLimiter\(req, res, next\)/);
   assert.match(routeSource, /verifyMarketplaceMutationSignature\(\{\s*action: 'refund'/);
   assert.match(routeSource, /refundedBy !== job\.postedBy && refundedBy !== job\.clientId/);
 
   const gateIndex = routeSource.indexOf('sendCustodialEscrowDisabledResponse');
+  const limiterIndex = routeSource.indexOf('marketplaceMutationLimiter');
   const authIndex = routeSource.indexOf('verifyMarketplaceMutationSignature');
   const actorIndex = routeSource.indexOf('refundedBy !== job.postedBy');
   const writeIndex = routeSource.indexOf('writeJSON(escrowPath, escrow)');
-  assert.ok(gateIndex < authIndex);
+  assert.ok(gateIndex < limiterIndex);
+  assert.ok(limiterIndex < authIndex);
   assert.ok(authIndex < actorIndex);
   assert.ok(actorIndex < writeIndex);
 });

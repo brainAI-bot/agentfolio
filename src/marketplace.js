@@ -718,8 +718,10 @@ function registerRoutes(app) {
   });
 
   // POST /api/marketplace/escrow/:id/refund — Refund escrow
-  app.post('/api/marketplace/escrow/:id/refund', marketplaceMutationLimiter, (req, res) => {
+  app.post('/api/marketplace/escrow/:id/refund', (req, res, next) => {
     if (sendCustodialEscrowDisabledResponse(res, 'legacy marketplace custodial escrow refund')) return;
+    marketplaceMutationLimiter(req, res, next);
+  }, (req, res) => {
 
     const escrowPath = path.join(DATA_DIR, 'escrow', `${req.params.id}.json`);
     const escrow = readJSON(escrowPath);
