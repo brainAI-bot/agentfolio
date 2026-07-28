@@ -36,26 +36,14 @@ const router = Router();
 
 // Determine network from env or default to mainnet
 const NETWORK = process.env.SATP_NETWORK || 'mainnet';
-let sdk = null;
-let sdkLoadError = null;
-if (SATPSDK) {
-  try {
-    sdk = new SATPSDK({ network: NETWORK });
-  } catch (e) {
-    sdkLoadError = e;
-    console.warn('[Escrow Routes] SATP SDK disabled:', e.message);
-  }
-}
+const sdk = SATPSDK ? new SATPSDK({ network: NETWORK }) : null;
 
 /**
  * Middleware: ensure SDK is available
  */
 function requireSDK(req, res, next) {
   if (!sdk) {
-    return res.status(503).json({
-      error: 'Escrow SDK not available',
-      reason: sdkLoadError ? sdkLoadError.message : undefined,
-    });
+    return res.status(503).json({ error: 'Escrow SDK not available' });
   }
   next();
 }
