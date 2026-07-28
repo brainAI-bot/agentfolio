@@ -718,27 +718,39 @@ function registerRoutes(app) {
   });
 
   // POST /api/marketplace/escrow/:id/refund — Refund escrow
-  app.post('/api/marketplace/escrow/:id/refund', (req, res) => {
-    if (sendCustodialEscrowDisabledResponse(res, 'legacy marketplace custodial escrow refund')) return;
+  app.post('/api/marketplace/escrow/:id/refund', marketplaceMutationLimiter, (req, res) => {
     const escrowPath = path.join(DATA_DIR, 'escrow', `${req.params.id}.json`);
     const escrow = readJSON(escrowPath);
     if (!escrow) return res.status(404).json({ error: 'Escrow not found' });
     if (escrow.status !== 'funded') return res.status(400).json({ error: 'Escrow not in funded state' });
 
     const { refundedBy, reason } = req.body;
+    if (!refundedBy) return res.status(400).json({ error: 'refundedBy required' });
+    const authResult = verifyMarketplaceMutationSignature({
+      action: 'refund',
+      resourceId: req.params.id,
+      actorId: refundedBy,
+      body: req.body,
+    });
+    if (!authResult.ok) return sendMarketplaceAuthFailure(res, authResult);
+
+    const jobPath = path.join(DATA_DIR, 'jobs', `${escrow.jobId}.json`);
+    const job = readJSON(jobPath);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (refundedBy !== job.postedBy && refundedBy !== job.clientId) {
+      return res.status(403).json({ error: 'Only the job poster can refund escrow' });
+    }
+    if (sendCustodialEscrowDisabledResponse(res, 'legacy marketplace custodial escrow refund')) return;
+
     escrow.status = 'refunded';
     escrow.refundedBy = refundedBy;
     escrow.refundReason = reason || 'No reason provided';
     escrow.refundedAt = new Date().toISOString();
     writeJSON(escrowPath, escrow);
 
-    const jobPath = path.join(DATA_DIR, 'jobs', `${escrow.jobId}.json`);
-    const job = readJSON(jobPath);
-    if (job) {
-      job.status = 'closed';
-      job.updatedAt = new Date().toISOString();
-      writeJSON(jobPath, job);
-    }
+    job.status = 'closed';
+    job.updatedAt = new Date().toISOString();
+    writeJSON(jobPath, job);
 
     res.json({ message: 'Escrow refunded', escrow });
   });
