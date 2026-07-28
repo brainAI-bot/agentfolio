@@ -132,7 +132,7 @@ test('AF2: how-it-works exposes non-empty SATP mainnet program ids', () => {
   assert.match(pageSource, /explorer\.solana\.com\/address/);
 });
 
-test('AF25: escrow refund requires signed job-owner authorization before custodial gate', async () => {
+test('AF25: escrow refund remains fail-closed at the custodial gate without state mutation', async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-escrow-refund-auth-'));
   const client = Keypair.generate();
   const nonOwner = Keypair.generate();
@@ -185,8 +185,8 @@ test('AF25: escrow refund requires signed job-owner authorization before custodi
       refundedBy: 'client_agent',
       reason: 'body-only refund',
     });
-    assert.equal(unsigned.status, 401);
-    assert.equal(unsigned.body.code, 'MARKETPLACE_WALLET_CHALLENGE_REQUIRED');
+    assert.equal(unsigned.status, 423);
+    assert.equal(unsigned.body.code, 'CUSTODIAL_ESCROW_DISABLED');
     assert.equal(readFixtureJSON(dataDir, 'escrow', 'escrow_refund_auth').status, 'funded');
     assert.equal(readFixtureJSON(dataDir, 'jobs', 'job_refund_auth').status, 'in_progress');
 
@@ -200,13 +200,50 @@ test('AF25: escrow refund requires signed job-owner authorization before custodi
         identityPDA: nonOwnerIdentity,
       }),
     });
-    assert.equal(signedNonOwner.status, 403);
+    assert.equal(signedNonOwner.status, 423);
+    assert.equal(signedNonOwner.body.code, 'CUSTODIAL_ESCROW_DISABLED');
+    assert.equal(readFixtureJSON(dataDir, 'escrow', 'escrow_refund_auth').status, 'funded');
+    assert.equal(readFixtureJSON(dataDir, 'jobs', 'job_refund_auth').status, 'in_progress');
+
+    const signedOwner = await postJSON(baseUrl, '/api/marketplace/escrow/escrow_refund_auth/refund', {
+      refundedBy: 'client_agent',
+      reason: 'signed owner refund',
+      walletChallenge: signedChallenge(loaded.marketplace, client, {
+        action: 'refund',
+        resourceId: 'escrow_refund_auth',
+        actorId: 'client_agent',
+        identityPDA: clientIdentity,
+      }),
+    });
+    assert.equal(signedOwner.status, 423);
+    assert.equal(signedOwner.body.code, 'CUSTODIAL_ESCROW_DISABLED');
     assert.equal(readFixtureJSON(dataDir, 'escrow', 'escrow_refund_auth').status, 'funded');
     assert.equal(readFixtureJSON(dataDir, 'jobs', 'job_refund_auth').status, 'in_progress');
   } finally {
     await close(server);
     loaded.restore();
   }
+});
+
+test('AF25: refund route keeps limiter and auth checks below the custodial escrow gate', () => {
+  const source = fs.readFileSync(path.join(repoRoot, 'src/marketplace.js'), 'utf8');
+  const routeStart = source.indexOf("app.post('/api/marketplace/escrow/:id/refund', marketplaceMutationLimiter");
+  assert.notEqual(routeStart, -1);
+  const routeEnd = source.indexOf("app.post('/api/marketplace/jobs/:id/complete'", routeStart);
+  assert.notEqual(routeEnd, -1);
+  const routeSource = source.slice(routeStart, routeEnd);
+
+  assert.match(routeSource, /sendCustodialEscrowDisabledResponse\(res, 'legacy marketplace custodial escrow refund'\)/);
+  assert.match(routeSource, /verifyMarketplaceMutationSignature\(\{\s*action: 'refund'/);
+  assert.match(routeSource, /refundedBy !== job\.postedBy && refundedBy !== job\.clientId/);
+
+  const gateIndex = routeSource.indexOf('sendCustodialEscrowDisabledResponse');
+  const authIndex = routeSource.indexOf('verifyMarketplaceMutationSignature');
+  const actorIndex = routeSource.indexOf('refundedBy !== job.postedBy');
+  const writeIndex = routeSource.indexOf('writeJSON(escrowPath, escrow)');
+  assert.ok(gateIndex < authIndex);
+  assert.ok(authIndex < actorIndex);
+  assert.ok(actorIndex < writeIndex);
 });
 
 test('AF8: JSON state writes use atomic temp-write and rename', () => {
