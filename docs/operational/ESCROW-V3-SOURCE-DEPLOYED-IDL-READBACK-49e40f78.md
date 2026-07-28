@@ -40,20 +40,24 @@ Local source workspace:
 commit 94a1d309dcc692228c357f6e28ab679196235ad2
 ```
 
-The working tree has an unrelated dirty `satp-v3/yarn.lock`; the audited source paths below were read directly.
+The working tree had an unrelated dirty `satp-v3/yarn.lock`; the audited
+source paths below were read directly. The `B1Se8SP...` values in this section
+are historical readback from 2026-07-06 and were superseded by the 2026-07-28
+owner decision selecting
+`HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C` as canonical.
 
 | Artifact | Path | SHA-256 / value |
 | --- | --- | --- |
 | clawd-brainchain Anchor config | `satp-v3/Anchor.toml` | `7af3f288b27ec7a2f931cb89ed2e645d0d809a12c7ca333d461388c4f34ac426` |
 | clawd-brainchain escrow source | `satp-v3/programs/escrow_v3/src/lib.rs` | `4ff60eacc9fc0b5e2b527a4b1aa62992b6863883dc16a9cf305911682853dd23` |
-| clawd-brainchain devnet program id | `satp-v3/Anchor.toml` | `B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg` |
-| clawd-brainchain source `declare_id!` | `satp-v3/programs/escrow_v3/src/lib.rs` | `B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg` |
+| clawd-brainchain historical devnet program id, superseded 2026-07-28 | `satp-v3/Anchor.toml` | `B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg` |
+| clawd-brainchain historical source `declare_id!`, superseded 2026-07-28 | `satp-v3/programs/escrow_v3/src/lib.rs` | `B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg` |
 | clawd-brainchain mainnet program id | `satp-v3/Anchor.toml` | `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C` |
 
 Comparison result:
 
 - AgentFolio source, AgentFolio tracked IDL, SATP runtime constant, and read-only devnet account readback agree on `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`.
-- The audited `clawd-brainchain` source at commit `94a1d309dcc692228c357f6e28ab679196235ad2` does not match the AgentFolio pinned source hash and declares `B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg`.
+- The audited `clawd-brainchain` source at commit `94a1d309dcc692228c357f6e28ab679196235ad2` did not match the AgentFolio pinned source hash and declared the now-superseded `B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg`.
 - `diff -q onchain/escrow_v3/programs/escrow_v3/src/lib.rs /Users/brainforge/clawd/tmp-clawd-brainchain-49e40f78/satp-v3/programs/escrow_v3/src/lib.rs` reports that the files differ.
 - `diff -q onchain/escrow_v3/Anchor.toml /Users/brainforge/clawd/tmp-clawd-brainchain-49e40f78/satp-v3/Anchor.toml` reports that the files differ.
 

@@ -14,7 +14,7 @@ The release gate remains closed until the production path is verified as genuine
 
 | Source | Escrow program readback | Status |
 | --- | --- | --- |
-| HQ task source readback | `B1Se8SP...` | Candidate audited source identity from `clawd-brainchain`; full fingerprint belongs in HQ evidence only. |
+| Historical HQ task source readback, superseded 2026-07-28 | `B1Se8SP...` | Former candidate audited source identity from `clawd-brainchain`; superseded by owner decision selecting `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`. |
 | Runtime SATP V3 client | `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C` | Current AgentFolio V3 runtime program ID via `@brainai/satp-client` `getV3ProgramIds(...).ESCROW`. |
 | Packaged legacy IDL metadata | `UpJ7jmUzHkQ7EdBKiBv3zq8Dr1fVh6GVWKa7nYtwQ22` | Legacy `idls/satp_escrow.json` address in the SATP client package, not aligned with V3 runtime. |
 | AgentFolio legacy wiring doc | `4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a` | Obsolete docs-only reference in `docs/ONCHAIN-WIRING-PLAN.md`; must not be used for launch claims. |
@@ -41,7 +41,7 @@ Acceptance:
 
 - `source program id == deployed devnet program id == IDL address == SATP V3 SDK ESCROW`.
 - No mainnet deploy or signing.
-- Existing `UpJ7...` and `B1Se8SP...` ambiguity is either removed or documented as superseded by the same verified artifact.
+- Existing `UpJ7...` and `B1Se8SP...` ambiguity is either removed or documented as superseded by the same verified artifact; the 2026-07-28 owner decision selects `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`.
 
 ### PR 2: AgentFolio escrow runtime pin
 

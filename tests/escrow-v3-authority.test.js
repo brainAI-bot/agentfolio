@@ -32,9 +32,9 @@ test('escrow_v3 authority readback names the HQ-selected program id from SATP ma
   assert.match(readback.releaseGate.readOnlyPosture, /PDA derivation routes remain read-only HTTP 200/);
   assert.equal(readback.satpArtifact.runtime.available, true);
   assert.equal(readback.satpArtifact.runtime.mainnetEscrowProgramId, AUTHORITY_PROGRAM_ID);
-  assert.equal(readback.satpArtifact.runtime.devnetEscrowProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
+  assert.equal(readback.satpArtifact.runtime.devnetEscrowProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
   assert.equal(readback.satpArtifact.mainnetMatchesExpectedProgramId, true);
-  assert.equal(readback.satpArtifact.devnetMatchesExpectedProgramId, false);
+  assert.equal(readback.satpArtifact.devnetMatchesExpectedProgramId, true);
 });
 
 test('escrow_v3 source and IDL strict verifier confirms the pinned program id', () => {
