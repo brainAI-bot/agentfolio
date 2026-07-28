@@ -279,29 +279,6 @@ export default function HowItWorksPage() {
           </div>
         </section>
 
-        {/* On-Chain Programs */}
-        <section className="mb-12 p-6 rounded-xl" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
-          <h2 className="text-2xl font-bold mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
-            On-Chain Programs (Solana Mainnet)
-          </h2>
-          <div className="space-y-2 text-xs" style={{ fontFamily: "var(--font-mono)" }}>
-            {[
-              { name: "Identity Registry", id: "BY4jzm5RWnBjVgaDMJMCjjCGRqbBqNF1sMCqFvreB7jH" },
-              { name: "Reputation System", id: "TQ4P9Rd5JYaUoWM3M7mGSF3RBTxGKBUz2CvfE32LbWm" },
-              { name: "Validation Engine", id: "AdDWFajjgH4fXgNXiyK8GDDwjK3MPXZK8EvJDHCUawsE" },
-              { name: "Escrow Protocol (gated)", id: "HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C" },
-            ].map((prog) => (
-              <div key={prog.name} className="flex items-center gap-2 p-2 rounded" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
-                <span className="text-green-400">●</span>
-                <span className="font-bold">{prog.name}</span>
-                <a href={`https://explorer.solana.com/address/${prog.id}`} target="_blank" rel="noopener noreferrer" className="ml-auto truncate max-w-[200px]" style={{ color: "var(--accent)" }}>
-                  {prog.id.substring(0, 8)}...{prog.id.substring(prog.id.length - 4)}
-                </a>
-              </div>
-            ))}
-          </div>
-        </section>
-
         {/* ERC-8004 Alignment */}
         <section className="mb-12 p-6 rounded-xl" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
           <h2 className="text-2xl font-bold mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>

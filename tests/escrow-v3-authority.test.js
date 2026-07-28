@@ -37,23 +37,57 @@ test('escrow_v3 authority readback names the HQ-selected program id from SATP ma
   assert.equal(readback.satpArtifact.devnetMatchesExpectedProgramId, false);
 });
 
-test('escrow_v3 source and IDL strict verifier confirms the pinned program id', () => {
+test('SATP mainnet program verifier checks every registry id and can fail closed', () => {
+  const owner = 'BPFLoaderUpgradeab1e11111111111111111111111';
+  const fixture = {
+    IDENTITY: { slot: 100, owner, exists: true, executable: true, status: 'verified' },
+    REVIEWS: { slot: 101, owner, exists: true, executable: true, status: 'verified' },
+    REPUTATION: { slot: 102, owner, exists: true, executable: true, status: 'verified' },
+    ATTESTATIONS: { slot: 103, owner, exists: true, executable: true, status: 'verified' },
+    VALIDATION: { slot: 104, owner, exists: true, executable: true, status: 'verified' },
+    ESCROW: { slot: 105, owner, exists: true, executable: true, status: 'verified' },
+  };
+  const fixturePath = path.join(fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'af-satp-programs-')), 'accounts.json');
+  fs.writeFileSync(fixturePath, JSON.stringify(fixture));
+
   const output = execFileSync(process.execPath, ['scripts/verify-escrow-v3-source-idl.mjs', '--strict'], {
     cwd: require('node:path').resolve(__dirname, '..'),
+    env: {
+      ...process.env,
+      AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE: fixturePath,
+    },
     encoding: 'utf8',
   });
   const evidence = JSON.parse(output);
-  assert.equal(evidence.expectedProgramId, AUTHORITY_PROGRAM_ID);
+  assert.equal(evidence.label, 'satp_mainnet_program_registry_onchain');
   assert.equal(evidence.status, 'verified');
-  assert.equal(evidence.checks.anchorProgramIdMatches, true);
-  assert.equal(evidence.checks.declareIdMatches, true);
-  assert.equal(evidence.checks.idlAddressMatches, true);
-  assert.equal(evidence.checks.createEscrowValidatesIdentityBeforeFunding, true);
-  assert.equal(evidence.checks.createEscrowValidatesIdentityBeforeRecordingRequirements, true);
-  assert.equal(evidence.checks.identityPdaBoundToAgentIdHash, true);
-  assert.equal(evidence.checks.identityOwnedBySatpProgram, true);
-  assert.equal(evidence.checks.minVerificationLevelEnforced, true);
-  assert.equal(evidence.checks.requireBornEnforced, true);
+  assert.equal(evidence.programs.length, 6);
+  for (const program of evidence.programs) {
+    assert.equal(program.owner, owner);
+    assert.equal(program.exists, true);
+    assert.equal(program.executable, true);
+    assert.match(program.id, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+  }
+
+  fixture.IDENTITY = {
+    slot: 106,
+    owner: null,
+    exists: false,
+    executable: false,
+    status: 'blocked_onchain_program_mismatch',
+  };
+  fs.writeFileSync(fixturePath, JSON.stringify(fixture));
+
+  const red = spawnSync(process.execPath, ['scripts/verify-escrow-v3-source-idl.mjs', '--strict'], {
+    cwd: require('node:path').resolve(__dirname, '..'),
+    env: {
+      ...process.env,
+      AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE: fixturePath,
+    },
+    encoding: 'utf8',
+  });
+  assert.equal(red.status, 1);
+  assert.match(red.stdout, /blocked_onchain_program_mismatch/);
 });
 
 test('escrow_v3 source binds dispute recipients and enforces SATP identity requirements', () => {

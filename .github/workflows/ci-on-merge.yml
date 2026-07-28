@@ -36,6 +36,9 @@ jobs:
       - name: Validate roadmap ledger
         run: npm run lint:roadmap
 
+      - name: Verify published SATP mainnet program accounts
+        run: npm run verify:satp-mainnet-programs
+
       - name: Run deep-audit regression ledger
         run: node --test tests/deepaudit-af-surface-remediation.test.js tests/escrow-release-gate.test.js
 
