@@ -190,7 +190,7 @@ async function main() {
 
   console.log(JSON.stringify(evidence, null, 2));
 
-  if ((strictMode || allowFixture) && !verified) {
+  if ((strictMode || ciMode || allowFixture) && !verified) {
     process.exitCode = 1;
   }
 }

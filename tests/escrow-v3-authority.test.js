@@ -1,7 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { execFileSync, spawnSync } = require('node:child_process');
+const { execFile, execFileSync, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
+const http = require('node:http');
 const path = require('node:path');
 
 const satpClient = require('@brainai/satp-client');
@@ -19,6 +20,53 @@ function verifierEnv(extra = {}) {
     }
   }
   return { ...env, ...extra };
+}
+
+function execFileAsync(file, args, options) {
+  return new Promise((resolve) => {
+    execFile(file, args, options, (error, stdout, stderr) => {
+      resolve({
+        status: typeof error?.code === 'number' ? error.code : error ? 1 : 0,
+        stdout,
+        stderr,
+      });
+    });
+  });
+}
+
+function withMockSolanaRpc(handler) {
+  const server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      const body = {
+        jsonrpc: '2.0',
+        id: payload.id,
+        result: payload.method === 'getGenesisHash'
+          ? '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d'
+          : {
+              context: { slot: 123 },
+              value: null,
+            },
+      };
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify(body));
+    });
+  });
+
+  return new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', async () => {
+      try {
+        const { port } = server.address();
+        resolve(await handler(`http://127.0.0.1:${port}`));
+      } catch (error) {
+        reject(error);
+      } finally {
+        server.close();
+      }
+    });
+  });
 }
 
 test('escrow_v3 authority readback names the HQ-selected program id from SATP mainnet runtime', () => {
@@ -84,6 +132,7 @@ test('SATP mainnet program verifier checks every registry id in explicit fixture
   const output = execFileSync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs', '--allow-fixture'], {
     cwd: require('node:path').resolve(__dirname, '..'),
     env: verifierEnv({
+      CI: '',
       AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE: fixturePath,
     }),
     encoding: 'utf8',
@@ -114,6 +163,7 @@ test('SATP mainnet program verifier checks every registry id in explicit fixture
   const red = spawnSync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs', '--allow-fixture'], {
     cwd: require('node:path').resolve(__dirname, '..'),
     env: verifierEnv({
+      CI: '',
       AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE: fixturePath,
     }),
     encoding: 'utf8',
@@ -183,6 +233,29 @@ test('SATP mainnet strict verifier rejects env overrides before checking account
   assert.equal(evidence.mode.allowFixture, false);
   assert.notEqual(identity.id, override);
   assert.equal(identity.provenance, 'frontend/src/lib/satp-mainnet-programs.ts');
+});
+
+test('SATP mainnet verifier fails closed on on-chain mismatch in CI mode without strict flag', async () => {
+  await withMockSolanaRpc(async (rpcUrl) => {
+    const ci = await execFileAsync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs'], {
+      cwd: require('node:path').resolve(__dirname, '..'),
+      env: verifierEnv({
+        CI: 'true',
+        SOLANA_RPC_URL: rpcUrl,
+      }),
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    const evidence = JSON.parse(ci.stdout);
+
+    assert.equal(ci.status, 1);
+    assert.equal(evidence.status, 'blocked_onchain_program_mismatch');
+    assert.equal(evidence.mode.strict, false);
+    assert.equal(evidence.mode.ci, true);
+    assert.equal(evidence.rpcGenesisHash, '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d');
+    assert.equal(evidence.programs.length, 6);
+    assert.ok(evidence.programs.every((program) => program.exists === false));
+  });
 });
 
 test('SATP mainnet verifier pins evidence to Solana mainnet genesis in strict mode', () => {

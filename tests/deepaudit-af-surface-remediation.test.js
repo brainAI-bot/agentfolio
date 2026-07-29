@@ -303,6 +303,6 @@ test('AF6 and AF10: CI-on-merge workflow runs explicit PR and main-branch merge 
   assert.match(workflow, /npm ci/);
   assert.match(workflow, /npm run lint:roadmap/);
   assert.match(workflow, /npm run verify:satp-mainnet-programs/);
-  assert.match(workflow, /node --test tests\/deepaudit-af-surface-remediation\.test\.js tests\/escrow-release-gate\.test\.js/);
+  assert.match(workflow, /node --test tests\/deepaudit-af-surface-remediation\.test\.js tests\/escrow-release-gate\.test\.js tests\/escrow-v3-authority\.test\.js/);
   assert.match(workflow, /git diff --check/);
 });

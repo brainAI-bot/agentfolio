@@ -40,7 +40,7 @@ jobs:
         run: npm run verify:satp-mainnet-programs
 
       - name: Run deep-audit regression ledger
-        run: node --test tests/deepaudit-af-surface-remediation.test.js tests/escrow-release-gate.test.js
+        run: node --test tests/deepaudit-af-surface-remediation.test.js tests/escrow-release-gate.test.js tests/escrow-v3-authority.test.js
 
       - name: Check committed diff hygiene
         run: git diff --check
