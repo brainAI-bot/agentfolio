@@ -8,6 +8,7 @@
   },
   "scripts": {
     "audit:satp-keypairs": "node scripts/satp-keypair-inventory.js --fail-on-tracked-secret",
+    "verify:satp-mainnet-programs": "node scripts/verify-satp-mainnet-programs.mjs --strict",
     "lint:roadmap": "node scripts/lint-roadmap.js",
     "check:public-routes": "node scripts/check-public-routes.mjs",
     "test": "node --test 'tests/**/*.test.js'"

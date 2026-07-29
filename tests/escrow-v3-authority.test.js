@@ -1,7 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { execFileSync, spawnSync } = require('node:child_process');
+const { execFile, execFileSync, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
+const http = require('node:http');
 const path = require('node:path');
 
 const satpClient = require('@brainai/satp-client');
@@ -10,6 +11,63 @@ const {
   AUTHORITY_PROGRAM_ID_PROVENANCE,
   getEscrowV3AuthorityReadback,
 } = require('../src/lib/escrow-v3-authority');
+
+function verifierEnv(extra = {}) {
+  const env = { ...process.env, ...extra };
+  for (const key of Object.keys(env)) {
+    if (/^SATP_MAINNET_[A-Z0-9_]+_PROGRAM_ID$/.test(key)) {
+      delete env[key];
+    }
+  }
+  return { ...env, ...extra };
+}
+
+function execFileAsync(file, args, options) {
+  return new Promise((resolve) => {
+    execFile(file, args, options, (error, stdout, stderr) => {
+      resolve({
+        status: typeof error?.code === 'number' ? error.code : error ? 1 : 0,
+        stdout,
+        stderr,
+      });
+    });
+  });
+}
+
+function withMockSolanaRpc(handler) {
+  const server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      const body = {
+        jsonrpc: '2.0',
+        id: payload.id,
+        result: payload.method === 'getGenesisHash'
+          ? '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d'
+          : {
+              context: { slot: 123 },
+              value: null,
+            },
+      };
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify(body));
+    });
+  });
+
+  return new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', async () => {
+      try {
+        const { port } = server.address();
+        resolve(await handler(`http://127.0.0.1:${port}`));
+      } catch (error) {
+        reject(error);
+      } finally {
+        server.close();
+      }
+    });
+  });
+}
 
 test('escrow_v3 authority readback names the HQ-selected program id from SATP mainnet runtime', () => {
   const readback = getEscrowV3AuthorityReadback({ satpClient });
@@ -43,17 +101,173 @@ test('escrow_v3 source and IDL strict verifier confirms the pinned program id', 
     encoding: 'utf8',
   });
   const evidence = JSON.parse(output);
+  assert.equal(evidence.label, 'escrow_v3_source_idl');
   assert.equal(evidence.expectedProgramId, AUTHORITY_PROGRAM_ID);
   assert.equal(evidence.status, 'verified');
   assert.equal(evidence.checks.anchorProgramIdMatches, true);
   assert.equal(evidence.checks.declareIdMatches, true);
   assert.equal(evidence.checks.idlAddressMatches, true);
+  assert.equal(evidence.checks.idlNameMatches, true);
   assert.equal(evidence.checks.createEscrowValidatesIdentityBeforeFunding, true);
   assert.equal(evidence.checks.createEscrowValidatesIdentityBeforeRecordingRequirements, true);
   assert.equal(evidence.checks.identityPdaBoundToAgentIdHash, true);
   assert.equal(evidence.checks.identityOwnedBySatpProgram, true);
   assert.equal(evidence.checks.minVerificationLevelEnforced, true);
   assert.equal(evidence.checks.requireBornEnforced, true);
+});
+
+test('SATP mainnet program verifier checks every registry id in explicit fixture mode and can fail closed', () => {
+  const owner = 'BPFLoaderUpgradeab1e11111111111111111111111';
+  const fixture = {
+    IDENTITY: { slot: 100, owner, exists: true, executable: true, status: 'verified' },
+    REVIEWS: { slot: 101, owner, exists: true, executable: true, status: 'verified' },
+    REPUTATION: { slot: 102, owner, exists: true, executable: true, status: 'verified' },
+    ATTESTATIONS: { slot: 103, owner, exists: true, executable: true, status: 'verified' },
+    VALIDATION: { slot: 104, owner, exists: true, executable: true, status: 'verified' },
+    ESCROW: { slot: 105, owner, exists: true, executable: true, status: 'verified' },
+  };
+  const fixturePath = path.join(fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'af-satp-programs-')), 'accounts.json');
+  fs.writeFileSync(fixturePath, JSON.stringify(fixture));
+
+  const output = execFileSync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs', '--allow-fixture'], {
+    cwd: require('node:path').resolve(__dirname, '..'),
+    env: verifierEnv({
+      CI: '',
+      AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE: fixturePath,
+    }),
+    encoding: 'utf8',
+  });
+  const evidence = JSON.parse(output);
+  assert.equal(evidence.label, 'satp_mainnet_program_registry_onchain');
+  assert.equal(evidence.status, 'verified');
+  assert.equal(evidence.mode.strict, false);
+  assert.equal(evidence.mode.allowFixture, true);
+  assert.equal(evidence.rpcGenesisHash, null);
+  assert.equal(evidence.programs.length, 6);
+  for (const program of evidence.programs) {
+    assert.equal(program.owner, owner);
+    assert.equal(program.exists, true);
+    assert.equal(program.executable, true);
+    assert.match(program.id, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+  }
+
+  fixture.IDENTITY = {
+    slot: 106,
+    owner: null,
+    exists: false,
+    executable: false,
+    status: 'blocked_onchain_program_mismatch',
+  };
+  fs.writeFileSync(fixturePath, JSON.stringify(fixture));
+
+  const red = spawnSync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs', '--allow-fixture'], {
+    cwd: require('node:path').resolve(__dirname, '..'),
+    env: verifierEnv({
+      CI: '',
+      AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE: fixturePath,
+    }),
+    encoding: 'utf8',
+  });
+  assert.equal(red.status, 1);
+  assert.match(red.stdout, /blocked_onchain_program_mismatch/);
+});
+
+test('SATP mainnet strict verifier rejects fixture evidence before checking accounts', () => {
+  const owner = 'BPFLoaderUpgradeab1e11111111111111111111111';
+  const fixture = {
+    IDENTITY: { slot: 100, owner, exists: true, executable: true, status: 'verified' },
+    REVIEWS: { slot: 101, owner, exists: true, executable: true, status: 'verified' },
+    REPUTATION: { slot: 102, owner, exists: true, executable: true, status: 'verified' },
+    ATTESTATIONS: { slot: 103, owner, exists: true, executable: true, status: 'verified' },
+    VALIDATION: { slot: 104, owner, exists: true, executable: true, status: 'verified' },
+    ESCROW: { slot: 105, owner, exists: true, executable: true, status: 'verified' },
+  };
+  const fixturePath = path.join(fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'af-satp-programs-')), 'accounts.json');
+  fs.writeFileSync(fixturePath, JSON.stringify(fixture));
+
+  const strict = spawnSync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs', '--strict'], {
+    cwd: require('node:path').resolve(__dirname, '..'),
+    env: verifierEnv({
+      AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE: fixturePath,
+    }),
+    encoding: 'utf8',
+  });
+  const evidence = JSON.parse(strict.stdout);
+
+  assert.equal(strict.status, 1);
+  assert.equal(evidence.status, 'blocked_fixture_in_strict_mode');
+  assert.equal(evidence.fixtureEnvKey, 'AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE');
+  assert.equal(evidence.mode.strict, true);
+  assert.equal(evidence.mode.allowFixture, false);
+  assert.equal(evidence.programs.length, 6);
+});
+
+test('SATP mainnet strict verifier rejects env overrides before checking accounts', () => {
+  const owner = 'BPFLoaderUpgradeab1e11111111111111111111111';
+  const fixture = {
+    IDENTITY: { slot: 100, owner, exists: true, executable: true, status: 'verified' },
+    REVIEWS: { slot: 101, owner, exists: true, executable: true, status: 'verified' },
+    REPUTATION: { slot: 102, owner, exists: true, executable: true, status: 'verified' },
+    ATTESTATIONS: { slot: 103, owner, exists: true, executable: true, status: 'verified' },
+    VALIDATION: { slot: 104, owner, exists: true, executable: true, status: 'verified' },
+    ESCROW: { slot: 105, owner, exists: true, executable: true, status: 'verified' },
+  };
+  const fixturePath = path.join(fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'af-satp-programs-')), 'accounts.json');
+  const override = '11111111111111111111111111111111';
+  fs.writeFileSync(fixturePath, JSON.stringify(fixture));
+
+  const strict = spawnSync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs', '--strict'], {
+    cwd: require('node:path').resolve(__dirname, '..'),
+    env: verifierEnv({
+      AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE: fixturePath,
+      SATP_MAINNET_IDENTITY_PROGRAM_ID: override,
+    }),
+    encoding: 'utf8',
+  });
+  const evidence = JSON.parse(strict.stdout);
+  const identity = evidence.programs.find((program) => program.name === 'IDENTITY');
+
+  assert.equal(strict.status, 1);
+  assert.equal(evidence.status, 'blocked_env_override_in_strict_mode');
+  assert.deepEqual(evidence.overrideEnvKeys, ['SATP_MAINNET_IDENTITY_PROGRAM_ID']);
+  assert.equal(evidence.mode.allowFixture, false);
+  assert.notEqual(identity.id, override);
+  assert.equal(identity.provenance, 'frontend/src/lib/satp-mainnet-programs.ts');
+});
+
+test('SATP mainnet verifier fails closed on on-chain mismatch in CI mode without strict flag', async () => {
+  await withMockSolanaRpc(async (rpcUrl) => {
+    const ci = await execFileAsync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs'], {
+      cwd: require('node:path').resolve(__dirname, '..'),
+      env: verifierEnv({
+        CI: 'true',
+        SOLANA_RPC_URL: rpcUrl,
+      }),
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    const evidence = JSON.parse(ci.stdout);
+
+    assert.equal(ci.status, 1);
+    assert.equal(evidence.status, 'blocked_onchain_program_mismatch');
+    assert.equal(evidence.mode.strict, false);
+    assert.equal(evidence.mode.ci, true);
+    assert.equal(evidence.rpcGenesisHash, '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d');
+    assert.equal(evidence.programs.length, 6);
+    assert.ok(evidence.programs.every((program) => program.exists === false));
+  });
+});
+
+test('SATP mainnet verifier pins evidence to Solana mainnet genesis in strict mode', () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '..', 'scripts/verify-satp-mainnet-programs.mjs'),
+    'utf8',
+  );
+
+  assert.match(source, /expectedGenesisHash = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d'/);
+  assert.match(source, /getGenesisHash\(\)/);
+  assert.match(source, /blocked_rpc_network_mismatch/);
+  assert.doesNotMatch(source, /rpcUrl,\s*$/m);
 });
 
 test('escrow_v3 source binds dispute recipients and enforces SATP identity requirements', () => {

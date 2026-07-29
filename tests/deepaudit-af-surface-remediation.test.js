@@ -130,6 +130,7 @@ test('AF2: how-it-works exposes non-empty SATP mainnet program ids', () => {
   }
   assert.match(pageSource, /SATP_MAINNET_PROGRAMS/);
   assert.match(pageSource, /explorer\.solana\.com\/address/);
+  assert.doesNotMatch(pageSource, /BY4jzm5R|TQ4P9Rd5|AdDWFajj/);
 });
 
 test('AF25: escrow refund authorizes before remaining fail-closed without state mutation', async () => {
@@ -301,6 +302,7 @@ test('AF6 and AF10: CI-on-merge workflow runs explicit PR and main-branch merge 
   assert.match(workflow, /name: AF6 AF10 merge gate/);
   assert.match(workflow, /npm ci/);
   assert.match(workflow, /npm run lint:roadmap/);
-  assert.match(workflow, /node --test tests\/deepaudit-af-surface-remediation\.test\.js tests\/escrow-release-gate\.test\.js/);
+  assert.match(workflow, /npm run verify:satp-mainnet-programs/);
+  assert.match(workflow, /node --test tests\/deepaudit-af-surface-remediation\.test\.js tests\/escrow-release-gate\.test\.js tests\/escrow-v3-authority\.test\.js/);
   assert.match(workflow, /git diff --check/);
 });
