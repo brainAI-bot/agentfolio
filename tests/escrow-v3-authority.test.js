@@ -68,7 +68,7 @@ test('escrow_v3 source and IDL strict verifier confirms the pinned program id', 
   assert.equal(evidence.checks.requireBornEnforced, true);
 });
 
-test('SATP mainnet program verifier checks every registry id and can fail closed', () => {
+test('SATP mainnet program verifier checks every registry id in explicit fixture mode and can fail closed', () => {
   const owner = 'BPFLoaderUpgradeab1e11111111111111111111111';
   const fixture = {
     IDENTITY: { slot: 100, owner, exists: true, executable: true, status: 'verified' },
@@ -81,7 +81,7 @@ test('SATP mainnet program verifier checks every registry id and can fail closed
   const fixturePath = path.join(fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'af-satp-programs-')), 'accounts.json');
   fs.writeFileSync(fixturePath, JSON.stringify(fixture));
 
-  const output = execFileSync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs', '--strict'], {
+  const output = execFileSync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs', '--allow-fixture'], {
     cwd: require('node:path').resolve(__dirname, '..'),
     env: verifierEnv({
       AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE: fixturePath,
@@ -91,6 +91,9 @@ test('SATP mainnet program verifier checks every registry id and can fail closed
   const evidence = JSON.parse(output);
   assert.equal(evidence.label, 'satp_mainnet_program_registry_onchain');
   assert.equal(evidence.status, 'verified');
+  assert.equal(evidence.mode.strict, false);
+  assert.equal(evidence.mode.allowFixture, true);
+  assert.equal(evidence.rpcGenesisHash, null);
   assert.equal(evidence.programs.length, 6);
   for (const program of evidence.programs) {
     assert.equal(program.owner, owner);
@@ -108,7 +111,7 @@ test('SATP mainnet program verifier checks every registry id and can fail closed
   };
   fs.writeFileSync(fixturePath, JSON.stringify(fixture));
 
-  const red = spawnSync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs', '--strict'], {
+  const red = spawnSync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs', '--allow-fixture'], {
     cwd: require('node:path').resolve(__dirname, '..'),
     env: verifierEnv({
       AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE: fixturePath,
@@ -117,6 +120,36 @@ test('SATP mainnet program verifier checks every registry id and can fail closed
   });
   assert.equal(red.status, 1);
   assert.match(red.stdout, /blocked_onchain_program_mismatch/);
+});
+
+test('SATP mainnet strict verifier rejects fixture evidence before checking accounts', () => {
+  const owner = 'BPFLoaderUpgradeab1e11111111111111111111111';
+  const fixture = {
+    IDENTITY: { slot: 100, owner, exists: true, executable: true, status: 'verified' },
+    REVIEWS: { slot: 101, owner, exists: true, executable: true, status: 'verified' },
+    REPUTATION: { slot: 102, owner, exists: true, executable: true, status: 'verified' },
+    ATTESTATIONS: { slot: 103, owner, exists: true, executable: true, status: 'verified' },
+    VALIDATION: { slot: 104, owner, exists: true, executable: true, status: 'verified' },
+    ESCROW: { slot: 105, owner, exists: true, executable: true, status: 'verified' },
+  };
+  const fixturePath = path.join(fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'af-satp-programs-')), 'accounts.json');
+  fs.writeFileSync(fixturePath, JSON.stringify(fixture));
+
+  const strict = spawnSync(process.execPath, ['scripts/verify-satp-mainnet-programs.mjs', '--strict'], {
+    cwd: require('node:path').resolve(__dirname, '..'),
+    env: verifierEnv({
+      AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE: fixturePath,
+    }),
+    encoding: 'utf8',
+  });
+  const evidence = JSON.parse(strict.stdout);
+
+  assert.equal(strict.status, 1);
+  assert.equal(evidence.status, 'blocked_fixture_in_strict_mode');
+  assert.equal(evidence.fixtureEnvKey, 'AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE');
+  assert.equal(evidence.mode.strict, true);
+  assert.equal(evidence.mode.allowFixture, false);
+  assert.equal(evidence.programs.length, 6);
 });
 
 test('SATP mainnet strict verifier rejects env overrides before checking accounts', () => {
@@ -147,8 +180,21 @@ test('SATP mainnet strict verifier rejects env overrides before checking account
   assert.equal(strict.status, 1);
   assert.equal(evidence.status, 'blocked_env_override_in_strict_mode');
   assert.deepEqual(evidence.overrideEnvKeys, ['SATP_MAINNET_IDENTITY_PROGRAM_ID']);
+  assert.equal(evidence.mode.allowFixture, false);
   assert.notEqual(identity.id, override);
   assert.equal(identity.provenance, 'frontend/src/lib/satp-mainnet-programs.ts');
+});
+
+test('SATP mainnet verifier pins evidence to Solana mainnet genesis in strict mode', () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '..', 'scripts/verify-satp-mainnet-programs.mjs'),
+    'utf8',
+  );
+
+  assert.match(source, /expectedGenesisHash = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d'/);
+  assert.match(source, /getGenesisHash\(\)/);
+  assert.match(source, /blocked_rpc_network_mismatch/);
+  assert.doesNotMatch(source, /rpcUrl,\s*$/m);
 });
 
 test('escrow_v3 source binds dispute recipients and enforces SATP identity requirements', () => {

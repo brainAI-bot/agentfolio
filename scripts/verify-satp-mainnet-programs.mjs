@@ -8,15 +8,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 const registryPath = path.join(repoRoot, 'frontend/src/lib/satp-mainnet-programs.ts');
 const expectedOwner = 'BPFLoaderUpgradeab1e11111111111111111111111';
+const expectedGenesisHash = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
 const args = new Set(process.argv.slice(2));
 const strictMode = args.has('--strict');
 const ciMode = Boolean(process.env.CI);
 const allowEnvOverrides = args.has('--allow-env-overrides') && !strictMode && !ciMode;
+const allowFixture = args.has('--allow-fixture') && !strictMode && !ciMode;
 const rpcUrl =
   process.env.SOLANA_RPC_URL
   || process.env.SOLANA_MAINNET_RPC_URL
   || process.env.RPC_URL
   || 'https://api.mainnet-beta.solana.com';
+const rpcEndpointSource = process.env.SOLANA_RPC_URL
+  ? 'SOLANA_RPC_URL'
+  : process.env.SOLANA_MAINNET_RPC_URL
+    ? 'SOLANA_MAINNET_RPC_URL'
+    : process.env.RPC_URL
+      ? 'RPC_URL'
+      : 'default-mainnet-beta';
 
 function loadRegistry() {
   const source = fs.readFileSync(registryPath, 'utf8');
@@ -79,8 +88,40 @@ async function readProgram(connection, program) {
 }
 
 function readFixture() {
-  if (!process.env.AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE) return null;
+  if (!allowFixture || !process.env.AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE) return null;
   return JSON.parse(fs.readFileSync(process.env.AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE, 'utf8'));
+}
+
+function evidenceBase(status, extra = {}) {
+  return {
+    label: 'satp_mainnet_program_registry_onchain',
+    registryPath: 'frontend/src/lib/satp-mainnet-programs.ts',
+    network: 'mainnet-beta',
+    expectedOwner,
+    expectedGenesisHash,
+    status,
+    mode: {
+      strict: strictMode,
+      ci: ciMode,
+      allowEnvOverrides,
+      allowFixture,
+    },
+    ...extra,
+  };
+}
+
+async function verifyMainnetGenesis(connection) {
+  const genesisHash = await connection.getGenesisHash();
+  if (genesisHash === expectedGenesisHash) {
+    return genesisHash;
+  }
+
+  console.log(JSON.stringify(evidenceBase('blocked_rpc_network_mismatch', {
+    rpcEndpointSource,
+    rpcGenesisHash: genesisHash,
+  }), null, 2));
+  process.exitCode = 1;
+  return null;
 }
 
 async function main() {
@@ -90,32 +131,41 @@ async function main() {
     .map((program) => program.overrideEnvKey);
 
   if ((strictMode || ciMode) && overrideEnvKeys.length > 0) {
-    console.log(JSON.stringify({
-      label: 'satp_mainnet_program_registry_onchain',
-      registryPath: 'frontend/src/lib/satp-mainnet-programs.ts',
-      network: 'mainnet-beta',
-      expectedOwner,
-      status: 'blocked_env_override_in_strict_mode',
-      mode: {
-        strict: strictMode,
-        ci: ciMode,
-        allowEnvOverrides: false,
-      },
+    console.log(JSON.stringify(evidenceBase('blocked_env_override_in_strict_mode', {
       overrideEnvKeys,
       programs: programs.map((program) => ({
         name: program.name,
         id: program.id,
         provenance: program.provenance,
       })),
-    }, null, 2));
+    }), null, 2));
+    process.exitCode = 1;
+    return;
+  }
+
+  if ((strictMode || ciMode) && process.env.AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE) {
+    console.log(JSON.stringify(evidenceBase('blocked_fixture_in_strict_mode', {
+      fixtureEnvKey: 'AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE',
+      programs: programs.map((program) => ({
+        name: program.name,
+        id: program.id,
+        provenance: program.provenance,
+      })),
+    }), null, 2));
     process.exitCode = 1;
     return;
   }
 
   const fixture = readFixture();
+  const connection = new Connection(rpcUrl, 'confirmed');
+  const rpcGenesisHash = fixture ? null : await verifyMainnetGenesis(connection);
+  if (!fixture && !rpcGenesisHash) {
+    return;
+  }
+
   const results = fixture
     ? programs.map((program) => ({ ...program, ...fixture[program.name] }))
-    : await Promise.all(programs.map((program) => readProgram(new Connection(rpcUrl, 'confirmed'), program)));
+    : await Promise.all(programs.map((program) => readProgram(connection, program)));
 
   const verified = results.every((program) => (
     program.exists === true
@@ -123,17 +173,9 @@ async function main() {
     && program.owner === expectedOwner
   ));
 
-  const evidence = {
-    label: 'satp_mainnet_program_registry_onchain',
-    registryPath: 'frontend/src/lib/satp-mainnet-programs.ts',
-    network: 'mainnet-beta',
-    expectedOwner,
-    status: verified ? 'verified' : 'blocked_onchain_program_mismatch',
-    mode: {
-      strict: strictMode,
-      ci: ciMode,
-      allowEnvOverrides,
-    },
+  const evidence = evidenceBase(verified ? 'verified' : 'blocked_onchain_program_mismatch', {
+    rpcEndpointSource: fixture ? null : rpcEndpointSource,
+    rpcGenesisHash,
     programs: results.map((program) => ({
       name: program.name,
       id: program.id,
@@ -144,11 +186,11 @@ async function main() {
       executable: program.executable === true,
       status: program.status,
     })),
-  };
+  });
 
   console.log(JSON.stringify(evidence, null, 2));
 
-  if (strictMode && !verified) {
+  if ((strictMode || allowFixture) && !verified) {
     process.exitCode = 1;
   }
 }
