@@ -14,8 +14,8 @@ The release gate remains closed until the production path is verified as genuine
 
 | Source | Escrow program readback | Status |
 | --- | --- | --- |
-| HQ task source readback | `B1Se8SP...` | Candidate audited source identity from `clawd-brainchain`; full fingerprint belongs in HQ evidence only. |
-| Runtime SATP V3 client | `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C` | Current AgentFolio V3 runtime program ID via `@brainai/satp-client` `getV3ProgramIds(...).ESCROW`. |
+| Current locked devnet SDK identity | `B1Se8SP...` | Active network-scoped value from the installed SATP client and `clawd-brainchain`; not superseded until dependency or deployment evidence changes. |
+| Runtime SATP V3 client mainnet identity | `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C` | Current AgentFolio V3 mainnet program ID via `@brainai/satp-client` `getV3ProgramIds('mainnet').ESCROW`. |
 | Packaged legacy IDL metadata | `UpJ7jmUzHkQ7EdBKiBv3zq8Dr1fVh6GVWKa7nYtwQ22` | Legacy `idls/satp_escrow.json` address in the SATP client package, not aligned with V3 runtime. |
 | AgentFolio legacy wiring doc | `4qx9DTX1BojPnQAtUBL2Gb9pw6kVyw5AucjaR8Yyea9a` | Obsolete docs-only reference in `docs/ONCHAIN-WIRING-PLAN.md`; must not be used for launch claims. |
 
@@ -31,7 +31,7 @@ Goal: make the escrow program artifact self-consistent before AgentFolio consume
 
 Required changes:
 
-- Select the canonical escrow source tree for the deployed `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C` program, or produce a replacement devnet deploy from the audited source.
+- Select the canonical escrow source tree for the mainnet `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C` program and the current devnet program, or produce a replacement devnet deploy from the audited source.
 - Regenerate the escrow IDL from the selected source.
 - Update IDL address metadata so it matches the selected program ID.
 - Add artifact verification output: source commit, Anchor/Solana toolchain versions, program binary hash, IDL hash, and `solana program show` readback for the deployed devnet program.
@@ -39,9 +39,9 @@ Required changes:
 
 Acceptance:
 
-- `source program id == deployed devnet program id == IDL address == SATP V3 SDK ESCROW`.
+- Source program ID, deployed program ID, IDL address, and SATP V3 SDK `ESCROW` match within each network scope.
 - No mainnet deploy or signing.
-- Existing `UpJ7...` and `B1Se8SP...` ambiguity is either removed or documented as superseded by the same verified artifact.
+- Existing `UpJ7...` and `B1Se8SP...` ambiguity is either removed or documented as network-scoped by the same verified artifact; the 2026-07-28 owner decision selects `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C` as canonical mainnet.
 
 ### PR 2: AgentFolio escrow runtime pin
 
@@ -52,7 +52,7 @@ Goal: consume the verified SATP artifact and fail closed on mismatch.
 Required changes:
 
 - Bump `@brainai/satp-client` to the verified artifact commit.
-- Add a runtime truth test asserting `getV3ProgramIds('mainnet').ESCROW` and `getV3ProgramIds('devnet').ESCROW` equal the verified escrow program ID.
+- Add runtime truth tests asserting `getV3ProgramIds('mainnet').ESCROW` equals the canonical mainnet escrow program ID and `getV3ProgramIds('devnet').ESCROW` remains aligned with the verified devnet escrow program ID.
 - Add a route-level health field showing `escrowProgramId`, `artifactCommit`, and `idlHash` from the SATP client package.
 - Keep `AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES` disabled until security review and operator approval are complete.
 

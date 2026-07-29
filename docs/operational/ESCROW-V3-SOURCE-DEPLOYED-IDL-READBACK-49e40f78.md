@@ -4,9 +4,18 @@ Date: 2026-07-06
 Agent: brainForge
 Scope: read-only verification; no production deploy, no keypair change, no mainnet action, no paid action, no Solana write.
 
-## Selected Target
+## Current Network Scope
 
-AgentFolio currently pins escrow V3 to:
+As of the 2026-07-29 PR #207 repair, the installed AgentFolio SATP client
+keeps `B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg` as the current locked
+devnet SDK identity. The 2026-07-28 owner decision selects
+`HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C` as canonical mainnet. Do not
+describe the devnet B1 identity as historical or superseded unless the
+dependency or deployment evidence changes.
+
+## Selected 2026-07-06 Target
+
+The original 2026-07-06 readback selected:
 
 ```text
 HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C
@@ -40,20 +49,25 @@ Local source workspace:
 commit 94a1d309dcc692228c357f6e28ab679196235ad2
 ```
 
-The working tree has an unrelated dirty `satp-v3/yarn.lock`; the audited source paths below were read directly.
+The working tree had an unrelated dirty `satp-v3/yarn.lock`; the audited
+source paths below were read directly. The `B1Se8SP...` values in this section
+remain the current locked devnet SDK identity for the installed SATP client and
+must not be described as superseded until dependency or deployment evidence
+changes. The 2026-07-28 owner decision selected
+`HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C` as canonical mainnet.
 
 | Artifact | Path | SHA-256 / value |
 | --- | --- | --- |
 | clawd-brainchain Anchor config | `satp-v3/Anchor.toml` | `7af3f288b27ec7a2f931cb89ed2e645d0d809a12c7ca333d461388c4f34ac426` |
 | clawd-brainchain escrow source | `satp-v3/programs/escrow_v3/src/lib.rs` | `4ff60eacc9fc0b5e2b527a4b1aa62992b6863883dc16a9cf305911682853dd23` |
-| clawd-brainchain devnet program id | `satp-v3/Anchor.toml` | `B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg` |
-| clawd-brainchain source `declare_id!` | `satp-v3/programs/escrow_v3/src/lib.rs` | `B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg` |
+| clawd-brainchain current locked devnet program id | `satp-v3/Anchor.toml` | `B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg` |
+| clawd-brainchain current locked devnet source `declare_id!` | `satp-v3/programs/escrow_v3/src/lib.rs` | `B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg` |
 | clawd-brainchain mainnet program id | `satp-v3/Anchor.toml` | `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C` |
 
 Comparison result:
 
-- AgentFolio source, AgentFolio tracked IDL, SATP runtime constant, and read-only devnet account readback agree on `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`.
-- The audited `clawd-brainchain` source at commit `94a1d309dcc692228c357f6e28ab679196235ad2` does not match the AgentFolio pinned source hash and declares `B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg`.
+- In the original 2026-07-06 repo-local readback, AgentFolio source, AgentFolio tracked IDL, SATP runtime constant, and read-only devnet account readback agreed on `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`; the current locked SATP client still scopes B1 as devnet and HXCUWKR2 as mainnet.
+- The audited `clawd-brainchain` source at commit `94a1d309dcc692228c357f6e28ab679196235ad2` did not match the AgentFolio pinned source hash and declared the current locked devnet SDK identity `B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg`.
 - `diff -q onchain/escrow_v3/programs/escrow_v3/src/lib.rs /Users/brainforge/clawd/tmp-clawd-brainchain-49e40f78/satp-v3/programs/escrow_v3/src/lib.rs` reports that the files differ.
 - `diff -q onchain/escrow_v3/Anchor.toml /Users/brainforge/clawd/tmp-clawd-brainchain-49e40f78/satp-v3/Anchor.toml` reports that the files differ.
 
