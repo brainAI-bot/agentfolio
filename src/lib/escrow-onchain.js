@@ -51,6 +51,25 @@ function encodeI64(n) {
   return buf;
 }
 
+function parseUsdcAmountToBaseUnits(amountUSDC) {
+  const value = String(amountUSDC).trim();
+  if (!/^\d+(?:\.\d+)?$/.test(value)) {
+    throw new Error('amountUSDC must be a positive USDC amount');
+  }
+
+  const [whole, fractional = ''] = value.split('.');
+  if (fractional.length > 6) {
+    throw new Error('amountUSDC must use at most 6 USDC decimal places');
+  }
+
+  const amountRaw = BigInt(whole) * 1_000_000n + BigInt(fractional.padEnd(6, '0'));
+  if (amountRaw <= 0n || amountRaw > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error('amountUSDC must convert to a positive safe integer of USDC base units');
+  }
+
+  return Number(amountRaw);
+}
+
 function deriveEscrowPDA(jobId) {
   return PublicKey.findProgramAddressSync(
     [Buffer.from('escrow'), Buffer.from(jobId)],
@@ -95,10 +114,7 @@ async function buildCreateEscrowTxInstructions({
   const clientToken = await getAssociatedTokenAddress(USDC_MINT, client);
   const vaultATA = await getAssociatedTokenAddress(USDC_MINT, vaultAuthorityPDA, true);
 
-  const amountRaw = Math.floor(amountUSDC * 1e6);
-  if (!Number.isSafeInteger(amountRaw) || amountRaw <= 0) {
-    throw new Error('amountUSDC must convert to a positive safe integer of USDC base units');
-  }
+  const amountRaw = parseUsdcAmountToBaseUnits(amountUSDC);
 
   const instructions = [];
   if (!vaultAtaExists) {
@@ -490,6 +506,7 @@ module.exports = {
   readEscrowAccount,
   mapOnchainStatusToJobStatus,
   buildCreateEscrowTxInstructions,
+  parseUsdcAmountToBaseUnits,
   deriveEscrowPDA,
   deriveVaultPDA,
   deriveUsdcVaultAuthorityPDA,

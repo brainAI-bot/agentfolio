@@ -113,6 +113,25 @@ function requirePositiveNumber(value, fieldName) {
   return numberValue;
 }
 
+function requirePositiveDecimalAmount(value, fieldName) {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d+(?:\.\d+)?$/.test(trimmed) && /[1-9]/.test(trimmed)) {
+      return trimmed;
+    }
+  } else if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return value;
+  }
+  throw new TypeError(`${fieldName} must be a positive decimal amount`);
+}
+
+function requireNonEmptyString(value, fieldName) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new TypeError(`${fieldName} is required`);
+  }
+  return value;
+}
+
 function buildSolEscrowCreate(data) {
   if (!data || typeof data !== 'object') throw new TypeError('escrow data is required');
   return {
@@ -127,7 +146,8 @@ function buildUsdcEscrowCreate(data) {
   return {
     ...data,
     currency: 'USDC',
-    amountUSDC: requirePositiveNumber(data.amountUSDC, 'amountUSDC'),
+    jobId: requireNonEmptyString(data.jobId, 'jobId'),
+    amountUSDC: requirePositiveDecimalAmount(data.amountUSDC, 'amountUSDC'),
   };
 }
 
