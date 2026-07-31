@@ -36,7 +36,7 @@ export interface SolEscrowCreate extends EscrowCreateBase {
 export interface UsdcEscrowCreate extends EscrowCreateBase {
   currency?: 'USDC';
   jobId: string;
-  amountUSDC: number;
+  amountUSDC: string | number;
 }
 
 export interface Profile {

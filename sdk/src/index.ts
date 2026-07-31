@@ -62,6 +62,18 @@ function requirePositiveNumber(value: unknown, fieldName: string): number {
   return numberValue;
 }
 
+function requirePositiveDecimalAmount(value: unknown, fieldName: string): string | number {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d+(?:\.\d+)?$/.test(trimmed) && /[1-9]/.test(trimmed)) {
+      return trimmed;
+    }
+  } else if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return value;
+  }
+  throw new ValidationError(`${fieldName} must be a positive decimal amount`);
+}
+
 function requireNonEmptyString(value: unknown, fieldName: string): string {
   if (typeof value !== 'string' || !value.trim()) {
     throw new ValidationError(`${fieldName} is required`);
@@ -82,7 +94,7 @@ export function buildUsdcEscrowCreate(data: V3UsdcEscrowCreate): V3UsdcEscrowCre
     ...data,
     currency: 'USDC',
     jobId: requireNonEmptyString(data.jobId, 'jobId'),
-    amountUSDC: requirePositiveNumber(data.amountUSDC, 'amountUSDC'),
+    amountUSDC: requirePositiveDecimalAmount(data.amountUSDC, 'amountUSDC'),
   };
 }
 

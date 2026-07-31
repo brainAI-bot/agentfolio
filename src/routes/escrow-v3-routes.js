@@ -54,6 +54,7 @@ const {
   deriveEscrowPDA: deriveUsdcEscrowPDA,
   deriveUsdcVaultATA,
   deriveUsdcVaultAuthorityPDA,
+  parseUsdcAmountToBaseUnits,
   USDC_MINT,
 } = require('../lib/escrow-onchain');
 
@@ -151,6 +152,37 @@ function normalizeEscrowCurrency(value) {
 function publicKeyToString(value) {
   if (!value) return null;
   return typeof value.toBase58 === 'function' ? value.toBase58() : String(value);
+}
+
+function normalizeRouteUsdcAmount(amountUSDC) {
+  const parseRouteAmount = (amountDecimal) => {
+    try {
+      return parseUsdcAmountToBaseUnits(amountDecimal);
+    } catch (err) {
+      err.statusCode = 400;
+      throw err;
+    }
+  };
+
+  if (typeof amountUSDC === 'string') {
+    const amountDecimal = amountUSDC.trim();
+    return {
+      amountDecimal,
+      amountRaw: parseRouteAmount(amountDecimal),
+    };
+  }
+
+  if (typeof amountUSDC === 'number' && Number.isSafeInteger(amountUSDC) && amountUSDC > 0) {
+    const amountDecimal = String(amountUSDC);
+    return {
+      amountDecimal,
+      amountRaw: parseRouteAmount(amountDecimal),
+    };
+  }
+
+  const err = new Error('amountUSDC must be a positive decimal string for fractional USDC escrow amounts');
+  err.statusCode = 400;
+  throw err;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -468,7 +500,7 @@ router.use((req, res, next) => {
  *   jobId?: string,                 // Marketplace job; selected_agent_id is authoritative for Genesis lookup
  *   currency?: 'SOL'|'USDC',        // Defaults to SOL
  *   amountLamports?: number,        // SOL amount in lamports
- *   amountUSDC?: number,            // USDC amount in token units
+ *   amountUSDC?: string|number,     // USDC amount; use a decimal string for fractional USDC
  *   description: string,            // Job description (hashed on-chain as [u8;32])
  *   deadlineUnix: number,           // Unix timestamp deadline
  *   nonce?: number,                 // Nonce for multiple escrows (default: 0)
@@ -531,12 +563,12 @@ router.post('/create', escrowV3CreateLimiter, requireSDK, async (req, res) => {
       if (!jobId) {
         return res.status(400).json({ error: 'jobId is required for USDC escrow PDA derivation' });
       }
-      const usdcAmount = Number(amountUSDC);
-      if (!Number.isFinite(usdcAmount) || usdcAmount <= 0) {
-        return res.status(400).json({ error: 'amountUSDC must be a positive number for USDC escrow' });
-      }
+      const { amountDecimal, amountRaw } = normalizeRouteUsdcAmount(amountUSDC);
 
-      const result = await buildUsdcCreateEscrowTx(clientWallet, jobId, usdcAmount, deadline);
+      const result = await buildUsdcCreateEscrowTx(clientWallet, jobId, amountDecimal, deadline);
+      if (result.amountRaw !== amountRaw) {
+        throw new Error('USDC amount parser invariant failed');
+      }
       const [escrowPDA] = deriveUsdcEscrowPDA(jobId);
       const [vaultPDA] = deriveUsdcVaultAuthorityPDA(jobId);
       const vaultATA = await deriveUsdcVaultATA(jobId);
@@ -548,8 +580,8 @@ router.post('/create', escrowV3CreateLimiter, requireSDK, async (req, res) => {
         vaultATA: vaultATA.toBase58(),
         clientATA: result.clientATA,
         usdcMint: USDC_MINT.toBase58(),
-        amountUSDC: usdcAmount,
-        amountRaw: result.amountRaw,
+        amountUSDC: amountDecimal,
+        amountRaw,
         currency: 'USDC',
         network: NETWORK,
         nonce: nonce || 0,

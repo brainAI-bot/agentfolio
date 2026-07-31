@@ -234,7 +234,7 @@ export interface V3SolEscrowCreate extends V3EscrowCreateBase {
 export interface V3UsdcEscrowCreate extends V3EscrowCreateBase {
   currency?: 'USDC';
   jobId: string;
-  amountUSDC: number;
+  amountUSDC: string | number;
 }
 
 // ==================== SOCIAL ====================
