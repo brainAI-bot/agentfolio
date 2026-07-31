@@ -113,6 +113,13 @@ function requirePositiveNumber(value, fieldName) {
   return numberValue;
 }
 
+function requireNonEmptyString(value, fieldName) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new TypeError(`${fieldName} is required`);
+  }
+  return value;
+}
+
 function buildSolEscrowCreate(data) {
   if (!data || typeof data !== 'object') throw new TypeError('escrow data is required');
   return {
@@ -127,6 +134,7 @@ function buildUsdcEscrowCreate(data) {
   return {
     ...data,
     currency: 'USDC',
+    jobId: requireNonEmptyString(data.jobId, 'jobId'),
     amountUSDC: requirePositiveNumber(data.amountUSDC, 'amountUSDC'),
   };
 }

@@ -16,6 +16,7 @@ const {
   deriveUsdcVaultATA,
   ESCROW_PROGRAM_ID,
   USDC_MINT,
+  parseUsdcAmountToBaseUnits,
 } = require('../src/lib/escrow-onchain');
 const {
   AgentFolio,
@@ -59,6 +60,19 @@ test('SDK builders require explicit SOL or USDC currency construction', () => {
   assert.throws(
     () => buildUsdcEscrowCreate({ ...base, jobId: JOB_ID, amountUSDC: 0 }),
     /amountUSDC must be a positive number/,
+  );
+  assert.throws(
+    () => buildUsdcEscrowCreate({ ...base, amountUSDC: 12.34 }),
+    /jobId is required/,
+  );
+});
+
+test('USDC amount conversion honors the mint decimals without silent truncation', () => {
+  assert.equal(parseUsdcAmountToBaseUnits('12.34'), 12_340_000);
+  assert.equal(parseUsdcAmountToBaseUnits(1.234567), 1_234_567);
+  assert.throws(
+    () => parseUsdcAmountToBaseUnits('0.0000001'),
+    /amountUSDC must use at most 6 USDC decimal places/,
   );
 });
 
@@ -120,7 +134,7 @@ test('USDC escrow builder rejects amounts below one USDC base unit', async () =>
       deadlineUnix: 2_000_000_000,
       vaultAtaExists: true,
     }),
-    /amountUSDC must convert to a positive safe integer/,
+    /amountUSDC must be a positive USDC amount/,
   );
 });
 
