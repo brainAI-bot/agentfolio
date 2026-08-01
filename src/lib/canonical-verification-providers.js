@@ -29,6 +29,25 @@ const RETIRED_TRUST_PROVIDERS = Object.freeze([
   'custom',
 ]);
 const RETIRED_TRUST_PROVIDER_SET = new Set(RETIRED_TRUST_PROVIDERS);
+const AUTO_PASS_MARKERS = [
+  'auto-pass',
+  'autopass',
+  'auto_pass',
+  'auto verified',
+  'auto-verified',
+  'auto_verified',
+  'satp-auto',
+];
+
+function parseJsonish(value, fallback = {}) {
+  if (!value) return fallback;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    return fallback;
+  }
+}
 
 function normalizeTrustProvider(platform) {
   const value = String(platform || '').trim().toLowerCase();
@@ -44,15 +63,41 @@ function isRetiredTrustProvider(platform) {
   return Boolean(normalized && !CANONICAL_TRUST_PROVIDER_SET.has(normalized));
 }
 
+function isAutoPassAttestation(data = {}) {
+  if (!data || typeof data !== 'object') return false;
+  if (data.auto === true || data.autoPass === true || data.auto_pass === true || data.autoVerified === true) return true;
+
+  const proof = parseJsonish(data.proof, {});
+  if (proof.auto === true || proof.autoPass === true || proof.auto_pass === true || proof.autoVerified === true) return true;
+
+  const text = [
+    data.source,
+    data.method,
+    data.reason,
+    data.status,
+    data.type,
+    proof.source,
+    proof.method,
+    proof.reason,
+    proof.status,
+    proof.type,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return AUTO_PASS_MARKERS.some((marker) => text.includes(marker));
+}
+
 function filterCanonicalTrustVerifications(verifications = []) {
-  return (verifications || []).filter((verification) => isCanonicalTrustProvider(verification?.platform || verification?.type));
+  return (verifications || []).filter((verification) => (
+    isCanonicalTrustProvider(verification?.platform || verification?.type) &&
+    !isAutoPassAttestation(verification)
+  ));
 }
 
 function filterCanonicalTrustData(verificationData = {}) {
   const filtered = {};
   for (const [platform, data] of Object.entries(verificationData || {})) {
     const normalized = normalizeTrustProvider(platform);
-    if (isCanonicalTrustProvider(normalized)) filtered[normalized] = data;
+    if (isCanonicalTrustProvider(normalized) && !isAutoPassAttestation(data)) filtered[normalized] = data;
   }
   return filtered;
 }
@@ -80,6 +125,7 @@ module.exports = {
   normalizeTrustProvider,
   isCanonicalTrustProvider,
   isRetiredTrustProvider,
+  isAutoPassAttestation,
   filterCanonicalTrustVerifications,
   filterCanonicalTrustData,
   hasVerifiedCanonicalTrustData,

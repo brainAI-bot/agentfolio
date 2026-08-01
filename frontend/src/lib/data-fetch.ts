@@ -1,4 +1,5 @@
 import type { Agent } from "./types";
+import { isCanonicalTrustProvider } from "./canonical-verifications";
 
 const API_BASE = process.env.INTERNAL_API_URL || "http://localhost:3333";
 
@@ -37,6 +38,11 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
         vd[platform] = { ...(vd[platform] || {}), ...entry };
       }
     }
+    const canonicalEntry = (platform: string) => {
+      if (!isCanonicalTrustProvider(platform)) return null;
+      return platform === "solana" ? (vd.solana || vd.solana_wallet || null) : (vd[platform] || null);
+    };
+    const isCanonicalVerified = (platform: string) => !!canonicalEntry(platform)?.verified;
 
     // V3 on-chain Genesis Record is canonical — prefer trust_score/v3 fields
     const v3ts = raw.trust_score?.source === 'satp_v3_onchain' ? raw.trust_score : null;
@@ -66,19 +72,17 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
       reputationRank: hasV3Evidence ? (["Newcomer","Recognized","Competent","Expert","Master"][Math.min(Math.floor(repScore / 250), 4)] || "Newcomer") : "Reputation pending",
       skills: Array.isArray(raw.skills) ? raw.skills.map((s: any) => typeof s === "string" ? s : s.name || "").filter(Boolean) : [],
       verifications: {
-        github: vd.github?.verified ? { username: vd.github.username || vd.github.handle || "", repos: vd.github.repos || 0, stars: vd.github.stars || 0, verified: true } : undefined,
-        solana: vd.solana?.verified ? { address: vd.solana.address || raw.walletAddress || "", txCount: vd.solana.txCount || 0, balance: vd.solana.balance || "0 SOL", verified: true } : undefined,
+        github: isCanonicalVerified("github") ? { username: canonicalEntry("github")?.username || canonicalEntry("github")?.handle || "", repos: canonicalEntry("github")?.repos || 0, stars: canonicalEntry("github")?.stars || 0, verified: true } : undefined,
+        solana: isCanonicalVerified("solana") ? { address: canonicalEntry("solana")?.address || raw.walletAddress || "", txCount: canonicalEntry("solana")?.txCount || 0, balance: canonicalEntry("solana")?.balance || "0 SOL", verified: true } : undefined,
         hyperliquid: vd.hyperliquid?.verified ? { address: vd.hyperliquid.address || "", volume: vd.hyperliquid.volume || "$0", verified: true } : undefined,
         x: vd.x?.verified || vd.twitter?.verified ? { handle: vd.x?.handle || vd.twitter?.handle || "", verified: true } : undefined,
         satp: vd.satp?.verified ? { did: vd.satp.did || "", verified: true } : undefined,
         ethereum: vd.ethereum?.verified ? { address: vd.ethereum.address || "", verified: true } : undefined,
-        agentmail: vd.agentmail?.verified ? { email: vd.agentmail.email || "", verified: true } : undefined,
         moltbook: vd.moltbook?.verified ? { username: vd.moltbook.username || "", verified: true } : undefined,
         polymarket: vd.polymarket?.verified ? { address: vd.polymarket.address || "", verified: true } : undefined,
         discord: vd.discord?.verified ? { username: vd.discord.username || "", verified: true } : undefined,
-        website: vd.website?.verified ? { url: vd.website.url || "", verified: true } : undefined,
-        domain: vd.domain?.verified ? { domain: vd.domain.domain || "", verified: true } : undefined,
-        telegram: vd.telegram?.verified ? { username: vd.telegram.username || "", verified: true } : undefined,
+        website: isCanonicalVerified("website") ? { url: canonicalEntry("website")?.url || "", verified: true } : undefined,
+        domain: isCanonicalVerified("domain") ? { domain: canonicalEntry("domain")?.domain || "", verified: true } : undefined,
         twitter: vd.twitter?.verified ? { handle: vd.twitter.handle || "", verified: true } : undefined,
         mcp: vd.mcp?.verified ? { url: vd.mcp.url || "", verified: true } : undefined,
         a2a: vd.a2a?.verified ? { url: vd.a2a.url || "", verified: true } : undefined,

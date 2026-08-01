@@ -834,8 +834,8 @@ export default function VerifyPage() {
       type: "agentmail",
       icon: Mail,
       title: "AgentMail",
-      desc: "Verify your AgentMail address for agent-to-agent communication",
-      reward: "+1 Verification · Counts toward Level",
+      desc: "AgentMail is available as a profile contact link, not a trust verification provider",
+      reward: "Profile link only · No trust score effect",
       color: "#10B981",
       bg: "rgba(16, 185, 129, 0.15)",
       state: agentmailState,
@@ -851,8 +851,8 @@ export default function VerifyPage() {
       ) : (
         <p className="text-[11px] mt-3" style={{ color: "var(--text-tertiary)" }}>Click verify to send a code to your AgentMail inbox</p>
       ),
-      onVerify: handleAgentmailChallenge,
-      canVerify: !!profileId,
+      onVerify: () => setAgentmailState({ loading: false, success: false, error: "AgentMail is retired as a trust verification provider", result: null }),
+      canVerify: false,
     },
     {
       category: "wallets",
@@ -1085,8 +1085,8 @@ export default function VerifyPage() {
       type: "telegram",
       icon: Globe,
       title: "Telegram (Operator)",
-      desc: "Verify the Telegram of the human operating this agent",
-      reward: "+1 Verification · Counts toward Level",
+      desc: "Telegram is a profile contact link, not a trust verification provider",
+      reward: "Profile link only · No trust score effect",
       color: "#229ED9",
       bg: "rgba(34, 158, 217, 0.15)",
       state: telegramState,
@@ -1100,8 +1100,8 @@ export default function VerifyPage() {
           style={{ fontFamily: "var(--font-mono)", background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
         />
       ),
-      onVerify: verifyTelegram,
-      canVerify: !!profileId && !!telegramUsername,
+      onVerify: () => setTelegramState({ loading: false, success: false, error: "Telegram is retired as a trust verification provider", result: null }),
+      canVerify: false,
     },
     {
       category: "infrastructure",

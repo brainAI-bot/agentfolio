@@ -421,7 +421,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ id: st
                   polymarket: "Polymarket", discord: "Discord", telegram: "Telegram",
                   website: "Website", domain: "Domain", mcp: "MCP", a2a: "A2A", review: "Review",
                 };
-                const priority = ["satp","github","x","solana","ethereum","agentmail","moltbook","hyperliquid","polymarket","discord","telegram","website","domain","mcp","a2a","review"];
+                const priority = ["satp","github","solana","website","domain","x","ethereum","moltbook","hyperliquid","polymarket","discord","mcp","a2a","review"];
                 // Chain attestation platforms (on-chain source of truth)
                 const chainPlatforms = new Set(chainAttestations.map(a => a.platform));
                 const chainTxMap = new Map(chainAttestations.map(a => [a.platform, a]));

@@ -1,4 +1,5 @@
 import { Github, Wallet, X, Shield, Globe, Mail, MessageCircle, Send, Bookmark, BarChart3, Link2 } from "lucide-react";
+import { isRetiredNonVerifyingProvider } from "@/lib/canonical-verifications";
 
 type VerificationType = "github" | "solana" | "hyperliquid" | "x" | "satp" | "ethereum" | "agentmail" | "moltbook" | "website" | "domain" | "polymarket" | "discord" | "telegram" | "mcp" | "a2a" | "review" | "twitter";
 
@@ -29,6 +30,7 @@ const config: Record<VerificationType, { icon: React.ElementType; label: string;
 };
 
 export function VerificationBadge({ type, verified, compact }: VerificationBadgeProps) {
+  if (isRetiredNonVerifyingProvider(type)) return null;
   const c = config[type];
   if (!c) return null;
   const Icon = c.icon;
@@ -67,8 +69,8 @@ export function VerificationBadge({ type, verified, compact }: VerificationBadge
 }
 
 export const VERIFICATION_PRIORITY: VerificationType[] = [
-  "satp", "github", "x", "solana", "ethereum",
-  "agentmail", "moltbook", "hyperliquid", "polymarket",
+  "satp", "github", "solana", "website", "domain", "x", "ethereum",
+  "moltbook", "hyperliquid", "polymarket",
   "mcp", "a2a", "review",
-  "discord", "telegram", "website", "domain"
+  "discord"
 ];

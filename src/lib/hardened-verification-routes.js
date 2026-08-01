@@ -18,6 +18,7 @@ const { initiateMoltbookVerification, completeMoltbookVerification } = require('
 const { initiateWebsiteVerification, completeWebsiteVerification } = require('./website-verify-hardened');
 const { initiateTelegramVerification, completeTelegramVerification, markBotVerified } = require('./telegram-verify-hardened');
 const { initiateDiscordVerification, confirmDiscordVerification } = require('./discord-verify-hardened');
+const { retiredProviderResponse } = require('./canonical-verification-providers');
 
 // P0 Sprint hardened modules (GitHub, X, AgentMail, Solana)
 let initiateGitHubVerification, verifyGitHubGist;
@@ -384,65 +385,13 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
   // ── TELEGRAM ──
   const tgInitMatch = pathname.match(/^\/api\/profile\/([^/]+)\/verify\/telegram\/initiate$/);
   if (tgInitMatch && method === 'POST') {
-    (async () => {
-      const profileId = tgInitMatch[1];
-      const parsed = await parseBody(req);
-      const profile = loadProfile?.(profileId, DATA_DIR);
-      if (!profile) return json(res, 404, { error: 'Profile not found' });
-
-      const handle = parsed.telegramHandle || profile.links?.telegram;
-      if (!handle) return json(res, 400, { error: 'No Telegram handle. Provide telegramHandle or set it on your profile.' });
-
-      try {
-        const result = initiateTelegramVerification(profileId, handle);
-        json(res, 200, result);
-      } catch (e) {
-        json(res, 400, { error: e.message });
-      }
-    })();
+    json(res, 410, retiredProviderResponse('telegram'));
     return true;
   }
 
   const tgCompleteMatch = pathname.match(/^\/api\/profile\/([^/]+)\/verify\/telegram\/complete$/);
   if (tgCompleteMatch && method === 'POST') {
-    (async () => {
-      const profileId = tgCompleteMatch[1];
-      const parsed = await parseBody(req);
-      const { challengeId } = parsed;
-      if (!challengeId) return json(res, 400, { error: 'challengeId required' });
-
-      try {
-        const result = await completeTelegramVerification(challengeId);
-        if (result.verified && loadProfile && dbSaveProfileFn) {
-          const profile = loadProfile(profileId, DATA_DIR);
-          if (profile) {
-            profile.verificationData = profile.verificationData || {};
-            profile.verificationData.telegram = {
-              verified: true, handle: result.handle, telegramUserId: result.telegramUserId,
-              method: result.method, verifiedAt: new Date().toISOString(),
-              proof: { challengeId, telegramUserId: result.telegramUserId },
-            };
-            profile.links = profile.links || {};
-            profile.links.telegram = result.handle;
-            profile.updatedAt = new Date().toISOString();
-            
-              // Save to SQLite + trigger on-chain updates
-              if (addVerification) try { addVerification(profileId, 'telegram', result.telegramHandle || result.username, { verifiedAt: new Date().toISOString() }); } catch(avErr) { console.error("[Hardened] addVerification:", avErr.message); }
-              dbSaveProfileFn(profile);
-          }
-          if (addActivityAndBroadcast) {
-            addActivityAndBroadcast(profileId, 'verification_telegram', {
-              handle: result.handle, method: result.method,
-            }, DATA_DIR);
-          }
-          if (postVerificationMemo) postVerificationMemo(profileId, 'telegram', { handle: result.handle }).catch(() => {});
-          if (postVerificationOnchainForProfile && profile) postVerificationOnchainForProfile(profile, 'telegram', { handle: result.handle });
-        }
-        json(res, result.verified ? 200 : 400, result);
-      } catch (e) {
-        json(res, 500, { error: e.message });
-      }
-    })();
+    json(res, 410, retiredProviderResponse('telegram'));
     return true;
   }
 
@@ -724,44 +673,12 @@ function handleVerificationRoutes(url, req, res, DATA_DIR, helpers = {}) {
   }
 
   // ── AgentMail Hardened ──
-  if (pathname === '/api/verify/agentmail/initiate' && method === 'POST' && initiateAgentMailVerification) {
-    (async () => {
-      const parsed = await parseBody(req);
-      const { profileId, email } = parsed;
-      if (!profileId || !email) return json(res, 400, { error: 'profileId and email required' });
-      try {
-        const result = await initiateAgentMailVerification(profileId, email);
-        json(res, result.success ? 200 : 400, result);
-      } catch (e) { json(res, 500, { error: e.message }); }
-    })();
+  if (pathname === '/api/verify/agentmail/initiate' && method === 'POST') {
+    json(res, 410, retiredProviderResponse('agentmail'));
     return true;
   }
-  if (pathname === '/api/verify/agentmail/confirm' && method === 'POST' && verifyAgentMailCode) {
-    (async () => {
-      const parsed = await parseBody(req);
-      const { challengeId, code } = parsed;
-      if (!challengeId || !code) return json(res, 400, { error: 'challengeId and code required' });
-      try {
-        const result = await verifyAgentMailCode(challengeId, code);
-        if (result.verified && getChallenge) {
-          const challenge = await getChallenge(challengeId);
-          if (challenge && loadProfile && dbSaveProfileFn) {
-            const profile = loadProfile(challenge.challengeData.profileId, DATA_DIR);
-            if (profile) {
-              profile.verificationData = profile.verificationData || {};
-              profile.verificationData.agentmail = { ...result, method: 'hardened_email_code', verifiedAt: new Date().toISOString() };
-              profile.updatedAt = new Date().toISOString();
-              dbSaveProfileFn(profile);
-              // Attestation TX
-              const amProfileId = challenge.challengeData.profileId;
-              if (postVerificationMemo) postVerificationMemo(amProfileId, 'agentmail', { email: result.email || challenge.challengeData.identifier }).catch(() => {});
-              if (postVerificationOnchainForProfile) postVerificationOnchainForProfile(profile, 'agentmail', { email: result.email || challenge.challengeData.identifier });
-            }
-          }
-        }
-        json(res, result.verified ? 200 : 400, result);
-      } catch (e) { json(res, 500, { error: e.message }); }
-    })();
+  if (pathname === '/api/verify/agentmail/confirm' && method === 'POST') {
+    json(res, 410, retiredProviderResponse('agentmail'));
     return true;
   }
 

@@ -4,6 +4,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import type { Agent, Job } from "./types";
 import { getAgentProfilePDA, AGENT_PROFILE_DISCRIMINATOR, SOLANA_RPC } from "./identity-registry";
 import { fetchV3Scores, v3ToComputedScores } from "./v3-scores";
+import { isCanonicalTrustProvider } from "./canonical-verifications";
 
 // Cache on-chain lookups to avoid rate limiting during builds
 const _onChainCache = new Map<string, boolean>();
@@ -152,6 +153,11 @@ function mapProfile(p: RawProfile): Agent {
   // not present them as evidence-backed reputation.
   const trustScore = hasV3Evidence ? v3.reputationScore : 0;
   const vd = p.verificationData || {};
+  const canonicalEntry = (platform: string) => {
+    if (!isCanonicalTrustProvider(platform)) return null;
+    return platform === "solana" ? (vd.solana || vd.solana_wallet || null) : ((vd as any)[platform] || null);
+  };
+  const isCanonicalVerified = (platform: string) => !!canonicalEntry(platform)?.verified;
   // Count local verifications for level fallback
   const localVerifCount = Object.values(vd).filter((v: any) => v && v.verified).length;
   const hasSATP = !!(vd.satp?.verified || (p.wallets?.solana));
@@ -183,16 +189,16 @@ function mapProfile(p: RawProfile): Agent {
     trustEvidenceSource: hasV3Evidence ? "satp_v3_onchain" : "pending",
     skills: [...new Set((p.skills || []).map(s => typeof s === 'string' ? s : (s.name || '')).filter(Boolean))],
     verifications: {
-      github: vd.github ? {
-        username: vd.github.handle || vd.github.username || vd.github.address || "",
-        repos: vd.github.repos || 0,
-        stars: vd.github.stars || 0,
-        verified: !!vd.github.verified,
+      github: isCanonicalVerified("github") ? {
+        username: canonicalEntry("github")?.handle || canonicalEntry("github")?.username || canonicalEntry("github")?.address || "",
+        repos: canonicalEntry("github")?.repos || 0,
+        stars: canonicalEntry("github")?.stars || 0,
+        verified: true,
       } : undefined,
-      solana: (vd.solana?.verified || p.wallets?.solana) ? {
-        address: p.wallets?.solana || vd.solana?.address || "",
-        txCount: vd.solana?.txCount || 0,
-        balance: vd.solana?.balance || "0 SOL",
+      solana: isCanonicalVerified("solana") ? {
+        address: p.wallets?.solana || canonicalEntry("solana")?.address || "",
+        txCount: canonicalEntry("solana")?.txCount || 0,
+        balance: canonicalEntry("solana")?.balance || "0 SOL",
         verified: !!vd.solana?.verified,
       } : undefined,
       hyperliquid: (vd.hyperliquid?.verified || p.wallets?.hyperliquid) ? {
@@ -212,13 +218,11 @@ function mapProfile(p: RawProfile): Agent {
         verified: true,
       } : undefined,
       ethereum: vd.ethereum?.verified ? { address: vd.ethereum.address || p.wallets?.ethereum || "", verified: true } : undefined,
-      agentmail: vd.agentmail?.verified ? { email: vd.agentmail.email || "", verified: true } : undefined,
       moltbook: vd.moltbook?.verified ? { username: vd.moltbook.username || "", verified: true } : undefined,
-      website: vd.website?.verified ? { url: vd.website.url || "", verified: true } : undefined,
-      domain: vd.domain?.verified ? { domain: vd.domain.domain || "", verified: true } : undefined,
+      website: isCanonicalVerified("website") ? { url: canonicalEntry("website")?.url || "", verified: true } : undefined,
+      domain: isCanonicalVerified("domain") ? { domain: canonicalEntry("domain")?.domain || "", verified: true } : undefined,
       polymarket: vd.polymarket?.verified ? { address: vd.polymarket.address || "", verified: true } : undefined,
       discord: vd.discord?.verified ? { username: vd.discord.username || "", verified: true } : undefined,
-      telegram: vd.telegram?.verified ? { username: vd.telegram.username || "", verified: true } : undefined,
       twitter: vd.twitter?.verified ? { handle: vd.twitter.handle || vd.twitter.address || "", verified: true } : undefined,
     },
     status: p.unclaimed ? "unclaimed" : "online", // Unclaimed profiles show unclaimed status
