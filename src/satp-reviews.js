@@ -5,7 +5,6 @@
 const Database = require('better-sqlite3');
 const { PublicKey } = require('@solana/web3.js');
 const path = require('path');
-const crypto = require('crypto');
 
 // SATP Program IDs
 const { getReviewsForProfile: getOnChainReviews } = require('./onchain-reviews');
@@ -46,11 +45,6 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_reviews_reviewee ON reviews(reviewee_id);
   CREATE INDEX IF NOT EXISTS idx_reviews_reviewer ON reviews(reviewer_id);
-`);
-
-const insertReview = db.prepare(`
-  INSERT INTO reviews (id, reviewer_id, reviewee_id, job_id, rating, comment, tx_signature)
-  VALUES (@id, @reviewer_id, @reviewee_id, @job_id, @rating, @comment, @tx_signature)
 `);
 
 const getReviewsByAgent = db.prepare(`
@@ -102,53 +96,12 @@ function getReviewPDA(reviewerId, revieweeId, jobId) {
 
 // --- Route Handlers ---
 function registerRoutes(app) {
-  // Submit a review
+  // Legacy SATP review writes are disabled; use the signed released-escrow flow.
   app.post('/api/satp/reviews', (req, res) => {
-    try {
-      const { reviewer_id, reviewee_id, job_id, rating, comment, tx_signature } = req.body;
-
-      if (!reviewer_id || !reviewee_id || !rating) {
-        return res.status(400).json({ error: 'reviewer_id, reviewee_id, and rating are required' });
-      }
-      if (rating < 1 || rating > 5 || !Number.isInteger(rating)) {
-        return res.status(400).json({ error: 'rating must be integer 1-5' });
-      }
-      if (reviewer_id === reviewee_id) {
-        return res.status(400).json({ error: 'Cannot review yourself' });
-      }
-
-      // Validate wallet addresses
-      try {
-        new PublicKey(reviewer_id);
-        new PublicKey(reviewee_id);
-      } catch {
-        return res.status(400).json({ error: 'reviewer_id and reviewee_id must be valid Solana addresses' });
-      }
-
-      const id = crypto.randomUUID();
-      insertReview.run({
-        id,
-        reviewer_id,
-        reviewee_id,
-        job_id: job_id || null,
-        rating,
-        comment: comment || null,
-        tx_signature: tx_signature || null,
-      });
-
-      // Compute PDAs for reference
-      const reviewPDA = getReviewPDA(reviewer_id, reviewee_id, job_id);
-      const reputationPDA = getReputationPDA(reviewee_id);
-
-      res.status(201).json({
-        id,
-        reviewPDA: reviewPDA.toBase58(),
-        reputationPDA: reputationPDA.toBase58(),
-        message: 'Review submitted',
-      });
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to submit review', detail: err.message });
-    }
+    res.status(403).json({
+      error: 'SATP review writes require the signed released-escrow flow',
+      next: '/api/reviews/challenge then /api/reviews/submit',
+    });
   });
 
   // Get reviews for an agent

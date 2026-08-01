@@ -161,7 +161,7 @@ test('production server mounts signed review write routes before the fallback re
   assert.ok(reviewsV2Mount < fallbackStub, 'reviews v2 routes must register before fallback stubs');
 });
 
-test('reviews v2 route module uses the repo database path and exposes a writer', () => {
+test('reviews v2 route module uses the repo database path and exposes a disabled writer', () => {
   const source = fs.readFileSync(path.join(ROOT, 'src', 'api', 'reviews-v2.js'), 'utf8');
 
   assert.match(source, /DEFAULT_DB_PATH/);
@@ -198,6 +198,33 @@ test('marketplace exposes only the read route and disables job-scoped review wri
   assert.match(postRoute, /res\.status\(403\)/);
   assert.match(postRoute, /signed released-escrow flow/);
   assert.doesNotMatch(postRoute, /writeJobReviews/);
+});
+
+test('legacy SATP review route cannot create authoritative reviews', () => {
+  const source = fs.readFileSync(path.join(ROOT, 'src', 'satp-reviews.js'), 'utf8');
+  const routeStart = source.indexOf("app.post('/api/satp/reviews'");
+  const routeEnd = source.indexOf("app.get('/api/satp/reviews'", routeStart);
+  const route = source.slice(routeStart, routeEnd);
+
+  assert.notEqual(routeStart, -1, 'missing SATP review write route');
+  assert.match(route, /res\.status\(403\)/);
+  assert.match(route, /signed released-escrow flow/);
+  assert.match(route, /\/api\/reviews\/challenge then \/api\/reviews\/submit/);
+  assert.doesNotMatch(route, /INSERT INTO reviews/);
+  assert.doesNotMatch(route, /insertReview\.run/);
+});
+
+test('auxiliary write endpoints do not bypass signed released-escrow reviews', () => {
+  const source = fs.readFileSync(path.join(ROOT, 'src', 'write-endpoints.js'), 'utf8');
+  const routeStart = source.indexOf("app.post('/api/profile/:id/review'");
+  const routeEnd = source.indexOf("app.post('/api/profile/:id/endorse'", routeStart);
+  const route = source.slice(routeStart, routeEnd);
+
+  assert.notEqual(routeStart, -1, 'missing auxiliary profile review write route');
+  assert.match(route, /res\.status\(403\)/);
+  assert.match(route, /signed released-escrow flow/);
+  assert.doesNotMatch(route, /INSERT INTO reviews/);
+  assert.doesNotMatch(route, /UPDATE profiles SET endorsements/);
 });
 
 test('marketplace review paths validate job ids before filesystem access', () => {

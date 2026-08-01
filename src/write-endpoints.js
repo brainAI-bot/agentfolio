@@ -168,27 +168,10 @@ function registerWriteEndpoints(app) {
 
   // 6. POST /api/profile/:id/review (auth required)
   app.post('/api/profile/:id/review', requireAuth, (req, res) => {
-    const targetId = req.params.id;
-    const { reviewer_id, rating, text } = req.body;
-    if (!reviewer_id || !rating) return res.status(400).json({ error: 'reviewer_id and rating are required' });
-    if (req.authProfileId !== reviewer_id) return res.status(403).json({ error: 'reviewer_id must match your authenticated profile' });
-    if (rating < 1 || rating > 5) return res.status(400).json({ error: 'rating must be between 1 and 5' });
-    if (reviewer_id === targetId) return res.status(400).json({ error: 'Cannot review yourself' });
-    const db = getDb();
-    try {
-      if (!db.prepare('SELECT id FROM profiles WHERE id = ?').get(targetId)) { db.close(); return res.status(404).json({ error: 'Target profile not found' }); }
-      const reviewId = `rev_${crypto.randomBytes(8).toString('hex')}`;
-      const now = new Date().toISOString();
-      db.prepare('INSERT INTO reviews (id, job_id, reviewer_id, reviewee_id, rating, comment, type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-        reviewId, '__profile_reviews__', reviewer_id, targetId, rating, text || '', 'profile', now
-      );
-      const row = db.prepare('SELECT endorsements FROM profiles WHERE id = ?').get(targetId);
-      const endorsements = JSON.parse(row.endorsements || '[]');
-      endorsements.push({ type: 'review', from: reviewer_id, rating, text: text || '', date: now });
-      db.prepare('UPDATE profiles SET endorsements = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(endorsements), now, targetId);
-      db.close();
-      res.status(201).json({ id: reviewId, reviewer_id, reviewee_id: targetId, rating, text: text || '', created_at: now });
-    } catch (e) { try { db.close(); } catch(_) {} res.status(500).json({ error: e.message }); }
+    res.status(403).json({
+      error: 'Profile review writes require the signed released-escrow flow',
+      next: '/api/reviews/challenge then /api/reviews/submit',
+    });
   });
 
   // 7. POST /api/profile/:id/endorse (auth required)
