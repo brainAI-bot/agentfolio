@@ -155,6 +155,7 @@ describe('deploy provenance', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-hq-drift-'));
     const mockHqCli = path.join(tempDir, 'mock-hq.sh');
     const hqArgsLog = path.join(tempDir, 'hq-args.log');
+    const evidenceFile = path.join(tempDir, 'deploy-drift.json');
     const driftSha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
     const pm2Config = JSON.parse(fs.readFileSync(
       path.resolve(repoRoot, 'tools/deploy-drift-cron-pm2.json'),
@@ -185,6 +186,7 @@ describe('deploy provenance', () => {
       ], {
         env: {
           ...app.env,
+          AGENTFOLIO_DRIFT_EVIDENCE_FILE: evidenceFile,
           HQ_CLI: mockHqCli,
           HQ_ARGS_LOG: hqArgsLog,
         },
@@ -206,12 +208,71 @@ describe('deploy provenance', () => {
           AGENTFOLIO_CREATE_DRIFT_TASK: 'true',
         },
       });
+      assert.strictEqual(payload.hq.write.route, 'POST /tasks');
+      assert.strictEqual(payload.hq.readback.route, 'GET /tasks/TASK-ID');
+      assert.strictEqual(payload.hq.readback.result.ok, true);
       assert.strictEqual(payload.hqUpdate.ok, true);
       assert.match(hqArgs, /^task create /);
+      assert.match(hqArgs, /task show TASK-ID/);
       assert.match(hqArgs, /--project=agentfolio/);
       assert.match(hqArgs, /--agent=brainforge/);
       assert.match(hqArgs, /--priority=p1/);
       assert.match(hqArgs, /AgentFolio deploy drift check: drift/);
+    } finally {
+      server.close();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes drift to HQ and performs a safety readback when a task id is configured', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-hq-drift-'));
+    const hqLog = path.join(tempDir, 'hq-commands.log');
+    const hqCli = path.join(tempDir, 'mock-hq.sh');
+    const evidenceFile = path.join(tempDir, 'deploy-drift.json');
+    const driftSha = 'cccccccccccccccccccccccccccccccccccccccc';
+    const hqTaskId = 'TASK-DRIFT-READBACK';
+
+    fs.writeFileSync(hqCli, [
+      '#!/bin/sh',
+      'printf "%s\\n" "$*" >> "$HQ_LOG"',
+      'if [ "$1" = "task" ] && [ "$2" = "deliver" ]; then echo "Task $3 delivered"; exit 0; fi',
+      'if [ "$1" = "task" ] && [ "$2" = "show" ]; then echo "Status: delivered"; echo "Task: $3"; exit 0; fi',
+      'echo "unexpected command: $*" >&2',
+      'exit 2',
+      '',
+    ].join('\n'), { mode: 0o700 });
+
+    const { server, url } = await listenWithVersion({
+      commitSha: driftSha,
+      buildTime: '2026-07-06T18:26:00.000Z',
+    });
+
+    try {
+      const result = await runDriftCheck([
+        `--prod-url=${url}`,
+        `--repo=${repoRoot}`,
+        `--hq-task-id=${hqTaskId}`,
+        `--hq-cli=${hqCli}`,
+        '--json',
+      ], {
+        env: {
+          AGENTFOLIO_DRIFT_EVIDENCE_FILE: evidenceFile,
+          HQ_LOG: hqLog,
+        },
+      });
+
+      assert.strictEqual(result.status, 0, result.stderr);
+      const payload = JSON.parse(result.stdout);
+      const hqCommands = fs.readFileSync(hqLog, 'utf8');
+      assert.strictEqual(payload.status, 'drift');
+      assert.strictEqual(payload.hq.write.route, `PUT /tasks/${hqTaskId}/deliver`);
+      assert.strictEqual(payload.hq.cli.value, hqCli);
+      assert.strictEqual(payload.hq.env.taskId.source, 'argv:--hq-task-id');
+      assert.strictEqual(payload.hq.readback.route, `GET /tasks/${hqTaskId}`);
+      assert.strictEqual(payload.hq.readback.result.ok, true);
+      assert.match(hqCommands, new RegExp(`task deliver ${hqTaskId} .*hqRoute=PUT /tasks/${hqTaskId}/deliver`));
+      assert.match(hqCommands, new RegExp(`task deliver ${hqTaskId} .*hqCli=${hqCli}`));
+      assert.match(hqCommands, new RegExp(`task show ${hqTaskId}`));
     } finally {
       server.close();
       fs.rmSync(tempDir, { recursive: true, force: true });
