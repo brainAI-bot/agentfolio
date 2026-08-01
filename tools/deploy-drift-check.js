@@ -182,7 +182,7 @@ async function main() {
   runGit(repo, ['fetch', '--quiet', 'origin', 'main']);
   const originSha = normalizeSha(runGit(repo, ['rev-parse', originRef]));
   const version = await fetchJson(prodUrl);
-  const prodSha = normalizeSha(version.commitSha || version.commit || version.sha);
+  const prodSha = normalizeSha(version.runningCommitSha || version.commitSha || version.commit || version.sha);
 
   const checkedAt = new Date().toISOString();
   const status = commitsMatch(prodSha, originSha) ? 'in_sync' : 'drift';
@@ -193,6 +193,8 @@ async function main() {
     production: {
       url: prodUrl,
       commitSha: prodSha,
+      source: version.source || null,
+      checkoutHead: version.checkoutHead || null,
       buildTime: version.buildTime || null,
       startedAt: version.startedAt || null,
       raw: version,
