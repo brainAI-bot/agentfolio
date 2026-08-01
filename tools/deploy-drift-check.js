@@ -88,6 +88,46 @@ function runHq(command, args) {
   return { ok: true, output: (result.stdout || '').trim() };
 }
 
+function argSource(args, argName, envName, fallback) {
+  if (Object.prototype.hasOwnProperty.call(args, argName)) {
+    return `argv:--${argName.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}`;
+  }
+  if (envName && process.env[envName]) return `env:${envName}`;
+  return fallback;
+}
+
+function hqContext(args, { hqCli, hqTaskId, prodUrl, originRef }) {
+  const createTask = Boolean(args.createHqTask || process.env.AGENTFOLIO_CREATE_DRIFT_TASK === 'true');
+  return {
+    cli: {
+      value: hqCli,
+      source: argSource(args, 'hqCli', 'HQ_CLI', 'default'),
+    },
+    env: {
+      productionVersionUrl: {
+        value: prodUrl,
+        source: argSource(args, 'prodUrl', 'AGENTFOLIO_PROD_VERSION_URL', 'default'),
+      },
+      originRef: {
+        value: originRef,
+        source: argSource(args, 'originRef', 'AGENTFOLIO_ORIGIN_REF', 'default'),
+      },
+      taskId: {
+        value: hqTaskId || null,
+        source: hqTaskId
+          ? (args.hqTaskId ? 'argv:--hq-task-id' : (process.env.HQ_TASK_ID ? 'env:HQ_TASK_ID' : 'env:AGENTFOLIO_DRIFT_HQ_TASK_ID'))
+          : 'unset',
+      },
+      createTask: {
+        value: createTask,
+        source: args.createHqTask ? 'argv:--create-hq-task' : (process.env.AGENTFOLIO_CREATE_DRIFT_TASK === 'true' ? 'env:AGENTFOLIO_CREATE_DRIFT_TASK' : 'unset'),
+      },
+    },
+    write: null,
+    readback: null,
+  };
+}
+
 function writeEvidence(repo, evidenceFile, evidence) {
   const target = path.resolve(repo, evidenceFile || DEFAULT_EVIDENCE_FILE);
   fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -101,6 +141,8 @@ function summarize(evidence) {
     `prod=${evidence.production.commitSha || 'unknown'}`,
     `origin=${evidence.origin.commitSha || 'unknown'}`,
     `versionUrl=${evidence.production.url}`,
+    `hqRoute=${evidence.hq?.write?.route || 'none'}`,
+    `hqCli=${evidence.hq?.cli?.value || 'none'}`,
     `checkedAt=${evidence.checkedAt}`,
   ].join(' ');
 }
@@ -135,6 +177,7 @@ async function main() {
   const hqCli = args.hqCli || process.env.HQ_CLI || '~/clawd/scripts/hq-env.zsh hq';
   const hqTaskId = args.hqTaskId || process.env.HQ_TASK_ID || process.env.AGENTFOLIO_DRIFT_HQ_TASK_ID;
   const createHqTask = args.createHqTask || process.env.AGENTFOLIO_CREATE_DRIFT_TASK === 'true';
+  const hq = hqContext(args, { hqCli, hqTaskId, prodUrl, originRef });
 
   runGit(repo, ['fetch', '--quiet', 'origin', 'main']);
   const originSha = normalizeSha(runGit(repo, ['rev-parse', originRef]));
@@ -159,21 +202,27 @@ async function main() {
       commitSha: originSha,
     },
     command: `node tools/deploy-drift-check.js --prod-url=${prodUrl} --origin-ref=${originRef}`,
+    hq,
     hqWrite: describeHqWrite({ hqCli, hqTaskId, createHqTask }),
   };
 
-  if (status === 'drift' || args.writeEvidence || process.env.AGENTFOLIO_DRIFT_EVIDENCE_FILE) {
-    evidence.evidenceFile = writeEvidence(
-      repo,
-      args.writeEvidence || process.env.AGENTFOLIO_DRIFT_EVIDENCE_FILE || DEFAULT_EVIDENCE_FILE,
-      evidence
-    );
-  }
-
   if (status === 'drift' && hqTaskId) {
+    evidence.hq.write = {
+      route: `PUT /tasks/${hqTaskId}/deliver`,
+      command: `${hqCli} task deliver ${hqTaskId} "..."`,
+    };
     evidence.hqUpdate = runHq(hqCli, ['task', 'deliver', hqTaskId, summarize(evidence)]);
-    evidence.hqReadback = runHq(hqCli, ['task', 'show', hqTaskId]);
+    evidence.hq.readback = {
+      route: `GET /tasks/${hqTaskId}`,
+      command: `${hqCli} task show ${hqTaskId}`,
+      result: runHq(hqCli, ['task', 'show', hqTaskId]),
+    };
+    evidence.hqReadback = evidence.hq.readback.result;
   } else if (status === 'drift' && createHqTask) {
+    evidence.hq.write = {
+      route: 'POST /tasks',
+      command: `${hqCli} task create --title="AgentFolio production deploy drift ${checkedAt.slice(0, 10)}" --project=agentfolio --agent=brainforge --priority=p1 --criteria="..."`,
+    };
     evidence.hqUpdate = runHq(hqCli, [
       'task',
       'create',
@@ -183,6 +232,27 @@ async function main() {
       '--priority=p1',
       `--criteria=${summarize(evidence)}`,
     ]);
+    const createdTaskId = evidence.hqUpdate.ok
+      ? (evidence.hqUpdate.output.match(/(TASK-[0-9A-Za-z_-]+)/) || [])[1]
+      : null;
+    evidence.hq.readback = createdTaskId ? {
+      route: `GET /tasks/${createdTaskId}`,
+      command: `${hqCli} task show ${createdTaskId}`,
+      result: runHq(hqCli, ['task', 'show', createdTaskId]),
+    } : {
+      route: null,
+      command: null,
+      result: { ok: false, error: 'created task id not found in HQ output' },
+    };
+    evidence.hqReadback = evidence.hq.readback.result;
+  }
+
+  if (status === 'drift' || args.writeEvidence || process.env.AGENTFOLIO_DRIFT_EVIDENCE_FILE) {
+    evidence.evidenceFile = writeEvidence(
+      repo,
+      args.writeEvidence || process.env.AGENTFOLIO_DRIFT_EVIDENCE_FILE || DEFAULT_EVIDENCE_FILE,
+      evidence
+    );
   }
 
   if (args.json) {
