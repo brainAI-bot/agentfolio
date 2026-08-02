@@ -38,6 +38,9 @@ const {
 const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainData } = require('./scoring');
 const { computeUnifiedTrustScore } = require('./lib/unified-trust-score');
 const {
+  CANONICAL_TRUST_PROVIDERS,
+  RETIRED_TRUST_PROVIDERS,
+  LIVE_DISPLAY_VERIFICATION_PROVIDERS,
   filterCanonicalTrustData,
   hasVerifiedCanonicalTrustData,
   retiredProviderResponse,
@@ -1236,15 +1239,18 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     version: '1.0.0',
     environment: NODE_ENV,
-    discord_verification: discordVerify ? 'hardened' : 'fallback',
-    telegram_verification: telegramVerify ? 'active' : 'fallback',
+    discord_verification: discordVerify ? 'active_display_non_trust' : 'fallback_display_non_trust',
+    telegram_verification: 'retired_non_verifying',
     domain_verification: domainVerify ? 'active' : 'fallback',
     website_verification: websiteVerify ? 'active' : 'fallback',
     fix_status: 'SERVER_IMPORT_FIXED',
-    eth_verification: ethVerify ? 'active' : 'fallback',
-    ens_verification: ensVerify ? 'active' : 'fallback',
-    farcaster_verification: farcasterVerify ? 'active' : 'fallback',
-    providers: ['discord', 'telegram', 'domain', 'website', 'eth', 'ens', 'farcaster']
+    eth_verification: ethVerify ? 'active_display_non_trust' : 'fallback_display_non_trust',
+    ens_verification: 'retired_non_verifying',
+    farcaster_verification: 'retired_non_verifying',
+    canonical_trust_providers: CANONICAL_TRUST_PROVIDERS,
+    retired_non_verifying_providers: RETIRED_TRUST_PROVIDERS,
+    live_display_verification_providers: LIVE_DISPLAY_VERIFICATION_PROVIDERS,
+    providers: Array.from(new Set([...CANONICAL_TRUST_PROVIDERS, ...LIVE_DISPLAY_VERIFICATION_PROVIDERS]))
   });
 });
 

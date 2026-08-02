@@ -1,5 +1,6 @@
 const {
   CANONICAL_TRUST_PROVIDERS,
+  isAutoPassAttestation,
   isCanonicalTrustProvider,
   normalizeTrustProvider,
 } = require('./canonical-verification-providers');
@@ -142,6 +143,7 @@ function computeCanonicalVerificationScore(input = {}) {
   for (const item of collectVerificationCandidates(input)) {
     const platform = normalizeTrustProvider(item.platform);
     if (!isCanonicalTrustProvider(platform) || seen.has(platform)) continue;
+    if (isAutoPassAttestation(item) || isAutoPassAttestation(item.proof)) continue;
     if (!hasPositiveVerification(item) && !hasPositiveVerification(item.proof)) continue;
 
     seen.add(platform);

@@ -2,10 +2,12 @@
 'use strict';
 
 /**
- * Removes retired/non-verifying trust providers from mutable profile state.
+ * Removes retired/non-verifying trust providers and auto-pass attestations
+ * from mutable profile state.
  *
- * Default mode is a dry run. Pass --write to delete retired rows from SQLite
- * verification/attestation tables and strip retired keys from profiles.
+ * Default mode is a dry run. Pass --write to delete retired/auto-pass rows
+ * from SQLite verification/attestation tables, strip retired keys from JSON
+ * profile state, and rescore affected profiles from canonical providers only.
  */
 
 const fs = require('fs');
@@ -13,115 +15,300 @@ const path = require('path');
 const {
   CANONICAL_TRUST_PROVIDERS,
   filterCanonicalTrustData,
-  isCanonicalTrustProvider,
+  isAutoPassAttestation,
+  isRetiredTrustProvider,
 } = require('../src/lib/canonical-verification-providers');
+const { computeTrustScore } = require('../src/lib/compute-trust-score');
 
 const WRITE = process.argv.includes('--write');
 const ROOT = path.join(__dirname, '..');
 const DB_PATH = process.env.AGENTFOLIO_DB_PATH || path.join(ROOT, 'data', 'agentfolio.db');
 const PROFILES_DIR = process.env.AGENTFOLIO_PROFILES_DIR || path.join(ROOT, 'data', 'profiles');
 
+function parseJson(value, fallback = {}) {
+  if (!value) return fallback;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    return fallback;
+  }
+}
+
 function jsonChanged(before, after) {
   return JSON.stringify(before || {}) !== JSON.stringify(after || {});
 }
 
-function listRetiredKeys(obj = {}) {
-  return Object.keys(obj || {}).filter((key) => !isCanonicalTrustProvider(key));
+function cleanupMatchForRow(row = {}) {
+  const platform = row.platform || row.type || null;
+  if (isRetiredTrustProvider(platform)) {
+    return {
+      platform,
+      reason: 'retired_provider',
+      tuple: [platform, 'platform'],
+    };
+  }
+
+  const data = {
+    ...row,
+    proof: parseJson(row.proof, row.proof || {}),
+  };
+  if (isAutoPassAttestation(data)) {
+    const proof = parseJson(row.proof, {});
+    const marker = data.auto === true ? 'auto=true'
+      : data.autoPass === true ? 'autoPass=true'
+      : data.auto_pass === true ? 'auto_pass=true'
+      : data.autoVerified === true ? 'autoVerified=true'
+      : proof.auto === true ? 'proof.auto=true'
+      : proof.autoPass === true ? 'proof.autoPass=true'
+      : proof.auto_pass === true ? 'proof.auto_pass=true'
+      : proof.autoVerified === true ? 'proof.autoVerified=true'
+      : data.source ? `source=${data.source}`
+      : data.method ? `method=${data.method}`
+      : data.type ? `type=${data.type}`
+      : proof.source ? `proof.source=${proof.source}`
+      : proof.method ? `proof.method=${proof.method}`
+      : proof.type ? `proof.type=${proof.type}`
+      : 'auto_pass_marker';
+    return {
+      platform,
+      reason: 'auto_pass_attestation',
+      tuple: [platform, marker],
+    };
+  }
+
+  return null;
 }
 
-const summary = {
-  mode: WRITE ? 'write' : 'dry-run',
-  canonicalTrustProviders: CANONICAL_TRUST_PROVIDERS,
-  sqliteVerificationRowsRemoved: 0,
-  sqliteAttestationRowsRemoved: 0,
-  sqliteProfilesUpdated: 0,
-  jsonProfilesUpdated: 0,
-  skipped: [],
-};
+function rowIsRetiredOrAutoPass(row = {}) {
+  return Boolean(cleanupMatchForRow(row));
+}
 
-if (fs.existsSync(DB_PATH)) {
+function sqliteMatchTuple(table, row = {}) {
+  const match = cleanupMatchForRow(row);
+  if (!match) return null;
+  return {
+    table,
+    rowId: row.id ?? row.rowid ?? null,
+    platform: match.platform,
+    reason: match.reason,
+    match: match.tuple,
+  };
+}
+
+function jsonProfileMatchTuple(file, platform, data = {}) {
+  const match = cleanupMatchForRow({ platform, ...data });
+  if (!match) return null;
+  return {
+    file,
+    platform: match.platform,
+    reason: match.reason,
+    match: match.tuple,
+  };
+}
+
+function rescoreProfileRecord(profile = {}, verificationData = {}) {
+  const trust = computeTrustScore({
+    profile: {
+      ...profile,
+      verificationData,
+      verification_data: verificationData,
+    },
+  });
+  const score = trust.trustScore;
+  return {
+    trustScore: score,
+    reputationScore: score,
+    verification: {
+      ...parseJson(profile.verification, profile.verification || {}),
+      score,
+    },
+  };
+}
+
+function sqliteTableExists(db, tableName) {
+  return Boolean(db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(tableName));
+}
+
+function createSummary(write) {
+  return {
+    mode: write ? 'write' : 'dry-run',
+    canonicalTrustProviders: CANONICAL_TRUST_PROVIDERS,
+    sqliteVerificationRowsRemoved: 0,
+    sqliteAttestationRowsRemoved: 0,
+    sqliteProfilesUpdated: 0,
+    sqliteProfilesRescored: 0,
+    jsonProfilesUpdated: 0,
+    jsonProfilesRescored: 0,
+    sqliteVerificationMatches: [],
+    sqliteAttestationMatches: [],
+    sqliteProfileMatches: [],
+    jsonProfileMatches: [],
+    skipped: [],
+  };
+}
+
+function cleanupSqlite({ dbPath, write, summary }) {
+  if (!fs.existsSync(dbPath)) return;
+
   let Database;
   try {
     Database = require('better-sqlite3');
   } catch (error) {
     summary.skipped.push(`sqlite cleanup skipped: ${error.code || error.message}`);
+    return;
   }
 
-  if (Database) {
-    const db = new Database(DB_PATH);
-    db.pragma('journal_mode = WAL');
+  const db = new Database(dbPath);
+  db.pragma('journal_mode = WAL');
 
-    const retiredVerificationRows = db
-      .prepare('SELECT id FROM verifications WHERE platform NOT IN (?, ?, ?, ?)')
-      .all(...CANONICAL_TRUST_PROVIDERS);
-    summary.sqliteVerificationRowsRemoved = retiredVerificationRows.length;
+  const hasVerifications = sqliteTableExists(db, 'verifications');
+  const retiredVerificationRows = hasVerifications
+    ? db.prepare('SELECT id, platform, proof FROM verifications').all().filter(rowIsRetiredOrAutoPass)
+    : [];
+  summary.sqliteVerificationRowsRemoved = retiredVerificationRows.length;
+  summary.sqliteVerificationMatches = retiredVerificationRows
+    .map((row) => sqliteMatchTuple('verifications', row))
+    .filter(Boolean);
 
-    const hasAttestations = db
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'attestations'")
-      .get();
-    if (hasAttestations) {
-      const retiredAttestationRows = db
-        .prepare('SELECT rowid FROM attestations WHERE platform NOT IN (?, ?, ?, ?)')
-        .all(...CANONICAL_TRUST_PROVIDERS);
-      summary.sqliteAttestationRowsRemoved = retiredAttestationRows.length;
+  const hasAttestations = sqliteTableExists(db, 'attestations');
+  const retiredAttestationRows = hasAttestations
+    ? db.prepare('SELECT rowid, platform, proof, source, method FROM attestations').all().filter(rowIsRetiredOrAutoPass)
+    : [];
+  summary.sqliteAttestationRowsRemoved = retiredAttestationRows.length;
+  summary.sqliteAttestationMatches = retiredAttestationRows
+    .map((row) => sqliteMatchTuple('attestations', row))
+    .filter(Boolean);
+
+  const profiles = sqliteTableExists(db, 'profiles') ? db.prepare('SELECT * FROM profiles').all() : [];
+  const profileUpdates = [];
+  for (const profile of profiles) {
+    const current = parseJson(profile.verification_data, {});
+    const filteredForScore = filterCanonicalTrustData(current);
+    const scores = rescoreProfileRecord(profile, filteredForScore);
+    const storedScore = Number(profile.trust_score ?? profile.trustScore ?? profile.reputation_score ?? profile.reputationScore ?? 0);
+    const needsScore = storedScore !== scores.trustScore;
+    const cleaned = { ...current };
+    for (const [platform, data] of Object.entries(current || {})) {
+      const match = cleanupMatchForRow({ platform, ...data });
+      if (match) delete cleaned[platform];
     }
-
-    const profiles = db.prepare('SELECT id, verification_data FROM profiles').all();
-    const profileUpdates = [];
-    for (const profile of profiles) {
-      let current = {};
-      try {
-        current = JSON.parse(profile.verification_data || '{}');
-      } catch (_) {
-        current = {};
-      }
-      const filtered = filterCanonicalTrustData(current);
-      if (jsonChanged(current, filtered)) {
-        profileUpdates.push({ id: profile.id, verificationData: filtered });
+    if (jsonChanged(current, cleaned) || needsScore) {
+      profileUpdates.push({ id: profile.id, verificationData: cleaned, scores });
+      for (const [platform, data] of Object.entries(current || {})) {
+        const match = jsonProfileMatchTuple(profile.id, platform, data);
+        if (match) summary.sqliteProfileMatches.push(match);
       }
     }
-    summary.sqliteProfilesUpdated = profileUpdates.length;
+  }
+  summary.sqliteProfilesUpdated = profileUpdates.length;
+  summary.sqliteProfilesRescored = profileUpdates.length;
 
-    if (WRITE) {
-      const deleteVerifications = db.prepare('DELETE FROM verifications WHERE platform NOT IN (?, ?, ?, ?)');
-      const deleteAttestations = hasAttestations
-        ? db.prepare('DELETE FROM attestations WHERE platform NOT IN (?, ?, ?, ?)')
-        : null;
-      const updateProfile = db.prepare('UPDATE profiles SET verification_data = ?, updated_at = ? WHERE id = ?');
-      const now = new Date().toISOString();
+  if (write) {
+    const deleteVerificationById = hasVerifications ? db.prepare('DELETE FROM verifications WHERE id = ?') : null;
+    const deleteAttestationByRowid = hasAttestations ? db.prepare('DELETE FROM attestations WHERE rowid = ?') : null;
+    const columns = new Set(db.prepare('PRAGMA table_info(profiles)').all().map((column) => column.name));
+    const now = new Date().toISOString();
 
-      db.transaction(() => {
-        deleteVerifications.run(...CANONICAL_TRUST_PROVIDERS);
-        if (deleteAttestations) deleteAttestations.run(...CANONICAL_TRUST_PROVIDERS);
-        for (const profile of profileUpdates) {
-          updateProfile.run(JSON.stringify(profile.verificationData), now, profile.id);
+    db.transaction(() => {
+      if (deleteVerificationById) {
+        for (const row of retiredVerificationRows) deleteVerificationById.run(row.id);
+      }
+      if (deleteAttestationByRowid) {
+        for (const row of retiredAttestationRows) deleteAttestationByRowid.run(row.rowid);
+      }
+      for (const profile of profileUpdates) {
+        const sets = [];
+        const values = [];
+        if (columns.has('verification_data')) {
+          sets.push('verification_data = ?');
+          values.push(JSON.stringify(profile.verificationData));
         }
-      })();
-    }
-
-    db.close();
+        if (columns.has('trust_score')) {
+          sets.push('trust_score = ?');
+          values.push(profile.scores.trustScore);
+        }
+        if (columns.has('reputation_score')) {
+          sets.push('reputation_score = ?');
+          values.push(profile.scores.reputationScore);
+        }
+        if (columns.has('verification')) {
+          sets.push('verification = ?');
+          values.push(JSON.stringify(profile.scores.verification));
+        }
+        if (columns.has('updated_at')) {
+          sets.push('updated_at = ?');
+          values.push(now);
+        }
+        if (sets.length > 0) {
+          db.prepare(`UPDATE profiles SET ${sets.join(', ')} WHERE id = ?`).run(...values, profile.id);
+        }
+      }
+    })();
   }
+
+  db.close();
 }
 
-if (fs.existsSync(PROFILES_DIR)) {
-  const files = fs.readdirSync(PROFILES_DIR).filter((file) => file.endsWith('.json'));
+function cleanupJsonProfiles({ profilesDir, write, summary }) {
+  if (!fs.existsSync(profilesDir)) return;
+
+  const files = fs.readdirSync(profilesDir).filter((file) => file.endsWith('.json'));
   for (const file of files) {
-    const filePath = path.join(PROFILES_DIR, file);
+    const filePath = path.join(profilesDir, file);
     let profile;
     try {
       profile = JSON.parse(fs.readFileSync(filePath, 'utf8'));
     } catch (_) {
       continue;
     }
-    const retiredKeys = listRetiredKeys(profile.verificationData || {});
-    if (retiredKeys.length === 0) continue;
-    profile.verificationData = filterCanonicalTrustData(profile.verificationData || {});
+
+    const current = profile.verificationData || {};
+    const filteredForScore = filterCanonicalTrustData(current);
+    const scores = rescoreProfileRecord(profile, filteredForScore);
+    const cleaned = { ...current };
+    for (const [platform, data] of Object.entries(current || {})) {
+      const match = cleanupMatchForRow({ platform, ...data });
+      if (match) delete cleaned[platform];
+    }
+    const changed = jsonChanged(current, cleaned);
+    const scoreChanged = profile.trustScore !== scores.trustScore || profile.reputationScore !== scores.reputationScore;
+    if (!changed && !scoreChanged) continue;
+
     summary.jsonProfilesUpdated += 1;
-    if (WRITE) {
-      profile.updatedAt = profile.updatedAt || new Date().toISOString();
+    summary.jsonProfilesRescored += 1;
+    for (const [platform, data] of Object.entries(current || {})) {
+      const match = jsonProfileMatchTuple(file, platform, data);
+      if (match) summary.jsonProfileMatches.push(match);
+    }
+
+    if (write) {
+      profile.verificationData = cleaned;
+      profile.trustScore = scores.trustScore;
+      profile.reputationScore = scores.reputationScore;
+      profile.verification = scores.verification;
+      profile.updatedAt = new Date().toISOString();
       fs.writeFileSync(filePath, JSON.stringify(profile, null, 2));
     }
   }
 }
 
-console.log(JSON.stringify(summary, null, 2));
+function cleanup({ write = false, dbPath = DB_PATH, profilesDir = PROFILES_DIR } = {}) {
+  const summary = createSummary(write);
+  cleanupSqlite({ dbPath, write, summary });
+  cleanupJsonProfiles({ profilesDir, write, summary });
+  return summary;
+}
+
+if (require.main === module) {
+  console.log(JSON.stringify(cleanup({ write: WRITE }), null, 2));
+}
+
+module.exports = {
+  cleanup,
+  cleanupMatchForRow,
+  rowIsRetiredOrAutoPass,
+  rescoreProfileRecord,
+};

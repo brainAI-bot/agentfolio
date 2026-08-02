@@ -9,26 +9,50 @@ const PLATFORM_ALIASES = Object.freeze({
 
 const RETIRED_TRUST_PROVIDERS = Object.freeze([
   'agentmail',
-  'discord',
   'ens',
   'farcaster',
-  'moltbook',
   'telegram',
-  'x',
-  'twitter',
-  'eth',
-  'ethereum',
-  'hyperliquid',
-  'polymarket',
-  'kalshi',
-  'mcp',
-  'a2a',
-  'satp',
-  'satp_v3',
   'email',
   'custom',
 ]);
 const RETIRED_TRUST_PROVIDER_SET = new Set(RETIRED_TRUST_PROVIDERS);
+const LIVE_DISPLAY_VERIFICATION_PROVIDERS = Object.freeze([
+  ...CANONICAL_TRUST_PROVIDERS,
+  'discord',
+  'ethereum',
+  'hyperliquid',
+  'moltbook',
+  'polymarket',
+  'satp',
+  'twitter',
+  'x',
+  'mcp',
+  'a2a',
+  'review',
+]);
+const LIVE_DISPLAY_VERIFICATION_PROVIDER_SET = new Set(LIVE_DISPLAY_VERIFICATION_PROVIDERS);
+const AUTO_PASS_MARKERS = new Set([
+  'auto',
+  'auto-pass',
+  'autopass',
+  'auto_pass',
+  'auto verified',
+  'auto-verified',
+  'auto_verified',
+  'platform_auto_verified',
+  'satp-auto',
+  'satp-auto-v3-confirm',
+]);
+
+function parseJsonish(value, fallback = {}) {
+  if (!value) return fallback;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    return fallback;
+  }
+}
 
 function normalizeTrustProvider(platform) {
   const value = String(platform || '').trim().toLowerCase();
@@ -41,18 +65,51 @@ function isCanonicalTrustProvider(platform) {
 
 function isRetiredTrustProvider(platform) {
   const normalized = normalizeTrustProvider(platform);
-  return Boolean(normalized && !CANONICAL_TRUST_PROVIDER_SET.has(normalized));
+  return RETIRED_TRUST_PROVIDER_SET.has(normalized);
+}
+
+function isLiveDisplayVerificationProvider(platform) {
+  const normalized = normalizeTrustProvider(platform);
+  return LIVE_DISPLAY_VERIFICATION_PROVIDER_SET.has(normalized);
+}
+
+function normalizeMarkerValue(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isKnownAutoPassMarker(value) {
+  return AUTO_PASS_MARKERS.has(normalizeMarkerValue(value));
+}
+
+function isAutoPassAttestation(data = {}) {
+  if (!data || typeof data !== 'object') return false;
+  if (data.auto === true || data.autoPass === true || data.auto_pass === true || data.autoVerified === true) return true;
+
+  const proof = parseJsonish(data.proof, {});
+  if (proof.auto === true || proof.autoPass === true || proof.auto_pass === true || proof.autoVerified === true) return true;
+
+  return [
+    data.source,
+    data.method,
+    data.type,
+    proof.source,
+    proof.method,
+    proof.type,
+  ].some(isKnownAutoPassMarker);
 }
 
 function filterCanonicalTrustVerifications(verifications = []) {
-  return (verifications || []).filter((verification) => isCanonicalTrustProvider(verification?.platform || verification?.type));
+  return (verifications || []).filter((verification) => (
+    isCanonicalTrustProvider(verification?.platform || verification?.type) &&
+    !isAutoPassAttestation(verification)
+  ));
 }
 
 function filterCanonicalTrustData(verificationData = {}) {
   const filtered = {};
   for (const [platform, data] of Object.entries(verificationData || {})) {
     const normalized = normalizeTrustProvider(platform);
-    if (isCanonicalTrustProvider(normalized)) filtered[normalized] = data;
+    if (isCanonicalTrustProvider(normalized) && !isAutoPassAttestation(data)) filtered[normalized] = data;
   }
   return filtered;
 }
@@ -77,9 +134,12 @@ function retiredProviderResponse(platform) {
 module.exports = {
   CANONICAL_TRUST_PROVIDERS,
   RETIRED_TRUST_PROVIDERS,
+  LIVE_DISPLAY_VERIFICATION_PROVIDERS,
   normalizeTrustProvider,
   isCanonicalTrustProvider,
   isRetiredTrustProvider,
+  isLiveDisplayVerificationProvider,
+  isAutoPassAttestation,
   filterCanonicalTrustVerifications,
   filterCanonicalTrustData,
   hasVerifiedCanonicalTrustData,

@@ -1,4 +1,5 @@
 const {
+  isAutoPassAttestation,
   isCanonicalTrustProvider,
   normalizeTrustProvider,
 } = require('./canonical-verification-providers');
@@ -43,6 +44,7 @@ function normalizeVerifications(verifications = [], { includeSatp = false, dedup
   const seen = new Set();
 
   for (const raw of verifications || []) {
+    if (isAutoPassAttestation(raw)) continue;
     const platform = normalizeVerificationPlatform(raw?.platform || raw?.type);
     if (!platform || platform === 'review') continue;
     if (!includeSatp && platform === 'satp') continue;

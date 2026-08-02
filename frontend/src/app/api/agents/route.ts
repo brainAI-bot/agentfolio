@@ -1,4 +1,5 @@
 import { getAllAgents } from "@/lib/data";
+import { isLiveDisplayVerificationProvider, normalizeTrustProvider } from "@/lib/canonical-verifications";
 import { NextRequest, NextResponse } from "next/server";
 
 export const revalidate = 30;
@@ -70,14 +71,11 @@ export async function GET(req: NextRequest) {
     registeredAt: a.registeredAt,
     status: a.status,
     unclaimed: a.unclaimed,
-    verifications: {
-      solana: a.verifications?.solana ? { verified: !!a.verifications.solana.verified } : undefined,
-      github: a.verifications?.github ? { verified: !!a.verifications.github.verified } : undefined,
-      x: a.verifications?.x ? { verified: !!a.verifications.x.verified } : undefined,
-      satp: a.verifications?.satp ? { verified: !!a.verifications.satp.verified } : undefined,
-      ethereum: a.verifications?.ethereum ? { verified: !!a.verifications.ethereum.verified } : undefined,
-      agentmail: a.verifications?.agentmail ? { verified: !!a.verifications.agentmail.verified } : undefined,
-    },
+    verifications: Object.fromEntries(
+      Object.entries(a.verifications || {})
+        .filter(([platform, entry]) => isLiveDisplayVerificationProvider(platform) && entry)
+        .map(([platform, entry]: [string, any]) => [normalizeTrustProvider(platform), { verified: !!entry.verified }])
+    ),
   }));
 
   // Collect all skills for filter dropdown
