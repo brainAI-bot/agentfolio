@@ -6,8 +6,9 @@ const VALID_ROADMAP_TAGS = ['shipped', 'in flight', 'pending', 'blocked', 'defer
 const COMPLETE_BANNER_RE = /Status:\s*COMPLETE\s*[·-]\s*(MONITORING|MAINTENANCE)/i;
 const NON_CORE_MARKER = ' · non-core';
 const VALID_TAG_RE = '(shipped|in flight|pending|blocked|deferred|withdrawn)';
-const ITEM_RE = new RegExp(`^\\s*-\\s+.+\\s\\[${VALID_TAG_RE}\\](\\s·\\sowner-gated)?\\s*$`);
-const ANY_TAG_RE = /\[[^\]]+\](\s·\sowner-gated)?\s*$/;
+const ANNOTATION_RE = '(\\s·\\sowner-gated)?(\\s·\\s[^\\r\\n]+)?';
+const ITEM_RE = new RegExp(`^\\s*-\\s+.+\\s\\[${VALID_TAG_RE}\\]${ANNOTATION_RE}\\s*$`);
+const ANY_TAG_RE = /\[[^\]]+\](\s·\sowner-gated)?(\s·\s[^\r\n]+)?\s*$/;
 const META_SECTIONS = new Set(['status taxonomy', 'current state snapshot']);
 const PRODUCTION_SHIPPED_CLAIM_RE = /\b(production|prod|live|endpoint|endpoints|health|smoke|launch)\b/i;
 const PROBE_EVIDENCE_RE = /\b(probe|probed|evidence|verified|readback|smoke|non-error|available in the repository|repo-local|documented|documentation|docs?)\b|\[#[-a-f0-9]+\]/i;
@@ -37,7 +38,7 @@ function parseRoadmapItems(markdown) {
 
     if (!section || META_SECTIONS.has(section)) continue;
 
-    const item = line.match(/^\s*-\s+(.+?)\s\[(shipped|in flight|pending|blocked|deferred|withdrawn)\](\s·\sowner-gated)?\s*$/);
+    const item = line.match(/^\s*-\s+(.+?)\s\[(shipped|in flight|pending|blocked|deferred|withdrawn)\](\s·\sowner-gated)?(\s·\s[^\r\n]+)?\s*$/);
     if (!item) continue;
 
     items.push({
