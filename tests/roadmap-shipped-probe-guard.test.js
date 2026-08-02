@@ -61,3 +61,15 @@ test('deploy provenance deflation annotations remain valid', () => {
 
   assert.deepEqual(errors, []);
 });
+
+test('treasury money-path shipped claims require source deployed IDL certification', () => {
+  const errors = lintFixture(roadmapWith('- On-chain fee collection inside release/partial_release routes the platform percentage to the treasury (FriU1FEp...) - GitHub/HQ-visible executed transfer evidence proves both live routes move the platform percentage to treasury. [#011685d4] [shipped]'));
+
+  assert.ok(errors.some((error) => error.includes('treasury money-path shipped item requires executed transfer evidence')));
+});
+
+test('treasury money-path shipped claims accept executed transfer and source certification evidence', () => {
+  const errors = lintFixture(roadmapWith('- On-chain fee collection inside release/partial_release routes the platform percentage to the treasury (FriU1FEp...) - GitHub/HQ-visible executed transfer evidence proves both live routes move the platform percentage to treasury and source/deployed/IDL alignment is certified. [#011685d4] [shipped]'));
+
+  assert.deepEqual(errors, []);
+});

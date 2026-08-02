@@ -73,6 +73,33 @@ Comparison result:
 
 Conclusion: repo-local AgentFolio source/IDL/program-id consistency is verified, but the stricter audited-source-to-deployed alignment is not certified from the available `clawd-brainchain` source. Live escrow writes must remain gated until the authoritative audited source/IDL for `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C` is supplied and verified, or an authorized devnet replacement deploy is performed outside this read-only task.
 
+## 2026-08-02 Roadmap Re-Flip Fence [#011685d4]
+
+Scope: read-only source comparison for the roadmap money-path claim; no
+production deploy, no keypair use, no Solana write, no authority change, no
+mainnet/devnet deploy.
+
+The roadmap item for on-chain fee collection must remain pending. A shipped
+flip requires GitHub/HQ-visible executed transfer evidence for both
+`release` and `partial_release`, plus certified source/deployed/IDL alignment.
+Lint, gitleaks, docs-only text, or an HXCU program-id declaration by itself is
+not sufficient proof of executed treasury movement.
+
+Current cross-host source readback:
+
+| Source tree | Commit | Source hash / result |
+| --- | --- | --- |
+| AgentFolio `onchain/escrow_v3` | current PR branch source | `Anchor.toml`, `declare_id!`, and tracked IDL all name `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`; source hash `a713fb25815f724bde8bc0ed9eec0c104826fc0fb26bd3f608a6ed46096efd4c`; IDL hash `19ab1ae26b274499d1d014b69b318a49467189085c35cd51ef52b10dbece1262`. |
+| local SATP canonical workspace `/Users/brainchain/clawd/satp-canonical-escrow-hxcuwkr2-20260728` | `353f7e6e7f00e131aebbbe1708d51ad4d990e3ef` | `Anchor.toml` and `declare_id!` also name `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`, but source hash is `cf2f4fe575332ff0004fac866f8fb33ac165297015c311fbe0371d675d4e601e`, which differs from AgentFolio. |
+
+Deployed-source truth: neither the AgentFolio `onchain/escrow_v3` tree nor the
+local SATP canonical `programs/escrow_v3` tree is certified here as the source
+that produced the deployed HXCU binary. Both can name the HXCU program ID while
+still disagreeing on source content. The re-flip lane must therefore require
+either an owner-approved replacement deploy from the audited source, or an
+auditable source/deployed/IDL packet that binds one source tree to the deployed
+program binary and includes executed treasury-delta proof for both money paths.
+
 ## Commands Run
 
 | Command | Result |

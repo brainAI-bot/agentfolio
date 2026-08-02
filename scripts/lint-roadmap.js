@@ -12,6 +12,9 @@ const ANY_TAG_RE = /\[[^\]]+\](\s·\sowner-gated)?(\s·\s[^\r\n]+)?\s*$/;
 const META_SECTIONS = new Set(['status taxonomy', 'current state snapshot']);
 const PRODUCTION_SHIPPED_CLAIM_RE = /\b(production|prod|live|endpoint|endpoints|health|smoke|launch)\b/i;
 const PROBE_EVIDENCE_RE = /\b(probe|probed|evidence|verified|readback|smoke|non-error|available in the repository|repo-local|documented|documentation|docs?)\b|\[#[-a-f0-9]+\]/i;
+const TREASURY_MONEY_PATH_SHIPPED_RE = /\b(fee collection|platform percentage|release\/partial_release)\b/i;
+const TREASURY_TRANSFER_EVIDENCE_RE = /\bexecuted transfer evidence\b/i;
+const SOURCE_DEPLOYED_IDL_CERT_RE = /\b(source\/deployed\/IDL|deployed-source|src\s*==\s*deployed\s*==\s*IDL)\b/i;
 
 function cleanSection(value) {
   return String(value || '')
@@ -93,6 +96,14 @@ function lintRoadmap(file) {
     }
     if (!section.includes('decisions') && /\[shipped\]/.test(line) && PRODUCTION_SHIPPED_CLAIM_RE.test(line) && !PROBE_EVIDENCE_RE.test(line)) {
       errors.push(`line ${index + 1}: production-facing shipped item requires live probe, proof marker, or evidence wording`);
+    }
+    if (
+      /\[shipped\]/.test(line) &&
+      /\btreasury\b/i.test(line) &&
+      TREASURY_MONEY_PATH_SHIPPED_RE.test(line) &&
+      (!TREASURY_TRANSFER_EVIDENCE_RE.test(line) || !SOURCE_DEPLOYED_IDL_CERT_RE.test(line))
+    ) {
+      errors.push(`line ${index + 1}: treasury money-path shipped item requires executed transfer evidence and certified source/deployed/IDL alignment`);
     }
   }
 
