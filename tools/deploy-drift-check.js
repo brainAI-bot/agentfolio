@@ -183,18 +183,32 @@ async function main() {
   const originSha = normalizeSha(runGit(repo, ['rev-parse', originRef]));
   const version = await fetchJson(prodUrl);
   const prodSha = normalizeSha(version.runningCommitSha || version.commitSha || version.commit || version.sha);
+  const buildSha = normalizeSha(version.buildCommitSha);
+  const checkoutSha = normalizeSha(version.checkoutHead);
+  const stampedSha = buildSha || prodSha;
 
   const checkedAt = new Date().toISOString();
-  const status = commitsMatch(prodSha, originSha) ? 'in_sync' : 'drift';
+  const checkoutUnverifiable = !checkoutSha;
+  const stampMismatch = Boolean(stampedSha && checkoutSha && !commitsMatch(stampedSha, checkoutSha));
+  const status = !commitsMatch(prodSha, originSha)
+    ? 'drift'
+    : stampMismatch
+      ? 'stamp_mismatch'
+      : checkoutUnverifiable
+        ? 'checkout_unverifiable'
+        : 'in_sync';
   const evidence = {
     service: 'agentfolio',
     status,
     checkedAt,
+    stampMismatch,
+    checkoutUnverifiable,
     production: {
       url: prodUrl,
       commitSha: prodSha,
+      buildCommitSha: buildSha,
       source: version.source || null,
-      checkoutHead: version.checkoutHead || null,
+      checkoutHead: checkoutSha,
       buildTime: version.buildTime || null,
       startedAt: version.startedAt || null,
       raw: version,
@@ -208,7 +222,7 @@ async function main() {
     hqWrite: describeHqWrite({ hqCli, hqTaskId, createHqTask }),
   };
 
-  if (status === 'drift' && hqTaskId) {
+  if (status !== 'in_sync' && hqTaskId) {
     evidence.hq.write = {
       route: `PUT /tasks/${hqTaskId}/deliver`,
       command: `${hqCli} task deliver ${hqTaskId} "..."`,
@@ -220,7 +234,7 @@ async function main() {
       result: runHq(hqCli, ['task', 'show', hqTaskId]),
     };
     evidence.hqReadback = evidence.hq.readback.result;
-  } else if (status === 'drift' && createHqTask) {
+  } else if (status !== 'in_sync' && createHqTask) {
     evidence.hq.write = {
       route: 'POST /tasks',
       command: `${hqCli} task create --title="AgentFolio production deploy drift ${checkedAt.slice(0, 10)}" --project=agentfolio --agent=brainforge --priority=p1 --criteria="..."`,
@@ -249,7 +263,7 @@ async function main() {
     evidence.hqReadback = evidence.hq.readback.result;
   }
 
-  if (status === 'drift' || args.writeEvidence || process.env.AGENTFOLIO_DRIFT_EVIDENCE_FILE) {
+  if (status !== 'in_sync' || args.writeEvidence || process.env.AGENTFOLIO_DRIFT_EVIDENCE_FILE) {
     evidence.evidenceFile = writeEvidence(
       repo,
       args.writeEvidence || process.env.AGENTFOLIO_DRIFT_EVIDENCE_FILE || DEFAULT_EVIDENCE_FILE,
@@ -265,7 +279,7 @@ async function main() {
     if (evidence.hqUpdate) console.log(`hqUpdate=${evidence.hqUpdate.ok ? 'ok' : `failed: ${evidence.hqUpdate.error}`}`);
   }
 
-  if (status === 'drift' && args.failOnDrift) process.exitCode = 1;
+  if (status !== 'in_sync' && args.failOnDrift) process.exitCode = 1;
 }
 
 main().catch((err) => {

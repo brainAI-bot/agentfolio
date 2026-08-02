@@ -119,16 +119,17 @@ describe('deploy provenance', () => {
     assert.ok(source.includes('getDeployProvenance()'));
   });
 
-  it('reports in_sync when the running production SHA matches origin/main', async () => {
+  it('reports in_sync when the running production SHA and checkout match origin/main', async () => {
     const originSha = execFileSync('git', ['rev-parse', 'origin/main'], {
       cwd: repoRoot,
       encoding: 'utf8',
     }).trim();
     const { server, url } = await listenWithVersion({
       runningCommitSha: originSha,
-      commitSha: '3333333333333333333333333333333333333333',
+      commitSha: originSha,
+      buildCommitSha: originSha,
       source: 'build',
-      checkoutHead: '3333333333333333333333333333333333333333',
+      checkoutHead: originSha,
       buildTime: '2026-07-06T18:26:00.000Z',
     });
 
@@ -143,9 +144,84 @@ describe('deploy provenance', () => {
       assert.strictEqual(result.status, 0, result.stderr);
       const payload = JSON.parse(result.stdout);
       assert.strictEqual(payload.status, 'in_sync');
+      assert.strictEqual(payload.stampMismatch, false);
       assert.strictEqual(payload.production.commitSha, originSha);
+      assert.strictEqual(payload.production.buildCommitSha, originSha);
       assert.strictEqual(payload.production.source, 'build');
-      assert.strictEqual(payload.production.checkoutHead, '3333333333333333333333333333333333333333');
+      assert.strictEqual(payload.production.checkoutHead, originSha);
+      assert.strictEqual(payload.origin.commitSha, originSha);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('reports stamp_mismatch when the stamped running SHA matches origin but checkout differs', async () => {
+    const originSha = execFileSync('git', ['rev-parse', 'origin/main'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    }).trim();
+    const checkoutSha = '3333333333333333333333333333333333333333';
+    const { server, url } = await listenWithVersion({
+      runningCommitSha: originSha,
+      commitSha: originSha,
+      buildCommitSha: originSha,
+      source: 'build',
+      checkoutHead: checkoutSha,
+      buildTime: '2026-07-06T18:26:00.000Z',
+    });
+
+    try {
+      const result = await runDriftCheck([
+        `--prod-url=${url}`,
+        `--repo=${repoRoot}`,
+        `--origin-ref=${originSha}`,
+        '--json',
+      ]);
+
+      assert.strictEqual(result.status, 0, result.stderr);
+      const payload = JSON.parse(result.stdout);
+      assert.strictEqual(payload.status, 'stamp_mismatch');
+      assert.strictEqual(payload.stampMismatch, true);
+      assert.strictEqual(payload.production.commitSha, originSha);
+      assert.strictEqual(payload.production.buildCommitSha, originSha);
+      assert.strictEqual(payload.production.checkoutHead, checkoutSha);
+      assert.strictEqual(payload.origin.commitSha, originSha);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('reports checkout_unverifiable when stamped production provenance omits checkoutHead', async () => {
+    const originSha = execFileSync('git', ['rev-parse', 'origin/main'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    }).trim();
+    const { server, url } = await listenWithVersion({
+      runningCommitSha: originSha,
+      commitSha: originSha,
+      buildCommitSha: originSha,
+      source: 'build',
+      buildTime: '2026-07-06T18:26:00.000Z',
+    });
+
+    try {
+      const result = await runDriftCheck([
+        `--prod-url=${url}`,
+        `--repo=${repoRoot}`,
+        `--origin-ref=${originSha}`,
+        '--fail-on-drift',
+        '--json',
+      ]);
+
+      assert.strictEqual(result.status, 1, result.stderr);
+      const payload = JSON.parse(result.stdout);
+      assert.strictEqual(payload.status, 'checkout_unverifiable');
+      assert.strictEqual(payload.stampMismatch, false);
+      assert.strictEqual(payload.checkoutUnverifiable, true);
+      assert.strictEqual(payload.production.commitSha, originSha);
+      assert.strictEqual(payload.production.buildCommitSha, originSha);
+      assert.strictEqual(payload.production.source, 'build');
+      assert.strictEqual(payload.production.checkoutHead, null);
       assert.strictEqual(payload.origin.commitSha, originSha);
     } finally {
       server.close();
