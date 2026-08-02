@@ -199,7 +199,7 @@ function mapProfile(p: RawProfile): Agent {
         address: p.wallets?.solana || canonicalEntry("solana")?.address || "",
         txCount: canonicalEntry("solana")?.txCount || 0,
         balance: canonicalEntry("solana")?.balance || "0 SOL",
-        verified: !!vd.solana?.verified,
+        verified: true,
       } : undefined,
       hyperliquid: (vd.hyperliquid?.verified || p.wallets?.hyperliquid) ? {
         address: p.wallets?.hyperliquid || vd.hyperliquid?.address || "",

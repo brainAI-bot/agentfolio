@@ -11,7 +11,7 @@ const {
   isAutoPassAttestation,
 } = require('../src/lib/canonical-verification-providers');
 const { computeTrustScore } = require('../src/lib/compute-trust-score');
-const { cleanup, rowIsRetiredOrAutoPass } = require('../scripts/cleanup-retired-trust-providers');
+const { cleanup, cleanupMatchForRow, rowIsRetiredOrAutoPass } = require('../scripts/cleanup-retired-trust-providers');
 
 test('canonical trust provider set is exactly solana, github, domain, website', () => {
   assert.deepEqual(CANONICAL_TRUST_PROVIDERS, ['solana', 'github', 'domain', 'website']);
@@ -48,6 +48,18 @@ test('cleanup identifies retired rows and auto-pass rows for purge', () => {
   assert.equal(rowIsRetiredOrAutoPass({ platform: 'solana', proof: '{"txSignature":"signed-solana-proof"}' }), false);
 });
 
+test('cleanup matching avoids free-text substring deletion', () => {
+  assert.equal(rowIsRetiredOrAutoPass({
+    platform: 'solana',
+    proof: '{"txSignature":"signed-solana-proof"}',
+    reason: 'manual review mentioned satp-auto in notes but kept signed proof',
+  }), false);
+  assert.equal(cleanupMatchForRow({
+    platform: 'solana',
+    proof: '{"source":"satp-auto-v3-confirm"}',
+  })?.reason, 'auto_pass_attestation');
+});
+
 test('cleanup dry-run reports profile filtering and rescoring without mutating files', () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-cleanup-'));
   const profilePath = path.join(temp, 'agent.json');
@@ -68,7 +80,42 @@ test('cleanup dry-run reports profile filtering and rescoring without mutating f
 
   assert.equal(summary.jsonProfilesUpdated, 1);
   assert.equal(summary.jsonProfilesRescored, 1);
+  assert.deepEqual(summary.jsonProfileMatches.map((match) => match.match), [
+    ['solana', 'auto=true'],
+    ['telegram', 'platform'],
+  ]);
   assert.deepEqual(JSON.parse(fs.readFileSync(profilePath, 'utf8')), profile);
+});
+
+test('cleanup dry-run exposes matched SQLite tuples', () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-cleanup-db-'));
+  const dbPath = path.join(temp, 'agentfolio.db');
+  const db = new Database(dbPath);
+  db.exec(`
+    CREATE TABLE verifications (id TEXT PRIMARY KEY, platform TEXT, proof TEXT);
+    CREATE TABLE attestations (platform TEXT, proof TEXT, source TEXT, method TEXT);
+  `);
+  db.prepare('INSERT INTO verifications (id, platform, proof) VALUES (?, ?, ?)').run('v1', 'telegram', '{}');
+  db.prepare('INSERT INTO verifications (id, platform, proof) VALUES (?, ?, ?)').run('v2', 'solana', '{"txSignature":"sig"}');
+  db.prepare('INSERT INTO attestations (platform, proof, source, method) VALUES (?, ?, ?, ?)').run('solana', '{}', 'satp-auto-v3-confirm', null);
+  db.close();
+
+  const summary = cleanup({ profilesDir: path.join(temp, 'missing-profiles'), dbPath, write: false });
+
+  assert.deepEqual(summary.sqliteVerificationMatches, [{
+    table: 'verifications',
+    rowId: 'v1',
+    platform: 'telegram',
+    reason: 'noncanonical_provider',
+    match: ['telegram', 'platform'],
+  }]);
+  assert.deepEqual(summary.sqliteAttestationMatches, [{
+    table: 'attestations',
+    rowId: 1,
+    platform: 'solana',
+    reason: 'auto_pass_attestation',
+    match: ['solana', 'source=satp-auto-v3-confirm'],
+  }]);
 });
 
 test('cleanup dry-run tolerates SQLite files without AgentFolio tables', () => {

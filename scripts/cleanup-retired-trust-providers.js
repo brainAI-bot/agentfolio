@@ -39,11 +39,72 @@ function jsonChanged(before, after) {
   return JSON.stringify(before || {}) !== JSON.stringify(after || {});
 }
 
-function rowIsRetiredOrAutoPass(row = {}) {
-  return !isCanonicalTrustProvider(row.platform) || isAutoPassAttestation({
+function cleanupMatchForRow(row = {}) {
+  const platform = row.platform || row.type || null;
+  if (!isCanonicalTrustProvider(platform)) {
+    return {
+      platform,
+      reason: 'noncanonical_provider',
+      tuple: [platform, 'platform'],
+    };
+  }
+
+  const data = {
     ...row,
     proof: parseJson(row.proof, row.proof || {}),
-  });
+  };
+  if (isAutoPassAttestation(data)) {
+    const proof = parseJson(row.proof, {});
+    const marker = data.auto === true ? 'auto=true'
+      : data.autoPass === true ? 'autoPass=true'
+      : data.auto_pass === true ? 'auto_pass=true'
+      : data.autoVerified === true ? 'autoVerified=true'
+      : proof.auto === true ? 'proof.auto=true'
+      : proof.autoPass === true ? 'proof.autoPass=true'
+      : proof.auto_pass === true ? 'proof.auto_pass=true'
+      : proof.autoVerified === true ? 'proof.autoVerified=true'
+      : data.source ? `source=${data.source}`
+      : data.method ? `method=${data.method}`
+      : data.type ? `type=${data.type}`
+      : proof.source ? `proof.source=${proof.source}`
+      : proof.method ? `proof.method=${proof.method}`
+      : proof.type ? `proof.type=${proof.type}`
+      : 'auto_pass_marker';
+    return {
+      platform,
+      reason: 'auto_pass_attestation',
+      tuple: [platform, marker],
+    };
+  }
+
+  return null;
+}
+
+function rowIsRetiredOrAutoPass(row = {}) {
+  return Boolean(cleanupMatchForRow(row));
+}
+
+function sqliteMatchTuple(table, row = {}) {
+  const match = cleanupMatchForRow(row);
+  if (!match) return null;
+  return {
+    table,
+    rowId: row.id ?? row.rowid ?? null,
+    platform: match.platform,
+    reason: match.reason,
+    match: match.tuple,
+  };
+}
+
+function jsonProfileMatchTuple(file, platform, data = {}) {
+  const match = cleanupMatchForRow({ platform, ...data });
+  if (!match) return null;
+  return {
+    file,
+    platform: match.platform,
+    reason: match.reason,
+    match: match.tuple,
+  };
 }
 
 function rescoreProfileRecord(profile = {}, verificationData = {}) {
@@ -81,6 +142,10 @@ function createSummary(write) {
     sqliteProfilesRescored: 0,
     jsonProfilesUpdated: 0,
     jsonProfilesRescored: 0,
+    sqliteVerificationMatches: [],
+    sqliteAttestationMatches: [],
+    sqliteProfileMatches: [],
+    jsonProfileMatches: [],
     skipped: [],
   };
 }
@@ -104,12 +169,18 @@ function cleanupSqlite({ dbPath, write, summary }) {
     ? db.prepare('SELECT id, platform, proof FROM verifications').all().filter(rowIsRetiredOrAutoPass)
     : [];
   summary.sqliteVerificationRowsRemoved = retiredVerificationRows.length;
+  summary.sqliteVerificationMatches = retiredVerificationRows
+    .map((row) => sqliteMatchTuple('verifications', row))
+    .filter(Boolean);
 
   const hasAttestations = sqliteTableExists(db, 'attestations');
   const retiredAttestationRows = hasAttestations
     ? db.prepare('SELECT rowid, platform, proof, source, method FROM attestations').all().filter(rowIsRetiredOrAutoPass)
     : [];
   summary.sqliteAttestationRowsRemoved = retiredAttestationRows.length;
+  summary.sqliteAttestationMatches = retiredAttestationRows
+    .map((row) => sqliteMatchTuple('attestations', row))
+    .filter(Boolean);
 
   const profiles = sqliteTableExists(db, 'profiles') ? db.prepare('SELECT * FROM profiles').all() : [];
   const profileUpdates = [];
@@ -121,6 +192,10 @@ function cleanupSqlite({ dbPath, write, summary }) {
     const needsScore = storedScore !== scores.trustScore;
     if (jsonChanged(current, filtered) || needsScore) {
       profileUpdates.push({ id: profile.id, verificationData: filtered, scores });
+      for (const [platform, data] of Object.entries(current || {})) {
+        const match = jsonProfileMatchTuple(profile.id, platform, data);
+        if (match) summary.sqliteProfileMatches.push(match);
+      }
     }
   }
   summary.sqliteProfilesUpdated = profileUpdates.length;
@@ -194,6 +269,10 @@ function cleanupJsonProfiles({ profilesDir, write, summary }) {
 
     summary.jsonProfilesUpdated += 1;
     summary.jsonProfilesRescored += 1;
+    for (const [platform, data] of Object.entries(current || {})) {
+      const match = jsonProfileMatchTuple(file, platform, data);
+      if (match) summary.jsonProfileMatches.push(match);
+    }
 
     if (write) {
       profile.verificationData = filtered;
@@ -219,6 +298,7 @@ if (require.main === module) {
 
 module.exports = {
   cleanup,
+  cleanupMatchForRow,
   rowIsRetiredOrAutoPass,
   rescoreProfileRecord,
 };

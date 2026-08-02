@@ -1,5 +1,20 @@
 export const CANONICAL_TRUST_PROVIDERS = ["solana", "github", "domain", "website"] as const;
 export const CANONICAL_TRUST_PROVIDER_SET = new Set<string>(CANONICAL_TRUST_PROVIDERS);
+export const LIVE_DISPLAY_VERIFICATION_PROVIDERS = [
+  ...CANONICAL_TRUST_PROVIDERS,
+  "discord",
+  "ethereum",
+  "hyperliquid",
+  "moltbook",
+  "polymarket",
+  "satp",
+  "twitter",
+  "x",
+  "mcp",
+  "a2a",
+  "review",
+] as const;
+export const LIVE_DISPLAY_VERIFICATION_PROVIDER_SET = new Set<string>(LIVE_DISPLAY_VERIFICATION_PROVIDERS);
 export const RETIRED_NON_VERIFYING_PROVIDERS = new Set<string>([
   "agentmail",
   "ens",
@@ -14,6 +29,10 @@ export function normalizeTrustProvider(platform: string | null | undefined): str
 
 export function isCanonicalTrustProvider(platform: string | null | undefined): boolean {
   return CANONICAL_TRUST_PROVIDER_SET.has(normalizeTrustProvider(platform));
+}
+
+export function isLiveDisplayVerificationProvider(platform: string | null | undefined): boolean {
+  return LIVE_DISPLAY_VERIFICATION_PROVIDER_SET.has(normalizeTrustProvider(platform));
 }
 
 export function isRetiredNonVerifyingProvider(platform: string | null | undefined): boolean {

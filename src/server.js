@@ -99,6 +99,20 @@ function sendRetiredVerificationProvider(res, platform, status = 410) {
   return res.status(status).json(retiredProviderResponse(platform));
 }
 
+const LIVE_DISPLAY_VERIFICATION_PROVIDERS = Object.freeze([
+  'discord',
+  'ethereum',
+  'hyperliquid',
+  'moltbook',
+  'polymarket',
+  'satp',
+  'twitter',
+  'x',
+  'mcp',
+  'a2a',
+  'review',
+]);
+
 function normalizeDidProfile(row) {
   if (!row) return null;
 
@@ -1238,17 +1252,18 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     version: '1.0.0',
     environment: NODE_ENV,
-    discord_verification: 'retired_non_verifying',
+    discord_verification: discordVerify ? 'active_display_non_trust' : 'fallback_display_non_trust',
     telegram_verification: 'retired_non_verifying',
     domain_verification: domainVerify ? 'active' : 'fallback',
     website_verification: websiteVerify ? 'active' : 'fallback',
     fix_status: 'SERVER_IMPORT_FIXED',
-    eth_verification: 'retired_non_verifying',
+    eth_verification: ethVerify ? 'active_display_non_trust' : 'fallback_display_non_trust',
     ens_verification: 'retired_non_verifying',
     farcaster_verification: 'retired_non_verifying',
     canonical_trust_providers: CANONICAL_TRUST_PROVIDERS,
     retired_non_verifying_providers: RETIRED_TRUST_PROVIDERS,
-    providers: CANONICAL_TRUST_PROVIDERS
+    live_display_verification_providers: LIVE_DISPLAY_VERIFICATION_PROVIDERS,
+    providers: [...CANONICAL_TRUST_PROVIDERS, ...LIVE_DISPLAY_VERIFICATION_PROVIDERS]
   });
 });
 

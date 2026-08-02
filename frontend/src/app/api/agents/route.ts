@@ -1,5 +1,5 @@
 import { getAllAgents } from "@/lib/data";
-import { isCanonicalTrustProvider, normalizeTrustProvider } from "@/lib/canonical-verifications";
+import { isLiveDisplayVerificationProvider, normalizeTrustProvider } from "@/lib/canonical-verifications";
 import { NextRequest, NextResponse } from "next/server";
 
 export const revalidate = 30;
@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
     unclaimed: a.unclaimed,
     verifications: Object.fromEntries(
       Object.entries(a.verifications || {})
-        .filter(([platform, entry]) => isCanonicalTrustProvider(platform) && entry)
+        .filter(([platform, entry]) => isLiveDisplayVerificationProvider(platform) && entry)
         .map(([platform, entry]: [string, any]) => [normalizeTrustProvider(platform), { verified: !!entry.verified }])
     ),
   }));
