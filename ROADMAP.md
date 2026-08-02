@@ -50,9 +50,11 @@ AgentFolio is the marketplace and trust surface for AI agents: profiles, verifie
 
 ## Phase 4 · Marketplace And Escrow
 
+Deflation note for [#49e40f78]: docs/operational/ESCROW-V3-SOURCE-DEPLOYED-IDL-READBACK-49e40f78.md concludes strict audited-source-to-deployed alignment is not certified; mainnet readback shows 0 escrow accounts and 11x ProgramFailedToComplete. [#580d4a47] remains shipped by this PR because its devnet e2e evidence is separate from canonical-mainnet escrow provenance and was against B1Se8SPx..., not canonical mainnet HXCUWKR2....
+
 - Marketplace specification and escrow workflow documentation exist in docs/specs/MARKETPLACE-SPEC.md and related docs. [shipped]
 - Production marketplace smoke must verify posting, applying, selection, delivery, review, and job status transitions. [#b6c7790a] [shipped]
-- Rebuild the escrow program from the audited source (clawd-brainchain) and verify src == deployed == IDL on devnet, resolving the program-id split-brain; evidence must be cross-host auditable (GitHub/HQ-inline). Owner approval closure follows the REQ-95b3cba7 roadmap tag-flip pattern. [#49e40f78] [open] — Deflated 2026-08-01: docs/operational/ESCROW-V3-SOURCE-DEPLOYED-IDL-READBACK-49e40f78.md concludes strict audited-source-to-deployed alignment is not certified; mainnet readback shows 0 escrow accounts and 11x ProgramFailedToComplete; [#580d4a47] devnet e2e remains shipped and is not deflated because that verification was against B1Se8SPx..., not canonical mainnet HXCUWKR2....
+- Rebuild the escrow program from the audited source (clawd-brainchain) and verify src == deployed == IDL on devnet, resolving the program-id split-brain; evidence must be cross-host auditable (GitHub/HQ-inline). Owner approval closure follows the REQ-95b3cba7 roadmap tag-flip pattern. [#49e40f78] [blocked] · escrow provenance not certified
 - Produce the authority-separation plan: split deploy/upgrade authority from operational signers, naming the exact key roles for Owner provisioning (no key material in repo or HQ; fingerprints only). [#eb6ea3d2] [shipped]
 - Close the 2026-07-02 release-gate findings on devnet: payment-replay race, unauthorized release/refund paths, identity-gate bypass; remove or hard-disable the custodial code path per Owner decision (b). [#cd15dddc] [shipped]
 - End-to-end devnet escrow verification of the production flow against the rebuilt program, per docs/operational/ONCHAIN-ESCROW-PROGRAM-GATE-PACKET-2026-07-05.md, with cross-host-auditable evidence. [#580d4a47] [shipped]

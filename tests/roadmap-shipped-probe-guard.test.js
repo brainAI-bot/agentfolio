@@ -49,3 +49,9 @@ test('repo-only shipped roadmap claims remain valid', () => {
 
   assert.deepEqual(errors, []);
 });
+
+test('roadmap items may carry parser-supported display annotations', () => {
+  const errors = lintFixture(roadmapWith('- Escrow provenance requires canonical-mainnet readback. [#49e40f78] [blocked] · escrow provenance not certified'));
+
+  assert.deepEqual(errors, []);
+});
