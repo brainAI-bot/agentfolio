@@ -44,6 +44,10 @@ test('cleanup identifies retired rows and auto-pass rows for purge', () => {
   assert.equal(rowIsRetiredOrAutoPass({ platform: 'agentmail', proof: '{}' }), true);
   assert.equal(rowIsRetiredOrAutoPass({ platform: 'ens', proof: '{}' }), true);
   assert.equal(rowIsRetiredOrAutoPass({ platform: 'farcaster', proof: '{}' }), true);
+  assert.equal(rowIsRetiredOrAutoPass({ platform: 'discord', proof: '{}' }), false);
+  assert.equal(rowIsRetiredOrAutoPass({ platform: 'ethereum', proof: '{"signature":"0xsig"}' }), false);
+  assert.equal(rowIsRetiredOrAutoPass({ platform: 'satp', proof: '{"txSignature":"sig"}' }), false);
+  assert.equal(rowIsRetiredOrAutoPass({ platform: 'x', proof: '{"tweetId":"123"}' }), false);
   assert.equal(rowIsRetiredOrAutoPass({ platform: 'solana', proof: '{"source":"satp-auto-v3-confirm","auto":true}' }), true);
   assert.equal(rowIsRetiredOrAutoPass({ platform: 'solana', proof: '{"txSignature":"signed-solana-proof"}' }), false);
 });
@@ -68,6 +72,10 @@ test('cleanup dry-run reports profile filtering and rescoring without mutating f
     verificationData: {
       solana: { verified: true, source: 'satp-auto-v3-confirm', auto: true },
       github: { verified: true },
+      discord: { verified: true, username: 'agent#0001' },
+      ethereum: { verified: true, address: '0x123' },
+      satp: { verified: true, did: 'did:satp:sol:abc' },
+      x: { verified: false, handle: 'agent' },
       telegram: { verified: true },
     },
     trustScore: 240,
@@ -97,6 +105,7 @@ test('cleanup dry-run exposes matched SQLite tuples', () => {
   `);
   db.prepare('INSERT INTO verifications (id, platform, proof) VALUES (?, ?, ?)').run('v1', 'telegram', '{}');
   db.prepare('INSERT INTO verifications (id, platform, proof) VALUES (?, ?, ?)').run('v2', 'solana', '{"txSignature":"sig"}');
+  db.prepare('INSERT INTO verifications (id, platform, proof) VALUES (?, ?, ?)').run('v3', 'discord', '{"challengeId":"manual"}');
   db.prepare('INSERT INTO attestations (platform, proof, source, method) VALUES (?, ?, ?, ?)').run('solana', '{}', 'satp-auto-v3-confirm', null);
   db.close();
 
@@ -106,7 +115,7 @@ test('cleanup dry-run exposes matched SQLite tuples', () => {
     table: 'verifications',
     rowId: 'v1',
     platform: 'telegram',
-    reason: 'noncanonical_provider',
+    reason: 'retired_provider',
     match: ['telegram', 'platform'],
   }]);
   assert.deepEqual(summary.sqliteAttestationMatches, [{

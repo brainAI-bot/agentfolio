@@ -40,6 +40,7 @@ const { computeUnifiedTrustScore } = require('./lib/unified-trust-score');
 const {
   CANONICAL_TRUST_PROVIDERS,
   RETIRED_TRUST_PROVIDERS,
+  LIVE_DISPLAY_VERIFICATION_PROVIDERS,
   filterCanonicalTrustData,
   hasVerifiedCanonicalTrustData,
   retiredProviderResponse,
@@ -98,20 +99,6 @@ function getRequestBaseUrl(req) {
 function sendRetiredVerificationProvider(res, platform, status = 410) {
   return res.status(status).json(retiredProviderResponse(platform));
 }
-
-const LIVE_DISPLAY_VERIFICATION_PROVIDERS = Object.freeze([
-  'discord',
-  'ethereum',
-  'hyperliquid',
-  'moltbook',
-  'polymarket',
-  'satp',
-  'twitter',
-  'x',
-  'mcp',
-  'a2a',
-  'review',
-]);
 
 function normalizeDidProfile(row) {
   if (!row) return null;
@@ -1263,7 +1250,7 @@ app.get('/api/health', (req, res) => {
     canonical_trust_providers: CANONICAL_TRUST_PROVIDERS,
     retired_non_verifying_providers: RETIRED_TRUST_PROVIDERS,
     live_display_verification_providers: LIVE_DISPLAY_VERIFICATION_PROVIDERS,
-    providers: [...CANONICAL_TRUST_PROVIDERS, ...LIVE_DISPLAY_VERIFICATION_PROVIDERS]
+    providers: Array.from(new Set([...CANONICAL_TRUST_PROVIDERS, ...LIVE_DISPLAY_VERIFICATION_PROVIDERS]))
   });
 });
 

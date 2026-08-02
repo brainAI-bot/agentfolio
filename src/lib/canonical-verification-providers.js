@@ -16,6 +16,21 @@ const RETIRED_TRUST_PROVIDERS = Object.freeze([
   'custom',
 ]);
 const RETIRED_TRUST_PROVIDER_SET = new Set(RETIRED_TRUST_PROVIDERS);
+const LIVE_DISPLAY_VERIFICATION_PROVIDERS = Object.freeze([
+  ...CANONICAL_TRUST_PROVIDERS,
+  'discord',
+  'ethereum',
+  'hyperliquid',
+  'moltbook',
+  'polymarket',
+  'satp',
+  'twitter',
+  'x',
+  'mcp',
+  'a2a',
+  'review',
+]);
+const LIVE_DISPLAY_VERIFICATION_PROVIDER_SET = new Set(LIVE_DISPLAY_VERIFICATION_PROVIDERS);
 const AUTO_PASS_MARKERS = new Set([
   'auto',
   'auto-pass',
@@ -51,6 +66,11 @@ function isCanonicalTrustProvider(platform) {
 function isRetiredTrustProvider(platform) {
   const normalized = normalizeTrustProvider(platform);
   return RETIRED_TRUST_PROVIDER_SET.has(normalized);
+}
+
+function isLiveDisplayVerificationProvider(platform) {
+  const normalized = normalizeTrustProvider(platform);
+  return LIVE_DISPLAY_VERIFICATION_PROVIDER_SET.has(normalized);
 }
 
 function normalizeMarkerValue(value) {
@@ -114,9 +134,11 @@ function retiredProviderResponse(platform) {
 module.exports = {
   CANONICAL_TRUST_PROVIDERS,
   RETIRED_TRUST_PROVIDERS,
+  LIVE_DISPLAY_VERIFICATION_PROVIDERS,
   normalizeTrustProvider,
   isCanonicalTrustProvider,
   isRetiredTrustProvider,
+  isLiveDisplayVerificationProvider,
   isAutoPassAttestation,
   filterCanonicalTrustVerifications,
   filterCanonicalTrustData,

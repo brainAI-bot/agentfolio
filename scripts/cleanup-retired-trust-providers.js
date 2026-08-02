@@ -16,7 +16,7 @@ const {
   CANONICAL_TRUST_PROVIDERS,
   filterCanonicalTrustData,
   isAutoPassAttestation,
-  isCanonicalTrustProvider,
+  isRetiredTrustProvider,
 } = require('../src/lib/canonical-verification-providers');
 const { computeTrustScore } = require('../src/lib/compute-trust-score');
 
@@ -41,10 +41,10 @@ function jsonChanged(before, after) {
 
 function cleanupMatchForRow(row = {}) {
   const platform = row.platform || row.type || null;
-  if (!isCanonicalTrustProvider(platform)) {
+  if (isRetiredTrustProvider(platform)) {
     return {
       platform,
-      reason: 'noncanonical_provider',
+      reason: 'retired_provider',
       tuple: [platform, 'platform'],
     };
   }
@@ -186,12 +186,17 @@ function cleanupSqlite({ dbPath, write, summary }) {
   const profileUpdates = [];
   for (const profile of profiles) {
     const current = parseJson(profile.verification_data, {});
-    const filtered = filterCanonicalTrustData(current);
-    const scores = rescoreProfileRecord(profile, filtered);
+    const filteredForScore = filterCanonicalTrustData(current);
+    const scores = rescoreProfileRecord(profile, filteredForScore);
     const storedScore = Number(profile.trust_score ?? profile.trustScore ?? profile.reputation_score ?? profile.reputationScore ?? 0);
     const needsScore = storedScore !== scores.trustScore;
-    if (jsonChanged(current, filtered) || needsScore) {
-      profileUpdates.push({ id: profile.id, verificationData: filtered, scores });
+    const cleaned = { ...current };
+    for (const [platform, data] of Object.entries(current || {})) {
+      const match = cleanupMatchForRow({ platform, ...data });
+      if (match) delete cleaned[platform];
+    }
+    if (jsonChanged(current, cleaned) || needsScore) {
+      profileUpdates.push({ id: profile.id, verificationData: cleaned, scores });
       for (const [platform, data] of Object.entries(current || {})) {
         const match = jsonProfileMatchTuple(profile.id, platform, data);
         if (match) summary.sqliteProfileMatches.push(match);
@@ -261,9 +266,14 @@ function cleanupJsonProfiles({ profilesDir, write, summary }) {
     }
 
     const current = profile.verificationData || {};
-    const filtered = filterCanonicalTrustData(current);
-    const scores = rescoreProfileRecord(profile, filtered);
-    const changed = jsonChanged(current, filtered);
+    const filteredForScore = filterCanonicalTrustData(current);
+    const scores = rescoreProfileRecord(profile, filteredForScore);
+    const cleaned = { ...current };
+    for (const [platform, data] of Object.entries(current || {})) {
+      const match = cleanupMatchForRow({ platform, ...data });
+      if (match) delete cleaned[platform];
+    }
+    const changed = jsonChanged(current, cleaned);
     const scoreChanged = profile.trustScore !== scores.trustScore || profile.reputationScore !== scores.reputationScore;
     if (!changed && !scoreChanged) continue;
 
@@ -275,7 +285,7 @@ function cleanupJsonProfiles({ profilesDir, write, summary }) {
     }
 
     if (write) {
-      profile.verificationData = filtered;
+      profile.verificationData = cleaned;
       profile.trustScore = scores.trustScore;
       profile.reputationScore = scores.reputationScore;
       profile.verification = scores.verification;

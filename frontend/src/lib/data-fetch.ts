@@ -40,7 +40,11 @@ export async function fetchAgent(id: string): Promise<Agent | null> {
     }
     const canonicalEntry = (platform: string) => {
       if (!isCanonicalTrustProvider(platform)) return null;
-      return platform === "solana" ? (vd.solana || vd.solana_wallet || null) : (vd[platform] || null);
+      if (platform === "solana") {
+        const solanaEntries = [vd.solana, vd.solana_wallet].filter(Boolean);
+        return solanaEntries.find((entry: any) => entry?.verified) || solanaEntries[0] || null;
+      }
+      return vd[platform] || null;
     };
     const isCanonicalVerified = (platform: string) => !!canonicalEntry(platform)?.verified;
 

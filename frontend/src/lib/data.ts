@@ -155,7 +155,11 @@ function mapProfile(p: RawProfile): Agent {
   const vd = p.verificationData || {};
   const canonicalEntry = (platform: string) => {
     if (!isCanonicalTrustProvider(platform)) return null;
-    return platform === "solana" ? (vd.solana || vd.solana_wallet || null) : ((vd as any)[platform] || null);
+    if (platform === "solana") {
+      const solanaEntries = [vd.solana, vd.solana_wallet].filter(Boolean);
+      return solanaEntries.find((entry: any) => entry?.verified) || solanaEntries[0] || null;
+    }
+    return (vd as any)[platform] || null;
   };
   const isCanonicalVerified = (platform: string) => !!canonicalEntry(platform)?.verified;
   // Count local verifications for level fallback
