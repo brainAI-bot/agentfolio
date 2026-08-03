@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const Database = require('better-sqlite3');
@@ -11,7 +12,28 @@ const {
   isAutoPassAttestation,
 } = require('../src/lib/canonical-verification-providers');
 const { computeTrustScore } = require('../src/lib/compute-trust-score');
-const { cleanup, cleanupMatchForRow, rowIsRetiredOrAutoPass } = require('../scripts/cleanup-retired-trust-providers');
+const {
+  cleanup,
+  cleanupMatchForRow,
+  cleanupWithDeployedAttestations,
+  rowIsRetiredOrAutoPass,
+} = require('../scripts/cleanup-retired-trust-providers');
+
+function listen(server) {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve(server.address().port);
+    });
+  });
+}
+
+function closeServer(server) {
+  return new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
 
 test('canonical trust provider set is exactly solana, github, domain, website', () => {
   assert.deepEqual(CANONICAL_TRUST_PROVIDERS, ['solana', 'github', 'domain', 'website']);
@@ -140,4 +162,59 @@ test('cleanup dry-run tolerates SQLite files without AgentFolio tables', () => {
   assert.equal(summary.sqliteAttestationRowsRemoved, 0);
   assert.equal(summary.sqliteProfilesUpdated, 0);
   assert.equal(summary.sqliteProfilesRescored, 0);
+});
+
+test('cleanup can detect deployed attestations through public API without deploy-host shell', async () => {
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/api/profiles') {
+      res.end(JSON.stringify({ profiles: [{ id: 'agent_live' }] }));
+      return;
+    }
+    if (req.url === '/api/satp/attestations/by-agent/agent_live') {
+      res.end(JSON.stringify({
+        ok: true,
+        data: {
+          attestations: [
+            {
+              platform: 'solana',
+              txSignature: 'signed-solana-proof',
+              memo: 'VERIFY|agent_live|solana|2026-08-03T00:00:00.000Z|hash',
+            },
+            {
+              platform: 'telegram',
+              txSignature: 'retired-provider-proof',
+              memo: 'VERIFY|agent_live|telegram|2026-08-03T00:00:00.000Z|hash',
+            },
+          ],
+        },
+      }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end(JSON.stringify({ error: 'not found' }));
+  });
+
+  const port = await listen(server);
+  try {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-deployed-cleanup-'));
+    const summary = await cleanupWithDeployedAttestations({
+      dbPath: path.join(temp, 'missing.db'),
+      profilesDir: path.join(temp, 'missing-profiles'),
+      deployedBaseUrl: `http://127.0.0.1:${port}`,
+    });
+
+    assert.equal(summary.deployedAttestationRowsDetected, 2);
+    assert.deepEqual(summary.deployedAttestationMatches, [{
+      agentId: 'agent_live',
+      platform: 'telegram',
+      reason: 'retired_provider',
+      match: ['telegram', 'platform'],
+      txSignature: 'retired-provider-proof',
+      solscanUrl: null,
+    }]);
+    assert.deepEqual(summary.deployedAttestationErrors, []);
+  } finally {
+    await closeServer(server);
+  }
 });
