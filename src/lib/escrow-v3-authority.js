@@ -158,15 +158,30 @@ function getEscrowV3ProvenanceReadback({ authorityReadback, network = 'mainnet' 
   const escrowProgramId = readback.expectedProgramId || null;
 
   const mismatches = [];
+  if (!readback.anchorToml?.exists) mismatches.push('missing_anchor_toml');
   if (!readback.programSource?.exists || !sourceHash) mismatches.push('missing_source_hash');
-  if (!readback.trackedIdl?.exists || !idlHash) mismatches.push('missing_idl_hash');
-  if (idlProgramId !== escrowProgramId) mismatches.push('tracked_idl_program_id_mismatch');
-  if (runtimeProgramId !== escrowProgramId) mismatches.push(`${normalizedNetwork}_runtime_program_id_mismatch`);
-  if (readback.packagedSatpEscrowIdl?.address && readback.packagedSatpEscrowIdl.address !== escrowProgramId) {
+  if (!readback.trackedIdl?.exists || !idlHash) {
+    mismatches.push('missing_idl_hash');
+  } else if (readback.trackedIdl.matchesExpectedProgramId !== true) {
+    mismatches.push('tracked_idl_program_id_mismatch');
+  }
+  if (!readback.packagedSatpEscrowIdl?.exists) {
+    mismatches.push('missing_packaged_idl');
+  } else if (readback.packagedSatpEscrowIdl.matchesExpectedProgramId !== true) {
     mismatches.push('packaged_idl_program_id_mismatch');
   }
+  if (runtime.available === false) mismatches.push('runtime_unavailable');
+  if (readback.satpArtifact?.mainnetMatchesExpectedProgramId !== true) {
+    mismatches.push('mainnet_runtime_program_id_mismatch');
+  }
+  if (readback.satpArtifact?.devnetMatchesExpectedProgramId !== true) {
+    mismatches.push('devnet_runtime_program_id_mismatch');
+  }
+  if (readback.status && readback.status !== 'verified' && mismatches.length === 0) {
+    mismatches.push('authority_status_not_verified');
+  }
   const liveEscrowWritesAllowed = mismatches.length === 0
-    && (readback.releaseGate?.liveEscrowWritesAllowed ?? true);
+    && readback.releaseGate?.liveEscrowWritesAllowed === true;
 
   return {
     label: readback.label || AUTHORITY_LABEL,

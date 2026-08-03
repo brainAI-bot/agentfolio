@@ -148,8 +148,12 @@ test('GET /api/v3/escrow/health exposes live escrow gate status', async () => {
     assert.match(body.escrowProvenance.sourceHash, /^[0-9a-f]{64}$/);
     assert.match(body.escrowProvenance.idlHash, /^[0-9a-f]{64}$/);
     assert.match(body.escrowProvenance.runtimeProgramId, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
-    assert.equal(body.escrowProvenance.mismatchStatus, 'matched');
-    assert.equal(body.escrowProvenance.failClosed, false);
+    assert.equal(body.escrowProvenance.mismatchStatus, 'mismatch');
+    assert.deepEqual(body.escrowProvenance.mismatches, [
+      'missing_packaged_idl',
+      'devnet_runtime_program_id_mismatch',
+    ]);
+    assert.equal(body.escrowProvenance.failClosed, true);
     assert.equal(body.escrowProvenance.liveEscrowWritesAllowed, false);
   } finally {
     if (previousEnable === undefined) delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
