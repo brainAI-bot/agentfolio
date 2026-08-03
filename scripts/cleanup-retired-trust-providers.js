@@ -29,7 +29,7 @@ function readOption(argv, name) {
   const inline = argv.find((arg) => arg.startsWith(prefix));
   if (inline) return inline.slice(prefix.length);
   const index = argv.indexOf(name);
-  if (index >= 0) return argv[index + 1] || '';
+  if (index >= 0 && argv[index + 1] && !argv[index + 1].startsWith('--')) return argv[index + 1];
   return '';
 }
 
@@ -39,7 +39,7 @@ function readRepeatedOption(argv, names) {
     const prefix = `${name}=`;
     argv.forEach((arg, index) => {
       if (arg.startsWith(prefix)) values.push(arg.slice(prefix.length));
-      if (arg === name && argv[index + 1]) values.push(argv[index + 1]);
+      if (arg === name && argv[index + 1] && !argv[index + 1].startsWith('--')) values.push(argv[index + 1]);
     });
   }
   return values;
@@ -58,6 +58,8 @@ function parseCliOptions(argv = process.argv.slice(2)) {
     dbPath: readOption(argv, '--db-path') || DB_PATH,
     profilesDir: readOption(argv, '--profiles-dir') || PROFILES_DIR,
     deployedBaseUrl: readOption(argv, '--deployed-base-url') || process.env.AGENTFOLIO_DEPLOYED_BASE_URL || '',
+    deployedProfilePageLimit: Number(readOption(argv, '--deployed-profile-page-limit') || 100),
+    deployedProfileMaxPages: Number(readOption(argv, '--deployed-profile-max-pages') || 100),
     deployedAgentIds: [
       ...readRepeatedOption(argv, ['--deployed-agent-id', '--agent-id']),
       ...splitList(process.env.AGENTFOLIO_DEPLOYED_AGENT_IDS),
@@ -186,9 +188,30 @@ function createSummary(write) {
     sqliteAttestationMatches: [],
     sqliteProfileMatches: [],
     jsonProfileMatches: [],
+    deployedDetectionRan: false,
+    deployedDetectionComplete: false,
+    deployedVerifiedClean: false,
+    deployedDetectionSource: null,
+    deployedBaseUrl: null,
+    deployedProfilesTotal: null,
+    deployedProfilesDiscovered: 0,
+    deployedProfilesCovered: 0,
+    deployedProfilePagesFetched: 0,
+    deployedProfilesTruncated: false,
+    deployedProfileCoverage: {
+      source: 'skipped',
+      requestedAgentIds: 0,
+      discoveredAgentIds: 0,
+      coveredAgentIds: 0,
+      totalProfiles: null,
+      pagesFetched: 0,
+      truncated: false,
+    },
     deployedAttestationRowsDetected: 0,
     deployedAttestationMatches: [],
     deployedAttestationErrors: [],
+    deployedAttestationEmptyAgents: [],
+    deployedAnomalies: [],
     skipped: [],
   };
 }
@@ -350,7 +373,14 @@ function unique(values) {
 }
 
 function normalizeBaseUrl(value) {
-  return String(value || '').trim().replace(/\/+$/, '');
+  const normalized = String(value || '').trim().replace(/\/+$/, '');
+  if (!normalized) return '';
+  try {
+    const parsed = new URL(normalized);
+    return ['http:', 'https:'].includes(parsed.protocol) ? normalized : '';
+  } catch (_) {
+    return '';
+  }
 }
 
 function extractProfiles(payload) {
@@ -363,10 +393,71 @@ function extractProfiles(payload) {
   return [];
 }
 
+function extractAgentIdFromProfile(profile = {}) {
+  return profile?.id || profile?.profileId || profile?.agentId || profile?.handle;
+}
+
 function extractAgentIdsFromProfiles(payload) {
-  return unique(extractProfiles(payload).map((profile) => (
-    profile?.id || profile?.profileId || profile?.agentId || profile?.handle
-  )));
+  return unique(extractProfiles(payload).map(extractAgentIdFromProfile));
+}
+
+function profileHasVerificationEvidence(profile = {}) {
+  const candidates = [
+    profile?.verificationData,
+    profile?.verification_data,
+    profile?.verifications,
+    profile?.verification,
+  ];
+  return candidates.some((value) => {
+    const data = parseJson(value, value || {});
+    if (!data || typeof data !== 'object') return false;
+    return Object.values(data).some((entry) => (
+      entry === true
+      || entry?.verified === true
+      || Boolean(entry?.txSignature || entry?.tx_signature || entry?.proof || entry?.memo)
+    ));
+  });
+}
+
+function readNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number >= 0) return number;
+  }
+  return null;
+}
+
+function extractProfilePagination(payload, fallbackPage, fallbackLimit, count) {
+  const page = readNumber(payload?.page, payload?.pagination?.page, payload?.meta?.page, fallbackPage) || fallbackPage;
+  const limit = readNumber(
+    payload?.limit,
+    payload?.pageSize,
+    payload?.pagination?.limit,
+    payload?.pagination?.pageSize,
+    payload?.meta?.limit,
+    fallbackLimit,
+  ) || fallbackLimit;
+  const total = readNumber(payload?.total, payload?.totalProfiles, payload?.pagination?.total, payload?.meta?.total);
+  const pages = readNumber(
+    payload?.pages,
+    payload?.totalPages,
+    payload?.pagination?.pages,
+    payload?.pagination?.totalPages,
+    payload?.meta?.pages,
+    payload?.meta?.totalPages,
+  );
+  const nextCursor = payload?.nextCursor || payload?.pagination?.nextCursor || payload?.meta?.nextCursor || null;
+  const nextUrl = payload?.next || payload?.nextUrl || payload?.pagination?.next || payload?.meta?.next || null;
+
+  return {
+    page,
+    limit,
+    total,
+    pages: pages || (total !== null && limit > 0 ? Math.ceil(total / limit) : null),
+    nextCursor,
+    nextUrl,
+    count,
+  };
 }
 
 function extractAttestations(payload) {
@@ -386,26 +477,178 @@ async function fetchJson(url, fetchImpl = global.fetch) {
   return response.json();
 }
 
-async function resolveDeployedAgentIds(baseUrl, explicitAgentIds, fetchImpl) {
-  const fromArgs = unique(explicitAgentIds);
-  if (fromArgs.length > 0) return fromArgs;
-  const payload = await fetchJson(`${baseUrl}/api/profiles`, fetchImpl);
-  return extractAgentIdsFromProfiles(payload);
+function buildProfilesUrl(baseUrl, page, limit, cursor) {
+  const url = new URL('/api/profiles', `${baseUrl}/`);
+  if (cursor) {
+    url.searchParams.set('cursor', cursor);
+  } else {
+    url.searchParams.set('page', String(page));
+    url.searchParams.set('limit', String(limit));
+  }
+  return url.toString();
 }
 
-async function detectDeployedAttestations({ baseUrl, agentIds = [], summary, fetchImpl = global.fetch }) {
+async function resolveDeployedAgentIds(baseUrl, explicitAgentIds, fetchImpl, options = {}) {
+  const fromArgs = unique(explicitAgentIds);
+  if (fromArgs.length > 0) {
+    return {
+      agentIds: fromArgs,
+      profilesById: new Map(fromArgs.map((agentId) => [agentId, null])),
+      coverage: {
+        source: 'explicit-agent-ids',
+        requestedAgentIds: fromArgs.length,
+        discoveredAgentIds: fromArgs.length,
+        totalProfiles: null,
+        pagesFetched: 0,
+        truncated: false,
+      },
+    };
+  }
+
+  const limit = Number.isFinite(options.profilePageLimit) && options.profilePageLimit > 0
+    ? options.profilePageLimit
+    : 100;
+  const maxPages = Number.isFinite(options.maxProfilePages) && options.maxProfilePages > 0
+    ? options.maxProfilePages
+    : 100;
+  const profilesById = new Map();
+  let page = 1;
+  let cursor = null;
+  let nextUrl = null;
+  let totalProfiles = null;
+  let expectedPages = null;
+  let pagesFetched = 0;
+  let truncated = false;
+
+  while (pagesFetched < maxPages) {
+    const url = nextUrl || buildProfilesUrl(baseUrl, page, limit, cursor);
+    const payload = await fetchJson(url, fetchImpl);
+    const profiles = extractProfiles(payload);
+    for (const profile of profiles) {
+      const agentId = extractAgentIdFromProfile(profile);
+      if (agentId) profilesById.set(String(agentId), profile);
+    }
+
+    pagesFetched += 1;
+    const pagination = extractProfilePagination(payload, page, limit, profiles.length);
+    totalProfiles = pagination.total ?? totalProfiles;
+    expectedPages = pagination.pages ?? expectedPages;
+
+    if (pagination.nextUrl) {
+      nextUrl = new URL(pagination.nextUrl, `${baseUrl}/`).toString();
+      cursor = null;
+      page += 1;
+      continue;
+    }
+    if (pagination.nextCursor) {
+      cursor = pagination.nextCursor;
+      nextUrl = null;
+      page += 1;
+      continue;
+    }
+    if (expectedPages && page < expectedPages) {
+      page += 1;
+      nextUrl = null;
+      cursor = null;
+      continue;
+    }
+    break;
+  }
+
+  if (expectedPages && pagesFetched < expectedPages) truncated = true;
+  if (totalProfiles !== null && profilesById.size < totalProfiles) truncated = true;
+
+  return {
+    agentIds: [...profilesById.keys()],
+    profilesById,
+    coverage: {
+      source: 'api-profiles',
+      requestedAgentIds: 0,
+      discoveredAgentIds: profilesById.size,
+      totalProfiles,
+      pagesFetched,
+      truncated,
+    },
+  };
+}
+
+function updateDeployedCoverage(summary, coverage = {}) {
+  summary.deployedProfilesTotal = coverage.totalProfiles ?? null;
+  summary.deployedProfilesDiscovered = coverage.discoveredAgentIds || 0;
+  summary.deployedProfilePagesFetched = coverage.pagesFetched || 0;
+  summary.deployedProfilesTruncated = Boolean(coverage.truncated);
+  summary.deployedProfileCoverage = {
+    source: coverage.source || 'unknown',
+    requestedAgentIds: coverage.requestedAgentIds || 0,
+    discoveredAgentIds: coverage.discoveredAgentIds || 0,
+    coveredAgentIds: summary.deployedProfilesCovered || 0,
+    totalProfiles: coverage.totalProfiles ?? null,
+    pagesFetched: coverage.pagesFetched || 0,
+    truncated: Boolean(coverage.truncated),
+  };
+}
+
+function updateDeployedVerdict(summary) {
+  summary.deployedDetectionComplete = Boolean(
+    summary.deployedDetectionRan
+    && !summary.deployedProfilesTruncated
+    && summary.deployedAttestationErrors.length === 0
+  );
+  summary.deployedProfileCoverage.coveredAgentIds = summary.deployedProfilesCovered;
+  summary.deployedVerifiedClean = Boolean(
+    summary.deployedDetectionComplete
+    && summary.deployedAttestationMatches.length === 0
+    && summary.deployedAnomalies.length === 0
+  );
+  return summary;
+}
+
+async function detectDeployedAttestations({
+  baseUrl,
+  agentIds = [],
+  summary,
+  fetchImpl = global.fetch,
+  profilePageLimit,
+  maxProfilePages,
+}) {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
-  if (!normalizedBaseUrl) return summary;
+  if (!normalizedBaseUrl) {
+    summary.deployedAnomalies.push({
+      type: 'deployed_detection_skipped',
+      reason: baseUrl ? 'invalid_base_url' : 'missing_base_url',
+    });
+    summary.skipped.push('deployed attestation detection skipped: missing or invalid deployed base URL');
+    return updateDeployedVerdict(summary);
+  }
+
+  summary.deployedDetectionRan = true;
+  summary.deployedDetectionSource = 'public-api-chain-cache';
+  summary.deployedBaseUrl = normalizedBaseUrl;
 
   let resolvedAgentIds = [];
+  let profilesById = new Map();
   try {
-    resolvedAgentIds = await resolveDeployedAgentIds(normalizedBaseUrl, agentIds, fetchImpl);
+    const resolved = await resolveDeployedAgentIds(normalizedBaseUrl, agentIds, fetchImpl, {
+      profilePageLimit,
+      maxProfilePages,
+    });
+    resolvedAgentIds = resolved.agentIds;
+    profilesById = resolved.profilesById;
+    updateDeployedCoverage(summary, resolved.coverage);
+    if (resolved.coverage.truncated) {
+      summary.deployedAnomalies.push({
+        type: 'profile_detection_truncated',
+        discoveredAgentIds: resolved.coverage.discoveredAgentIds,
+        totalProfiles: resolved.coverage.totalProfiles,
+        pagesFetched: resolved.coverage.pagesFetched,
+      });
+    }
   } catch (error) {
     summary.deployedAttestationErrors.push({
       url: `${normalizedBaseUrl}/api/profiles`,
       error: error.message,
     });
-    return summary;
+    return updateDeployedVerdict(summary);
   }
 
   for (const agentId of resolvedAgentIds) {
@@ -413,7 +656,19 @@ async function detectDeployedAttestations({ baseUrl, agentIds = [], summary, fet
     try {
       const payload = await fetchJson(url, fetchImpl);
       const attestations = extractAttestations(payload);
+      summary.deployedProfilesCovered += 1;
       summary.deployedAttestationRowsDetected += attestations.length;
+      if (attestations.length === 0) {
+        summary.deployedAttestationEmptyAgents.push(agentId);
+        const profile = profilesById.get(agentId);
+        summary.deployedAnomalies.push({
+          type: 'empty_attestations',
+          agentId,
+          reason: profileHasVerificationEvidence(profile)
+            ? 'profile_has_verification_evidence_but_chain_cache_returned_empty'
+            : 'chain_cache_returned_empty',
+        });
+      }
       for (const attestation of attestations) {
         const match = cleanupMatchForRow({
           ...attestation,
@@ -435,7 +690,7 @@ async function detectDeployedAttestations({ baseUrl, agentIds = [], summary, fet
     }
   }
 
-  return summary;
+  return updateDeployedVerdict(summary);
 }
 
 async function cleanupWithDeployedAttestations(options = {}) {
@@ -445,6 +700,8 @@ async function cleanupWithDeployedAttestations(options = {}) {
     agentIds: options.deployedAgentIds,
     summary,
     fetchImpl: options.fetchImpl,
+    profilePageLimit: options.deployedProfilePageLimit,
+    maxProfilePages: options.deployedProfileMaxPages,
   });
 }
 
