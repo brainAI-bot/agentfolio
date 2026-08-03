@@ -10,7 +10,50 @@ const {
   AUTHORITY_PROGRAM_ID,
   AUTHORITY_PROGRAM_ID_PROVENANCE,
   getEscrowV3AuthorityReadback,
+  getEscrowV3ProvenanceReadback,
 } = require('../src/lib/escrow-v3-authority');
+
+function authorityReadbackFixture(overrides = {}) {
+  const base = {
+    label: 'escrow_v3',
+    expectedProgramId: AUTHORITY_PROGRAM_ID,
+    programSource: {
+      exists: true,
+      sha256: 'source-sha',
+    },
+    trackedIdl: {
+      exists: true,
+      address: AUTHORITY_PROGRAM_ID,
+      sha256: 'idl-sha',
+    },
+    packagedSatpEscrowIdl: {
+      address: AUTHORITY_PROGRAM_ID,
+    },
+    satpArtifact: {
+      commit: 'artifact-commit',
+      runtime: {
+        mainnetEscrowProgramId: AUTHORITY_PROGRAM_ID,
+        devnetEscrowProgramId: AUTHORITY_PROGRAM_ID,
+      },
+    },
+  };
+
+  return {
+    ...base,
+    ...overrides,
+    programSource: { ...base.programSource, ...overrides.programSource },
+    trackedIdl: { ...base.trackedIdl, ...overrides.trackedIdl },
+    packagedSatpEscrowIdl: { ...base.packagedSatpEscrowIdl, ...overrides.packagedSatpEscrowIdl },
+    satpArtifact: {
+      ...base.satpArtifact,
+      ...overrides.satpArtifact,
+      runtime: {
+        ...base.satpArtifact.runtime,
+        ...overrides.satpArtifact?.runtime,
+      },
+    },
+  };
+}
 
 function verifierEnv(extra = {}) {
   const env = { ...process.env, ...extra };
@@ -114,6 +157,65 @@ test('escrow_v3 source and IDL strict verifier confirms the pinned program id', 
   assert.equal(evidence.checks.identityOwnedBySatpProgram, true);
   assert.equal(evidence.checks.minVerificationLevelEnforced, true);
   assert.equal(evidence.checks.requireBornEnforced, true);
+});
+
+test('escrow_v3 provenance readback exposes hashes, artifact commit, runtime id, and matched status', () => {
+  const provenance = getEscrowV3ProvenanceReadback({
+    authorityReadback: authorityReadbackFixture(),
+    network: 'mainnet',
+  });
+
+  assert.equal(provenance.escrowProgramId, AUTHORITY_PROGRAM_ID);
+  assert.equal(provenance.artifactCommit, 'artifact-commit');
+  assert.equal(provenance.sourceHash, 'source-sha');
+  assert.equal(provenance.idlHash, 'idl-sha');
+  assert.equal(provenance.idlProgramId, AUTHORITY_PROGRAM_ID);
+  assert.equal(provenance.runtimeProgramId, AUTHORITY_PROGRAM_ID);
+  assert.deepEqual(provenance.runtimeProgramIds, {
+    mainnet: AUTHORITY_PROGRAM_ID,
+    devnet: AUTHORITY_PROGRAM_ID,
+  });
+  assert.equal(provenance.mismatchStatus, 'matched');
+  assert.deepEqual(provenance.mismatches, []);
+  assert.equal(provenance.failClosed, false);
+  assert.equal(provenance.liveEscrowWritesAllowed, true);
+});
+
+test('escrow_v3 provenance readback fails closed when source, IDL, or runtime disagree', () => {
+  const sourceMissing = getEscrowV3ProvenanceReadback({
+    authorityReadback: authorityReadbackFixture({
+      programSource: { exists: false, sha256: null },
+    }),
+  });
+  assert.equal(sourceMissing.mismatchStatus, 'mismatch');
+  assert.equal(sourceMissing.failClosed, true);
+  assert.equal(sourceMissing.liveEscrowWritesAllowed, false);
+  assert.deepEqual(sourceMissing.mismatches, ['missing_source_hash']);
+
+  const idlMismatch = getEscrowV3ProvenanceReadback({
+    authorityReadback: authorityReadbackFixture({
+      trackedIdl: { address: '11111111111111111111111111111111' },
+    }),
+  });
+  assert.equal(idlMismatch.mismatchStatus, 'mismatch');
+  assert.equal(idlMismatch.failClosed, true);
+  assert.equal(idlMismatch.liveEscrowWritesAllowed, false);
+  assert.deepEqual(idlMismatch.mismatches, ['tracked_idl_program_id_mismatch']);
+
+  const runtimeMismatch = getEscrowV3ProvenanceReadback({
+    authorityReadback: authorityReadbackFixture({
+      satpArtifact: {
+        runtime: {
+          mainnetEscrowProgramId: '11111111111111111111111111111111',
+        },
+      },
+    }),
+    network: 'mainnet',
+  });
+  assert.equal(runtimeMismatch.mismatchStatus, 'mismatch');
+  assert.equal(runtimeMismatch.failClosed, true);
+  assert.equal(runtimeMismatch.liveEscrowWritesAllowed, false);
+  assert.deepEqual(runtimeMismatch.mismatches, ['mainnet_runtime_program_id_mismatch']);
 });
 
 test('SATP mainnet program verifier checks every registry id in explicit fixture mode and can fail closed', () => {

@@ -25,15 +25,22 @@
  */
 
 const { Router } = require('express');
+const satpClient = require('@brainai/satp-client');
 const { liveEscrowGateStatus } = require('../lib/write-surface-gate');
+const {
+  getEscrowV3AuthorityReadback,
+  getEscrowV3ProvenanceReadback,
+} = require('../lib/escrow-v3-authority');
 const router = Router();
 
 // ── Health check ───────────────────────────────────────────────────────────────
 router.get('/health', (req, res) => {
+  const network = process.env.SATP_NETWORK || process.env.SOLANA_NETWORK || 'mainnet';
+  const escrowAuthority = getEscrowV3AuthorityReadback({ satpClient });
   res.json({
     status: 'ok',
     version: 'v3',
-    network: process.env.SATP_NETWORK || process.env.SOLANA_NETWORK || 'mainnet',
+    network,
     endpoints: {
       identity: 4,
       escrow: 11,
@@ -43,6 +50,10 @@ router.get('/health', (req, res) => {
       total: 26,
     },
     liveEscrow: liveEscrowGateStatus(),
+    escrowProvenance: getEscrowV3ProvenanceReadback({
+      authorityReadback: escrowAuthority,
+      network,
+    }),
     programs: {
       identity_v3: 'GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG',
       reviews_v3: 'r9XX4frcqxxAZ6Au9V5PA3EAxs1zoNckqLLmoSRcNr4',

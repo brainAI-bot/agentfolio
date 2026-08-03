@@ -142,6 +142,15 @@ test('GET /api/v3/escrow/health exposes live escrow gate status', async () => {
     assert.equal(body.escrowAuthority.releaseGate.ownerAuthorizationRequired, true);
     assert.equal(body.escrowAuthority.releaseGate.ownerAuthorizationStatus, 'missing_owner_authorization');
     assert.match(body.escrowAuthority.releaseGate.reason, /PDA reads may derive/);
+    assert.equal(body.escrowProvenance.escrowProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
+    assert.equal(typeof body.escrowProvenance.artifactCommit, 'string');
+    assert.ok(body.escrowProvenance.artifactCommit.length > 0);
+    assert.match(body.escrowProvenance.sourceHash, /^[0-9a-f]{64}$/);
+    assert.match(body.escrowProvenance.idlHash, /^[0-9a-f]{64}$/);
+    assert.match(body.escrowProvenance.runtimeProgramId, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+    assert.equal(body.escrowProvenance.mismatchStatus, 'matched');
+    assert.equal(body.escrowProvenance.failClosed, false);
+    assert.equal(body.escrowProvenance.liveEscrowWritesAllowed, false);
   } finally {
     if (previousEnable === undefined) delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
     else process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = previousEnable;
