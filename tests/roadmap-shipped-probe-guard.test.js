@@ -6,9 +6,14 @@ const test = require('node:test');
 
 const { lintRoadmap } = require('../scripts/lint-roadmap');
 
-function lintFixture(markdown) {
+function lintFixture(markdown, files = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-roadmap-'));
   const file = path.join(dir, 'ROADMAP.md');
+  for (const [name, content] of Object.entries(files)) {
+    const target = path.join(dir, name);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, content);
+  }
   fs.writeFileSync(file, markdown);
   return lintRoadmap(file);
 }
@@ -68,8 +73,28 @@ test('treasury money-path shipped claims require source deployed IDL certificati
   assert.ok(errors.some((error) => error.includes('treasury money-path shipped item requires executed transfer evidence')));
 });
 
-test('treasury money-path shipped claims accept executed transfer and source certification evidence', () => {
+test('treasury money-path shipped claims require a resolvable evidence document', () => {
   const errors = lintFixture(roadmapWith('- On-chain fee collection inside release/partial_release routes the platform percentage to the treasury (FriU1FEp...) - GitHub/HQ-visible executed transfer evidence proves both live routes move the platform percentage to treasury and source/deployed/IDL alignment is certified. [#011685d4] [shipped]'));
 
+  assert.ok(errors.some((error) => error.includes('resolvable evidence document path')));
+});
+
+test('treasury money-path shipped claims accept executed transfer, source certification, and evidence document', () => {
+  const errors = lintFixture(
+    roadmapWith('- On-chain fee collection inside release/partial_release routes the platform percentage to the treasury (FriU1FEp...) - GitHub/HQ-visible executed transfer evidence proves both live routes move the platform percentage to treasury and source/deployed/IDL alignment is certified in docs/operational/treasury-evidence.md. [#011685d4] [shipped]'),
+    { 'docs/operational/treasury-evidence.md': '# Treasury evidence\n' },
+  );
+
   assert.deepEqual(errors, []);
+});
+
+test('literal final fee roadmap line cannot be flipped to shipped without proof', () => {
+  const roadmap = fs.readFileSync(path.join(__dirname, '..', 'ROADMAP.md'), 'utf8');
+  const feeLine = roadmap.split(/\r?\n/).find((line) => line.includes('[#011685d4]'));
+
+  assert.ok(feeLine.includes('[pending]'));
+
+  const errors = lintFixture(roadmapWith(feeLine.replace('[pending]', '[shipped]')));
+
+  assert.ok(errors.some((error) => error.includes('treasury money-path shipped item requires executed transfer evidence')));
 });

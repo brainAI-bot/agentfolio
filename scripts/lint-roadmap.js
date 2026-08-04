@@ -15,6 +15,7 @@ const PROBE_EVIDENCE_RE = /\b(probe|probed|evidence|verified|readback|smoke|non-
 const TREASURY_MONEY_PATH_SHIPPED_RE = /\b(fee collection|platform percentage|release\/partial_release)\b/i;
 const TREASURY_TRANSFER_EVIDENCE_RE = /\bexecuted transfer evidence\b/i;
 const SOURCE_DEPLOYED_IDL_CERT_RE = /\b(source\/deployed\/IDL|deployed-source|src\s*==\s*deployed\s*==\s*IDL)\b/i;
+const REPO_DOC_PATH_RE = /\b(?:docs|reports|evidence)\/[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+/g;
 
 function cleanSection(value) {
   return String(value || '')
@@ -51,6 +52,17 @@ function parseRoadmapItems(markdown) {
   }
 
   return items;
+}
+
+function hasResolvableEvidencePath(line, roadmapFile) {
+  const refs = line.match(REPO_DOC_PATH_RE) || [];
+  return refs.some((ref) => {
+    const cleanRef = ref.replace(/[),.;:]+$/g, '');
+    return [
+      path.resolve(process.cwd(), cleanRef),
+      path.resolve(path.dirname(roadmapFile), cleanRef),
+    ].some((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile());
+  });
 }
 
 function lintRoadmap(file) {
@@ -101,9 +113,13 @@ function lintRoadmap(file) {
       /\[shipped\]/.test(line) &&
       /\btreasury\b/i.test(line) &&
       TREASURY_MONEY_PATH_SHIPPED_RE.test(line) &&
-      (!TREASURY_TRANSFER_EVIDENCE_RE.test(line) || !SOURCE_DEPLOYED_IDL_CERT_RE.test(line))
+      (
+        !TREASURY_TRANSFER_EVIDENCE_RE.test(line) ||
+        !SOURCE_DEPLOYED_IDL_CERT_RE.test(line) ||
+        !hasResolvableEvidencePath(line, file)
+      )
     ) {
-      errors.push(`line ${index + 1}: treasury money-path shipped item requires executed transfer evidence and certified source/deployed/IDL alignment`);
+      errors.push(`line ${index + 1}: treasury money-path shipped item requires executed transfer evidence, certified source/deployed/IDL alignment, and a resolvable evidence document path`);
     }
   }
 
