@@ -185,22 +185,25 @@ async function main() {
   const prodSha = normalizeSha(version.runningCommitSha || version.commitSha || version.commit || version.sha);
   const buildSha = normalizeSha(version.buildCommitSha);
   const checkoutSha = normalizeSha(version.checkoutHead);
-  const stampedSha = buildSha || prodSha;
 
   const checkedAt = new Date().toISOString();
-  const checkoutUnverifiable = !checkoutSha;
-  const stampMismatch = Boolean(stampedSha && checkoutSha && !commitsMatch(stampedSha, checkoutSha));
+  const unstamped = !buildSha;
+  const checkoutUnverifiable = Boolean(buildSha && version.source === 'checkout' && !checkoutSha);
+  const stampMismatch = Boolean(buildSha && checkoutSha && !commitsMatch(buildSha, checkoutSha));
   const status = !commitsMatch(prodSha, originSha)
     ? 'drift'
-    : stampMismatch
-      ? 'stamp_mismatch'
+    : unstamped
+      ? 'unstamped'
       : checkoutUnverifiable
         ? 'checkout_unverifiable'
-        : 'in_sync';
+        : stampMismatch
+          ? 'stamp_mismatch'
+          : 'in_sync';
   const evidence = {
     service: 'agentfolio',
     status,
     checkedAt,
+    unstamped,
     stampMismatch,
     checkoutUnverifiable,
     production: {

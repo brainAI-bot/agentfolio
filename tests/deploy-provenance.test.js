@@ -191,7 +191,7 @@ describe('deploy provenance', () => {
     }
   });
 
-  it('reports checkout_unverifiable when stamped production provenance omits checkoutHead', async () => {
+  it('reports in_sync when stamped production provenance omits checkoutHead', async () => {
     const originSha = execFileSync('git', ['rev-parse', 'origin/main'], {
       cwd: repoRoot,
       encoding: 'utf8',
@@ -213,15 +213,54 @@ describe('deploy provenance', () => {
         '--json',
       ]);
 
-      assert.strictEqual(result.status, 1, result.stderr);
+      assert.strictEqual(result.status, 0, result.stderr);
       const payload = JSON.parse(result.stdout);
-      assert.strictEqual(payload.status, 'checkout_unverifiable');
+      assert.strictEqual(payload.status, 'in_sync');
+      assert.strictEqual(payload.unstamped, false);
       assert.strictEqual(payload.stampMismatch, false);
-      assert.strictEqual(payload.checkoutUnverifiable, true);
+      assert.strictEqual(payload.checkoutUnverifiable, false);
       assert.strictEqual(payload.production.commitSha, originSha);
       assert.strictEqual(payload.production.buildCommitSha, originSha);
       assert.strictEqual(payload.production.source, 'build');
       assert.strictEqual(payload.production.checkoutHead, null);
+      assert.strictEqual(payload.origin.commitSha, originSha);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('reports unstamped when checkout-only production provenance matches origin', async () => {
+    const originSha = execFileSync('git', ['rev-parse', 'origin/main'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    }).trim();
+    const { server, url } = await listenWithVersion({
+      runningCommitSha: originSha,
+      commitSha: originSha,
+      source: 'checkout',
+      checkoutHead: originSha,
+      buildTime: '2026-07-06T18:26:00.000Z',
+    });
+
+    try {
+      const result = await runDriftCheck([
+        `--prod-url=${url}`,
+        `--repo=${repoRoot}`,
+        `--origin-ref=${originSha}`,
+        '--fail-on-drift',
+        '--json',
+      ]);
+
+      assert.strictEqual(result.status, 1, result.stderr);
+      const payload = JSON.parse(result.stdout);
+      assert.strictEqual(payload.status, 'unstamped');
+      assert.strictEqual(payload.unstamped, true);
+      assert.strictEqual(payload.stampMismatch, false);
+      assert.strictEqual(payload.checkoutUnverifiable, false);
+      assert.strictEqual(payload.production.commitSha, originSha);
+      assert.strictEqual(payload.production.buildCommitSha, null);
+      assert.strictEqual(payload.production.source, 'checkout');
+      assert.strictEqual(payload.production.checkoutHead, originSha);
       assert.strictEqual(payload.origin.commitSha, originSha);
     } finally {
       server.close();
