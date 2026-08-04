@@ -25,7 +25,6 @@
  */
 
 const { Router } = require('express');
-const satpClient = require('@brainai/satp-client');
 const { liveEscrowGateStatus } = require('../lib/write-surface-gate');
 const router = Router();
 
