@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const Database = require('better-sqlite3');
@@ -11,7 +12,28 @@ const {
   isAutoPassAttestation,
 } = require('../src/lib/canonical-verification-providers');
 const { computeTrustScore } = require('../src/lib/compute-trust-score');
-const { cleanup, cleanupMatchForRow, rowIsRetiredOrAutoPass } = require('../scripts/cleanup-retired-trust-providers');
+const {
+  cleanup,
+  cleanupMatchForRow,
+  cleanupWithDeployedAttestations,
+  rowIsRetiredOrAutoPass,
+} = require('../scripts/cleanup-retired-trust-providers');
+
+function listen(server) {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve(server.address().port);
+    });
+  });
+}
+
+function closeServer(server) {
+  return new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
 
 test('canonical trust provider set is exactly solana, github, domain, website', () => {
   assert.deepEqual(CANONICAL_TRUST_PROVIDERS, ['solana', 'github', 'domain', 'website']);
@@ -140,4 +162,238 @@ test('cleanup dry-run tolerates SQLite files without AgentFolio tables', () => {
   assert.equal(summary.sqliteAttestationRowsRemoved, 0);
   assert.equal(summary.sqliteProfilesUpdated, 0);
   assert.equal(summary.sqliteProfilesRescored, 0);
+});
+
+test('cleanup can detect deployed attestations through public API without deploy-host shell', async () => {
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/api/profiles?page=1&limit=100') {
+      res.end(JSON.stringify({ profiles: [{ id: 'agent_live' }], total: 1, pages: 1 }));
+      return;
+    }
+    if (req.url === '/api/satp/attestations/by-agent/agent_live') {
+      res.end(JSON.stringify({
+        ok: true,
+        data: {
+          attestations: [
+            {
+              platform: 'solana',
+              txSignature: 'signed-solana-proof',
+              memo: 'VERIFY|agent_live|solana|2026-08-03T00:00:00.000Z|hash',
+            },
+            {
+              platform: 'telegram',
+              txSignature: 'retired-provider-proof',
+              memo: 'VERIFY|agent_live|telegram|2026-08-03T00:00:00.000Z|hash',
+            },
+          ],
+        },
+      }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end(JSON.stringify({ error: 'not found' }));
+  });
+
+  const port = await listen(server);
+  try {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-deployed-cleanup-'));
+    const summary = await cleanupWithDeployedAttestations({
+      dbPath: path.join(temp, 'missing.db'),
+      profilesDir: path.join(temp, 'missing-profiles'),
+      deployedBaseUrl: `http://127.0.0.1:${port}`,
+    });
+
+    assert.equal(summary.deployedAttestationRowsDetected, 2);
+    assert.equal(summary.deployedDetectionRan, true);
+    assert.equal(summary.deployedDetectionComplete, true);
+    assert.equal(summary.deployedVerifiedClean, false);
+    assert.equal(summary.deployedBaseUrl, `http://127.0.0.1:${port}`);
+    assert.deepEqual(summary.deployedProfileCoverage, {
+      source: 'api-profiles',
+      requestedAgentIds: 0,
+      discoveredAgentIds: 1,
+      coveredAgentIds: 1,
+      totalProfiles: 1,
+      pagesFetched: 1,
+      truncated: false,
+    });
+    assert.deepEqual(summary.deployedAttestationMatches, [{
+      agentId: 'agent_live',
+      platform: 'telegram',
+      reason: 'retired_provider',
+      match: ['telegram', 'platform'],
+      txSignature: 'retired-provider-proof',
+      solscanUrl: null,
+    }]);
+    assert.deepEqual(summary.deployedAttestationErrors, []);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test('cleanup marks deployed detection skipped when no base URL is supplied', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-deployed-skip-'));
+  const summary = await cleanupWithDeployedAttestations({
+    dbPath: path.join(temp, 'missing.db'),
+    profilesDir: path.join(temp, 'missing-profiles'),
+  });
+
+  assert.equal(summary.deployedDetectionRan, false);
+  assert.equal(summary.deployedDetectionComplete, false);
+  assert.equal(summary.deployedVerifiedClean, false);
+  assert.deepEqual(summary.deployedAttestationMatches, []);
+  assert.deepEqual(summary.deployedAttestationErrors, []);
+  assert.deepEqual(summary.deployedAnomalies, [{
+    type: 'deployed_detection_skipped',
+    reason: 'missing_base_url',
+  }]);
+});
+
+test('cleanup pages through deployed profiles before reporting clean coverage', async () => {
+  const requestedUrls = [];
+  const server = http.createServer((req, res) => {
+    requestedUrls.push(req.url);
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/api/profiles?page=1&limit=100') {
+      res.end(JSON.stringify({ profiles: [{ id: 'agent_page_1' }], total: 2, page: 1, limit: 100, pages: 2 }));
+      return;
+    }
+    if (req.url === '/api/profiles?page=2&limit=100') {
+      res.end(JSON.stringify({ profiles: [{ id: 'agent_page_2' }], total: 2, page: 2, limit: 100, pages: 2 }));
+      return;
+    }
+    if (req.url?.startsWith('/api/satp/attestations/by-agent/')) {
+      res.end(JSON.stringify({
+        ok: true,
+        data: {
+          attestations: [{
+            platform: 'github',
+            txSignature: 'signed-github-proof',
+            memo: 'VERIFY|agent|github|2026-08-03T00:00:00.000Z|hash',
+          }],
+        },
+      }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end(JSON.stringify({ error: 'not found' }));
+  });
+
+  const port = await listen(server);
+  try {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-deployed-pages-'));
+    const summary = await cleanupWithDeployedAttestations({
+      dbPath: path.join(temp, 'missing.db'),
+      profilesDir: path.join(temp, 'missing-profiles'),
+      deployedBaseUrl: `http://127.0.0.1:${port}`,
+    });
+
+    assert.deepEqual(requestedUrls.slice(0, 2), [
+      '/api/profiles?page=1&limit=100',
+      '/api/profiles?page=2&limit=100',
+    ]);
+    assert.equal(summary.deployedProfilesDiscovered, 2);
+    assert.equal(summary.deployedProfilesCovered, 2);
+    assert.equal(summary.deployedProfilePagesFetched, 2);
+    assert.equal(summary.deployedProfilesTruncated, false);
+    assert.equal(summary.deployedDetectionComplete, true);
+    assert.equal(summary.deployedVerifiedClean, true);
+    assert.deepEqual(summary.deployedAnomalies, []);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test('cleanup reports explicit deployed profile truncation instead of clean coverage', async () => {
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/api/profiles?page=1&limit=100') {
+      res.end(JSON.stringify({ profiles: [{ id: 'agent_page_1' }], total: 2, page: 1, limit: 100, pages: 2 }));
+      return;
+    }
+    if (req.url === '/api/satp/attestations/by-agent/agent_page_1') {
+      res.end(JSON.stringify({
+        ok: true,
+        data: {
+          attestations: [{
+            platform: 'github',
+            txSignature: 'signed-github-proof',
+            memo: 'VERIFY|agent_page_1|github|2026-08-03T00:00:00.000Z|hash',
+          }],
+        },
+      }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end(JSON.stringify({ error: 'not found' }));
+  });
+
+  const port = await listen(server);
+  try {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-deployed-truncated-'));
+    const summary = await cleanupWithDeployedAttestations({
+      dbPath: path.join(temp, 'missing.db'),
+      profilesDir: path.join(temp, 'missing-profiles'),
+      deployedBaseUrl: `http://127.0.0.1:${port}`,
+      deployedProfileMaxPages: 1,
+    });
+
+    assert.equal(summary.deployedProfilesTruncated, true);
+    assert.equal(summary.deployedDetectionComplete, false);
+    assert.equal(summary.deployedVerifiedClean, false);
+    assert.deepEqual(summary.deployedAnomalies, [{
+      type: 'profile_detection_truncated',
+      discoveredAgentIds: 1,
+      totalProfiles: 2,
+      pagesFetched: 1,
+    }]);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test('cleanup reports cold empty deployed by-agent attestations as anomalies', async () => {
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/api/profiles?page=1&limit=100') {
+      res.end(JSON.stringify({
+        profiles: [{
+          id: 'agent_cold',
+          verificationData: { github: { verified: true, username: 'octo' } },
+        }],
+        total: 1,
+        pages: 1,
+      }));
+      return;
+    }
+    if (req.url === '/api/satp/attestations/by-agent/agent_cold') {
+      res.end(JSON.stringify({ ok: true, data: { attestations: [] } }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end(JSON.stringify({ error: 'not found' }));
+  });
+
+  const port = await listen(server);
+  try {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-deployed-cold-'));
+    const summary = await cleanupWithDeployedAttestations({
+      dbPath: path.join(temp, 'missing.db'),
+      profilesDir: path.join(temp, 'missing-profiles'),
+      deployedBaseUrl: `http://127.0.0.1:${port}`,
+    });
+
+    assert.equal(summary.deployedAttestationRowsDetected, 0);
+    assert.deepEqual(summary.deployedAttestationEmptyAgents, ['agent_cold']);
+    assert.equal(summary.deployedDetectionComplete, true);
+    assert.equal(summary.deployedVerifiedClean, false);
+    assert.deepEqual(summary.deployedAnomalies, [{
+      type: 'empty_attestations',
+      agentId: 'agent_cold',
+      reason: 'profile_has_verification_evidence_but_chain_cache_returned_empty',
+    }]);
+  } finally {
+    await closeServer(server);
+  }
 });
