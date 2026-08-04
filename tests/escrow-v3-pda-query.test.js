@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const express = require('express');
 
+const v3ApiRouter = require('../src/routes/v3-api-index');
 const escrowV3Router = require('../src/routes/escrow-v3-routes');
 
 const VALID_CLIENT = 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
@@ -102,6 +103,33 @@ test('POST /api/v3/escrow/create is gated before live-funds release', async () =
     else process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION = previousOwnerAuthorization;
     if (previousKill === undefined) delete process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
     else process.env.AGENTFOLIO_ESCROW_KILL_SWITCH = previousKill;
+    await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  }
+});
+
+test('GET /api/v3/health stays cheap and leaves escrow provenance on escrow health', async () => {
+  const app = express();
+  app.use('/api/v3', v3ApiRouter);
+  const server = await listen(app);
+
+  try {
+    const { port } = server.address();
+    const res = await fetch(`http://127.0.0.1:${port}/api/v3/health`);
+    const body = await res.json();
+
+    assert.equal(res.status, 200);
+    assert.equal(body.status, 'ok');
+    assert.equal(body.version, 'v3');
+    assert.equal(body.programs.escrow_v3, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
+    assert.equal(Object.hasOwn(body, 'escrowAuthority'), false);
+    assert.equal(Object.hasOwn(body, 'escrowProvenance'), false);
+
+    const escrowHealthRes = await fetch(`http://127.0.0.1:${port}/api/v3/escrow/health`);
+    const escrowHealth = await escrowHealthRes.json();
+    assert.equal(escrowHealthRes.status, 200);
+    assert.equal(escrowHealth.escrowAuthority.expectedProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
+    assert.equal(escrowHealth.escrowProvenance.failClosed, true);
+  } finally {
     await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
   }
 });
