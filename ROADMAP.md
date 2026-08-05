@@ -54,7 +54,7 @@ Deflation note for [#49e40f78]: docs/operational/ESCROW-V3-SOURCE-DEPLOYED-IDL-R
 
 - Marketplace specification and escrow workflow documentation exist in docs/specs/MARKETPLACE-SPEC.md and related docs. [shipped]
 - Production marketplace smoke must verify posting, applying, selection, delivery, review, and job status transitions. [#b6c7790a] [shipped]
-- Rebuild the escrow program from the audited source (clawd-brainchain) and verify src == deployed == IDL on devnet, resolving the program-id split-brain; evidence must be cross-host auditable (GitHub/HQ-inline). Owner approval closure follows the REQ-95b3cba7 roadmap tag-flip pattern. [#49e40f78] [blocked] · escrow provenance not certified
+- Rebuild/certify the escrow program from audited source and verify source == deployed program == IDL on devnet, resolving the HXCU/B1Se/UpJ7 split-brain; current AgentFolio local source/IDL/runtime agree on HXCU, but audited SATP source/deployed-devnet refs and on-chain IDL publication are not yet certified. [#49e40f78] [#3258f2a8] [blocked] · owner-gated
 - Produce the authority-separation plan: split deploy/upgrade authority from operational signers, naming the exact key roles for Owner provisioning (no key material in repo or HQ; fingerprints only). [#eb6ea3d2] [shipped]
 - Close the 2026-07-02 release-gate findings on devnet: payment-replay race, unauthorized release/refund paths, identity-gate bypass; remove or hard-disable the custodial code path per Owner decision (b). [#cd15dddc] [shipped]
 - End-to-end devnet escrow verification of the production flow against the rebuilt program, per docs/operational/ONCHAIN-ESCROW-PROGRAM-GATE-PACKET-2026-07-05.md, with cross-host-auditable evidence. [#580d4a47] [shipped]
