@@ -151,7 +151,9 @@ No production deploy, no keypair change, no mainnet action, no paid action, no S
 ## 2026-08-05 No-Write Alignment Path [#3258f2a8]
 
 HQ parent: `AGENTFOLIO-3258F2A8-ESCROW-SPLITBRAIN-NOWRITE-PREP-20260805-0451Z`.
-Owner/signing gate: `REQ-6480e7c6`.
+This note does not include an authoritative owner-request readback and does not
+treat any request id as signing authority for deploy, upgrade, IDL publish,
+keypair, or other Solana-write work.
 
 This follow-up preserves the current split-brain as a fail-closed planning state,
 not as a deploy decision:
@@ -159,6 +161,17 @@ not as a deploy decision:
 - `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`: AgentFolio local Anchor config, `declare_id!`, tracked IDL address, and app/runtime references.
 - `B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg`: SATP current locked devnet escrow V3 source/config/runtime identity.
 - `UpJ7jmUzHkQ7EdBKiBv3zq8Dr1fVh6GVWKa7nYtwQ22`: SATP legacy V2 escrow identity and packaged legacy IDL lineage.
+
+Authority request reconciliation is intentionally deferred until an
+authoritative request-status and approval-scope readback is attached. Until then,
+remaining work is per-network alignment evidence: preserve B1 as the current
+locked devnet identity, preserve HXCUWKR2 as the candidate canonical mainnet id,
+and produce reproducible-build proof before any `source == deployed == IDL`
+claim advances.
+
+Reviewer/author separation is not self-certified by this note. This PR must
+receive an independent HQ/GitHub review from the assigned reviewer before any
+approval or merge routing.
 
 Exact files that must be aligned after owner authority selection:
 
@@ -183,9 +196,10 @@ Exact files that must be aligned after owner authority selection:
 
 Safe PR scope for this no-write cycle: documentation only. Do not update SATP
 devnet constants from `B1Se...` to `HXCU...`, do not change AgentFolio runtime
-write behavior, and do not publish an IDL until Hani approves `REQ-6480e7c6` or
-supplies the authoritative audited source tree and IDL for the selected program
-id. The one remaining Hani action is to approve `REQ-6480e7c6` for
-`ESCROW_DEVNET_DEPLOY_AUTHORITY` to sign the selected devnet deploy/upgrade plus
-Anchor IDL publish command class, or to provide the missing authoritative
-audited source/IDL for `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`.
+write behavior, do not publish an IDL, and do not perform Solana writes or
+keypair actions. The remaining unblock must be a separate owner-authorized
+per-network repair/proof path: either preserve B1 for devnet with reproducible
+source/deployed/IDL evidence, authorize and prove any devnet repair/redeploy
+through a separately recorded approval scope, or provide the missing
+authoritative source/toolchain provenance that reproduces the deployed HXCUWKR2
+mainnet ELF.
