@@ -1,4 +1,4 @@
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const path = require('path');
 
 const STARTED_AT = new Date().toISOString();
@@ -12,7 +12,7 @@ function clean(value) {
 
 function runGit(args) {
   try {
-    return clean(execSync(`git ${args}`, {
+    return clean(execFileSync('git', args, {
       cwd: REPO_ROOT,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -23,35 +23,44 @@ function runGit(args) {
   }
 }
 
-function getCommitSha() {
-  return clean(process.env.AGENTFOLIO_COMMIT_SHA)
-    || clean(process.env.SOURCE_COMMIT)
-    || clean(process.env.GIT_COMMIT)
-    || clean(process.env.HEROKU_SLUG_COMMIT)
-    || clean(process.env.VERCEL_GIT_COMMIT_SHA)
-    || runGit('rev-parse HEAD')
-    || 'unknown';
+function firstClean(values) {
+  for (const value of values) {
+    const cleaned = clean(value);
+    if (cleaned) return cleaned;
+  }
+  return null;
 }
 
-function getBuildTime() {
-  return clean(process.env.AGENTFOLIO_BUILD_TIME)
-    || clean(process.env.BUILD_TIME)
-    || clean(process.env.BUILD_TIMESTAMP)
-    || clean(process.env.VERCEL_GIT_COMMIT_DATE)
-    || STARTED_AT;
-}
+const BUILD_COMMIT_SHA = firstClean([
+  process.env.AGENTFOLIO_COMMIT_SHA,
+  process.env.SOURCE_COMMIT,
+  process.env.GIT_COMMIT,
+  process.env.HEROKU_SLUG_COMMIT,
+  process.env.VERCEL_GIT_COMMIT_SHA,
+]);
+const CHECKOUT_HEAD = runGit(['rev-parse', 'HEAD']);
+const COMMIT_SHA = BUILD_COMMIT_SHA || CHECKOUT_HEAD || 'unknown';
+const BUILD_TIME = firstClean([
+  process.env.AGENTFOLIO_BUILD_TIME,
+  process.env.BUILD_TIME,
+  process.env.BUILD_TIMESTAMP,
+  process.env.VERCEL_GIT_COMMIT_DATE,
+]) || STARTED_AT;
+const SOURCE = BUILD_COMMIT_SHA ? 'build' : (CHECKOUT_HEAD ? 'checkout' : 'unavailable');
 
 function getDeployProvenance() {
-  const commitSha = getCommitSha();
   return {
     service: 'agentfolio',
-    commitSha,
-    commit: commitSha,
-    shortCommit: commitSha === 'unknown' ? 'unknown' : commitSha.slice(0, 12),
-    buildTime: getBuildTime(),
+    commitSha: COMMIT_SHA,
+    commit: COMMIT_SHA,
+    runningCommitSha: COMMIT_SHA,
+    shortCommit: COMMIT_SHA === 'unknown' ? 'unknown' : COMMIT_SHA.slice(0, 12),
+    buildCommitSha: BUILD_COMMIT_SHA,
+    checkoutHead: CHECKOUT_HEAD,
+    buildTime: BUILD_TIME,
     startedAt: STARTED_AT,
     environment: process.env.NODE_ENV || 'development',
-    source: commitSha === 'unknown' ? 'unavailable' : 'runtime',
+    source: SOURCE,
   };
 }
 

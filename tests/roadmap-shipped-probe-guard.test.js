@@ -55,3 +55,9 @@ test('roadmap items may carry parser-supported display annotations', () => {
 
   assert.deepEqual(errors, []);
 });
+
+test('deploy provenance deflation annotations remain valid', () => {
+  const errors = lintFixture(roadmapWith('- Deploy provenance preserves milestone identity. [#0be32a7b] [pending] · deflated until production readback is verified.'));
+
+  assert.deepEqual(errors, []);
+});
