@@ -101,6 +101,7 @@ const BPS_DENOMINATOR = 10_000;
 const PLATFORM_TREASURY_WALLET = 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
 const ESCROW_V3_AMOUNT_OFFSET = 8 + 32 + 32 + 32;
 const ESCROW_V3_RELEASED_AMOUNT_OFFSET = ESCROW_V3_AMOUNT_OFFSET + 8;
+const ESCROW_V3_ACCOUNT_DISCRIMINATOR = Buffer.from([145, 108, 37, 52, 197, 162, 232, 59]);
 const ESCROW_V3_DISCRIMINATORS = {
   release: Buffer.from([253, 249, 15, 206, 28, 127, 193, 241]),
   partialRelease: Buffer.from([20, 4, 101, 245, 53, 131, 213, 8]),
@@ -264,10 +265,35 @@ function validatePositiveLamports(value, fieldName) {
   throw new Error(`${fieldName} must be a positive integer`);
 }
 
+function publicKeyEquals(left, right) {
+  return new PublicKey(left).equals(new PublicKey(right));
+}
+
+function parseFullReleaseAmountReadbackFromAccountInfo(accountInfo, expectedProgramId) {
+  if (!accountInfo?.data) {
+    const err = new Error('Escrow account not found for release platform fee readback');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  if (!accountInfo.owner || !publicKeyEquals(accountInfo.owner, expectedProgramId)) {
+    const err = new Error('Escrow account owner mismatch for release platform fee readback');
+    err.statusCode = 409;
+    throw err;
+  }
+
+  return parseFullReleaseAmountReadback(accountInfo.data);
+}
+
 function parseFullReleaseAmountReadback(accountData) {
   const data = Buffer.from(accountData || []);
   if (data.length < ESCROW_V3_RELEASED_AMOUNT_OFFSET + 8) {
     throw new Error('escrow account data is too short for release fee readback');
+  }
+
+  const discriminator = data.subarray(0, ESCROW_V3_ACCOUNT_DISCRIMINATOR.length);
+  if (!discriminator.equals(ESCROW_V3_ACCOUNT_DISCRIMINATOR)) {
+    throw new Error('Escrow V3 account discriminator mismatch for release platform fee readback');
   }
 
   const escrowAmount = data.readBigUInt64LE(ESCROW_V3_AMOUNT_OFFSET);
@@ -287,13 +313,9 @@ function parseFullReleaseAmountReadback(accountData) {
 async function getFullReleasePlatformFeeReadback(escrowPDA) {
   const connection = new Connection(RPC_URL || DEFAULT_SOLANA_RPC_URL, 'confirmed');
   const escrow = new PublicKey(escrowPDA);
+  const programId = getEscrowProgramId();
   const accountInfo = await connection.getAccountInfo(escrow);
-  if (!accountInfo?.data) {
-    const err = new Error('Escrow account not found for release platform fee readback');
-    err.statusCode = 404;
-    throw err;
-  }
-  return parseFullReleaseAmountReadback(accountInfo.data);
+  return parseFullReleaseAmountReadbackFromAccountInfo(accountInfo, programId);
 }
 
 function buildEscrowReleaseInstruction({ clientWallet, agentWallet, escrowPDA, amountLamports = null, programId = null }) {
@@ -1278,7 +1300,9 @@ router.__test = {
   buildEscrowReleaseInstruction,
   calculatePlatformFeeSplit,
   deriveSelectedAgentSatpReadback,
+  ESCROW_V3_ACCOUNT_DISCRIMINATOR,
   parseFullReleaseAmountReadback,
+  parseFullReleaseAmountReadbackFromAccountInfo,
   resolveEscrowAgentBinding,
   resolveEscrowAgentId,
   resolveProfileSolanaWallet,

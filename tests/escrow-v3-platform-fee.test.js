@@ -13,6 +13,8 @@ const CLIENT_WALLET = '11111111111111111111111111111111';
 const AGENT_WALLET = 'So11111111111111111111111111111111111111112';
 const ESCROW_PDA = 'SysvarRent111111111111111111111111111111111';
 const PROGRAM_ID = 'BPFLoaderUpgradeab1e11111111111111111111111';
+const ESCROW_PROGRAM_ID = new PublicKey('11111111111111111111111111111111');
+const WRONG_OWNER_PROGRAM_ID = new PublicKey(TREASURY_WALLET);
 const escrowV3Router = require('../src/routes/escrow-v3-routes');
 
 function sliceFunction(source, name, nextName) {
@@ -21,6 +23,18 @@ function sliceFunction(source, name, nextName) {
   assert.notEqual(start, -1, `${name} missing`);
   assert.notEqual(end, -1, `${nextName} missing`);
   return source.slice(start, end);
+}
+
+function createEscrowV3AccountData({
+  escrowAmount = 1_000_000n,
+  releasedAmount = 250_000n,
+  discriminator = escrowV3Router.__test.ESCROW_V3_ACCOUNT_DISCRIMINATOR,
+} = {}) {
+  const escrowAccountData = Buffer.alloc(339);
+  Buffer.from(discriminator).copy(escrowAccountData, 0);
+  escrowAccountData.writeBigUInt64LE(BigInt(escrowAmount), 8 + 32 + 32 + 32);
+  escrowAccountData.writeBigUInt64LE(BigInt(releasedAmount), 8 + 32 + 32 + 32 + 8);
+  return escrowAccountData;
 }
 
 test('escrow_v3 release and partial_release route platform fee on-chain to treasury', () => {
@@ -145,9 +159,7 @@ test('escrow_v3 fee split preserves full and partial release payout correctness'
     },
   );
 
-  const escrowAccountData = Buffer.alloc(339);
-  escrowAccountData.writeBigUInt64LE(1_000_000n, 8 + 32 + 32 + 32);
-  escrowAccountData.writeBigUInt64LE(250_000n, 8 + 32 + 32 + 32 + 8);
+  const escrowAccountData = createEscrowV3AccountData();
   assert.deepEqual(
     parseFullReleaseAmountReadback(escrowAccountData),
     {
@@ -211,12 +223,46 @@ test('escrow_v3 fee split floors treasury dust and fails closed on non-positive 
     /escrow account data is too short/,
   );
 
-  const fullyReleasedAccount = Buffer.alloc(339);
-  fullyReleasedAccount.writeBigUInt64LE(1_000_000n, 8 + 32 + 32 + 32);
-  fullyReleasedAccount.writeBigUInt64LE(1_000_000n, 8 + 32 + 32 + 32 + 8);
+  const fullyReleasedAccount = createEscrowV3AccountData({
+    escrowAmount: 1_000_000n,
+    releasedAmount: 1_000_000n,
+  });
   assert.throws(
     () => parseFullReleaseAmountReadback(fullyReleasedAccount),
     /amountLamports must be a positive number/,
+  );
+});
+
+test('escrow_v3 fee readback fails closed on wrong account owner', () => {
+  const { parseFullReleaseAmountReadbackFromAccountInfo } = escrowV3Router.__test;
+  const accountInfo = {
+    owner: WRONG_OWNER_PROGRAM_ID,
+    data: createEscrowV3AccountData(),
+  };
+
+  assert.throws(
+    () => parseFullReleaseAmountReadbackFromAccountInfo(accountInfo, ESCROW_PROGRAM_ID),
+    /Escrow account owner mismatch for release platform fee readback/,
+  );
+});
+
+test('escrow_v3 fee readback fails closed on wrong account discriminator', () => {
+  const { parseFullReleaseAmountReadback, parseFullReleaseAmountReadbackFromAccountInfo } = escrowV3Router.__test;
+  const wrongDiscriminatorData = createEscrowV3AccountData({
+    discriminator: Buffer.from([0, 1, 2, 3, 4, 5, 6, 7]),
+  });
+  const accountInfo = {
+    owner: ESCROW_PROGRAM_ID,
+    data: wrongDiscriminatorData,
+  };
+
+  assert.throws(
+    () => parseFullReleaseAmountReadback(wrongDiscriminatorData),
+    /Escrow V3 account discriminator mismatch for release platform fee readback/,
+  );
+  assert.throws(
+    () => parseFullReleaseAmountReadbackFromAccountInfo(accountInfo, ESCROW_PROGRAM_ID),
+    /Escrow V3 account discriminator mismatch for release platform fee readback/,
   );
 });
 
