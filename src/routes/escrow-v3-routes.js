@@ -99,6 +99,8 @@ const DEFAULT_SOLANA_RPC_URL = NETWORK === 'devnet'
 const PLATFORM_FEE_BPS = 500;
 const BPS_DENOMINATOR = 10_000;
 const PLATFORM_TREASURY_WALLET = 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
+const ESCROW_V3_AMOUNT_OFFSET = 8 + 32 + 32 + 32;
+const ESCROW_V3_RELEASED_AMOUNT_OFFSET = ESCROW_V3_AMOUNT_OFFSET + 8;
 const ESCROW_V3_DISCRIMINATORS = {
   release: Buffer.from([253, 249, 15, 206, 28, 127, 193, 241]),
   partialRelease: Buffer.from([20, 4, 101, 245, 53, 131, 213, 8]),
@@ -260,6 +262,38 @@ function validatePositiveLamports(value, fieldName) {
     return BigInt(value);
   }
   throw new Error(`${fieldName} must be a positive integer`);
+}
+
+function parseFullReleaseAmountReadback(accountData) {
+  const data = Buffer.from(accountData || []);
+  if (data.length < ESCROW_V3_RELEASED_AMOUNT_OFFSET + 8) {
+    throw new Error('escrow account data is too short for release fee readback');
+  }
+
+  const escrowAmount = data.readBigUInt64LE(ESCROW_V3_AMOUNT_OFFSET);
+  const releasedAmount = data.readBigUInt64LE(ESCROW_V3_RELEASED_AMOUNT_OFFSET);
+  const remainingAmount = escrowAmount > releasedAmount ? escrowAmount - releasedAmount : 0n;
+  const feeSplit = calculatePlatformFeeSplit(remainingAmount);
+
+  return {
+    source: 'escrow_v3_account.amount_minus_released_amount',
+    escrowAmountLamports: escrowAmount.toString(),
+    releasedAmountLamports: releasedAmount.toString(),
+    remainingAmountLamports: remainingAmount.toString(),
+    ...feeSplit,
+  };
+}
+
+async function getFullReleasePlatformFeeReadback(escrowPDA) {
+  const connection = new Connection(RPC_URL || DEFAULT_SOLANA_RPC_URL, 'confirmed');
+  const escrow = new PublicKey(escrowPDA);
+  const accountInfo = await connection.getAccountInfo(escrow);
+  if (!accountInfo?.data) {
+    const err = new Error('Escrow account not found for release platform fee readback');
+    err.statusCode = 404;
+    throw err;
+  }
+  return parseFullReleaseAmountReadback(accountInfo.data);
 }
 
 function buildEscrowReleaseInstruction({ clientWallet, agentWallet, escrowPDA, amountLamports = null, programId = null }) {
@@ -708,22 +742,23 @@ router.post('/release', requireSDK, async (req, res) => {
       return res.status(400).json({ error: 'Invalid escrowPDA address' });
     }
 
+    const feeReadback = await getFullReleasePlatformFeeReadback(escrowPDA);
     const transaction = await buildEscrowReleaseTx({ clientWallet, agentWallet, escrowPDA });
 
     res.json({
       transaction: serializeTx(transaction),
       network: NETWORK,
+      releaseAmount: feeReadback.remainingAmountLamports,
       platformFee: {
+        ...feeReadback,
         bps: PLATFORM_FEE_BPS,
-        treasuryWallet: PLATFORM_TREASURY_WALLET,
         collection: 'on-chain',
-        rounding: 'integer floor in lamports; sub-20-lamport releases produce 0 platform fee',
       },
       message: 'Client: sign and submit to release all remaining funds with platform fee routed on-chain to treasury',
     });
   } catch (err) {
     console.error('[Escrow V3] release error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
@@ -776,7 +811,11 @@ router.post('/partial-release', requireSDK, async (req, res) => {
     res.json({
       transaction: serializeTx(transaction),
       milestoneAmount: feeSplit.grossAmountLamports,
-      platformFee: feeSplit,
+      platformFee: {
+        source: 'request.amountLamports',
+        collection: 'on-chain',
+        ...feeSplit,
+      },
       network: NETWORK,
       message: 'Client: sign and submit to release milestone payment with platform fee routed on-chain to treasury',
     });
@@ -1239,6 +1278,7 @@ router.__test = {
   buildEscrowReleaseInstruction,
   calculatePlatformFeeSplit,
   deriveSelectedAgentSatpReadback,
+  parseFullReleaseAmountReadback,
   resolveEscrowAgentBinding,
   resolveEscrowAgentId,
   resolveProfileSolanaWallet,

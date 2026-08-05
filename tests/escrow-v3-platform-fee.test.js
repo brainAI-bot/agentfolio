@@ -120,7 +120,7 @@ test('escrow_v3 partial_release instruction binds treasury and encodes gross mil
 });
 
 test('escrow_v3 fee split preserves full and partial release payout correctness', () => {
-  const { calculatePlatformFeeSplit } = escrowV3Router.__test;
+  const { calculatePlatformFeeSplit, parseFullReleaseAmountReadback } = escrowV3Router.__test;
 
   assert.deepEqual(
     calculatePlatformFeeSplit(1_000_000n),
@@ -139,6 +139,25 @@ test('escrow_v3 fee split preserves full and partial release payout correctness'
       grossAmountLamports: '250000',
       agentAmountLamports: '237500',
       platformFeeLamports: '12500',
+      platformFeeBps: 500,
+      treasuryWallet: TREASURY_WALLET,
+      rounding: 'integer floor in lamports; sub-20-lamport releases produce 0 platform fee',
+    },
+  );
+
+  const escrowAccountData = Buffer.alloc(339);
+  escrowAccountData.writeBigUInt64LE(1_000_000n, 8 + 32 + 32 + 32);
+  escrowAccountData.writeBigUInt64LE(250_000n, 8 + 32 + 32 + 32 + 8);
+  assert.deepEqual(
+    parseFullReleaseAmountReadback(escrowAccountData),
+    {
+      source: 'escrow_v3_account.amount_minus_released_amount',
+      escrowAmountLamports: '1000000',
+      releasedAmountLamports: '250000',
+      remainingAmountLamports: '750000',
+      grossAmountLamports: '750000',
+      agentAmountLamports: '712500',
+      platformFeeLamports: '37500',
       platformFeeBps: 500,
       treasuryWallet: TREASURY_WALLET,
       rounding: 'integer floor in lamports; sub-20-lamport releases produce 0 platform fee',
@@ -171,7 +190,7 @@ test('escrow_v3 author validation executes fee path vectors for reviewer readbac
 });
 
 test('escrow_v3 fee split floors treasury dust and fails closed on non-positive releases', () => {
-  const { calculatePlatformFeeSplit, validatePositiveLamports } = escrowV3Router.__test;
+  const { calculatePlatformFeeSplit, parseFullReleaseAmountReadback, validatePositiveLamports } = escrowV3Router.__test;
 
   assert.deepEqual(
     calculatePlatformFeeSplit(19n),
@@ -187,6 +206,18 @@ test('escrow_v3 fee split floors treasury dust and fails closed on non-positive 
   assert.throws(() => calculatePlatformFeeSplit(0n), /amountLamports must be a positive number/);
   assert.throws(() => validatePositiveLamports(0, 'amountLamports'), /must be a positive integer/);
   assert.throws(() => validatePositiveLamports('1.5', 'amountLamports'), /must be a positive integer/);
+  assert.throws(
+    () => parseFullReleaseAmountReadback(Buffer.alloc(119)),
+    /escrow account data is too short/,
+  );
+
+  const fullyReleasedAccount = Buffer.alloc(339);
+  fullyReleasedAccount.writeBigUInt64LE(1_000_000n, 8 + 32 + 32 + 32);
+  fullyReleasedAccount.writeBigUInt64LE(1_000_000n, 8 + 32 + 32 + 32 + 8);
+  assert.throws(
+    () => parseFullReleaseAmountReadback(fullyReleasedAccount),
+    /amountLamports must be a positive number/,
+  );
 });
 
 test('escrow_v3 release builders fail closed when treasury/config prerequisites are absent', () => {
