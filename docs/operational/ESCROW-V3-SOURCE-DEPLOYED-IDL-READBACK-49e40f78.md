@@ -86,3 +86,45 @@ Conclusion: repo-local AgentFolio source/IDL/program-id consistency is verified,
 ## Safety Readback
 
 No production deploy, no keypair change, no mainnet action, no paid action, no Solana write, no live escrow enablement, and no ROADMAP.md edit were performed.
+
+## 2026-08-05 No-Write Alignment Path [#3258f2a8]
+
+HQ parent: `AGENTFOLIO-3258F2A8-ESCROW-SPLITBRAIN-NOWRITE-PREP-20260805-0451Z`.
+Owner/signing gate: `REQ-6480e7c6`.
+
+This follow-up preserves the current split-brain as a fail-closed planning state,
+not as a deploy decision:
+
+- `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`: AgentFolio local Anchor config, `declare_id!`, tracked IDL address, and app/runtime references.
+- `B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg`: SATP current locked devnet escrow V3 source/config/runtime identity.
+- `UpJ7jmUzHkQ7EdBKiBv3zq8Dr1fVh6GVWKa7nYtwQ22`: SATP legacy V2 escrow identity and packaged legacy IDL lineage.
+
+Exact files that must be aligned after owner authority selection:
+
+| Repo | File | Required alignment |
+| --- | --- | --- |
+| AgentFolio | `onchain/escrow_v3/Anchor.toml` | Anchor `[programs.devnet].escrow_v3` names the selected escrow V3 program id. |
+| AgentFolio | `onchain/escrow_v3/programs/escrow_v3/src/lib.rs` | `declare_id!` names the same selected program id and source hash is recorded. |
+| AgentFolio | `onchain/escrow_v3/target/idl/escrow_v3.json` | Tracked IDL `address` names the same selected program id and IDL hash is recorded. |
+| AgentFolio | `scripts/verify-escrow-v3-source-idl.mjs` | Strict verifier expects the same selected program id and fails closed on drift. |
+| AgentFolio | `src/lib/escrow-v3-authority.js` | Runtime authority readback expects the same selected program id. |
+| AgentFolio | `frontend/src/lib/satp-mainnet-programs.ts` | Frontend registry names the same selected program id for the matching network scope. |
+| AgentFolio | `src/lib/escrow-onchain.js` | Escrow runtime constant names the same selected program id before writes are enabled. |
+| AgentFolio | `ROADMAP.md` and `docs/planning/ROADMAP.md` | Roadmap remains blocked until source == deployed program == IDL is certified. |
+| SATP | `Anchor.toml` | `[programs.devnet].escrow_v3` and any matching network section name the selected escrow V3 program id. |
+| SATP | `programs/escrow_v3/src/lib.rs` | Active `declare_id!` for the selected build target names the selected program id. |
+| SATP | `idls/v3/escrow_v3.json` | IDL metadata gains or preserves the selected program id address, if this repo is the IDL source of truth. |
+| SATP | `packages/satp-client/src/v3-pda.js` | V3 runtime constants name the selected program id for the matching network scope. |
+| SATP | `packages/satp-client/src/constants.js` | Legacy V2 escrow identity remains explicitly fenced or documented; it must not be mistaken for V3. |
+| SATP | `packages/satp-client/test-v3.js` and `packages/satp-client/test-release-safety.js` | Tests assert the selected program id and keep legacy V2/mainnet fences explicit. |
+| SATP | `docs/escrow-v3-build-proof-reference.json` and `docs/escrow-v3-build-proof.md` | Build-proof docs record the selected source/deployed/IDL hashes and any remaining mismatch. |
+| SATP | `docs/v3-program-source-verification.md` | Verification instructions and network matrix name one selected escrow V3 program id per network scope. |
+
+Safe PR scope for this no-write cycle: documentation only. Do not update SATP
+devnet constants from `B1Se...` to `HXCU...`, do not change AgentFolio runtime
+write behavior, and do not publish an IDL until Hani approves `REQ-6480e7c6` or
+supplies the authoritative audited source tree and IDL for the selected program
+id. The one remaining Hani action is to approve `REQ-6480e7c6` for
+`ESCROW_DEVNET_DEPLOY_AUTHORITY` to sign the selected devnet deploy/upgrade plus
+Anchor IDL publish command class, or to provide the missing authoritative
+audited source/IDL for `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`.
