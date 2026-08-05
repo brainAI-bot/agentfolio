@@ -151,10 +151,9 @@ No production deploy, no keypair change, no mainnet action, no paid action, no S
 ## 2026-08-05 No-Write Alignment Path [#3258f2a8]
 
 HQ parent: `AGENTFOLIO-3258F2A8-ESCROW-SPLITBRAIN-NOWRITE-PREP-20260805-0451Z`.
-Current owner request readback: `REQ-6480e7c6` is `commented` with no
-non-null approval scope recorded, so this note does not treat it as signing
-authority for deploy, upgrade, IDL publish, keypair, or other Solana-write
-work.
+This note does not include an authoritative owner-request readback and does not
+treat any request id as signing authority for deploy, upgrade, IDL publish,
+keypair, or other Solana-write work.
 
 This follow-up preserves the current split-brain as a fail-closed planning state,
 not as a deploy decision:
@@ -163,22 +162,16 @@ not as a deploy decision:
 - `B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg`: SATP current locked devnet escrow V3 source/config/runtime identity.
 - `UpJ7jmUzHkQ7EdBKiBv3zq8Dr1fVh6GVWKa7nYtwQ22`: SATP legacy V2 escrow identity and packaged legacy IDL lineage.
 
-Authority request reconciliation:
+Authority request reconciliation is intentionally deferred until an
+authoritative request-status and approval-scope readback is attached. Until then,
+remaining work is per-network alignment evidence: preserve B1 as the current
+locked devnet identity, preserve HXCUWKR2 as the candidate canonical mainnet id,
+and produce reproducible-build proof before any `source == deployed == IDL`
+claim advances.
 
-- `REQ-34f2e44b` approved a prior devnet-only SATP escrow V3 upgrade for
-  `B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg`, tied to a specific
-  ProgramData authority, SATP ref, and reproduced artifact hash. It is not
-  standing approval for `HXCUWKR2...` devnet deployment, mainnet work, keypair
-  changes, or IDL publishing outside that prior B1-scoped path.
-- `REQ-a5647bff` is the later approved canonical-id decision for
-  `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`: make HXCUWKR2 the compiled
-  default in source, document that current devnet byte proof is not preserved,
-  and defer any devnet repair/redeploy to a separate owner-authorized step.
-- Remaining work is therefore per-network alignment evidence: preserve B1 as
-  the current locked devnet identity until the devnet repair/redeploy is
-  separately authorized and proven, preserve HXCUWKR2 as the adopted canonical
-  id under `REQ-a5647bff`, and produce reproducible-build proof before any
-  source == deployed == IDL claim advances.
+Reviewer/author separation is not self-certified by this note. This PR must
+receive an independent HQ/GitHub review from the assigned reviewer before any
+approval or merge routing.
 
 Exact files that must be aligned after owner authority selection:
 
@@ -206,6 +199,7 @@ devnet constants from `B1Se...` to `HXCU...`, do not change AgentFolio runtime
 write behavior, do not publish an IDL, and do not perform Solana writes or
 keypair actions. The remaining unblock must be a separate owner-authorized
 per-network repair/proof path: either preserve B1 for devnet with reproducible
-source/deployed/IDL evidence, authorize and prove a devnet repair/redeploy for
-the HXCUWKR2-aligned path, or provide the missing authoritative source/toolchain
-provenance that reproduces the deployed HXCUWKR2 mainnet ELF.
+source/deployed/IDL evidence, authorize and prove any devnet repair/redeploy
+through a separately recorded approval scope, or provide the missing
+authoritative source/toolchain provenance that reproduces the deployed HXCUWKR2
+mainnet ELF.
