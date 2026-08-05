@@ -149,6 +149,62 @@ test('cleanup dry-run exposes matched SQLite tuples', () => {
   }]);
 });
 
+test('cleanup dry-run tolerates production attestation schema without proof column', () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-production-attestation-db-'));
+  const dbPath = path.join(temp, 'agentfolio.db');
+  const db = new Database(dbPath);
+  db.exec(`
+    CREATE TABLE attestations (
+      id TEXT PRIMARY KEY,
+      profile_id TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      tx_signature TEXT NOT NULL,
+      memo TEXT NOT NULL,
+      proof_hash TEXT NOT NULL,
+      signer TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+  db.prepare(`
+    INSERT INTO attestations (id, profile_id, platform, tx_signature, memo, proof_hash, signer, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'att-telegram',
+    'agent-prod',
+    'telegram',
+    'retired-provider-proof',
+    'VERIFY|agent-prod|telegram|2026-08-03T00:00:00.000Z|hash',
+    'hash',
+    'signer',
+    '2026-08-03T00:00:00.000Z'
+  );
+  db.prepare(`
+    INSERT INTO attestations (id, profile_id, platform, tx_signature, memo, proof_hash, signer, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'att-github',
+    'agent-prod',
+    'github',
+    'signed-github-proof',
+    'VERIFY|agent-prod|github|2026-08-03T00:00:00.000Z|hash',
+    'hash',
+    'signer',
+    '2026-08-03T00:00:00.000Z'
+  );
+  db.close();
+
+  const summary = cleanup({ profilesDir: path.join(temp, 'missing-profiles'), dbPath, write: false });
+
+  assert.equal(summary.sqliteAttestationRowsRemoved, 1);
+  assert.deepEqual(summary.sqliteAttestationMatches, [{
+    table: 'attestations',
+    rowId: 'att-telegram',
+    platform: 'telegram',
+    reason: 'retired_provider',
+    match: ['telegram', 'platform'],
+  }]);
+});
+
 test('cleanup dry-run tolerates SQLite files without AgentFolio tables', () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-empty-db-'));
   const dbPath = path.join(temp, 'empty.db');
