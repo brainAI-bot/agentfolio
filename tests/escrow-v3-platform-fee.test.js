@@ -146,6 +146,30 @@ test('escrow_v3 fee split preserves full and partial release payout correctness'
   );
 });
 
+test('escrow_v3 author validation executes fee path vectors for reviewer readback', () => {
+  const { calculatePlatformFeeSplit } = escrowV3Router.__test;
+  const vectors = [
+    ['full release', 1_000_000n, '950000', '50000'],
+    ['partial milestone release', 250000n, '237500', '12500'],
+    ['dust release', 19n, '19', '0'],
+  ];
+
+  for (const [label, grossAmountLamports, agentAmountLamports, platformFeeLamports] of vectors) {
+    assert.deepEqual(
+      calculatePlatformFeeSplit(grossAmountLamports),
+      {
+        grossAmountLamports: grossAmountLamports.toString(),
+        agentAmountLamports,
+        platformFeeLamports,
+        platformFeeBps: 500,
+        treasuryWallet: TREASURY_WALLET,
+        rounding: 'integer floor in lamports; sub-20-lamport releases produce 0 platform fee',
+      },
+      label,
+    );
+  }
+});
+
 test('escrow_v3 fee split floors treasury dust and fails closed on non-positive releases', () => {
   const { calculatePlatformFeeSplit, validatePositiveLamports } = escrowV3Router.__test;
 
