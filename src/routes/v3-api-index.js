@@ -30,10 +30,11 @@ const router = Router();
 
 // ── Health check ───────────────────────────────────────────────────────────────
 router.get('/health', (req, res) => {
+  const network = process.env.SATP_NETWORK || process.env.SOLANA_NETWORK || 'mainnet';
   res.json({
     status: 'ok',
     version: 'v3',
-    network: process.env.SATP_NETWORK || process.env.SOLANA_NETWORK || 'mainnet',
+    network,
     endpoints: {
       identity: 4,
       escrow: 11,

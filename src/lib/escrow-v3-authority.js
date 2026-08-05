@@ -61,6 +61,11 @@ function publicKeyToString(value) {
   return String(value);
 }
 
+function normalizeRuntimeProgramId(value) {
+  if (!value || (typeof value === 'object' && typeof value.error === 'string')) return null;
+  return publicKeyToString(value);
+}
+
 function readSatpRuntimeIds(satpClient) {
   if (!satpClient || typeof satpClient.getV3ProgramIds !== 'function') {
     return { available: false, error: '@brainai/satp-client missing getV3ProgramIds export' };
@@ -140,6 +145,63 @@ function getEscrowV3AuthorityReadback({ satpClient, env = process.env } = {}) {
   };
 }
 
+function getEscrowV3ProvenanceReadback({ authorityReadback, network = 'mainnet' } = {}) {
+  const readback = authorityReadback || getEscrowV3AuthorityReadback();
+  const normalizedNetwork = String(network || '').toLowerCase().includes('devnet') ? 'devnet' : 'mainnet';
+  const runtime = readback.satpArtifact?.runtime || {};
+  const runtimeProgramId = normalizedNetwork === 'devnet'
+    ? normalizeRuntimeProgramId(runtime.devnetEscrowProgramId)
+    : normalizeRuntimeProgramId(runtime.mainnetEscrowProgramId);
+  const sourceHash = readback.programSource?.sha256 || null;
+  const idlHash = readback.trackedIdl?.sha256 || null;
+  const idlProgramId = readback.trackedIdl?.address || null;
+  const escrowProgramId = readback.expectedProgramId || null;
+
+  const mismatches = [];
+  if (!readback.anchorToml?.exists) mismatches.push('missing_anchor_toml');
+  if (!readback.programSource?.exists || !sourceHash) mismatches.push('missing_source_hash');
+  if (!readback.trackedIdl?.exists || !idlHash) {
+    mismatches.push('missing_idl_hash');
+  } else if (readback.trackedIdl.matchesExpectedProgramId !== true) {
+    mismatches.push('tracked_idl_program_id_mismatch');
+  }
+  if (!readback.packagedSatpEscrowIdl?.exists) {
+    mismatches.push('missing_packaged_idl');
+  } else if (readback.packagedSatpEscrowIdl.matchesExpectedProgramId !== true) {
+    mismatches.push('packaged_idl_program_id_mismatch');
+  }
+  if (runtime.available === false) mismatches.push('runtime_unavailable');
+  if (readback.satpArtifact?.mainnetMatchesExpectedProgramId !== true) {
+    mismatches.push('mainnet_runtime_program_id_mismatch');
+  }
+  if (readback.satpArtifact?.devnetMatchesExpectedProgramId !== true) {
+    mismatches.push('devnet_runtime_program_id_mismatch');
+  }
+  if (readback.status && readback.status !== 'verified' && mismatches.length === 0) {
+    mismatches.push('authority_status_not_verified');
+  }
+  const liveEscrowWritesAllowed = mismatches.length === 0
+    && readback.releaseGate?.liveEscrowWritesAllowed === true;
+
+  return {
+    label: readback.label || AUTHORITY_LABEL,
+    escrowProgramId,
+    artifactCommit: readback.satpArtifact?.commit || null,
+    sourceHash,
+    idlHash,
+    idlProgramId,
+    runtimeProgramId,
+    runtimeProgramIds: {
+      mainnet: normalizeRuntimeProgramId(runtime.mainnetEscrowProgramId),
+      devnet: normalizeRuntimeProgramId(runtime.devnetEscrowProgramId),
+    },
+    mismatchStatus: mismatches.length ? 'mismatch' : 'matched',
+    mismatches,
+    failClosed: mismatches.length > 0,
+    liveEscrowWritesAllowed,
+  };
+}
+
 module.exports = {
   AUTHORITY_ANCHOR_TOML,
   AUTHORITY_IDL_PATH,
@@ -150,4 +212,5 @@ module.exports = {
   AUTHORITY_SOURCE_WORKSPACE,
   SATP_ESCROW_IDL_PACKAGE_PATH,
   getEscrowV3AuthorityReadback,
+  getEscrowV3ProvenanceReadback,
 };

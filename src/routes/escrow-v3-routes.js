@@ -47,6 +47,7 @@ const {
 } = require('../lib/write-surface-gate');
 const {
   getEscrowV3AuthorityReadback,
+  getEscrowV3ProvenanceReadback,
 } = require('../lib/escrow-v3-authority');
 const { loadJob, loadProfile } = require('../lib/database');
 const {
@@ -473,12 +474,14 @@ function resolveEscrowAgentBinding(
 
 router.get('/health', (req, res) => {
   const agentId = getSingleQueryString(req.query.agentId);
+  const escrowAuthority = getEscrowV3AuthorityReadback({ satpClient });
   res.json({
     status: 'ok',
     network: NETWORK,
     sdkAvailable: Boolean(SATPV3SDK),
     liveEscrow: liveEscrowGateStatus(),
-    escrowAuthority: getEscrowV3AuthorityReadback({ satpClient }),
+    escrowAuthority,
+    escrowProvenance: getEscrowV3ProvenanceReadback({ authorityReadback: escrowAuthority, network: NETWORK }),
     selectedAgentSatpIdentity: deriveSelectedAgentSatpReadback(agentId),
     timestamp: new Date().toISOString(),
   });

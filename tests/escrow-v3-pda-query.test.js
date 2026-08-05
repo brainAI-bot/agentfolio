@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const express = require('express');
 
+const v3ApiRouter = require('../src/routes/v3-api-index');
 const escrowV3Router = require('../src/routes/escrow-v3-routes');
 
 const VALID_CLIENT = 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
@@ -106,6 +107,33 @@ test('POST /api/v3/escrow/create is gated before live-funds release', async () =
   }
 });
 
+test('GET /api/v3/health stays cheap and leaves escrow provenance on escrow health', async () => {
+  const app = express();
+  app.use('/api/v3', v3ApiRouter);
+  const server = await listen(app);
+
+  try {
+    const { port } = server.address();
+    const res = await fetch(`http://127.0.0.1:${port}/api/v3/health`);
+    const body = await res.json();
+
+    assert.equal(res.status, 200);
+    assert.equal(body.status, 'ok');
+    assert.equal(body.version, 'v3');
+    assert.equal(body.programs.escrow_v3, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
+    assert.equal(Object.hasOwn(body, 'escrowAuthority'), false);
+    assert.equal(Object.hasOwn(body, 'escrowProvenance'), false);
+
+    const escrowHealthRes = await fetch(`http://127.0.0.1:${port}/api/v3/escrow/health`);
+    const escrowHealth = await escrowHealthRes.json();
+    assert.equal(escrowHealthRes.status, 200);
+    assert.equal(escrowHealth.escrowAuthority.expectedProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
+    assert.equal(escrowHealth.escrowProvenance.failClosed, true);
+  } finally {
+    await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  }
+});
+
 test('GET /api/v3/escrow/health exposes live escrow gate status', async () => {
   const previousEnable = process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
   const previousOwnerAuthorization = process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
@@ -142,6 +170,19 @@ test('GET /api/v3/escrow/health exposes live escrow gate status', async () => {
     assert.equal(body.escrowAuthority.releaseGate.ownerAuthorizationRequired, true);
     assert.equal(body.escrowAuthority.releaseGate.ownerAuthorizationStatus, 'missing_owner_authorization');
     assert.match(body.escrowAuthority.releaseGate.reason, /PDA reads may derive/);
+    assert.equal(body.escrowProvenance.escrowProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
+    assert.equal(typeof body.escrowProvenance.artifactCommit, 'string');
+    assert.ok(body.escrowProvenance.artifactCommit.length > 0);
+    assert.match(body.escrowProvenance.sourceHash, /^[0-9a-f]{64}$/);
+    assert.match(body.escrowProvenance.idlHash, /^[0-9a-f]{64}$/);
+    assert.match(body.escrowProvenance.runtimeProgramId, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+    assert.equal(body.escrowProvenance.mismatchStatus, 'mismatch');
+    assert.deepEqual(body.escrowProvenance.mismatches, [
+      'missing_packaged_idl',
+      'devnet_runtime_program_id_mismatch',
+    ]);
+    assert.equal(body.escrowProvenance.failClosed, true);
+    assert.equal(body.escrowProvenance.liveEscrowWritesAllowed, false);
   } finally {
     if (previousEnable === undefined) delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
     else process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = previousEnable;
