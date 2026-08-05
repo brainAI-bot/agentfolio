@@ -17,6 +17,19 @@ const TREASURY_TRANSFER_EVIDENCE_RE = /\bexecuted transfer evidence\b/i;
 const SOURCE_DEPLOYED_IDL_CERT_RE = /\b(source\/deployed\/IDL|deployed-source|src\s*==\s*deployed\s*==\s*IDL)\b/i;
 const REPO_DOC_PATH_RE = /\b(?:docs|reports|evidence)\/[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+/g;
 
+function repositoryRootForRoadmap(roadmapFile) {
+  const roadmapDir = path.dirname(path.resolve(roadmapFile));
+  if (path.basename(roadmapDir) === 'planning' && path.basename(path.dirname(roadmapDir)) === 'docs') {
+    return path.dirname(path.dirname(roadmapDir));
+  }
+  return roadmapDir;
+}
+
+function isInsideDirectory(candidate, root) {
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
 function cleanSection(value) {
   return String(value || '')
     .replace(/[✅🔧⛔🟡⏳🔒🔮]/g, '')
@@ -56,12 +69,16 @@ function parseRoadmapItems(markdown) {
 
 function hasResolvableEvidencePath(line, roadmapFile) {
   const refs = line.match(REPO_DOC_PATH_RE) || [];
+  const repoRoot = repositoryRootForRoadmap(roadmapFile);
+  const realRepoRoot = fs.realpathSync(repoRoot);
+
   return refs.some((ref) => {
     const cleanRef = ref.replace(/[),.;:]+$/g, '');
-    return [
-      path.resolve(process.cwd(), cleanRef),
-      path.resolve(path.dirname(roadmapFile), cleanRef),
-    ].some((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile());
+    const candidate = path.resolve(repoRoot, cleanRef);
+    if (!isInsideDirectory(candidate, repoRoot) || !fs.existsSync(candidate)) return false;
+
+    const realCandidate = fs.realpathSync(candidate);
+    return isInsideDirectory(realCandidate, realRepoRoot) && fs.statSync(realCandidate).isFile();
   });
 }
 

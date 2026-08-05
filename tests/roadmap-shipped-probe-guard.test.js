@@ -79,6 +79,19 @@ test('treasury money-path shipped claims require a resolvable evidence document'
   assert.ok(errors.some((error) => error.includes('resolvable evidence document path')));
 });
 
+test('treasury money-path evidence paths cannot escape the repository', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-roadmap-'));
+  const outsideName = `outside-treasury-evidence-${path.basename(dir)}.md`;
+  const outsideFile = path.join(path.dirname(dir), outsideName);
+  fs.writeFileSync(outsideFile, '# Outside evidence\n');
+  const file = path.join(dir, 'ROADMAP.md');
+  fs.writeFileSync(file, roadmapWith(`- On-chain fee collection inside release/partial_release routes the platform percentage to the treasury (FriU1FEp...) - GitHub/HQ-visible executed transfer evidence proves both live routes move the platform percentage to treasury and source/deployed/IDL alignment is certified in docs/../../${outsideName}. [#011685d4] [shipped]`));
+
+  const errors = lintRoadmap(file);
+
+  assert.ok(errors.some((error) => error.includes('resolvable evidence document path')));
+});
+
 test('treasury money-path shipped claims accept executed transfer, source certification, and evidence document', () => {
   const errors = lintFixture(
     roadmapWith('- On-chain fee collection inside release/partial_release routes the platform percentage to the treasury (FriU1FEp...) - GitHub/HQ-visible executed transfer evidence proves both live routes move the platform percentage to treasury and source/deployed/IDL alignment is certified in docs/operational/treasury-evidence.md. [#011685d4] [shipped]'),
