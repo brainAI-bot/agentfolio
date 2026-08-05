@@ -174,6 +174,30 @@ function sqliteTableExists(db, tableName) {
     .get(tableName));
 }
 
+function sqliteTableColumns(db, tableName) {
+  return new Set(db.prepare(`PRAGMA table_info(${tableName})`).all().map((column) => column.name));
+}
+
+function selectAttestationRows(db) {
+  const columns = sqliteTableColumns(db, 'attestations');
+  const selectColumns = [];
+  if (columns.has('id')) {
+    selectColumns.push('id');
+  } else {
+    selectColumns.push('rowid');
+  }
+  for (const column of ['profile_id', 'platform', 'type', 'proof', 'memo', 'proof_hash', 'source', 'method', 'tx_signature']) {
+    if (columns.has(column)) selectColumns.push(column);
+  }
+
+  return db.prepare(`SELECT ${selectColumns.join(', ')} FROM attestations`).all().map((row) => ({
+    ...row,
+    proof: row.proof ?? row.memo ?? row.proof_hash ?? {},
+    txSignature: row.tx_signature ?? null,
+    proofHash: row.proof_hash ?? null,
+  }));
+}
+
 function createSummary(write) {
   return {
     mode: write ? 'write' : 'dry-run',
@@ -241,7 +265,7 @@ function cleanupSqlite({ dbPath, write, summary }) {
 
   const hasAttestations = sqliteTableExists(db, 'attestations');
   const retiredAttestationRows = hasAttestations
-    ? db.prepare('SELECT rowid, platform, proof, source, method FROM attestations').all().filter(rowIsRetiredOrAutoPass)
+    ? selectAttestationRows(db).filter(rowIsRetiredOrAutoPass)
     : [];
   summary.sqliteAttestationRowsRemoved = retiredAttestationRows.length;
   summary.sqliteAttestationMatches = retiredAttestationRows
@@ -274,7 +298,10 @@ function cleanupSqlite({ dbPath, write, summary }) {
 
   if (write) {
     const deleteVerificationById = hasVerifications ? db.prepare('DELETE FROM verifications WHERE id = ?') : null;
-    const deleteAttestationByRowid = hasAttestations ? db.prepare('DELETE FROM attestations WHERE rowid = ?') : null;
+    const attestationColumns = hasAttestations ? sqliteTableColumns(db, 'attestations') : new Set();
+    const deleteAttestationByKey = hasAttestations
+      ? db.prepare(attestationColumns.has('id') ? 'DELETE FROM attestations WHERE id = ?' : 'DELETE FROM attestations WHERE rowid = ?')
+      : null;
     const columns = new Set(db.prepare('PRAGMA table_info(profiles)').all().map((column) => column.name));
     const now = new Date().toISOString();
 
@@ -282,8 +309,8 @@ function cleanupSqlite({ dbPath, write, summary }) {
       if (deleteVerificationById) {
         for (const row of retiredVerificationRows) deleteVerificationById.run(row.id);
       }
-      if (deleteAttestationByRowid) {
-        for (const row of retiredAttestationRows) deleteAttestationByRowid.run(row.rowid);
+      if (deleteAttestationByKey) {
+        for (const row of retiredAttestationRows) deleteAttestationByKey.run(row.id ?? row.rowid);
       }
       for (const profile of profileUpdates) {
         const sets = [];
