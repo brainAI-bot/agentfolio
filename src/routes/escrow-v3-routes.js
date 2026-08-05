@@ -262,19 +262,18 @@ function validatePositiveLamports(value, fieldName) {
   throw new Error(`${fieldName} must be a positive integer`);
 }
 
-async function buildEscrowReleaseTx({ clientWallet, agentWallet, escrowPDA, amountLamports = null }) {
-  const connection = new Connection(RPC_URL || DEFAULT_SOLANA_RPC_URL, 'confirmed');
+function buildEscrowReleaseInstruction({ clientWallet, agentWallet, escrowPDA, amountLamports = null, programId = null }) {
   const client = new PublicKey(clientWallet);
   const agent = new PublicKey(agentWallet);
   const escrow = new PublicKey(escrowPDA);
   const treasury = new PublicKey(PLATFORM_TREASURY_WALLET);
-  const programId = getEscrowProgramId();
+  const escrowProgramId = programId ? new PublicKey(programId) : getEscrowProgramId();
   const data = amountLamports === null
     ? ESCROW_V3_DISCRIMINATORS.release
     : Buffer.concat([ESCROW_V3_DISCRIMINATORS.partialRelease, encodeU64(amountLamports)]);
 
-  const instruction = new TransactionInstruction({
-    programId,
+  return new TransactionInstruction({
+    programId: escrowProgramId,
     keys: [
       { pubkey: escrow, isSigner: false, isWritable: true },
       { pubkey: client, isSigner: true, isWritable: false },
@@ -283,6 +282,12 @@ async function buildEscrowReleaseTx({ clientWallet, agentWallet, escrowPDA, amou
     ],
     data,
   });
+}
+
+async function buildEscrowReleaseTx({ clientWallet, agentWallet, escrowPDA, amountLamports = null }) {
+  const connection = new Connection(RPC_URL || DEFAULT_SOLANA_RPC_URL, 'confirmed');
+  const client = new PublicKey(clientWallet);
+  const instruction = buildEscrowReleaseInstruction({ clientWallet, agentWallet, escrowPDA, amountLamports });
 
   const { blockhash } = await connection.getLatestBlockhash();
   const msg = new TransactionMessage({
@@ -1231,6 +1236,7 @@ router.get('/by-agent-id/:agentId', requireSDK, async (req, res) => {
 });
 
 router.__test = {
+  buildEscrowReleaseInstruction,
   calculatePlatformFeeSplit,
   deriveSelectedAgentSatpReadback,
   resolveEscrowAgentBinding,
