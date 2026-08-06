@@ -2,12 +2,17 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { PublicKey } = require('@solana/web3.js');
 
 const SOURCE_PATH = path.resolve(__dirname, '..', 'onchain/escrow_v3/programs/escrow_v3/src/lib.rs');
 const IDL_PATH = path.resolve(__dirname, '..', 'onchain/escrow_v3/target/idl/escrow_v3.json');
 const ROUTE_PATH = path.resolve(__dirname, '..', 'src/routes/escrow-v3-routes.js');
 const USDC_BUILDER_PATH = path.resolve(__dirname, '..', 'src/lib/escrow-onchain.js');
 const TREASURY_WALLET = 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
+const CLIENT_WALLET = '11111111111111111111111111111111';
+const AGENT_WALLET = 'So11111111111111111111111111111111111111112';
+const ESCROW_PDA = 'SysvarRent111111111111111111111111111111111';
+const PROGRAM_ID = 'BPFLoaderUpgradeab1e11111111111111111111111';
 const escrowV3Router = require('../src/routes/escrow-v3-routes');
 
 function sliceFunction(source, name, nextName) {
@@ -67,6 +72,53 @@ test('escrow_v3 HTTP release builders publish treasury and integer fee readback'
   assert.match(routeSource, /sub-20-lamport releases produce 0 platform fee/);
 });
 
+test('escrow_v3 release instruction binds platform treasury without live Solana writes', () => {
+  const { buildEscrowReleaseInstruction } = escrowV3Router.__test;
+  const instruction = buildEscrowReleaseInstruction({
+    clientWallet: CLIENT_WALLET,
+    agentWallet: AGENT_WALLET,
+    escrowPDA: ESCROW_PDA,
+    programId: PROGRAM_ID,
+  });
+
+  assert.equal(instruction.programId.toBase58(), PROGRAM_ID);
+  assert.deepEqual(
+    instruction.keys.map((key) => ({
+      pubkey: key.pubkey.toBase58(),
+      isSigner: key.isSigner,
+      isWritable: key.isWritable,
+    })),
+    [
+      { pubkey: ESCROW_PDA, isSigner: false, isWritable: true },
+      { pubkey: CLIENT_WALLET, isSigner: true, isWritable: false },
+      { pubkey: AGENT_WALLET, isSigner: false, isWritable: true },
+      { pubkey: TREASURY_WALLET, isSigner: false, isWritable: true },
+    ],
+  );
+  assert.deepEqual([...instruction.data], [253, 249, 15, 206, 28, 127, 193, 241]);
+});
+
+test('escrow_v3 partial_release instruction binds treasury and encodes gross milestone amount', () => {
+  const { buildEscrowReleaseInstruction, calculatePlatformFeeSplit } = escrowV3Router.__test;
+  const grossAmount = 250000n;
+  const feeSplit = calculatePlatformFeeSplit(grossAmount);
+  const instruction = buildEscrowReleaseInstruction({
+    clientWallet: CLIENT_WALLET,
+    agentWallet: AGENT_WALLET,
+    escrowPDA: ESCROW_PDA,
+    amountLamports: grossAmount,
+    programId: new PublicKey(PROGRAM_ID),
+  });
+
+  assert.equal(feeSplit.treasuryWallet, TREASURY_WALLET);
+  assert.equal(feeSplit.grossAmountLamports, '250000');
+  assert.equal(feeSplit.agentAmountLamports, '237500');
+  assert.equal(feeSplit.platformFeeLamports, '12500');
+  assert.equal(instruction.keys[3].pubkey.toBase58(), TREASURY_WALLET);
+  assert.deepEqual([...instruction.data.subarray(0, 8)], [20, 4, 101, 245, 53, 131, 213, 8]);
+  assert.equal(instruction.data.readBigUInt64LE(8), grossAmount);
+});
+
 test('escrow_v3 fee split preserves full and partial release payout correctness', () => {
   const { calculatePlatformFeeSplit } = escrowV3Router.__test;
 
@@ -92,6 +144,30 @@ test('escrow_v3 fee split preserves full and partial release payout correctness'
       rounding: 'integer floor in lamports; sub-20-lamport releases produce 0 platform fee',
     },
   );
+});
+
+test('escrow_v3 author validation executes fee path vectors for reviewer readback', () => {
+  const { calculatePlatformFeeSplit } = escrowV3Router.__test;
+  const vectors = [
+    ['full release', 1_000_000n, '950000', '50000'],
+    ['partial milestone release', 250000n, '237500', '12500'],
+    ['dust release', 19n, '19', '0'],
+  ];
+
+  for (const [label, grossAmountLamports, agentAmountLamports, platformFeeLamports] of vectors) {
+    assert.deepEqual(
+      calculatePlatformFeeSplit(grossAmountLamports),
+      {
+        grossAmountLamports: grossAmountLamports.toString(),
+        agentAmountLamports,
+        platformFeeLamports,
+        platformFeeBps: 500,
+        treasuryWallet: TREASURY_WALLET,
+        rounding: 'integer floor in lamports; sub-20-lamport releases produce 0 platform fee',
+      },
+      label,
+    );
+  }
 });
 
 test('escrow_v3 fee split floors treasury dust and fails closed on non-positive releases', () => {
