@@ -32,6 +32,7 @@ const MEMO_PROGRAM = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const REFRESH_INTERVAL_MS = 120_000; // 2 minutes (reduced from 45s to avoid RPC 429s)
 const PLATFORM_SIGNER = process.env.SATP_PLATFORM_SIGNER || null;
+const ATTESTATIONS_DB_PATH = process.env.AGENTFOLIO_DB_PATH || '/home/ubuntu/agentfolio/data/agentfolio.db';
 
 let _connection = null;
 function getConnection() {
@@ -314,20 +315,13 @@ async function refreshAttestationsFromChain() {
  */
 async function refreshAttestationsFromDB() {
   try {
-    const path = require('path');
     const Database = require('better-sqlite3');
-    const dbPath = '/home/ubuntu/agentfolio/data/agentfolio.db';
-    const db = new Database(dbPath, { readonly: true });
+    const db = new Database(ATTESTATIONS_DB_PATH, { readonly: true });
     
     // Security: only trust attestations after hardened system date AND from platform signer
     // HARDENED_DATE removed — signer check is the real security (date format mismatch caused regression: 17/49 memos)
     // Trust both current and legacy platform signers
-    const trustedSigners = new Set([
-      PLATFORM_SIGNER,
-      'Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc', // deploy wallet
-      '4St74qSyzuGyV2TA9gxej9GvXG2TgVSTvp1HEpzJbwcP', // legacy signer
-      'JAbcYnKy4p2c5SYV3bHu14VtD6EDDpzj44uGYW8BMud4', // brainforge personal
-    ].filter(Boolean));
+    const trustedSigners = getTrustedAttestationSigners();
     const rows = db.prepare('SELECT * FROM attestations ORDER BY created_at DESC').all();
     
     const newAttestations = new Map();
@@ -339,15 +333,7 @@ async function refreshAttestationsFromDB() {
       if (!newAttestations.has(row.profile_id)) {
         newAttestations.set(row.profile_id, []);
       }
-      newAttestations.get(row.profile_id).push({
-        platform: row.platform,
-        txSignature: row.tx_signature,
-        memo: row.memo,
-        proofHash: row.proof_hash,
-        signer: row.signer,
-        timestamp: row.created_at,
-        solscanUrl: `https://solscan.io/tx/${row.tx_signature}`,
-      });
+      newAttestations.get(row.profile_id).push(normalizeDbAttestation(row));
     }
     
     cache.attestations = newAttestations;
@@ -360,6 +346,52 @@ async function refreshAttestationsFromDB() {
 }
 
 // ============ PUBLIC GETTERS ============
+
+function getTrustedAttestationSigners() {
+  return new Set([
+    PLATFORM_SIGNER,
+    'Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc', // deploy wallet
+    '4St74qSyzuGyV2TA9gxej9GvXG2TgVSTvp1HEpzJbwcP', // legacy signer
+    'JAbcYnKy4p2c5SYV3bHu14VtD6EDDpzj44uGYW8BMud4', // brainforge personal
+  ].filter(Boolean));
+}
+
+function normalizeDbAttestation(row = {}) {
+  const txSignature = row.tx_signature || row.txSignature || null;
+  return {
+    platform: row.platform,
+    txSignature,
+    memo: row.memo,
+    proofHash: row.proof_hash || row.proofHash || null,
+    signer: row.signer || null,
+    timestamp: row.created_at || row.timestamp || null,
+    solscanUrl: row.solscanUrl || (txSignature ? `https://solscan.io/tx/${txSignature}` : null),
+  };
+}
+
+function readDbVerifications(profileId) {
+  try {
+    const fs = require('fs');
+    if (!fs.existsSync(ATTESTATIONS_DB_PATH)) return [];
+    const Database = require('better-sqlite3');
+    const db = new Database(ATTESTATIONS_DB_PATH, { readonly: true });
+    try {
+      const table = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'attestations'").get();
+      if (!table) return [];
+      const trustedSigners = getTrustedAttestationSigners();
+      return db
+        .prepare('SELECT * FROM attestations WHERE profile_id = ? ORDER BY created_at DESC')
+        .all(profileId)
+        .filter((row) => !row.signer || trustedSigners.has(row.signer))
+        .map(normalizeDbAttestation);
+    } finally {
+      db.close();
+    }
+  } catch (e) {
+    console.warn('[ChainCache] Attestation DB fallback read failed:', e.message);
+    return [];
+  }
+}
 
 /**
  * Get agent identity by wallet address
@@ -393,7 +425,9 @@ function isVerified(wallet) {
  * @returns {Array} attestation records
  */
 function getVerifications(profileId) {
-  return cache.attestations.get(profileId) || [];
+  const cached = cache.attestations.get(profileId) || [];
+  if (cached.length > 0) return cached;
+  return readDbVerifications(profileId);
 }
 
 /**
