@@ -230,3 +230,58 @@ source/deployed/IDL evidence, authorize and prove any devnet repair/redeploy
 through a separately recorded approval scope, or provide the missing
 authoritative source/toolchain provenance that reproduces the deployed HXCUWKR2
 mainnet ELF.
+
+## 2026-08-08 Mainnet Source Certification [#ef7e4581]
+
+Read-only observation time: `2026-08-08T11:09:05Z`. The certification source
+is `github.com/brainAI-bot/agentfolio` commit
+`f25b9c23d886d6adb0ebb57defd52689b5dc9990`, path
+`onchain/escrow_v3/programs/escrow_v3/src/lib.rs` (sha256
+`a713fb25815f724bde8bc0ed9eec0c104826fc0fb26bd3f608a6ed46096efd4c`).
+
+The pinned toolchain is Cargo `1.86.0`, rustc `1.86.0`, Anchor CLI `0.31.1`,
+Solana CLI / `solana-cargo-build-sbf` `2.1.21`, platform-tools `v1.43`, and
+SBF rustc `1.79.0`. From `onchain/escrow_v3`, this command was reproduced:
+
+```text
+cargo build-sbf --manifest-path programs/escrow_v3/Cargo.toml --sbf-out-dir target/deploy
+```
+
+It produced `target/deploy/escrow_v3.so`, sha256
+`21dda9b5b0f95aba7f2560d58f2085de7ef8d0c9f1e3ac79f8ee506dcb9c6cf4`,
+length `289216`. Read-only `solana program show` and `solana program dump`
+against mainnet-beta returned program
+`HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`, ProgramData
+`Fg1DJyKX9CngiMihZxJY2zjaQ8T1PK5QuiVhNvJmeTqk`, deployed ELF sha256
+`b70a7a7ea55f43da7bd3fc4f666e1374436bb9c8aeaa83cb2f0a2a970b603094`,
+and deployed ELF length `290680`.
+
+The tracked IDL source is
+`onchain/escrow_v3/target/idl/escrow_v3.json`, sha256
+`19ab1ae26b274499d1d014b69b318a49467189085c35cd51ef52b10dbece1262`.
+The strict repository verifier passes. A non-mutating semantic comparison also
+passes for all 9 instruction names, argument types, account order, and
+discriminators; the 19 `EscrowV3` state fields and account discriminator; all
+8 event names/discriminators; and all 20 error variants.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| source -> candidate ELF | PASS | pinned command produces `21dda9b5...`, 289216 bytes |
+| source <-> tracked IDL | PASS | strict verifier and semantic comparison pass |
+| IDL address == deployed program id | PASS | both name `HXCUWKR2...` |
+| candidate ELF == deployed ELF | **FAIL** | `21dda9b5...` / 289216 != `b70a7a7e...` / 290680 |
+| source == deployed == IDL | **FAIL** | binary gate diverges |
+
+The exact first certification divergence is therefore the candidate ELF versus
+the deployed mainnet ELF, after the source/IDL semantic gate passes. This is not
+correctable by changing program-id metadata. The PR-first corrective path is to
+supply the authoritative source commit plus locked build provenance that
+reproduces `b70a7a7e...`, then regenerate and semantically compare its IDL. An
+owner-authorized replacement deployment from the audited source is the separate
+alternative and is outside this read-only certification.
+
+No Solana write, deploy/restart, existing or canonical keypair read/change,
+money movement, npm publish, public launch, or `ROADMAP.md` edit was performed.
+The build-generated temporary keypair artifact was never read or used and was
+destroyed with its task-specific temporary worktree before this documentation
+change.
