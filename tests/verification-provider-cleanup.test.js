@@ -410,7 +410,7 @@ test('cleanup reports explicit deployed profile truncation instead of clean cove
   }
 });
 
-test('cleanup reports cold empty deployed by-agent attestations as anomalies', async () => {
+test('cleanup does not treat profile-body verificationData as chain-cache evidence', async () => {
   const server = http.createServer((req, res) => {
     res.setHeader('content-type', 'application/json');
     if (req.url === '/api/profiles?page=1&limit=100') {
@@ -444,11 +444,57 @@ test('cleanup reports cold empty deployed by-agent attestations as anomalies', a
     assert.equal(summary.deployedAttestationRowsDetected, 0);
     assert.deepEqual(summary.deployedAttestationEmptyAgents, ['agent_cold']);
     assert.equal(summary.deployedDetectionComplete, true);
+    assert.equal(summary.deployedVerifiedClean, true);
+    assert.deepEqual(summary.deployedAnomalies, []);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test('cleanup reports empty by-agent read when profile exposes chain-backed evidence', async () => {
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/api/profiles?page=1&limit=100') {
+      res.end(JSON.stringify({
+        profiles: [{
+          id: 'agent_chain_claim',
+          verifications: {
+            github: {
+              source: 'on-chain',
+              proof: { txSignature: 'claimed-chain-proof' },
+            },
+          },
+        }],
+        total: 1,
+        pages: 1,
+      }));
+      return;
+    }
+    if (req.url === '/api/satp/attestations/by-agent/agent_chain_claim') {
+      res.end(JSON.stringify({ ok: true, data: { attestations: [] } }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end(JSON.stringify({ error: 'not found' }));
+  });
+
+  const port = await listen(server);
+  try {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-deployed-chain-claim-'));
+    const summary = await cleanupWithDeployedAttestations({
+      dbPath: path.join(temp, 'missing.db'),
+      profilesDir: path.join(temp, 'missing-profiles'),
+      deployedBaseUrl: `http://127.0.0.1:${port}`,
+    });
+
+    assert.equal(summary.deployedAttestationRowsDetected, 0);
+    assert.deepEqual(summary.deployedAttestationEmptyAgents, ['agent_chain_claim']);
+    assert.equal(summary.deployedDetectionComplete, true);
     assert.equal(summary.deployedVerifiedClean, false);
     assert.deepEqual(summary.deployedAnomalies, [{
       type: 'empty_attestations',
-      agentId: 'agent_cold',
-      reason: 'profile_has_verification_evidence_but_chain_cache_returned_empty',
+      agentId: 'agent_chain_claim',
+      reason: 'profile_has_chain_backed_verification_evidence_but_chain_cache_returned_empty',
     }]);
   } finally {
     await closeServer(server);
