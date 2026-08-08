@@ -428,22 +428,17 @@ function extractAgentIdsFromProfiles(payload) {
   return unique(extractProfiles(payload).map(extractAgentIdFromProfile));
 }
 
-function profileHasVerificationEvidence(profile = {}) {
-  const candidates = [
-    profile?.verificationData,
-    profile?.verification_data,
-    profile?.verifications,
-    profile?.verification,
-  ];
-  return candidates.some((value) => {
-    const data = parseJson(value, value || {});
-    if (!data || typeof data !== 'object') return false;
-    return Object.values(data).some((entry) => (
-      entry === true
-      || entry?.verified === true
-      || Boolean(entry?.txSignature || entry?.tx_signature || entry?.proof || entry?.memo)
-    ));
-  });
+function profileHasChainBackedVerificationEvidence(profile = {}) {
+  if (!profile || typeof profile !== 'object') return false;
+  if (Number(profile.onchain_verification_count || 0) > 0) return true;
+  if (Array.isArray(profile.onchain_platforms) && profile.onchain_platforms.length > 0) return true;
+
+  const data = parseJson(profile.verifications, profile.verifications || {});
+  if (!data || typeof data !== 'object') return false;
+  return Object.values(data).some((entry) => (
+    Boolean(entry?.txSignature || entry?.tx_signature)
+    || entry?.source === 'on-chain'
+  ));
 }
 
 function readNumber(...values) {
@@ -688,13 +683,13 @@ async function detectDeployedAttestations({
       if (attestations.length === 0) {
         summary.deployedAttestationEmptyAgents.push(agentId);
         const profile = profilesById.get(agentId);
-        summary.deployedAnomalies.push({
-          type: 'empty_attestations',
-          agentId,
-          reason: profileHasVerificationEvidence(profile)
-            ? 'profile_has_verification_evidence_but_chain_cache_returned_empty'
-            : 'chain_cache_returned_empty',
-        });
+        if (profileHasChainBackedVerificationEvidence(profile)) {
+          summary.deployedAnomalies.push({
+            type: 'empty_attestations',
+            agentId,
+            reason: 'profile_has_chain_backed_verification_evidence_but_chain_cache_returned_empty',
+          });
+        }
       }
       for (const attestation of attestations) {
         const match = cleanupMatchForRow({
