@@ -268,8 +268,15 @@ on-chain IDL sha256 is
 The tracked IDL source is
 `onchain/escrow_v3/target/idl/escrow_v3.json`, sha256
 `19ab1ae26b274499d1d014b69b318a49467189085c35cd51ef52b10dbece1262`.
-The strict repository verifier passes for source versus this tracked IDL. The
-deployed on-chain IDL does not pass the same semantic comparison:
+The strict repository verifier passes its configured checks, but a complete
+isolated `anchor idl build` schema comparison fails for source versus the
+tracked IDL. All 9 instruction shapes, the 19 `EscrowV3` fields and account
+discriminator, all 8 event names/discriminators, and all 20 error variants
+match. The first missing semantic definition is the `DeadlineExtended` event
+payload type, followed by the other 7 source event payload types; tracked
+`types` contains only `EscrowStatus` and `EscrowV3`.
+
+The deployed on-chain IDL also does not pass the semantic comparison:
 
 - The first instruction divergence is instruction index 4,
   `partial_release`: the tracked IDL requires accounts
@@ -286,17 +293,20 @@ deployed on-chain IDL does not pass the same semantic comparison:
 | Gate | Result | Evidence |
 | --- | --- | --- |
 | source -> candidate ELF | PASS | v1.43 produces `21dda9b5...`; v1.52 produces `60f7fee8...` |
-| source <-> tracked IDL | PASS | strict verifier and semantic comparison pass |
+| source <-> tracked IDL | **FAIL** | configured strict checks pass, but all 8 event payload type definitions are absent from tracked `types` |
 | IDL address == deployed program id | PASS | both name `HXCUWKR2...` |
 | candidate ELF == deployed ELF | **FAIL** | neither candidate hash/length equals `b70a7a7e...` / 290680 |
 | tracked IDL == on-chain IDL | **FAIL** | first interface divergence is `partial_release.treasury` |
-| source == deployed == IDL | **FAIL** | both binary and deployed-IDL semantic gates diverge |
+| source == deployed == IDL | **FAIL** | source/tracked-IDL, binary, and deployed-IDL semantic gates diverge |
 
-At byte level, the v1.43 candidate first diverges from the deployed ELF at
+At source/IDL schema level, the first exact divergence is the missing
+`DeadlineExtended` payload type in tracked `types`. At byte level, the v1.43
+candidate first diverges from the deployed ELF at
 1-based byte 19 (ELF `e_machine`: `0xF7` versus `0x107`). Pinned v1.52 fixes
 that format difference, but first diverges at 1-based byte 25 (ELF entry point)
 and remains different in size and hash. At interface level, the first exact
-divergence is the `partial_release` account list described above. The current
+tracked/on-chain divergence is the `partial_release` account list described
+above. The current
 AgentFolio source and tracked IDL therefore represent a post-deployment
 interface (including platform-fee treasury routing), not reproducible provenance
 for the binary and IDL currently deployed at `HXCUWKR2...`.
@@ -304,7 +314,8 @@ for the binary and IDL currently deployed at `HXCUWKR2...`.
 This is not correctable by changing program-id metadata or trying more compiler
 versions. The PR-first corrective path is to supply the authoritative deployed
 source commit and locked build provenance that reproduces `b70a7a7e...`, then
-regenerate an IDL that semantically matches the fetched on-chain IDL. An
+regenerate a complete IDL (including event payload types) that semantically
+matches the fetched on-chain IDL. An
 owner-authorized replacement deployment from the audited current source is the
 separate alternative and remains outside this read-only certification.
 
