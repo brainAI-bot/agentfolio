@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const http = require('node:http');
+const Module = require('node:module');
 const os = require('node:os');
 const path = require('node:path');
 const Database = require('better-sqlite3');
@@ -451,5 +452,95 @@ test('cleanup reports cold empty deployed by-agent attestations as anomalies', a
     }]);
   } finally {
     await closeServer(server);
+  }
+});
+
+test('chain-cache by-agent read falls back to SQLite attestations when memory cache is cold', () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-chain-cache-db-'));
+  const dbPath = path.join(temp, 'agentfolio.db');
+  const db = new Database(dbPath);
+  db.exec(`
+    CREATE TABLE attestations (
+      id TEXT PRIMARY KEY,
+      profile_id TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      tx_signature TEXT NOT NULL,
+      memo TEXT NOT NULL,
+      proof_hash TEXT NOT NULL,
+      signer TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+  db.prepare(`
+    INSERT INTO attestations (id, profile_id, platform, tx_signature, memo, proof_hash, signer, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'att-github',
+    'agent_cold_cache',
+    'github',
+    'signed-github-proof',
+    'VERIFY|agent_cold_cache|github|2026-08-03T00:00:00.000Z|hash',
+    'hash',
+    'JAbcYnKy4p2c5SYV3bHu14VtD6EDDpzj44uGYW8BMud4',
+    '2026-08-03T00:00:00.000Z'
+  );
+  db.prepare(`
+    INSERT INTO attestations (id, profile_id, platform, tx_signature, memo, proof_hash, signer, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'att-untrusted',
+    'agent_cold_cache',
+    'x',
+    'untrusted-proof',
+    'VERIFY|agent_cold_cache|x|2026-08-03T00:00:00.000Z|hash',
+    'hash',
+    'UntrustedSigner11111111111111111111111111111111',
+    '2026-08-03T00:00:01.000Z'
+  );
+  db.close();
+
+  const oldDbPath = process.env.AGENTFOLIO_DB_PATH;
+  const originalLoad = Module._load;
+  const chainCachePath = path.resolve(__dirname, '../src/lib/chain-cache.js');
+  delete require.cache[chainCachePath];
+  process.env.AGENTFOLIO_DB_PATH = dbPath;
+  Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === '@brainai/satp-v3') {
+      return {
+        SatpV3Client: class SatpV3Client {},
+        deriveGenesisPda: () => [{ toBase58: () => 'GenesisPda111' }],
+        agentIdHash: () => Buffer.alloc(32),
+        deserializeGenesis: () => ({}),
+        deserializeAttestation: () => ({}),
+        trustTier: () => 'unknown',
+        verificationLabel: () => 'Unverified',
+        reputationPct: () => 0,
+        isBorn: () => false,
+        PROGRAM_IDS: {},
+      };
+    }
+    return originalLoad(request, parent, isMain);
+  };
+  try {
+    const chainCache = require(chainCachePath);
+    const attestations = chainCache.getVerifications('agent_cold_cache');
+
+    assert.deepEqual(attestations, [{
+      platform: 'github',
+      txSignature: 'signed-github-proof',
+      memo: 'VERIFY|agent_cold_cache|github|2026-08-03T00:00:00.000Z|hash',
+      proofHash: 'hash',
+      signer: 'JAbcYnKy4p2c5SYV3bHu14VtD6EDDpzj44uGYW8BMud4',
+      timestamp: '2026-08-03T00:00:00.000Z',
+      solscanUrl: 'https://solscan.io/tx/signed-github-proof',
+    }]);
+  } finally {
+    if (oldDbPath === undefined) {
+      delete process.env.AGENTFOLIO_DB_PATH;
+    } else {
+      process.env.AGENTFOLIO_DB_PATH = oldDbPath;
+    }
+    Module._load = originalLoad;
+    delete require.cache[chainCachePath];
   }
 });
