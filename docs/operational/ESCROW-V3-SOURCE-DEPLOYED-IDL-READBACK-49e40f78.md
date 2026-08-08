@@ -230,3 +230,96 @@ source/deployed/IDL evidence, authorize and prove any devnet repair/redeploy
 through a separately recorded approval scope, or provide the missing
 authoritative source/toolchain provenance that reproduces the deployed HXCUWKR2
 mainnet ELF.
+
+## 2026-08-08 Mainnet Source Certification [#ef7e4581]
+
+Read-only observation time: `2026-08-08T11:09:05Z`. The certification source
+is `github.com/brainAI-bot/agentfolio` commit
+`f25b9c23d886d6adb0ebb57defd52689b5dc9990`, path
+`onchain/escrow_v3/programs/escrow_v3/src/lib.rs` (sha256
+`a713fb25815f724bde8bc0ed9eec0c104826fc0fb26bd3f608a6ed46096efd4c`).
+
+The host toolchain is Cargo `1.86.0`, rustc `1.86.0`, Anchor CLI `0.31.1`,
+and Solana CLI / `solana-cargo-build-sbf` `2.1.21`. From
+`onchain/escrow_v3`, these clean SBF builds were reproduced:
+
+```text
+cargo build-sbf --manifest-path programs/escrow_v3/Cargo.toml --sbf-out-dir target/deploy
+cargo build-sbf --force-tools-install --tools-version v1.52 --manifest-path programs/escrow_v3/Cargo.toml --sbf-out-dir target/deploy
+```
+
+The default platform-tools `v1.43` / SBF rustc `1.79.0` build produced sha256
+`21dda9b5b0f95aba7f2560d58f2085de7ef8d0c9f1e3ac79f8ee506dcb9c6cf4`,
+length `289216`, and ELF machine `EM_BPF (0xF7)`. The pinned
+platform-tools `v1.52` / SBF rustc `1.89.0` build produced sha256
+`60f7fee84d640a0ff339011962bab3d866c5c27d6a1dad574798999838183d67`,
+length `292336`, and ELF machine `EM_SBF (0x107)`. Neither build reproduced
+the deployed artifact.
+
+Read-only `solana program show`, `solana program dump`, and `anchor idl fetch`
+against mainnet-beta returned program
+`HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C`, ProgramData
+`Fg1DJyKX9CngiMihZxJY2zjaQ8T1PK5QuiVhNvJmeTqk`, deployed ELF sha256
+`b70a7a7ea55f43da7bd3fc4f666e1374436bb9c8aeaa83cb2f0a2a970b603094`,
+deployed ELF length `290680`, and ELF machine `EM_SBF (0x107)`. The fetched
+on-chain IDL sha256 is
+`79b7fd4389dcd55738955de5dc61771bc4d5af997f21065318728a49aa53dd74`.
+
+The tracked IDL source is
+`onchain/escrow_v3/target/idl/escrow_v3.json`, sha256
+`19ab1ae26b274499d1d014b69b318a49467189085c35cd51ef52b10dbece1262`.
+The strict repository verifier passes its configured checks, but a complete
+isolated `anchor idl build` schema comparison fails for source versus the
+tracked IDL. All 9 instruction shapes, the 19 `EscrowV3` fields and account
+discriminator, all 8 event names/discriminators, and all 20 error variants
+match. The first missing semantic definition is the `DeadlineExtended` event
+payload type, followed by the other 7 source event payload types; tracked
+`types` contains only `EscrowStatus` and `EscrowV3`.
+
+The deployed on-chain IDL also does not pass the semantic comparison:
+
+- The first instruction divergence is instruction index 4,
+  `partial_release`: the tracked IDL requires accounts
+  `[escrow, client, agent, treasury]`, while the on-chain IDL requires only
+  `[escrow, client, agent]`.
+- `release` has the same interface split: the tracked IDL adds `treasury`,
+  while the on-chain IDL does not.
+- The tracked IDL has 20 error variants while the on-chain IDL has 25. The
+  first semantic error divergence is code `6002`: tracked `NotActive` versus
+  on-chain `AgentIdTooLong`.
+- The 19 `EscrowV3` state fields remain semantically equal after ignoring
+  documentation-only text.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| source -> candidate ELF | PASS | v1.43 produces `21dda9b5...`; v1.52 produces `60f7fee8...` |
+| source <-> tracked IDL | **FAIL** | configured strict checks pass, but all 8 event payload type definitions are absent from tracked `types` |
+| IDL address == deployed program id | PASS | both name `HXCUWKR2...` |
+| candidate ELF == deployed ELF | **FAIL** | neither candidate hash/length equals `b70a7a7e...` / 290680 |
+| tracked IDL == on-chain IDL | **FAIL** | first interface divergence is `partial_release.treasury` |
+| source == deployed == IDL | **FAIL** | source/tracked-IDL, binary, and deployed-IDL semantic gates diverge |
+
+At source/IDL schema level, the first exact divergence is the missing
+`DeadlineExtended` payload type in tracked `types`. At byte level, the v1.43
+candidate first diverges from the deployed ELF at
+1-based byte 19 (ELF `e_machine`: `0xF7` versus `0x107`). Pinned v1.52 fixes
+that format difference, but first diverges at 1-based byte 25 (ELF entry point)
+and remains different in size and hash. At interface level, the first exact
+tracked/on-chain divergence is the `partial_release` account list described
+above. The current
+AgentFolio source and tracked IDL therefore represent a post-deployment
+interface (including platform-fee treasury routing), not reproducible provenance
+for the binary and IDL currently deployed at `HXCUWKR2...`.
+
+This is not correctable by changing program-id metadata or trying more compiler
+versions. The PR-first corrective path is to supply the authoritative deployed
+source commit and locked build provenance that reproduces `b70a7a7e...`, then
+regenerate a complete IDL (including event payload types) that semantically
+matches the fetched on-chain IDL. An
+owner-authorized replacement deployment from the audited current source is the
+separate alternative and remains outside this read-only certification.
+
+No Solana write, deploy/restart, existing or canonical keypair read/change,
+money movement, npm publish, public launch, or `ROADMAP.md` edit was performed.
+The standard build-generated local output keypair was never read, printed,
+copied, used for signing, or used for any chain action.
