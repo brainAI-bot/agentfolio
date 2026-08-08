@@ -92,7 +92,7 @@ describe('deploy provenance', () => {
     assert.ok(payload.checkoutHead);
   });
 
-  it('captures checkout fallback once at process start instead of per request', () => {
+  it('keeps the running SHA fixed while reading checkout HEAD on every request', () => {
     let calls = 0;
     childProcess.execFileSync = () => {
       calls += 1;
@@ -107,9 +107,23 @@ describe('deploy provenance', () => {
 
     assert.strictEqual(first.commitSha, '1111111111111111111111111111111111111111');
     assert.strictEqual(second.commitSha, '1111111111111111111111111111111111111111');
-    assert.strictEqual(first.checkoutHead, '1111111111111111111111111111111111111111');
+    assert.strictEqual(first.runningCommitSha, '1111111111111111111111111111111111111111');
+    assert.strictEqual(first.checkoutHead, '2222222222222222222222222222222222222222');
+    assert.strictEqual(second.checkoutHead, '2222222222222222222222222222222222222222');
+    assert.strictEqual(first.checkoutMatchesRunning, false);
+    assert.strictEqual(first.restartNeeded, true);
     assert.strictEqual(first.source, 'checkout');
-    assert.strictEqual(calls, 1);
+    assert.strictEqual(calls, 3);
+  });
+
+  it('reports no restart needed when the live checkout matches the running SHA', () => {
+    childProcess.execFileSync = () => '1111111111111111111111111111111111111111\n';
+
+    const { getDeployProvenance } = loadFreshProvenance();
+    const payload = getDeployProvenance();
+
+    assert.strictEqual(payload.checkoutMatchesRunning, true);
+    assert.strictEqual(payload.restartNeeded, false);
   });
 
   it('registers the public /api/version route in the server source', () => {
