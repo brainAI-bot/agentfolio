@@ -451,6 +451,54 @@ test('cleanup does not treat profile-body verificationData as chain-cache eviden
   }
 });
 
+test('cleanup does not treat boolean or off-chain verifications as chain-cache evidence', async () => {
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/api/profiles?page=1&limit=100') {
+      res.end(JSON.stringify({
+        profiles: [{
+          id: 'agent_off_chain',
+          verifications: {
+            github: true,
+            website: {
+              verified: true,
+              source: 'oauth',
+              memo: 'ordinary off-chain verification',
+            },
+          },
+        }],
+        total: 1,
+        pages: 1,
+      }));
+      return;
+    }
+    if (req.url === '/api/satp/attestations/by-agent/agent_off_chain') {
+      res.end(JSON.stringify({ ok: true, data: { attestations: [] } }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end(JSON.stringify({ error: 'not found' }));
+  });
+
+  const port = await listen(server);
+  try {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-deployed-off-chain-'));
+    const summary = await cleanupWithDeployedAttestations({
+      dbPath: path.join(temp, 'missing.db'),
+      profilesDir: path.join(temp, 'missing-profiles'),
+      deployedBaseUrl: `http://127.0.0.1:${port}`,
+    });
+
+    assert.equal(summary.deployedAttestationRowsDetected, 0);
+    assert.deepEqual(summary.deployedAttestationEmptyAgents, ['agent_off_chain']);
+    assert.equal(summary.deployedDetectionComplete, true);
+    assert.equal(summary.deployedVerifiedClean, true);
+    assert.deepEqual(summary.deployedAnomalies, []);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test('cleanup reports empty by-agent read when profile exposes chain-backed evidence', async () => {
   const server = http.createServer((req, res) => {
     res.setHeader('content-type', 'application/json');

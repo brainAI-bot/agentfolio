@@ -436,8 +436,7 @@ function profileHasChainBackedVerificationEvidence(profile = {}) {
   const data = parseJson(profile.verifications, profile.verifications || {});
   if (!data || typeof data !== 'object') return false;
   return Object.values(data).some((entry) => (
-    entry === true
-    || Boolean(entry?.txSignature || entry?.tx_signature || entry?.memo)
+    Boolean(entry?.txSignature || entry?.tx_signature)
     || entry?.source === 'on-chain'
   ));
 }
