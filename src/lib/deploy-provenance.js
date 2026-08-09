@@ -3,6 +3,7 @@ const path = require('path');
 
 const STARTED_AT = new Date().toISOString();
 const REPO_ROOT = path.resolve(__dirname, '../..');
+const LIVE_CHECKOUT_TTL_MS = 5000;
 
 function clean(value) {
   if (value === undefined || value === null) return null;
@@ -49,11 +50,24 @@ const BUILD_TIME = firstClean([
   process.env.VERCEL_GIT_COMMIT_DATE,
 ]) || STARTED_AT;
 const SOURCE = BUILD_COMMIT_SHA ? 'build' : (BOOT_CHECKOUT_HEAD ? 'checkout' : 'unavailable');
+let liveCheckoutHead = null;
+let liveCheckoutHeadExpiresAt = 0;
+
+function getLiveCheckoutHead() {
+  const now = Date.now();
+  if (now < liveCheckoutHeadExpiresAt) return liveCheckoutHead;
+
+  // Keep checkout drift visible without letting the public version endpoint
+  // fork git on every request. Five seconds is well below the deploy cron period.
+  liveCheckoutHead = runGit(['rev-parse', 'HEAD']);
+  liveCheckoutHeadExpiresAt = now + LIVE_CHECKOUT_TTL_MS;
+  return liveCheckoutHead;
+}
 
 function getDeployProvenance() {
-  const checkoutHead = runGit(['rev-parse', 'HEAD']);
-  const checkoutMatchesRunning = checkoutHead && COMMIT_SHA !== 'unknown'
-    ? checkoutHead === COMMIT_SHA
+  const checkoutHead = getLiveCheckoutHead();
+  const checkoutMatchesRunning = SOURCE === 'checkout' && checkoutHead && BOOT_CHECKOUT_HEAD
+    ? checkoutHead === BOOT_CHECKOUT_HEAD
     : null;
 
   return {
