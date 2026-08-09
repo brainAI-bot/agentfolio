@@ -6,13 +6,16 @@ const os = require('node:os');
 const path = require('node:path');
 const childProcess = require('node:child_process');
 const { execFileSync, spawn } = childProcess;
+const dateNow = Date.now;
 
 const repoRoot = path.resolve(__dirname, '..');
 
 afterEach(() => {
   delete process.env.AGENTFOLIO_COMMIT_SHA;
   delete process.env.AGENTFOLIO_BUILD_TIME;
+  delete process.env.GIT_COMMIT;
   childProcess.execFileSync = execFileSync;
+  Date.now = dateNow;
 });
 
 function loadFreshProvenance() {
@@ -92,7 +95,49 @@ describe('deploy provenance', () => {
     assert.ok(payload.checkoutHead);
   });
 
-  it('captures checkout fallback once at process start instead of per request', () => {
+  it('keeps the running SHA fixed while memoizing live checkout drift', () => {
+    let now = 1000;
+    Date.now = () => now;
+    let calls = 0;
+    childProcess.execFileSync = () => {
+      calls += 1;
+      if (calls === 1) return '1111111111111111111111111111111111111111\n';
+      if (calls === 2) return '2222222222222222222222222222222222222222\n';
+      return '3333333333333333333333333333333333333333\n';
+    };
+
+    const { getDeployProvenance } = loadFreshProvenance();
+    const first = getDeployProvenance();
+    const second = getDeployProvenance();
+
+    assert.strictEqual(first.commitSha, '1111111111111111111111111111111111111111');
+    assert.strictEqual(second.commitSha, '1111111111111111111111111111111111111111');
+    assert.strictEqual(first.runningCommitSha, '1111111111111111111111111111111111111111');
+    assert.strictEqual(first.checkoutHead, '2222222222222222222222222222222222222222');
+    assert.strictEqual(second.checkoutHead, '2222222222222222222222222222222222222222');
+    assert.strictEqual(first.checkoutMatchesRunning, false);
+    assert.strictEqual(first.restartNeeded, true);
+    assert.strictEqual(first.source, 'checkout');
+    assert.strictEqual(calls, 2);
+
+    now += 5001;
+    const afterTtl = getDeployProvenance();
+    assert.strictEqual(afterTtl.checkoutHead, '3333333333333333333333333333333333333333');
+    assert.strictEqual(calls, 3);
+  });
+
+  it('reports no restart needed when the live checkout matches the running SHA', () => {
+    childProcess.execFileSync = () => '1111111111111111111111111111111111111111\n';
+
+    const { getDeployProvenance } = loadFreshProvenance();
+    const payload = getDeployProvenance();
+
+    assert.strictEqual(payload.checkoutMatchesRunning, true);
+    assert.strictEqual(payload.restartNeeded, false);
+  });
+
+  it('returns null restart semantics for build-source deployments', () => {
+    process.env.GIT_COMMIT = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     let calls = 0;
     childProcess.execFileSync = () => {
       calls += 1;
@@ -102,14 +147,14 @@ describe('deploy provenance', () => {
     };
 
     const { getDeployProvenance } = loadFreshProvenance();
-    const first = getDeployProvenance();
-    const second = getDeployProvenance();
+    const payload = getDeployProvenance();
 
-    assert.strictEqual(first.commitSha, '1111111111111111111111111111111111111111');
-    assert.strictEqual(second.commitSha, '1111111111111111111111111111111111111111');
-    assert.strictEqual(first.checkoutHead, '1111111111111111111111111111111111111111');
-    assert.strictEqual(first.source, 'checkout');
-    assert.strictEqual(calls, 1);
+    assert.strictEqual(payload.source, 'build');
+    assert.strictEqual(payload.runningCommitSha, process.env.GIT_COMMIT);
+    assert.strictEqual(payload.checkoutHead, '2222222222222222222222222222222222222222');
+    assert.strictEqual(payload.checkoutMatchesRunning, null);
+    assert.strictEqual(payload.restartNeeded, null);
+    assert.strictEqual(calls, 2);
   });
 
   it('registers the public /api/version route in the server source', () => {
