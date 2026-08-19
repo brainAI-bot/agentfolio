@@ -256,12 +256,19 @@ const addProfileCandidate = (map, key, profile) => {
 };
 const profilesByAuthority = new Map();
 const profilesByName = new Map();
+const profilesByGenesisPda = new Map();
 for (const profile of profiles) {
   for (const authorityKey of getProfileAuthorityCandidates(profile)) {
     addProfileCandidate(profilesByAuthority, authorityKey, profile);
   }
   const nameKey = normalizeProfileKey(profile.name || profile.handle || profile.id || '');
   if (nameKey) addProfileCandidate(profilesByName, nameKey, profile);
+  const genesisPda = String(
+    profile.verification_data?.satp_v3?.genesisPDA
+    || profile.verification_data?.satp?.genesisPDA
+    || ''
+  ).trim().toLowerCase();
+  if (genesisPda) addProfileCandidate(profilesByGenesisPda, genesisPda, profile);
 }
 const pickBestProfileForAgent = (parsedAgent) => {
   if (!parsedAgent) return { profile: null, score: 0 };
@@ -269,6 +276,7 @@ const pickBestProfileForAgent = (parsedAgent) => {
   const derivedProfileId = String(deriveProfileIdFromName(agentName) || '').trim().toLowerCase();
   const authorityKey = String(parsedAgent.authority || '').trim().toLowerCase();
   const nameKey = normalizeProfileKey(agentName);
+  const pdaKey = String(parsedAgent.pda || '').trim().toLowerCase();
   const candidates = new Map();
   const registerCandidate = (profile) => {
     if (!profile?.id) return;
@@ -279,6 +287,7 @@ const pickBestProfileForAgent = (parsedAgent) => {
   }
   for (const profile of profilesByAuthority.get(authorityKey) || []) registerCandidate(profile);
   for (const profile of profilesByName.get(nameKey) || []) registerCandidate(profile);
+  for (const profile of profilesByGenesisPda.get(pdaKey) || []) registerCandidate(profile);
   if (!candidates.size) return { profile: null, score: 0 };
 
   const rankProfile = (profile) => {
@@ -287,6 +296,12 @@ const pickBestProfileForAgent = (parsedAgent) => {
     const profileNameKey = normalizeProfileKey(profile.name || profile.handle || '');
     const authorityCandidates = getProfileAuthorityCandidates(profile);
     const verificationCount = Object.keys(profile.verification_data || {}).length;
+    const profileGenesisPda = String(
+      profile.verification_data?.satp_v3?.genesisPDA
+      || profile.verification_data?.satp?.genesisPDA
+      || ''
+    ).trim().toLowerCase();
+    if (pdaKey && profileGenesisPda && profileGenesisPda === pdaKey) score += 2000;
     if (derivedProfileId && profileId === derivedProfileId) score += 1000;
     if (authorityKey && authorityCandidates.includes(authorityKey)) score += 500;
     if (nameKey && profileNameKey === nameKey) score += 100;
@@ -307,8 +322,15 @@ const pickBestProfileForAgent = (parsedAgent) => {
   const profileNameKey = normalizeProfileKey(best.profile.name || best.profile.handle || '');
   const hasIdMatch = Boolean(derivedProfileId && profileId === derivedProfileId);
   const hasNameMatch = Boolean(nameKey && profileNameKey === nameKey);
+  const profileGenesisPda = String(
+    best.profile.verification_data?.satp_v3?.genesisPDA
+    || best.profile.verification_data?.satp?.genesisPDA
+    || ''
+  ).trim().toLowerCase();
+  const hasPdaMatch = Boolean(pdaKey && profileGenesisPda && profileGenesisPda === pdaKey);
   // Authority-only matches are too weak: many fixture agents share one wallet.
-  if (!hasIdMatch && !hasNameMatch) return { profile: null, score: best.score };
+  // A persisted SATP V3 genesis PDA is an honest join signal for a real profile.
+  if (!hasIdMatch && !hasNameMatch && !hasPdaMatch) return { profile: null, score: best.score };
   return best;
 };
 const filteredAgents = agents.map((v3) => {

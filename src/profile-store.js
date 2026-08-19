@@ -1041,7 +1041,7 @@ function registerRoutes(app) {
 
   // ── POST /api/satp/genesis/prepare — User-paid Genesis Record (returns unsigned TX) ──
   app.post('/api/satp/genesis/prepare', async (req, res) => {
-    if (sendSolanaIrysWriteGateResponse(res, 'SATP V3 genesis transaction build')) return;
+    // Unsigned client-signed V3 genesis TX. Escrow/BOA POSTs stay gated.
     if (!satpV3) return res.status(503).json({ error: 'SATP V3 SDK not available' });
     try {
       const { agentId, payer } = req.body;
