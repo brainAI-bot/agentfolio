@@ -242,6 +242,10 @@ function registerWorkflowReadRoutes(app, options = {}) {
           total_volume: Number(escrowStats.total_volume || 0),
           released_volume: Number(escrowStats.released_volume || 0),
           total_fees: Number(escrowStats.total_fees || 0),
+          publicTraction: false,
+          sample: 'internal-smoke',
+          liveMainnetEscrow: false,
+          note: 'Volume is internal/smoke escrow rows, not public mainnet traction. Live mainnet escrow writes stay gated.',
         },
         applications: {
           total_applications: Number(applicationStats.total_applications || 0),

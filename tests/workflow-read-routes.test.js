@@ -138,6 +138,9 @@ test('returns marketplace stats from the canonical owner route', () => {
     assert.equal(res.body.jobs.completion_rate, 50);
     assert.equal(res.body.escrow.total_volume, 30);
     assert.equal(res.body.escrow.total_fees, 1.5);
+    assert.equal(res.body.escrow.publicTraction, false);
+    assert.equal(res.body.escrow.liveMainnetEscrow, false);
+    assert.equal(res.body.escrow.sample, 'internal-smoke');
     assert.equal(res.body.applications.total_applications, 2);
   } finally {
     cleanup();

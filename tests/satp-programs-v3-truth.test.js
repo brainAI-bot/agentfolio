@@ -143,3 +143,26 @@ describe('backend and frontend V3 registries stay aligned', () => {
     assert.equal(Object.values(js.SATP_MAINNET_PROGRAMS).filter((id) => id === V3.ESCROW).length, 1);
   });
 });
+
+describe('GET /api/satp/registry labels V1 leftover', () => {
+  it('marks BY4j as legacy and points at the V3 explorer list', async () => {
+    const loaded = loadSatpRoutes();
+    restoreModules = loaded.restore;
+    const routes = [];
+    loaded.registerSATPRoutes({
+      get(route, handler) { routes.push({ route, handler }); },
+    });
+    const registryRoute = routes.find((entry) => entry.route === '/api/satp/registry');
+    assert.ok(registryRoute, 'expected /api/satp/registry route');
+    const res = createJsonResponse();
+    await registryRoute.handler({ query: { limit: '10', offset: '0' } }, res);
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(res.body.ok, true);
+    assert.strictEqual(res.body.data.legacy, true);
+    assert.strictEqual(res.body.data.programVersion, 'v1-legacy');
+    assert.strictEqual(res.body.data.programId, 'BY4jzmnrui1K5gZ5z5xRQkVfEEMXYHYugtH1Ua867eyr');
+    assert.strictEqual(res.body.data.current.version, 'v3');
+    assert.strictEqual(res.body.data.current.programId, V3.IDENTITY);
+    assert.strictEqual(res.body.data.current.list, '/api/satp/explorer/agents');
+  });
+});
