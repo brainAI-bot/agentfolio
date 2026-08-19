@@ -6,6 +6,7 @@
 const satpWrite = require('../satp-write-client');
 const path = require('path');
 const { sendSolanaIrysWriteGateResponse } = require('../lib/write-surface-gate');
+const { buildCreateIdentityV3Tx, SATP_V3_IDENTITY_PROGRAM } = require('./satp-auto-identity-v3');
 
 // Platform keypair for server-signed operations
 const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || 
@@ -80,8 +81,9 @@ function registerSATPWriteRoutes(app) {
    */
   app.post('/api/satp/register/build', async (req, res) => {
     try {
-      // Unsigned client-signed identity TX. Not an Irys/escrow write.
-      const { walletAddress, name, description, category, capabilities, metadataUri } = req.body;
+      // Unsigned client-signed V3 create_identity. Not an Irys/escrow write.
+      // Do not follow SATP_NETWORK=devnet leftover (that is gated escrow).
+      const { walletAddress, name, description, category, capabilities, metadataUri, profileId } = req.body || {};
       
       if (!walletAddress || !name || !description || !category) {
         return res.status(400).json({ 
@@ -89,16 +91,33 @@ function registerSATPWriteRoutes(app) {
           required: ['walletAddress', 'name', 'description', 'category'] 
         });
       }
-      
-      const result = await satpWrite.buildRegisterIdentityTx(
-        { walletAddress, name, description, category, capabilities: capabilities || [], metadataUri: metadataUri || '' },
-        NETWORK
+
+      const explicit = String(profileId || '').trim();
+      const normalizedName = String(name || '').trim();
+      const agentId = explicit || (normalizedName.startsWith('agent_') ? normalizedName : `agent_${normalizedName}`);
+
+      const result = await buildCreateIdentityV3Tx(
+        walletAddress,
+        agentId,
+        name,
+        description,
+        category,
+        capabilities || [],
+        metadataUri || ''
       );
-      
-      res.json({ ok: true, data: result });
+
+      return res.json({
+        ok: true,
+        data: {
+          ...result,
+          identityPDA: result.genesisPDA,
+          program: result.program || SATP_V3_IDENTITY_PROGRAM.toBase58(),
+          profileId: agentId,
+        },
+      });
     } catch (err) {
       console.error('[SATP Write] build TX error:', err.message);
-      res.status(500).json({ error: 'Failed to build transaction', detail: err.message });
+      res.status(err.statusCode || 500).json({ error: 'Failed to build transaction', detail: err.message, code: err.code || undefined });
     }
   });
 

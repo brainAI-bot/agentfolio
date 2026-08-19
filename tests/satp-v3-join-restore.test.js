@@ -271,4 +271,63 @@ describe('SATP V3 join restore', () => {
     }
   });
 
+
+  it('register/build is V3 GTpp mainnet, not leftover SATP_NETWORK', () => {
+    const writeApi = fs.readFileSync(path.join(ROOT, 'src', 'routes', 'satp-write-api.js'), 'utf8');
+    const buildStart = writeApi.indexOf("app.post('/api/satp/register/build'");
+    const buildEnd = writeApi.indexOf("app.post('/api/satp/reputation/submit'");
+    const buildRoute = writeApi.slice(buildStart, buildEnd);
+    assert.match(buildRoute, /buildCreateIdentityV3Tx/);
+    assert.doesNotMatch(buildRoute, /buildRegisterIdentityTx/);
+    assert.doesNotMatch(buildRoute, /buildRegisterIdentityTx\([\s\S]*NETWORK/);
+    assert.doesNotMatch(buildRoute, /,\s*NETWORK\s*\)/);
+  });
+
+  it('register/build returns GTpp mainnet-beta for the persisted p1reg profile', async () => {
+    const previousNet = process.env.SATP_NETWORK;
+    const previousRpc = process.env.SOLANA_RPC_URL;
+    process.env.SATP_NETWORK = 'devnet';
+    process.env.SOLANA_RPC_URL = 'https://api.devnet.solana.com';
+    const identityPath = require.resolve('../src/routes/satp-auto-identity-v3');
+    const writePath = require.resolve('../src/routes/satp-write-api');
+    delete require.cache[identityPath];
+    delete require.cache[writePath];
+    const app = express();
+    app.use(express.json());
+    const { registerSATPWriteRoutes } = require('../src/routes/satp-write-api');
+    registerSATPWriteRoutes(app);
+    const server = await listen(app);
+    try {
+      const { port } = server.address();
+      const buildRes = await fetch(`http://127.0.0.1:${port}/api/satp/register/build`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          walletAddress: '2op4BBEhNBEf3qSv9S4p8ph1QSkJFuC4wgrhNFxDJncZ',
+          name: 'p1reg_35028542',
+          description: 'x',
+          category: 'ai-agent',
+        }),
+      });
+      const buildBody = await buildRes.json();
+      assert.equal(buildRes.status, 200);
+      assert.equal(buildBody.ok, true);
+      assert.equal(buildBody.data.network, 'mainnet-beta');
+      assert.notEqual(buildBody.data.network, 'devnet');
+      assert.equal(buildBody.data.alreadyExists, true);
+      assert.equal(buildBody.data.genesisPDA, 'HmuetLjwGoZ3kHt2TKj83pqPYVX9j62mSJWhRw8xAdWg');
+      assert.equal(buildBody.data.identityPDA, 'HmuetLjwGoZ3kHt2TKj83pqPYVX9j62mSJWhRw8xAdWg');
+      assert.equal(buildBody.data.program, 'GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
+      assert.equal(buildBody.data.transaction, null);
+    } finally {
+      await close(server);
+      delete require.cache[identityPath];
+      delete require.cache[writePath];
+      if (previousNet === undefined) delete process.env.SATP_NETWORK;
+      else process.env.SATP_NETWORK = previousNet;
+      if (previousRpc === undefined) delete process.env.SOLANA_RPC_URL;
+      else process.env.SOLANA_RPC_URL = previousRpc;
+    }
+  });
+
 });
