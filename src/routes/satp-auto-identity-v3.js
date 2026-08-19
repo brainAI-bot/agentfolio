@@ -42,13 +42,8 @@ const SATP_V2_IDENTITY_PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxu
 // GTpp lives on mainnet. Prod may still set SATP_NETWORK=devnet for the
 // gated escrow surface. That leftover must not send join/check/create to
 // the public devnet RPC or advertise network:devnet on this path.
-const NETWORK = 'mainnet-beta';
-function resolveV3IdentityRpcUrl() {
-  const rpc = String(process.env.SOLANA_RPC_URL || '').trim();
-  if (rpc && !/devnet/i.test(rpc)) return rpc;
-  return 'https://api.mainnet-beta.solana.com';
-}
-const RPC_URL = resolveV3IdentityRpcUrl();
+const { NETWORK, resolveSatpMainnetRpcUrl } = require('../lib/satp-mainnet-rpc');
+const RPC_URL = resolveSatpMainnetRpcUrl();
 
 const connection = new Connection(RPC_URL, 'confirmed');
 const V3_PRIORITY_FEE_MICROLAMPORTS = 50000;
@@ -292,26 +287,17 @@ async function getV3IdentityStatus(agentId) {
       return { exists: false, accountExists: false, active: false, pda: pda.toBase58() };
     }
 
-    let active = true;
-    let verificationLevel = null;
-    let reputationScore = null;
-    try {
-      const { client: satpAdapter } = require('../adapters/satp');
-      const { SATPV3SDK } = satpAdapter.loadSatpClient();
-      const sdk = new SATPV3SDK({ rpcUrl: RPC_URL });
-      const record = await sdk.getGenesisRecord(agentId);
-      active = !!(record && !record.error && record.isActive !== false && record.active !== false);
-      verificationLevel = record && !record.error ? (record.verificationLevel ?? null) : null;
-      reputationScore = record && !record.error ? (record.reputationScore ?? null) : null;
-    } catch (_) {}
+    const { parseGenesisRecord } = require('../v3-score-service');
+    const parsed = parseGenesisRecord(acct.data);
+    const active = !!(parsed && parsed.isActive !== false);
 
     return {
       exists: active,
       accountExists: true,
       active,
       pda: pda.toBase58(),
-      verificationLevel,
-      reputationScore,
+      verificationLevel: parsed ? (parsed.verificationLevel ?? null) : null,
+      reputationScore: parsed ? (parsed.reputationScore ?? null) : null,
     };
   } catch {
     return { exists: false, accountExists: false, active: false, pda: null, verificationLevel: null, reputationScore: null };

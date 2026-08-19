@@ -230,8 +230,9 @@ describe('SATP V3 join restore', () => {
 
   it('V3 identity join is pinned to mainnet even when SATP_NETWORK=devnet', () => {
     const v3 = fs.readFileSync(path.join(ROOT, 'src', 'routes', 'satp-auto-identity-v3.js'), 'utf8');
-    assert.match(v3, /const NETWORK = 'mainnet-beta'/);
-    assert.match(v3, /resolveV3IdentityRpcUrl/);
+    assert.match(v3, /satp-mainnet-rpc/);
+    assert.match(v3, /resolveSatpMainnetRpcUrl/);
+    assert.match(v3, /NETWORK/);
     assert.doesNotMatch(v3, /NETWORK === 'devnet'/);
     assert.doesNotMatch(v3, /api\.devnet\.solana\.com/);
   });
