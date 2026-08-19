@@ -2047,7 +2047,12 @@ try {
   registerBoaStatusRoutes(app);
   const { registerEligibilityRoutes } = require("./api/eligibility");
   registerEligibilityRoutes(app);
+  const { registerBoaMintRoutes, registerBoaMintCompleteRoute, registerBoaAgentMintRoute } = require('./api/boa-mint');
+  registerBoaMintRoutes(app);
+  registerBoaMintCompleteRoute(app);
+  registerBoaAgentMintRoute(app);
   console.log("[Eligibility API] Mounted — /api/boa/status, /api/mint/eligibility, /api/boa/eligibility");
+  console.log("[BOA Mint API] POST /api/boa/mint is mounted gated");
 } catch (e) {
   console.warn("[Eligibility API] Failed to mount:", e.message);
 }

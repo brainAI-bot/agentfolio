@@ -16,7 +16,10 @@ try { sdkDeriveGenesisPda = require("@brainai/satp-v3").deriveGenesisPda; } catc
 
 const PROGRAM_ID = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
 const GENESIS_SEED = 'genesis';
-const RPC = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+const { resolveSatpMainnetRpcUrl } = require('./lib/satp-mainnet-rpc');
+// Ignore leftover SATP_NETWORK=devnet / SOLANA_RPC_URL containing 'devnet'.
+// Explorer already pins via the same helper; eligibility must use the same surface.
+const RPC = resolveSatpMainnetRpcUrl();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const RATE_LIMIT_RETRY_DELAYS_MS = [250, 500, 1000];
 
