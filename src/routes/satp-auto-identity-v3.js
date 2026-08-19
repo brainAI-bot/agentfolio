@@ -39,10 +39,16 @@ const SATP_V3_IDENTITY_PROGRAM = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty
 // SATP V2 Identity Program (for legacy check/migration)
 const SATP_V2_IDENTITY_PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq');
 
-const NETWORK = process.env.SATP_NETWORK || 'mainnet';
-const RPC_URL = NETWORK === 'devnet'
-  ? 'https://api.devnet.solana.com'
-  : (process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+// GTpp lives on mainnet. Prod may still set SATP_NETWORK=devnet for the
+// gated escrow surface. That leftover must not send join/check/create to
+// the public devnet RPC or advertise network:devnet on this path.
+const NETWORK = 'mainnet-beta';
+function resolveV3IdentityRpcUrl() {
+  const rpc = String(process.env.SOLANA_RPC_URL || '').trim();
+  if (rpc && !/devnet/i.test(rpc)) return rpc;
+  return 'https://api.mainnet-beta.solana.com';
+}
+const RPC_URL = resolveV3IdentityRpcUrl();
 
 const connection = new Connection(RPC_URL, 'confirmed');
 const V3_PRIORITY_FEE_MICROLAMPORTS = 50000;
