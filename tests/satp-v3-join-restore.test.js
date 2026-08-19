@@ -227,4 +227,48 @@ describe('SATP V3 join restore', () => {
     assert.match(source, /isOnChainIdentity\(row\.verification_data\)/);
     assert.doesNotMatch(source, /if \(vd\.solana\?\.verified\) onChain\+\+/);
   });
+
+  it('V3 identity join is pinned to mainnet even when SATP_NETWORK=devnet', () => {
+    const v3 = fs.readFileSync(path.join(ROOT, 'src', 'routes', 'satp-auto-identity-v3.js'), 'utf8');
+    assert.match(v3, /const NETWORK = 'mainnet-beta'/);
+    assert.match(v3, /resolveV3IdentityRpcUrl/);
+    assert.doesNotMatch(v3, /NETWORK === 'devnet'/);
+    assert.doesNotMatch(v3, /api\.devnet\.solana\.com/);
+  });
+
+  it('identity check/create advertise mainnet-beta when SATP_NETWORK=devnet', async () => {
+    const previousNet = process.env.SATP_NETWORK;
+    const previousRpc = process.env.SOLANA_RPC_URL;
+    process.env.SATP_NETWORK = 'devnet';
+    process.env.SOLANA_RPC_URL = 'https://api.devnet.solana.com';
+    const resolved = require.resolve('../src/routes/satp-auto-identity-v3');
+    delete require.cache[resolved];
+    const mod = require('../src/routes/satp-auto-identity-v3');
+    const app = express();
+    app.use(express.json());
+    mod.registerSATPAutoIdentityV3Routes(app);
+    const server = await listen(app);
+    try {
+      assert.equal(mod.NETWORK, 'mainnet-beta');
+      assert.notEqual(mod.RPC_URL, 'https://api.devnet.solana.com');
+      assert.match(mod.RPC_URL, /mainnet/);
+
+      const { port } = server.address();
+      const checkRes = await fetch(`http://127.0.0.1:${port}/api/satp-auto/v3/identity/check/agent_p1reg_35028542`);
+      const checkBody = await checkRes.json();
+      assert.equal(checkRes.status, 200);
+      assert.equal(checkBody.network, 'mainnet-beta');
+      assert.notEqual(checkBody.network, 'devnet');
+      assert.equal(checkBody.v3.program, 'GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
+      assert.equal(checkBody.v3.genesisPDA, 'HmuetLjwGoZ3kHt2TKj83pqPYVX9j62mSJWhRw8xAdWg');
+    } finally {
+      await close(server);
+      delete require.cache[resolved];
+      if (previousNet === undefined) delete process.env.SATP_NETWORK;
+      else process.env.SATP_NETWORK = previousNet;
+      if (previousRpc === undefined) delete process.env.SOLANA_RPC_URL;
+      else process.env.SOLANA_RPC_URL = previousRpc;
+    }
+  });
+
 });
