@@ -284,7 +284,20 @@ function registerSATPRoutes(app) {
       const limit = Math.min(parseInt(req.query.limit) || 50, 100);
       const offset = parseInt(req.query.offset) || 0;
       const result = await satpIdentity.listRegisteredAgents(limit, offset);
-      res.json({ ok: true, data: result });
+      res.json({
+        ok: true,
+        data: {
+          ...result,
+          legacy: true,
+          programVersion: 'v1-legacy',
+          programId: 'BY4jzmnrui1K5gZ5z5xRQkVfEEMXYHYugtH1Ua867eyr',
+          current: {
+            version: 'v3',
+            programId: 'GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG',
+            list: '/api/satp/explorer/agents',
+          },
+        },
+      });
     } catch (err) {
       console.error('[SATP API] registry error:', err.message);
       res.status(500).json({ error: 'Failed to list agents', detail: err.message });
