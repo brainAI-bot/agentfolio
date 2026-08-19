@@ -132,7 +132,7 @@ describe('SATP V3 per-agent read contract', () => {
     const record = await loaded.resolveV3GenesisRecord(SAMPLE_AGENT_ID);
 
     assert.strictEqual(record.agentId, SAMPLE_AGENT_ID);
-    assert.strictEqual(record.resolvedAgentId, SAMPLE_AGENT_ID);
+    assert.strictEqual(record.resolvedAgentId, 'brainTEST');
     assert.strictEqual(record.agentName, 'brainTEST');
     assert.strictEqual(record.pda, 'ExplorerPda111');
     assert.strictEqual(record.reputationScore, 620);
@@ -200,7 +200,7 @@ describe('SATP V3 per-agent read contract', () => {
     assert.strictEqual(scoresRes.body.source, 'satp_v3_genesis_contract');
     assert.deepStrictEqual(scoresRes.body.data, {
       agentId: SAMPLE_AGENT_ID,
-      resolvedAgentId: SAMPLE_AGENT_ID,
+      resolvedAgentId: 'brainTEST',
       reputationScore: 620,
       reputationPct: '620.00',
       verificationLevel: 3,

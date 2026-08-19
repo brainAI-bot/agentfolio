@@ -101,6 +101,8 @@ describe('SATP explorer profile join honesty', () => {
     const result = await loaded.mod.getSatpAgents();
     assert.strictEqual(result.count, 1);
     assert.strictEqual(result.agents[0].profileId, 'agent_brainForge');
+    assert.strictEqual(result.agents[0].agentId, 'agent_brainForge');
+    assert.strictEqual(result.agents[0].onChainAgentId, 'brainForge');
     assert.strictEqual(result.agents[0].profileJoined, true);
     assert.strictEqual(result.profileJoin.matched, 1);
   });
@@ -119,9 +121,10 @@ describe('SATP explorer profile join honesty', () => {
     const result = await loaded.mod.getSatpAgents();
     assert.ok(result.profileJoin);
     assert.strictEqual(result.profileJoin.matched, 0);
-    for (const agent of result.agents) {
+    for (const [index, agent] of result.agents.entries()) {
       assert.notStrictEqual(agent.profileId, null);
       assert.strictEqual(agent.profileId, undefined);
+      assert.strictEqual(agent.onChainAgentId, ['brainChain', 'brainKID', 'Orphan Agent'][index]);
       assert.strictEqual(agent.profileJoined, false);
     }
     assert.ok(!result.agents.every((agent) => Object.prototype.hasOwnProperty.call(agent, 'profileId') && agent.profileId === null));
