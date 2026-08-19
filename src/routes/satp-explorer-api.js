@@ -10,6 +10,7 @@ const { Connection, PublicKey } = require("@solana/web3.js");
 let profileStore;
 try { profileStore = require("../profile-store"); } catch(e) { profileStore = null; }
 const { computeUnifiedTrustScore } = require('../lib/unified-trust-score');
+const { isFixtureIdentity } = require('../lib/public-traction');
 const { buildReputationSurface, normalizeTrustScoreValue } = require('../lib/reputation-surface');
 const RPC = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
 const TOKEN_2022 = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
@@ -169,9 +170,10 @@ async function getSatpAgents() {
   const agents = await fetchSatpSourceAgents(conn);
 
   try {
-    const Database = require('better-sqlite3');
-    const path = require('path');
-    const _db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
+    if (!profileStore || typeof profileStore.getDb !== 'function') {
+      throw new Error('profileStore.getDb unavailable');
+    }
+    const _db = profileStore.getDb();
     const profileRows = _db.prepare('SELECT * FROM profiles').all();
     const reviewStatsRows = _db.prepare(`
       SELECT
@@ -206,6 +208,11 @@ async function getSatpAgents() {
       nft_avatar: parseJsonField(profile.nft_avatar, null),
     }));
     const profileIndex = new Map(profiles.map((profile) => [profile.id, profile]));
+const profileIndexByLowerId = new Map();
+for (const profile of profiles) {
+  const lowerId = String(profile.id || '').trim().toLowerCase();
+  if (lowerId && !profileIndexByLowerId.has(lowerId)) profileIndexByLowerId.set(lowerId, profile);
+}
 
 
 const levelLabels = ['Unverified','Registered','Verified','Established','Trusted','Sovereign'];
@@ -266,7 +273,9 @@ const pickBestProfileForAgent = (parsedAgent) => {
     if (!profile?.id) return;
     candidates.set(profile.id, profile);
   };
-  if (derivedProfileId && profileIndex.has(derivedProfileId)) registerCandidate(profileIndex.get(derivedProfileId));
+  if (derivedProfileId) {
+    registerCandidate(profileIndex.get(derivedProfileId) || profileIndexByLowerId.get(derivedProfileId));
+  }
   for (const profile of profilesByAuthority.get(authorityKey) || []) registerCandidate(profile);
   for (const profile of profilesByName.get(nameKey) || []) registerCandidate(profile);
   if (!candidates.size) return { profile: null, score: 0 };
@@ -291,7 +300,15 @@ const pickBestProfileForAgent = (parsedAgent) => {
   const ranked = Array.from(candidates.values())
     .map(rankProfile)
     .sort((a, b) => b.score - a.score || b.updatedTs - a.updatedTs || String(a.profile.id).localeCompare(String(b.profile.id)));
-  return ranked[0] || { profile: null, score: 0 };
+  const best = ranked[0] || { profile: null, score: 0 };
+  if (!best.profile) return { profile: null, score: 0 };
+  const profileId = String(best.profile.id || '').trim().toLowerCase();
+  const profileNameKey = normalizeProfileKey(best.profile.name || best.profile.handle || '');
+  const hasIdMatch = Boolean(derivedProfileId && profileId === derivedProfileId);
+  const hasNameMatch = Boolean(nameKey && profileNameKey === nameKey);
+  // Authority-only matches are too weak: many fixture agents share one wallet.
+  if (!hasIdMatch && !hasNameMatch) return { profile: null, score: best.score };
+  return best;
 };
 const filteredAgents = agents.map((v3) => {
   if (!v3 || !v3.name) return null;
@@ -303,7 +320,8 @@ const filteredAgents = agents.map((v3) => {
     pda: v3.pda,
     authority,
     agentId: profile?.id || fallbackProfileId,
-    profileId: profile?.id || null,
+    ...(profile?.id ? { profileId: profile.id } : {}),
+    profileJoined: Boolean(profile?.id),
     profileMatchScore: Number(matched.score || 0),
     name: v3.name || profile?.name || fallbackProfileId,
     description: v3.description || '',
@@ -554,8 +572,6 @@ for (const agent of filteredAgents) {
     onChainAttestations: explorerAttestations.length || explorerVerifications.length || platforms.length || 0,
   });
 }
-    _db.close();
-
     const rankedAgents = [...enrichedAgents].sort((a, b) => {
       const scoreDelta = Number(b?.reputationScore || 0) - Number(a?.reputationScore || 0);
       if (scoreDelta !== 0) return scoreDelta;
@@ -594,7 +610,19 @@ for (const agent of filteredAgents) {
       if (dedupeKey) seenAgentKeys.add(dedupeKey);
       dedupedAgents.push(agent);
     }
-    const result = { agents: dedupedAgents, count: dedupedAgents.length, source: "solana-mainnet-v3" };
+    const publicAgents = dedupedAgents.filter((agent) => !isFixtureIdentity(agent?.name, agent?.agentId, agent?.profileId, agent?.id));
+    const matchedCount = publicAgents.filter((agent) => agent.profileJoined && agent.profileId).length;
+    const result = {
+      agents: publicAgents,
+      count: publicAgents.length,
+      source: "solana-mainnet-v3",
+      profileJoin: {
+        attempted: true,
+        source: 'profile-store',
+        matched: matchedCount,
+        unmatched: publicAgents.length - matchedCount,
+      },
+    };
     if (!hasIncompleteExplorerCache(result)) {
       agentCache = { data: result, timestamp: Date.now() };
     } else {
@@ -603,11 +631,21 @@ for (const agent of filteredAgents) {
     return result;
   } catch (e) {
     console.warn('[SATP Explorer] DB filter/overlay failed:', e.message);
+    const publicAgents = (Array.isArray(agents) ? agents : []).filter((agent) => !isFixtureIdentity(agent?.name, agent?.agentId, agent?.profileId, agent?.id));
+    const honest = publicAgents.map((agent) => {
+      if (!agent || typeof agent !== 'object') return agent;
+      const { profileId, ...rest } = agent;
+      return rest;
+    });
+    const result = {
+      agents: honest,
+      count: honest.length,
+      source: "solana-mainnet-v3",
+      profileJoin: { attempted: false, matched: 0, unmatched: honest.length, reason: e.message },
+    };
+    agentCache = { data: result, timestamp: Date.now() };
+    return result;
   }
-
-  const result = { agents, count: agents.length, source: "solana-mainnet-v3" };
-  agentCache = { data: result, timestamp: Date.now() };
-  return result;
 }
 
 module.exports = { getSatpAgents, clearSatpExplorerCache };

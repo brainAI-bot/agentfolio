@@ -6,6 +6,12 @@
 
 const { Connection, PublicKey } = require('@solana/web3.js');
 const borsh = require('borsh');
+const {
+  SATP_MAINNET_PROGRAMS,
+  SATP_V2_MAINNET_PROGRAMS,
+  SATP_V3_DESCRIPTION,
+  mapProgramIds,
+} = require('./lib/satp-mainnet-programs');
 
 // V3 SDK: borsh-reader for Genesis Record deserialization + V3 PDA derivation
 let deserializeGenesisRecord, hashAgentId, getGenesisPDA, getV3ProgramIds;
@@ -44,6 +50,38 @@ const DEVNET_PROGRAMS = {
 
 function getPrograms(network) {
   return network === 'devnet' ? DEVNET_PROGRAMS : PROGRAMS;
+}
+
+/**
+ * Advertised cluster for /api/satp/programs and public docs.
+ * V2 PROGRAMS stay on getPrograms() so historical PDA helpers keep working.
+ */
+function pubkeyMapFromIds(ids) {
+  const out = {};
+  for (const [key, value] of Object.entries(ids || {})) {
+    if (!value) continue;
+    out[key] = value instanceof PublicKey ? value : new PublicKey(value);
+  }
+  return out;
+}
+
+function getAdvertisedPrograms(network) {
+  if (network === 'devnet') {
+    if (typeof getV3ProgramIds === 'function') {
+      try {
+        const v3 = getV3ProgramIds('devnet');
+        if (v3 && v3.IDENTITY) return v3;
+      } catch (_) { /* fall through */ }
+    }
+    return DEVNET_PROGRAMS;
+  }
+  if (typeof getV3ProgramIds === 'function') {
+    try {
+      const v3 = getV3ProgramIds('mainnet');
+      if (v3 && v3.IDENTITY) return v3;
+    } catch (_) { /* fall through */ }
+  }
+  return pubkeyMapFromIds(SATP_MAINNET_PROGRAMS);
 }
 
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
@@ -607,7 +645,12 @@ module.exports = {
   PROGRAMS,
   LEGACY_PROGRAMS,
   DEVNET_PROGRAMS,
+  SATP_MAINNET_PROGRAMS,
+  SATP_V2_MAINNET_PROGRAMS,
+  SATP_V3_DESCRIPTION,
+  mapProgramIds,
   getPrograms,
+  getAdvertisedPrograms,
   getIdentityPDA,
   getIdentityPDALegacy,
   getReputationAuthorityPDA,

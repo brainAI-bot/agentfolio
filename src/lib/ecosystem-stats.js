@@ -6,13 +6,14 @@
 const { listProfiles } = require('./profile');
 const { listJobs } = require('./marketplace');
 const escrowManager = require('./escrow');
+const { isFixtureIdentity, isFixtureJob } = require('./public-traction');
 
 /**
  * Get comprehensive ecosystem statistics
  * @returns {Object} Full ecosystem stats
  */
 function getEcosystemStats() {
-  const profiles = listProfiles() || [];
+  const profiles = (listProfiles() || []).filter((p) => !isFixtureIdentity(p.id, p.name, p.handle));
   const jobs = listJobs ? listJobs({}) : [];
   
   // Profile stats
@@ -53,7 +54,7 @@ function getEcosystemStats() {
     .map(([skill, count]) => ({ skill, count }));
   
   // Job stats
-  const jobsArray = Array.isArray(jobs) ? jobs : (jobs.jobs || []);
+  const jobsArray = (Array.isArray(jobs) ? jobs : (jobs.jobs || [])).filter((job) => !isFixtureJob(job));
   const totalJobs = jobsArray.length;
   const openJobs = jobsArray.filter(j => j.status === 'open').length;
   const completedJobs = jobsArray.filter(j => j.status === 'completed').length;

@@ -36,7 +36,15 @@ const router = Router();
 
 // Determine network from env or default to mainnet
 const NETWORK = process.env.SATP_NETWORK || 'mainnet';
-const sdk = SATPSDK ? new SATPSDK({ network: NETWORK }) : null;
+let sdk = null;
+if (SATPSDK) {
+  try {
+    sdk = new SATPSDK({ network: NETWORK });
+  } catch (e) {
+    // satp-client 2.0.6 fences V2 mainnet. Legacy POST routes stay 423; do not ungate.
+    console.warn("[Escrow Routes] SATP SDK init skipped:", e.message);
+  }
+}
 
 /**
  * Middleware: ensure SDK is available

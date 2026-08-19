@@ -91,7 +91,11 @@ function loadWithMocks(options = {}) {
       return { Connection, PublicKey };
     }
     if (request === '../profile-store') {
-      return {};
+      return {
+        getDb() {
+          return db;
+        },
+      };
     }
     if (request === '../lib/unified-trust-score') {
       return {

@@ -37,6 +37,7 @@ const {
 // Scoring module
 const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainData } = require('./scoring');
 const { computeUnifiedTrustScore } = require('./lib/unified-trust-score');
+const { isFixtureIdentity, isFixtureJob } = require('./lib/public-traction');
 const {
   CANONICAL_TRUST_PROVIDERS,
   RETIRED_TRUST_PROVIDERS,
@@ -824,6 +825,29 @@ app.get('/api/did/satp/sol/:address', async (req, res) => {
 });
 
 // ─── API Documentation ──────────────────────────────────
+function sendAdvertisedApiDocs(req, res) {
+  try {
+    const { generateDocsHTML } = require('./api/docs');
+    res.type('html').send(generateDocsHTML());
+  } catch (err) {
+    res.redirect(302, '/docs');
+  }
+}
+
+app.get('/docs/api', (req, res) => res.redirect(301, '/docs'));
+app.get('/docs/satp', (req, res) => res.redirect(301, '/docs'));
+app.get('/satp/docs', (req, res) => res.redirect(301, '/docs'));
+app.get('/api/docs', sendAdvertisedApiDocs);
+app.get('/openapi.json', (req, res) => {
+  try {
+    const { API_DOCS } = require('./api/docs');
+    res.json(API_DOCS);
+  } catch (err) {
+    res.status(500).json({ error: 'OpenAPI spec unavailable' });
+  }
+});
+app.get('/api/x402/info', (req, res) => res.redirect(301, '/api/x402/pricing'));
+
 app.get('/docs', (req, res) => {
   res.send(`<!DOCTYPE html>
 <html>
@@ -1098,11 +1122,13 @@ app.get('/docs', (req, res) => {
 
 function getEcosystemStatsPayload() {
   const d = profileStore.getDb();
-  const total = d.prepare('SELECT COUNT(*) as c FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL)').get('active').c;
-  const claimed = d.prepare('SELECT COUNT(*) as c FROM profiles WHERE status = ? AND claimed = 1 AND (hidden = 0 OR hidden IS NULL)').get('active').c;
+  const profileRows = d.prepare('SELECT id, name, handle, claimed, verification_data FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL)').all('active')
+    .filter((row) => !isFixtureIdentity(row.id, row.name, row.handle));
+  const total = profileRows.length;
+  const claimed = profileRows.filter((row) => Number(row.claimed) === 1).length;
 
   // Count verified agents (those with at least one verification in verification_data)
-  const rows = d.prepare('SELECT verification_data FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL)').all('active');
+  const rows = profileRows;
   let verified = 0;
   let onChain = 0;
   const allSkills = new Set();
@@ -1114,22 +1140,28 @@ function getEcosystemStatsPayload() {
   let completedJobs = 0;
   let totalVolume = 0;
   try {
-    totalJobs = d.prepare('SELECT COUNT(*) as c FROM jobs').get().c;
-    openJobs = d.prepare("SELECT COUNT(*) as c FROM jobs WHERE status = 'open'").get().c;
-    inProgressJobs = d.prepare("SELECT COUNT(*) as c FROM jobs WHERE status = 'in_progress'").get().c;
-    completedJobs = d.prepare("SELECT COUNT(*) as c FROM jobs WHERE status = 'completed'").get().c;
-    totalVolume = d.prepare("SELECT COALESCE(SUM(COALESCE(agreed_budget, budget_amount)), 0) as total FROM jobs").get().total || 0;
+    const jobRows = d.prepare('SELECT client_id, agent_id, title, description, status, agreed_budget, budget_amount FROM jobs').all()
+      .filter((job) => !isFixtureJob(job));
+    totalJobs = jobRows.length;
+    openJobs = jobRows.filter((job) => job.status === 'open').length;
+    inProgressJobs = jobRows.filter((job) => job.status === 'in_progress').length;
+    completedJobs = jobRows.filter((job) => job.status === 'completed').length;
+    totalVolume = jobRows.reduce((sum, job) => sum + (Number(job.agreed_budget ?? job.budget_amount) || 0), 0);
   } catch {}
 
   // Also count from JSON files for skills
   const fs = require('fs');
   const path = require('path');
   const profilesDir = '/home/ubuntu/agentfolio/data/profiles';
-  const jsonFiles = fs.readdirSync(profilesDir).filter(f => f.endsWith('.json'));
+  let jsonFiles = [];
+  try {
+    jsonFiles = fs.readdirSync(profilesDir).filter(f => f.endsWith('.json') && !isFixtureIdentity(f.replace(/\.json$/, '')));
+  } catch {}
 
   for (const file of jsonFiles) {
     try {
       const p = JSON.parse(fs.readFileSync(path.join(profilesDir, file), 'utf-8'));
+      if (isFixtureIdentity(p.id, p.name, p.handle, file.replace(/\.json$/, ''))) continue;
       if (p.skills) {
         for (const s of p.skills) {
           const name = typeof s === 'string' ? s : s.name;
@@ -1160,7 +1192,7 @@ function getEcosystemStatsPayload() {
   return {
     agents: { total, verified, claimed, avgSkills: 3 },
     total,
-    totalAgents: Math.max(total, jsonFiles.length),
+    totalAgents: total,
     totalSkills: allSkills.size,
     verified,
     verifiedAgents: verified,
@@ -1180,6 +1212,7 @@ function getEcosystemStatsPayload() {
     },
     verificationTypes: verificationTypes.size,
     verificationPlatforms: [...verificationTypes].sort(),
+    publicTraction: { excludedFixtures: true },
   };
 }
 
@@ -2231,7 +2264,7 @@ app.get('/api/leaderboard', publicLeaderboardLimiter, (req, res) => {
       WHERE COALESCE(p.hidden, 0) = 0
         AND COALESCE(p.status, 'active') = 'active'
       ORDER BY leaderboard_score DESC, p.created_at DESC
-    `).all();
+    `).all().filter((row) => !isFixtureIdentity(row.id, row.name, row.handle));
 
   const leaderboard = rows.map((row) => {
       const verification = parseJsonFieldSafe(row.verification, {});
