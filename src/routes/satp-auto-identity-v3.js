@@ -39,11 +39,24 @@ const SATP_V3_IDENTITY_PROGRAM = new PublicKey('GTppU4E44BqXTQgbqMZ68ozFzhP1TLty
 // SATP V2 Identity Program (for legacy check/migration)
 const SATP_V2_IDENTITY_PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq');
 
-const NETWORK = process.env.SATP_NETWORK || 'mainnet';
-const RPC_URL = NETWORK === 'devnet'
-  ? 'https://api.devnet.solana.com'
-  : (process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+// GTpp lives on mainnet. SATP_NETWORK=devnet is a leftover and must not
+// drive create/confirm/check/check-wallet RPC or the `network` payload.
+const MAINNET_BETA_RPC = 'https://api.mainnet-beta.solana.com';
+const NETWORK = 'mainnet-beta';
 
+function isMainnetRpcUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  const normalized = url.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.includes('devnet') || normalized.includes('testnet')) return false;
+  return normalized.includes('mainnet');
+}
+
+function resolveIdentityMainnetRpcUrl(envUrl = process.env.SOLANA_RPC_URL) {
+  return isMainnetRpcUrl(envUrl) ? String(envUrl).trim() : MAINNET_BETA_RPC;
+}
+
+const RPC_URL = resolveIdentityMainnetRpcUrl();
 const connection = new Connection(RPC_URL, 'confirmed');
 const V3_PRIORITY_FEE_MICROLAMPORTS = 50000;
 const V3_PRIORITY_FEE_BUFFER_LAMPORTS = 20000;
@@ -810,4 +823,7 @@ module.exports = {
   NETWORK,
   RPC_URL,
   connection,
+  isMainnetRpcUrl,
+  resolveIdentityMainnetRpcUrl,
+  MAINNET_BETA_RPC,
 };
