@@ -12,7 +12,12 @@ try { profileStore = require("../profile-store"); } catch(e) { profileStore = nu
 const { computeUnifiedTrustScore } = require('../lib/unified-trust-score');
 const { isFixtureIdentity } = require('../lib/public-traction');
 const { buildReputationSurface, normalizeTrustScoreValue } = require('../lib/reputation-surface');
-const RPC = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+function resolveSatpMainnetRpcUrl() {
+  const rpc = String(process.env.SOLANA_RPC_URL || '').trim();
+  if (rpc && !/devnet/i.test(rpc)) return rpc;
+  return 'https://api.mainnet-beta.solana.com';
+}
+const RPC = resolveSatpMainnetRpcUrl();
 const TOKEN_2022 = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
 // V3 program + same parser as v3-score-service

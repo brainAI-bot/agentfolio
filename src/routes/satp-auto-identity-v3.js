@@ -292,17 +292,15 @@ async function getV3IdentityStatus(agentId) {
       return { exists: false, accountExists: false, active: false, pda: pda.toBase58() };
     }
 
-    let active = true;
+    let active = false;
     let verificationLevel = null;
     let reputationScore = null;
     try {
-      const { client: satpAdapter } = require('../adapters/satp');
-      const { SATPV3SDK } = satpAdapter.loadSatpClient();
-      const sdk = new SATPV3SDK({ rpcUrl: RPC_URL });
-      const record = await sdk.getGenesisRecord(agentId);
-      active = !!(record && !record.error && record.isActive !== false && record.active !== false);
-      verificationLevel = record && !record.error ? (record.verificationLevel ?? null) : null;
-      reputationScore = record && !record.error ? (record.reputationScore ?? null) : null;
+      const { parseGenesisRecord } = require('../v3-score-service');
+      const record = parseGenesisRecord(acct.data);
+      active = !!(record && record.isActive !== false);
+      verificationLevel = record ? (record.verificationLevel ?? null) : null;
+      reputationScore = record ? (record.reputationScore ?? null) : null;
     } catch (_) {}
 
     return {
