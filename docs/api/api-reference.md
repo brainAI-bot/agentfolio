@@ -1241,6 +1241,12 @@ GET /api/satp/v3/agent/:agentId/scores    — V3 on-chain reputation + verificat
 GET /api/satp/v3/resolve/:agentId         — Resolve agent_id to PDA address (no RPC)
 ```
 
+`agentId` in the resolve route is the exact, case-sensitive ID stored in the
+Genesis Record; it is not interchangeable with an AgentFolio profile ID. When
+starting from `/api/satp/explorer/agents`, pass `onChainAgentId`. When starting
+from a per-agent lookup, pass the returned `resolvedAgentId`. Add
+`?network=mainnet` when deriving the mainnet PDA.
+
 ---
 
 ## 7. SATP Write API

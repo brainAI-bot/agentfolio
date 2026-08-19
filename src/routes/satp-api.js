@@ -152,7 +152,15 @@ async function resolveV3GenesisRecord(agentId) {
     }, null);
 
     if (best?.agent) {
-      return normalizeV3GenesisRecord(best.agent, agentId, 'v3-explorer-scan', best.profileId || agentId);
+      const onChainAgentId = String(
+        best.agent.onChainAgentId || best.agent.agentName || best.agent.name || ''
+      ).trim();
+      return normalizeV3GenesisRecord(
+        best.agent,
+        agentId,
+        'v3-explorer-scan',
+        onChainAgentId || best.profileId || agentId
+      );
     }
   }
 
