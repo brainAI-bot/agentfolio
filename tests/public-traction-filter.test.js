@@ -2,7 +2,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { isFixtureIdentity, isPublicTractionIdentity, isFixtureJob } = require('../src/lib/public-traction');
+const { isFixtureIdentity, isPublicTractionIdentity, isFixtureJob, isSatpJoinedOrSolanaVerified } = require('../src/lib/public-traction');
 
 describe('public traction fixture filter', () => {
   it('excludes the documented smoke/QA/fixture patterns and keeps real identities', () => {
@@ -25,8 +25,18 @@ describe('public traction fixture filter', () => {
     assert.match(serverSource, /isFixtureIdentity/);
     assert.match(serverSource, /isFixtureJob/);
     assert.match(serverSource, /publicTraction/);
+    assert.match(serverSource, /isSatpJoinedOrSolanaVerified/);
     const statsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'ecosystem-stats.js'), 'utf8');
     assert.match(statsSource, /isFixtureIdentity/);
     assert.match(statsSource, /isFixtureJob/);
+  });
+
+  it('counts SATP-joined or solana-verified raw verification_data only', () => {
+    assert.equal(isSatpJoinedOrSolanaVerified({ satp_v3: { verified: true, genesisPDA: 'Pda1' } }), true);
+    assert.equal(isSatpJoinedOrSolanaVerified({ satp: { verified: true } }), true);
+    assert.equal(isSatpJoinedOrSolanaVerified({ solana: { verified: true, address: 'Wallet1' } }), true);
+    assert.equal(isSatpJoinedOrSolanaVerified({ domain: { verified: true }, website: { verified: true } }), false);
+    assert.equal(isSatpJoinedOrSolanaVerified({}), false);
+    assert.equal(isSatpJoinedOrSolanaVerified('{"satp_v3":{"verified":true}}'), true);
   });
 });

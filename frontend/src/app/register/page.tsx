@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation";
 import { Connection } from "@solana/web3.js";
 import { useDemoMode } from "@/lib/demo-mode";
 import { Wallet, ArrowRight, AlertCircle, CheckCircle, X, Link2 } from "lucide-react";
-import { assertFrontendSolanaIrysWriteEnabled } from "@/lib/write-surface-gate";
+import { autoCreateSatpIdentityV3 } from "@/lib/satp-identity-v3";
 import {
   buildRegisterAgentTransaction,
   SOLANA_RPC,
@@ -130,41 +130,29 @@ export default function RegisterPage() {
       }
       const profileId = data.profile_id || data.id;
 
-      // STEP 2: ONE TX — SATP identity creation (user signs = wallet verified)
+      // STEP 2: ONE TX — SATP V3 genesis (user signs). Not Irys/escrow gated.
       let satpTxSig = "";
       try {
-        assertFrontendSolanaIrysWriteEnabled("frontend registration SATP identity creation");
         setChainStatus("signing");
         const connection = new Connection(SOLANA_RPC, "confirmed");
-
-        // Request unsigned SATP identity TX from backend
-        const satpRes = await fetch("/api/satp-auto/identity/create", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ walletAddress, profileId }),
-        });
-        const satpData = await satpRes.json();
-
-        if (satpData.data?.alreadyExists) {
-          // SATP already exists — skip TX, still count as verified
+        const satpResult = await autoCreateSatpIdentityV3(
+          connection,
+          walletAddress,
+          profileId,
+          sendTransaction,
+        );
+        if (satpResult.alreadyExists) {
           satpTxSig = "existing";
           setChainStatus("done");
-        } else if (satpData.data?.transaction) {
-          // Sign and send the single TX
-          const { Transaction } = await import("@solana/web3.js");
-          const tx = Transaction.from(Buffer.from(satpData.data.transaction, "base64"));
-          const sig = await sendTransaction(tx, connection);
-          setChainStatus("confirming");
-          await connection.confirmTransaction(sig, "confirmed");
-          satpTxSig = sig;
-          setTxSignature(sig);
+        } else if (satpResult.txSignature) {
+          satpTxSig = satpResult.txSignature;
+          setTxSignature(satpResult.txSignature);
           setChainStatus("done");
         } else {
-          // SATP unavailable — skip gracefully
           setChainStatus("skipped");
         }
       } catch (txErr: any) {
-        console.warn("[Register] SATP TX failed (profile still saved):", txErr.message);
+        console.warn("[Register] SATP V3 TX failed (profile still saved):", txErr.message);
         setChainStatus("skipped");
       }
 
@@ -177,16 +165,6 @@ export default function RegisterPage() {
             body: JSON.stringify({ profileId, txSignature: satpTxSig, walletAddress }),
           });
         } catch {}
-        // Also confirm SATP identity to backend
-        if (satpTxSig !== "existing") {
-          try {
-            await fetch("/api/satp-auto/identity/confirm", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ walletAddress, profileId, txSignature: satpTxSig }),
-            });
-          } catch {}
-        }
       }
 
       setSuccess(true);

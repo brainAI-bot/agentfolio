@@ -201,7 +201,7 @@ async function registerIdentity(params, signerKeypair, network = 'mainnet') {
  * @returns {object} - { transaction (base64), identityPDA }
  */
 async function buildRegisterIdentityTx(params, network = 'mainnet') {
-  assertSolanaIrysWriteEnabled('SATP identity registration transaction build');
+  // Unsigned V2 identity build — no HXCU escrow accounts; client signs.
   const rpcUrl = network === 'devnet' ? DEVNET_RPC : MAINNET_RPC;
   const connection = new Connection(rpcUrl, 'confirmed');
   
@@ -416,7 +416,7 @@ async function registerIdentityV3(params, signerKeypair, network = 'mainnet') {
  * Build unsigned V3 identity creation TX (for client-side signing)
  */
 async function buildRegisterIdentityV3Tx(params, network = 'mainnet') {
-  assertSolanaIrysWriteEnabled('SATP V3 genesis transaction build');
+  // Unsigned V3 genesis build — identity program GTpp..., not HXCU escrow; client signs.
   if (!SATPV3SDK) throw new Error('V3 SDK not available');
   
   const rpcUrl = network === 'devnet' ? DEVNET_RPC : MAINNET_RPC;

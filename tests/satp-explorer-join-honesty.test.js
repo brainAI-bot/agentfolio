@@ -129,4 +129,42 @@ describe('SATP explorer profile join honesty', () => {
     }
     assert.ok(!result.agents.every((agent) => Object.prototype.hasOwnProperty.call(agent, 'profileId') && agent.profileId === null));
   });
+
+  it('joins a real profile when persisted satp_v3 genesisPDA matches the on-chain PDA', async () => {
+    const loaded = loadWithMocks({
+      profiles: [{
+        id: 'p1reg',
+        name: 'Phase One Registry',
+        handle: 'p1reg',
+        wallet: 'WalletP1',
+        claimed_by: null,
+        wallets: JSON.stringify({ solana: 'WalletP1' }),
+        tags: '[]',
+        skills: '[]',
+        portfolio: '[]',
+        links: '{}',
+        metadata: '{}',
+        verification_data: JSON.stringify({
+          satp_v3: { verified: true, genesisPDA: 'PDA_P1REG', program: 'GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG' },
+        }),
+        nft_avatar: null,
+        created_at: '2026-01-01T00:00:00.000Z',
+        updated_at: '2026-01-02T00:00:00.000Z',
+      }],
+      explorerAgents: [{
+        pda: 'PDA_P1REG',
+        agentName: 'OnChain Name Mismatch',
+        authority: 'OtherAuth',
+        reputationScore: 10,
+        verificationLevel: 1,
+      }],
+    });
+    cleanup = loaded.restore;
+    loaded.mod.clearSatpExplorerCache();
+    const result = await loaded.mod.getSatpAgents();
+    assert.strictEqual(result.count, 1);
+    assert.strictEqual(result.agents[0].profileId, 'p1reg');
+    assert.strictEqual(result.agents[0].profileJoined, true);
+    assert.strictEqual(result.profileJoin.matched, 1);
+  });
 });

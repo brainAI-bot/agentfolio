@@ -1041,61 +1041,56 @@ function registerRoutes(app) {
 
   // ── POST /api/satp/genesis/prepare — User-paid Genesis Record (returns unsigned TX) ──
   app.post('/api/satp/genesis/prepare', async (req, res) => {
-    if (sendSolanaIrysWriteGateResponse(res, 'SATP V3 genesis transaction build')) return;
-    if (!satpV3) return res.status(503).json({ error: 'SATP V3 SDK not available' });
+    // Unsigned V3 genesis build — identity program GTpp..., not HXCU escrow. Client signs as creator.
     try {
-      const { agentId, payer } = req.body;
-      if (!agentId || !payer) return res.status(400).json({ error: 'agentId and payer required' });
+      const { agentId, payer, walletAddress, profileId } = req.body || {};
+      const id = agentId || profileId;
+      const wallet = payer || walletAddress;
+      if (!id || !wallet) return res.status(400).json({ error: 'agentId and payer required' });
 
-      // Check if genesis record already exists
-      const existing = await satpV3.client.getGenesisRecord(agentId);
-      if (existing && !existing.error) return res.status(409).json({ error: 'Genesis record already exists', genesis: existing });
+      const profile = getDb().prepare('SELECT * FROM profiles WHERE id = ?').get(id);
+      if (!profile) return res.status(404).json({ error: 'Profile not found. Create an AgentFolio profile first.' });
 
-      // Get profile data for name/description/skills
-      const profile = getDb().prepare('SELECT * FROM profiles WHERE id = ?').get(agentId);
-      const name = profile ? (profile.name || agentId).substring(0, 32) : agentId.substring(0, 32);
-      const bio = profile ? (profile.bio || '').substring(0, 256) : '';
-      const skills = profile?.skills ? (typeof profile.skills === 'string' ? JSON.parse(profile.skills) : profile.skills).slice(0, 5).map(s => s.name || s) : [];
-      const category = profile?.framework || 'general';
+      const { buildCreateIdentityV3Tx } = require('./routes/satp-auto-identity-v3');
+      const name = (profile.name || id).substring(0, 32);
+      const bio = (profile.bio || 'AgentFolio registered agent').substring(0, 256);
+      let skills = [];
+      try {
+        skills = profile.skills ? (typeof profile.skills === 'string' ? JSON.parse(profile.skills) : profile.skills).slice(0, 10).map(s => (s && s.name) || s).filter(Boolean) : [];
+      } catch {}
+      const category = String(profile.framework || 'general').substring(0, 32);
+      const metadataUri = `https://agentfolio.bot/api/profile/${id}`;
 
-      const hashBuf = satpV3.agentIdHash(agentId);
-      const { PublicKey } = require('@solana/web3.js');
-      const payerKey = new PublicKey(payer);
-
-      // Build TX with deployer as creator/authority, user as feePayer
-      const fs = require('fs');
-      const { Keypair } = require('@solana/web3.js');
-      const deployerKey = JSON.parse(fs.readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'));
-      const deployer = Keypair.fromSecretKey(Uint8Array.from(deployerKey));
-
-      const { transaction, genesisPda } = await satpV3.client.buildCreateGenesisRecord(
-        deployer.publicKey, hashBuf, name, bio || 'AgentFolio registered agent', category, skills, ''
+      const result = await buildCreateIdentityV3Tx(
+        wallet,
+        id,
+        name,
+        bio,
+        category,
+        skills,
+        metadataUri
       );
 
-      // User pays the transaction fee + rent
-      transaction.feePayer = payerKey;
-      const { blockhash, lastValidBlockHeight } = await satpV3.client.connection.getLatestBlockhash();
-      transaction.recentBlockhash = blockhash;
-
-      // Deployer signs as creator/authority
-      transaction.partialSign(deployer);
-
-      // Serialize and return (user's wallet will add their signature)
-      const serialized = transaction.serialize({ requireAllSignatures: false });
-      const base64Tx = serialized.toString('base64');
+      if (result.alreadyExists) {
+        return res.status(409).json({ error: 'Genesis record already exists', genesisPDA: result.genesisPDA, agentId: id });
+      }
 
       res.json({
-        transaction: base64Tx,
-        genesisPda: genesisPda.toBase58(),
-        agentId,
-        payer,
-        blockhash,
-        lastValidBlockHeight,
+        transaction: result.transaction,
+        genesisPda: result.genesisPDA,
+        genesisPDA: result.genesisPDA,
+        agentId: id,
+        payer: wallet,
+        blockhash: result.blockhash,
+        lastValidBlockHeight: result.lastValidBlockHeight,
+        program: result.program,
+        programVersion: 'v3',
         rentCost: '~0.0105 SOL',
       });
     } catch (e) {
       console.error('[SATP V3] Genesis prepare error:', e.message);
-      res.status(500).json({ error: e.message });
+      const status = Number(e.statusCode) || 500;
+      res.status(status).json({ error: e.message, code: e.code || undefined });
     }
   });
 

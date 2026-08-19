@@ -41,9 +41,34 @@ function isFixtureJob(job) {
   );
 }
 
+function parseVerificationData(verificationData) {
+  if (!verificationData) return {};
+  if (typeof verificationData === 'object') return verificationData;
+  try {
+    return JSON.parse(verificationData);
+  } catch (_) {
+    return {};
+  }
+}
+
+/**
+ * Designed SATP join / on-chain identity signal for /api/stats onChain.
+ * Counts a real profile that has SATP V3/V2 join evidence or a verified Solana wallet.
+ * Reads RAW verification_data (canonical filter strips satp_v3 / auto-pass solana).
+ */
+function isSatpJoinedOrSolanaVerified(verificationData) {
+  const vd = parseVerificationData(verificationData);
+  if (vd.satp_v3 && vd.satp_v3.verified) return true;
+  if (vd.satp && vd.satp.verified) return true;
+  if (vd.solana && vd.solana.verified) return true;
+  return false;
+}
+
 module.exports = {
   normalizeIdentity,
   isFixtureIdentity,
   isPublicTractionIdentity,
   isFixtureJob,
+  parseVerificationData,
+  isSatpJoinedOrSolanaVerified,
 };

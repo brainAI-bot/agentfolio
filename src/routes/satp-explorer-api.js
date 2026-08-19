@@ -256,12 +256,18 @@ const addProfileCandidate = (map, key, profile) => {
 };
 const profilesByAuthority = new Map();
 const profilesByName = new Map();
+const profilesByGenesisPda = new Map();
 for (const profile of profiles) {
   for (const authorityKey of getProfileAuthorityCandidates(profile)) {
     addProfileCandidate(profilesByAuthority, authorityKey, profile);
   }
   const nameKey = normalizeProfileKey(profile.name || profile.handle || profile.id || '');
   if (nameKey) addProfileCandidate(profilesByName, nameKey, profile);
+  const vd = profile.verification_data || {};
+  for (const pda of [vd.satp_v3 && vd.satp_v3.genesisPDA, vd.satp && vd.satp.genesisPDA]) {
+    const key = String(pda || '').trim();
+    if (key) addProfileCandidate(profilesByGenesisPda, key, profile);
+  }
 }
 const pickBestProfileForAgent = (parsedAgent) => {
   if (!parsedAgent) return { profile: null, score: 0 };
@@ -269,6 +275,8 @@ const pickBestProfileForAgent = (parsedAgent) => {
   const derivedProfileId = String(deriveProfileIdFromName(agentName) || '').trim().toLowerCase();
   const authorityKey = String(parsedAgent.authority || '').trim().toLowerCase();
   const nameKey = normalizeProfileKey(agentName);
+  const pdaKey = String(parsedAgent.pda || '').trim();
+  const onChainAgentId = String(parsedAgent.onChainAgentId || parsedAgent.agentId || '').trim().toLowerCase();
   const candidates = new Map();
   const registerCandidate = (profile) => {
     if (!profile?.id) return;
@@ -277,8 +285,12 @@ const pickBestProfileForAgent = (parsedAgent) => {
   if (derivedProfileId) {
     registerCandidate(profileIndex.get(derivedProfileId) || profileIndexByLowerId.get(derivedProfileId));
   }
+  if (onChainAgentId) {
+    registerCandidate(profileIndex.get(onChainAgentId) || profileIndexByLowerId.get(onChainAgentId));
+  }
   for (const profile of profilesByAuthority.get(authorityKey) || []) registerCandidate(profile);
   for (const profile of profilesByName.get(nameKey) || []) registerCandidate(profile);
+  for (const profile of profilesByGenesisPda.get(pdaKey) || []) registerCandidate(profile);
   if (!candidates.size) return { profile: null, score: 0 };
 
   const rankProfile = (profile) => {
@@ -288,6 +300,11 @@ const pickBestProfileForAgent = (parsedAgent) => {
     const authorityCandidates = getProfileAuthorityCandidates(profile);
     const verificationCount = Object.keys(profile.verification_data || {}).length;
     if (derivedProfileId && profileId === derivedProfileId) score += 1000;
+    if (onChainAgentId && profileId === onChainAgentId) score += 1500;
+    const profileGenesisPda = (profile.verification_data && profile.verification_data.satp_v3 && profile.verification_data.satp_v3.genesisPDA)
+      || (profile.verification_data && profile.verification_data.satp && profile.verification_data.satp.genesisPDA)
+      || '';
+    if (pdaKey && profileGenesisPda && profileGenesisPda === pdaKey) score += 2000;
     if (authorityKey && authorityCandidates.includes(authorityKey)) score += 500;
     if (nameKey && profileNameKey === nameKey) score += 100;
     if (profileId.startsWith('agent_')) score += 25;
@@ -306,9 +323,15 @@ const pickBestProfileForAgent = (parsedAgent) => {
   const profileId = String(best.profile.id || '').trim().toLowerCase();
   const profileNameKey = normalizeProfileKey(best.profile.name || best.profile.handle || '');
   const hasIdMatch = Boolean(derivedProfileId && profileId === derivedProfileId);
+  const hasOnChainIdMatch = Boolean(onChainAgentId && profileId === onChainAgentId);
+  const profileGenesisPda = (best.profile.verification_data && best.profile.verification_data.satp_v3 && best.profile.verification_data.satp_v3.genesisPDA)
+    || (best.profile.verification_data && best.profile.verification_data.satp && best.profile.verification_data.satp.genesisPDA)
+    || '';
+  const hasPdaMatch = Boolean(pdaKey && profileGenesisPda && profileGenesisPda === pdaKey);
   const hasNameMatch = Boolean(nameKey && profileNameKey === nameKey);
   // Authority-only matches are too weak: many fixture agents share one wallet.
-  if (!hasIdMatch && !hasNameMatch) return { profile: null, score: best.score };
+  // PDA / exact profileId==on-chain agent_id is designed SATP join evidence.
+  if (!hasIdMatch && !hasNameMatch && !hasPdaMatch && !hasOnChainIdMatch) return { profile: null, score: best.score };
   return best;
 };
 const filteredAgents = agents.map((v3) => {

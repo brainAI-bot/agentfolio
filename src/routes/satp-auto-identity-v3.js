@@ -28,6 +28,7 @@ const crypto = require('crypto');
 const { clearV3Cache } = require('../v3-score-service');
 const { clearSatpExplorerCache } = require('./satp-explorer-api');
 const path = require('path');
+const { evaluateV3JoinConfirm, getProfileSolanaWallet } = require('../lib/satp-v3-join');
 
 // ─────────────────────────────────────────────
 //  CONSTANTS
@@ -563,6 +564,16 @@ async function recordConfirmedV3Identity({ walletAddress, profileId, txSignature
   };
 }
 
+function loadProfileRow(profileId, { readonly = true } = {}) {
+  const Database = require('better-sqlite3');
+  const db = new Database(path.join(__dirname, '../../data/agentfolio.db'), readonly ? { readonly: true } : undefined);
+  try {
+    return db.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId) || null;
+  } finally {
+    db.close();
+  }
+}
+
 // ─────────────────────────────────────────────
 //  EXPRESS ROUTES
 // ─────────────────────────────────────────────
@@ -602,21 +613,22 @@ function registerSATPAutoIdentityV3Routes(app) {
       let capabilities = [];
       let metadataUri = '';
 
-      if (profileId) {
-        try {
-          const Database = require('better-sqlite3');
-          const db = new Database(path.join(__dirname, '../../data/agentfolio.db'), { readonly: true });
-          const profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
-          if (profile) {
-            agentName = (profile.name || agentName).slice(0, 32);
-            agentDescription = (profile.bio || agentDescription).slice(0, 256);
-            try { capabilities = JSON.parse(profile.capabilities || '[]').slice(0, 10); } catch {}
-            metadataUri = `https://agentfolio.bot/api/profile/${profileId}`;
-          }
-          db.close();
-        } catch (e) {
-          console.warn('[SATP AutoID V3] Profile lookup failed:', e.message);
-        }
+      let profile = null;
+      try {
+        profile = loadProfileRow(profileId);
+      } catch (e) {
+        console.warn('[SATP AutoID V3] Profile lookup failed:', e.message);
+      }
+      if (!profile) {
+        return res.status(404).json({ error: 'Profile not found. Create an AgentFolio profile first.' });
+      }
+      agentName = (profile.name || agentName).slice(0, 32);
+      agentDescription = (profile.bio || agentDescription).slice(0, 256);
+      try { capabilities = JSON.parse(profile.capabilities || '[]').slice(0, 10); } catch {}
+      metadataUri = `https://agentfolio.bot/api/profile/${profileId}`;
+      const storedWallet = getProfileSolanaWallet(profile);
+      if (storedWallet && storedWallet !== walletAddress) {
+        return res.status(403).json({ error: 'walletAddress does not match the profile wallet' });
       }
 
       // Check for existing V2 identity (for migration hint)
@@ -660,20 +672,50 @@ function registerSATPAutoIdentityV3Routes(app) {
       });
     } catch (err) {
       console.error('[SATP AutoID V3] create error:', err.message);
-      res.status(500).json({ error: 'Failed to build V3 identity TX', detail: err.message });
+      const status = Number(err.statusCode) || 500;
+      res.status(status).json({ error: 'Failed to build V3 identity TX', detail: err.message, code: err.code || undefined });
     }
   });
 
   /**
    * POST /api/satp-auto/v3/identity/confirm
-   * SECURITY: disabled. This legacy public route previously accepted untrusted
-   * wallet/profile/tx data and wrote forged SATP V3 verification rows to the DB.
-   * Atomic registration must use /api/register/atomic/confirm instead.
+   * Persist a client-signed V3 genesis only after the PDA exists on-chain
+   * for a real AgentFolio profile. Does not invent profileIds.
    */
-  app.post('/api/satp-auto/v3/identity/confirm', (req, res) => {
-    return res.status(410).json({
-      error: 'This legacy V3 confirm route is disabled. Use /api/register/atomic/confirm for real registration finalization.'
-    });
+  app.post('/api/satp-auto/v3/identity/confirm', async (req, res) => {
+    try {
+      const { walletAddress, profileId, txSignature } = req.body || {};
+      if (!profileId) {
+        return res.status(400).json({ error: 'profileId required (used as agent_id for V3 PDA)' });
+      }
+
+      let profile = null;
+      try {
+        profile = loadProfileRow(profileId);
+      } catch (e) {
+        console.warn('[SATP AutoID V3] Confirm profile lookup failed:', e.message);
+      }
+
+      const v3Status = await getV3IdentityStatus(profileId);
+      const decision = evaluateV3JoinConfirm({
+        profile,
+        onChainAccountExists: !!v3Status.accountExists,
+        walletAddress,
+      });
+      if (!decision.ok) {
+        return res.status(decision.status).json({ error: decision.error });
+      }
+
+      const result = await recordConfirmedV3Identity({
+        walletAddress,
+        profileId,
+        txSignature: txSignature || null,
+      });
+      return res.json(result);
+    } catch (err) {
+      console.error('[SATP AutoID V3] confirm error:', err.message);
+      return res.status(500).json({ error: 'Failed to confirm V3 identity', detail: err.message });
+    }
   });
 
   /**
@@ -714,7 +756,7 @@ function registerSATPAutoIdentityV3Routes(app) {
             identityPDA: v2Pda.toBase58(),
             program: SATP_V2_IDENTITY_PROGRAM.toBase58(),
           };
-          result.needsMigration = v2Exists && !v3Exists;
+          result.needsMigration = v2Exists && !v3Status.exists;
         } catch (e) {
           result.v2 = { error: e.message };
         }
@@ -772,6 +814,8 @@ module.exports = {
   hasV2Identity,
   buildCreateIdentityV3Tx,
   recordConfirmedV3Identity,
+  evaluateV3JoinConfirm,
+  getProfileSolanaWallet,
   SATP_V3_IDENTITY_PROGRAM,
   SATP_V2_IDENTITY_PROGRAM,
   NETWORK,

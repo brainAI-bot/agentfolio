@@ -80,7 +80,7 @@ function registerSATPWriteRoutes(app) {
    */
   app.post('/api/satp/register/build', async (req, res) => {
     try {
-      if (sendSolanaIrysWriteGateResponse(res, 'SATP identity registration transaction build')) return;
+      // Unsigned identity ix: identity PDA + authority + system program. Does not touch HXCU escrow.
       const { walletAddress, name, description, category, capabilities, metadataUri } = req.body;
       
       if (!walletAddress || !name || !description || !category) {

@@ -37,7 +37,7 @@ const {
 // Scoring module
 const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainData } = require('./scoring');
 const { computeUnifiedTrustScore } = require('./lib/unified-trust-score');
-const { isFixtureIdentity, isFixtureJob } = require('./lib/public-traction');
+const { isFixtureIdentity, isFixtureJob, isSatpJoinedOrSolanaVerified } = require('./lib/public-traction');
 const {
   CANONICAL_TRUST_PROVIDERS,
   RETIRED_TRUST_PROVIDERS,
@@ -1185,7 +1185,9 @@ function getEcosystemStatsPayload() {
         }
       }
       if (hasVerification) verified++;
-      if (vd.solana?.verified) onChain++;
+      // SATP join / solana-verified on RAW verification_data.
+      // filterCanonicalTrustData strips satp_v3 and auto-pass solana, which hid designed join.
+      if (isSatpJoinedOrSolanaVerified(row.verification_data)) onChain++;
     } catch {}
   }
 
@@ -1985,6 +1987,15 @@ satpReviews.registerRoutes(app);
 // Register SATP on-chain routes (read + write)
 registerSATPRoutes(app);
 registerSATPWriteRoutes(app);
+
+// SATP V3 client-signed join — unsigned create/check/confirm (identity program GTpp..., not HXCU escrow)
+try {
+  const { registerSATPAutoIdentityV3Routes } = require('./routes/satp-auto-identity-v3');
+  registerSATPAutoIdentityV3Routes(app);
+  console.log('[SATP AutoID V3] Mounted at /api/satp-auto/v3/identity/{create, confirm, check/:agentId, check-wallet/:wallet}');
+} catch (e) {
+  console.warn('[SATP AutoID V3] Failed to mount:', e.message);
+}
 
 // Register wallet-signed review write routes used by the production profile UI.
 try {
