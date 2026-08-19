@@ -1,7 +1,7 @@
 /**
  * BOA & Mint Eligibility Endpoints
- * Uses V3 on-chain data (v3-score-service) as primary source.
- * Falls back to scoring-engine-v2 for agents without on-chain records.
+ * Uses V3 on-chain data (v3-score-service) as primary source,
+ * then the V3 explorer scan, then scoring-engine-v2.
  */
 
 const Database = require('better-sqlite3');
@@ -15,6 +15,13 @@ try {
   console.warn('[Eligibility] V3 score service not available:', e.message);
 }
 
+let v3Explorer;
+try {
+  v3Explorer = require('../v3-explorer');
+} catch (e) {
+  console.warn('[Eligibility] V3 explorer not available:', e.message);
+}
+
 let getCompleteScore;
 try {
   ({ getCompleteScore } = require('../lib/scoring-engine-v2'));
@@ -26,29 +33,70 @@ function getDb() {
   return new Database(path.join(__dirname, '..', '..', 'data', 'agentfolio.db'), { readonly: true });
 }
 
+function normalizeAgentKey(value) {
+  return String(value || '').trim().toLowerCase().replace(/^agent_/, '');
+}
+
+function matchExplorerAgent(agents, agentId, profile) {
+  const keys = new Set([
+    normalizeAgentKey(agentId),
+    normalizeAgentKey(profile && profile.id),
+    normalizeAgentKey(profile && profile.name),
+    normalizeAgentKey(profile && profile.handle),
+  ].filter(Boolean));
+
+  return (agents || []).find((agent) => {
+    const candidates = [
+      agent.agentId,
+      agent.agentName,
+      agent.name,
+      agent.pda,
+      agent.profileId,
+      agent.id,
+    ].map(normalizeAgentKey).filter(Boolean);
+    return candidates.some((candidate) => keys.has(candidate));
+  }) || null;
+}
+
+function scoreFromOnchainRecord(record, source) {
+  if (!record || record.verificationLevel == null || record.verificationLevel <= 0) return null;
+  return {
+    level: record.verificationLevel,
+    reputation: record.reputationScore,
+    source,
+    label: record.verificationLabel,
+  };
+}
+
 /**
- * Resolve agent level + reputation from V3 on-chain data first,
- * then fall back to scoring-engine-v2 if no on-chain record.
+ * Resolve agent level + reputation from the same V3 explorer/on-chain
+ * surface the SATP explorer uses (verificationLevel + reputationScore).
+ * If getV3Score fails or misses, try v3-explorer before scoring-engine-v2.
  */
 async function resolveAgentScore(agentId, profile) {
-  // Try V3 on-chain data first (correct deserialization)
+  // Try V3 on-chain data first (correct deserialization, mainnet-pinned RPC)
   if (v3ScoreService) {
     try {
-      // Try multiple ID formats
       let v3 = await v3ScoreService.getV3Score(agentId);
       if (!v3 && !agentId.startsWith('agent_')) {
         v3 = await v3ScoreService.getV3Score('agent_' + agentId.toLowerCase());
       }
-      if (v3 && v3.verificationLevel != null && v3.verificationLevel > 0) {
-        return {
-          level: v3.verificationLevel,
-          reputation: v3.reputationScore,
-          source: 'v3_onchain',
-          label: v3.verificationLabel,
-        };
-      }
+      const scored = scoreFromOnchainRecord(v3, 'v3_onchain');
+      if (scored) return scored;
     } catch (e) {
       console.warn('[Eligibility] V3 lookup failed for', agentId, e.message);
+    }
+  }
+
+  // Same explorer scan the SATP explorer uses (fetchAllV3Agents / parseGenesisRecord)
+  if (v3Explorer && typeof v3Explorer.fetchAllV3Agents === 'function') {
+    try {
+      const agents = await v3Explorer.fetchAllV3Agents();
+      const match = matchExplorerAgent(agents, agentId, profile);
+      const scored = scoreFromOnchainRecord(match, 'explorer');
+      if (scored) return scored;
+    } catch (e) {
+      console.warn('[Eligibility] V3 explorer lookup failed for', agentId, e.message);
     }
   }
 
@@ -110,7 +158,7 @@ function registerEligibilityRoutes(app) {
       db.close();
       if (!profile) return res.status(404).json({ error: 'Agent not found', eligible: false });
 
-      const { level, reputation } = await resolveAgentScore(agentId, profile);
+      const { level, reputation, source } = await resolveAgentScore(agentId, profile);
 
       const meetsLevel = level >= 3;
       const meetsReputation = reputation >= 50;
@@ -132,6 +180,7 @@ function registerEligibilityRoutes(app) {
       res.json({
         agent: agentId,
         eligible,
+        source,
         requirements: {
           verification_level: { current: level, required: 3, met: meetsLevel },
           reputation: { current: reputation, required: 50, met: meetsReputation },
@@ -224,4 +273,4 @@ function registerEligibilityRoutes(app) {
   });
 }
 
-module.exports = { registerEligibilityRoutes };
+module.exports = { registerEligibilityRoutes, resolveAgentScore, matchExplorerAgent };
