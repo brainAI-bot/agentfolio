@@ -409,19 +409,35 @@ function registerSATPRoutes(app) {
    */
   app.get('/api/satp/programs', (req, res) => {
     const network = req.query.network || 'mainnet';
-    const progs = satpIdentity.getPrograms(network);
+    const advertised = typeof satpIdentity.getAdvertisedPrograms === 'function'
+      ? satpIdentity.getAdvertisedPrograms(network)
+      : (typeof satpIdentity.getV3ProgramIds === 'function'
+        ? satpIdentity.getV3ProgramIds(network === 'devnet' ? 'devnet' : 'mainnet')
+        : satpIdentity.getPrograms(network));
+    const v2 = satpIdentity.getPrograms(network);
+    const toMap = (progs) => Object.fromEntries(
+      Object.entries(progs || {}).map(([k, v]) => {
+        const id = v && typeof v.toBase58 === 'function' ? v.toBase58() : String(v || '');
+        return [String(k).toLowerCase(), id];
+      }).filter(([, id]) => Boolean(id))
+    );
+    const programs = toMap(advertised);
     res.json({
       ok: true,
       data: {
-        programs: Object.fromEntries(
-          Object.entries(progs).map(([k, v]) => [k.toLowerCase(), v.toBase58()])
-        ),
+        programs,
+        version: 'v3',
+        v2: toMap(v2),
         legacy: Object.fromEntries(
-          Object.entries(satpIdentity.LEGACY_PROGRAMS).map(([k, v]) => [k.toLowerCase(), v.toBase58()])
+          Object.entries(satpIdentity.LEGACY_PROGRAMS || {}).map(([k, v]) => [
+            k.toLowerCase(),
+            v && typeof v.toBase58 === 'function' ? v.toBase58() : String(v || ''),
+          ])
         ),
         network: network === 'devnet' ? 'devnet' : 'mainnet-beta',
         architecture: 'proof-based-trustless',
-        description: 'SATP v2 — Solana Agent Trust Protocol. 5-program cluster with CPI-based scoring.',
+        description: satpIdentity.SATP_V3_DESCRIPTION
+          || 'SATP v3 — Solana Agent Trust Protocol. 6-program mainnet cluster (identity, reviews, reputation, attestations, validation, one escrow).',
       },
     });
   });

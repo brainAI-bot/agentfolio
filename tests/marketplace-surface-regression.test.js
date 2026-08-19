@@ -16,8 +16,8 @@ test('marketplace surface regression guard', async (t) => {
   });
 
   await t.test('api/stats includes live job totals instead of hardcoded zeroes', () => {
-    assert.match(serverSource, /totalJobs = d\.prepare\('SELECT COUNT\(\*\) as c FROM jobs'\)\.get\(\)\.c/);
-    assert.match(serverSource, /totalVolume = d\.prepare\("SELECT COALESCE\(SUM\(COALESCE\(agreed_budget, budget_amount\)\), 0\) as total FROM jobs"\)\.get\(\)\.total \|\| 0/);
+    assert.match(serverSource, /SELECT client_id, agent_id, title, description, status, agreed_budget, budget_amount FROM jobs/);
+    assert.match(serverSource, /isFixtureJob/);
     assert.match(serverSource, /marketplace:\s*\{[\s\S]*totalJobs,[\s\S]*openJobs,[\s\S]*inProgress:[\s\S]*completed:/);
     assert.doesNotMatch(serverSource, /totalJobs:\s*0,\s*totalVolume:\s*0/);
   });

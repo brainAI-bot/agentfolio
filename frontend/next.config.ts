@@ -9,6 +9,10 @@ const nextConfig: NextConfig = {
         source: '/api/:path*',
         destination: `${apiUrl}/api/:path*`,
       },
+      {
+        source: '/openapi.json',
+        destination: `${apiUrl}/openapi.json`,
+      },
     ];
   },
   
@@ -18,6 +22,21 @@ const nextConfig: NextConfig = {
       {
         source: '/explorer',
         destination: '/satp/explorer',
+        permanent: true,
+      },
+      {
+        source: '/docs/api',
+        destination: '/docs',
+        permanent: true,
+      },
+      {
+        source: '/docs/satp',
+        destination: '/docs',
+        permanent: true,
+      },
+      {
+        source: '/satp/docs',
+        destination: '/docs',
         permanent: true,
       },
     ];
