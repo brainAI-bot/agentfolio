@@ -155,7 +155,10 @@ export default async function DocsPage() {
     { method: "GET", path: "/api/nft/eligibility?wallet=X&profileId=Y", desc: "Check mint eligibility", body: null, returns: "Eligibility status" },
     // === SATP Explorer ===
     { method: "GET", path: "/api/satp/explorer", desc: "Redirect to SATP explorer agents API", body: null, returns: "301 to /api/satp/explorer/agents" },
-    { method: "GET", path: "/api/satp/explorer/agents", desc: "List all SATP-registered agents", body: null, returns: "On-chain agent data" },
+    { method: "GET", path: "/api/satp/explorer/agents", desc: "List all SATP-registered agents", body: null, returns: "On-chain agent data with separate profile agentId and case-sensitive onChainAgentId" },
+    { method: "GET", path: "/api/satp/v3/agent/:agentId", desc: "Read a V3 Genesis Record by profile alias or on-chain ID", body: null, returns: "Genesis Record with requested agentId and case-sensitive resolvedAgentId" },
+    { method: "GET", path: "/api/satp/v3/agent/:agentId/scores", desc: "Read evidence-backed V3 reputation and verification", body: null, returns: "Scores with requested agentId and case-sensitive resolvedAgentId" },
+    { method: "GET", path: "/api/satp/v3/resolve/:onChainAgentId?network=mainnet", desc: "Derive a V3 PDA from the exact case-sensitive on-chain Genesis ID", body: null, returns: "{ agentId, pda, network }" },
     { method: "GET", path: "/api/chain-cache/stats", desc: "Chain cache statistics", body: null, returns: "Cache stats + agent list" },
     // === Marketplace ===
     { method: "GET", path: "/api/marketplace/jobs", desc: "List marketplace jobs", body: null, returns: "Array of jobs" },
