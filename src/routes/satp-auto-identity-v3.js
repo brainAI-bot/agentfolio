@@ -636,11 +636,23 @@ function registerSATPAutoIdentityV3Routes(app) {
       );
 
       if (result.alreadyExists) {
+        let persisted = null;
+        try {
+          persisted = await recordConfirmedV3Identity({
+            walletAddress,
+            profileId,
+            txSignature: null,
+          });
+        } catch (persistErr) {
+          console.warn('[SATP AutoID V3] persist existing identity failed:', persistErr.message);
+        }
         return res.json({
           ok: true,
           data: {
             ...result,
             hasV2Identity: hasV2,
+            persisted: Boolean(persisted?.ok),
+            profileId,
             message: 'V3 genesis record already exists for this agent',
           },
         });
@@ -666,14 +678,35 @@ function registerSATPAutoIdentityV3Routes(app) {
 
   /**
    * POST /api/satp-auto/v3/identity/confirm
-   * SECURITY: disabled. This legacy public route previously accepted untrusted
-   * wallet/profile/tx data and wrote forged SATP V3 verification rows to the DB.
-   * Atomic registration must use /api/register/atomic/confirm instead.
+   * Persist a real V3 join after the wallet signs create_identity.
+   * Requires an on-chain genesis PDA for this profileId — no invented profileIds,
+   * no claim_token, and no Irys/escrow ungating.
    */
-  app.post('/api/satp-auto/v3/identity/confirm', (req, res) => {
-    return res.status(410).json({
-      error: 'This legacy V3 confirm route is disabled. Use /api/register/atomic/confirm for real registration finalization.'
-    });
+  app.post('/api/satp-auto/v3/identity/confirm', async (req, res) => {
+    try {
+      const { walletAddress, profileId, txSignature } = req.body || {};
+      if (!walletAddress || !profileId) {
+        return res.status(400).json({ error: 'walletAddress and profileId required' });
+      }
+
+      const v3Status = await getV3IdentityStatus(profileId);
+      if (!v3Status.accountExists) {
+        return res.status(400).json({
+          error: 'V3 genesis record not found on-chain for this profileId. Complete the create_identity transaction first.',
+          genesisPDA: v3Status.pda,
+        });
+      }
+
+      const persisted = await recordConfirmedV3Identity({
+        walletAddress,
+        profileId,
+        txSignature: txSignature || null,
+      });
+      return res.json(persisted);
+    } catch (err) {
+      console.error('[SATP AutoID V3] confirm error:', err.message);
+      return res.status(500).json({ error: 'Failed to persist V3 identity', detail: err.message });
+    }
   });
 
   /**
@@ -714,7 +747,7 @@ function registerSATPAutoIdentityV3Routes(app) {
             identityPDA: v2Pda.toBase58(),
             program: SATP_V2_IDENTITY_PROGRAM.toBase58(),
           };
-          result.needsMigration = v2Exists && !v3Exists;
+          result.needsMigration = v2Exists && !v3Status.exists;
         } catch (e) {
           result.v2 = { error: e.message };
         }

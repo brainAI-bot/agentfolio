@@ -10,7 +10,6 @@ import { useRouter } from "next/navigation";
 import { Connection } from "@solana/web3.js";
 import { useDemoMode } from "@/lib/demo-mode";
 import { Wallet, ArrowRight, AlertCircle, CheckCircle, X, Link2 } from "lucide-react";
-import { assertFrontendSolanaIrysWriteEnabled } from "@/lib/write-surface-gate";
 import {
   buildRegisterAgentTransaction,
   SOLANA_RPC,
@@ -133,12 +132,12 @@ export default function RegisterPage() {
       // STEP 2: ONE TX — SATP identity creation (user signs = wallet verified)
       let satpTxSig = "";
       try {
-        assertFrontendSolanaIrysWriteEnabled("frontend registration SATP identity creation");
+        // Client-signed SATP V3 join is not gated by Irys/escrow writes.
         setChainStatus("signing");
         const connection = new Connection(SOLANA_RPC, "confirmed");
 
         // Request unsigned SATP identity TX from backend
-        const satpRes = await fetch("/api/satp-auto/identity/create", {
+        const satpRes = await fetch("/api/satp-auto/v3/identity/create", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ walletAddress, profileId }),
@@ -180,7 +179,7 @@ export default function RegisterPage() {
         // Also confirm SATP identity to backend
         if (satpTxSig !== "existing") {
           try {
-            await fetch("/api/satp-auto/identity/confirm", {
+            await fetch("/api/satp-auto/v3/identity/confirm", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ walletAddress, profileId, txSignature: satpTxSig }),

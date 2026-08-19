@@ -38,6 +38,7 @@ const {
 const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainData } = require('./scoring');
 const { computeUnifiedTrustScore } = require('./lib/unified-trust-score');
 const { isFixtureIdentity, isFixtureJob } = require('./lib/public-traction');
+const { isOnChainIdentity } = require('./lib/onchain-identity');
 const {
   CANONICAL_TRUST_PROVIDERS,
   RETIRED_TRUST_PROVIDERS,
@@ -1185,7 +1186,7 @@ function getEcosystemStatsPayload() {
         }
       }
       if (hasVerification) verified++;
-      if (vd.solana?.verified) onChain++;
+      if (isOnChainIdentity(row.verification_data)) onChain++;
     } catch {}
   }
 
@@ -1985,6 +1986,16 @@ satpReviews.registerRoutes(app);
 // Register SATP on-chain routes (read + write)
 registerSATPRoutes(app);
 registerSATPWriteRoutes(app);
+
+// SATP V3 auto-identity — unsigned client-signed join/check/create.
+// Not gated by Irys/escrow. Escrow/BOA POSTs stay 423.
+try {
+  const { registerSATPAutoIdentityV3Routes } = require('./routes/satp-auto-identity-v3');
+  registerSATPAutoIdentityV3Routes(app);
+  console.log('[SATP AutoID V3] Mounted at /api/satp-auto/v3/identity');
+} catch (e) {
+  console.warn('[SATP AutoID V3] Failed to mount:', e.message);
+}
 
 // Register wallet-signed review write routes used by the production profile UI.
 try {

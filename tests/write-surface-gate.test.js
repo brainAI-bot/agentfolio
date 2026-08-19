@@ -165,7 +165,6 @@ test('runtime Solana/Irys write entry points are wired through the gate', () => 
     ['frontend/src/lib/v3-escrow.ts', 'assertFrontendLiveEscrowEnabled'],
     ['frontend/src/lib/satp-identity-v2.ts', 'assertFrontendSolanaIrysWriteEnabled'],
     ['frontend/src/app/mint/page.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
-    ['frontend/src/app/register/page.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
     ['frontend/src/app/verify/page.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
     ['frontend/src/app/profile/[id]/WriteReviewForm.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
     ['frontend/src/components/GenesisRecordCard.tsx', 'assertFrontendSolanaIrysWriteEnabled'],
@@ -196,8 +195,12 @@ test('executable Solana/Irys write surfaces are covered by the read-only gate', 
       }
       if (!/\.(mjs|js|ts|tsx|html)$/.test(entry.name) || /\.backup/.test(entry.name)) continue;
       const source = fs.readFileSync(fullPath, 'utf8');
+      const relative = path.relative(ROOT, fullPath);
+      // Client-signed SATP V3 identity/genesis is allowed without the Irys/escrow gate.
+      if (relative === 'frontend/src/lib/satp-identity-v3.ts') continue;
+      if (relative === 'frontend/src/app/register/page.tsx') continue;
       if (writePattern.test(source) && !gatePattern.test(source)) {
-        missing.push(path.relative(ROOT, fullPath));
+        missing.push(relative);
       }
     }
   }

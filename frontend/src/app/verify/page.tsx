@@ -14,11 +14,8 @@ import {
   SOLANA_RPC,
   explorerUrl,
 } from "@/lib/identity-registry";
-import {
-  autoCreateSatpIdentity,
-  hasSatpIdentity,
-  getSatpIdentityPDA,
-} from "@/lib/satp-identity-v2";
+import { autoCreateSatpV3Identity, checkSatpV3Identity } from "@/lib/satp-identity-v3";
+import { SATP_MAINNET_PROGRAMS } from "@/lib/satp-mainnet-programs";
 import { assertFrontendSolanaIrysWriteEnabled } from "@/lib/write-surface-gate";
 
 interface VerificationState {
@@ -494,8 +491,9 @@ export default function VerifyPage() {
   };
 
   /**
-   * Auto-trigger SATP V3 identity creation after Solana wallet verification
-   * Uses ["identity", wallet_pubkey] PDA on program 97yL33...
+   * Auto-trigger SATP V3 identity creation after Solana wallet verification.
+   * Uses ["genesis", SHA256(profileId)] PDA on program GTppU4E...
+   * Client-signed join is not gated by AGENTFOLIO_ENABLE_SOLANA_IRYS_WRITES.
    */
   const autoTriggerSatpIdentity = async () => {
     if (!connected || !publicKey || !sendTransaction || !profileId) return;
@@ -504,18 +502,23 @@ export default function VerifyPage() {
 
     setSatpAutoStatus("Checking SATP identity...");
     try {
-      assertFrontendSolanaIrysWriteEnabled("frontend SATP identity auto-create");
       const connection = new Connection(SOLANA_RPC, "confirmed");
       
-      // Check if already has SATP V3 identity
-      const exists = await hasSatpIdentity(connection, publicKey);
-      if (exists) {
-        const [pda] = getSatpIdentityPDA(publicKey);
-        setSatpState({ loading: false, success: true, error: "", result: { identityPDA: pda.toBase58(), alreadyExists: true } });
-        setSatpAutoStatus("SATP identity already exists ✅");
-        // Still notify backend
+      const existing = await checkSatpV3Identity(profileId, publicKey.toBase58());
+      if (existing?.v3?.accountExists || existing?.v3?.exists) {
+        setSatpState({
+          loading: false,
+          success: true,
+          error: "",
+          result: {
+            genesisPDA: existing.v3.genesisPDA,
+            alreadyExists: true,
+            program: SATP_MAINNET_PROGRAMS.IDENTITY,
+          },
+        });
+        setSatpAutoStatus("SATP V3 identity already exists ✅");
         try {
-          await fetch("/api/satp-auto/identity/confirm", {
+          await fetch("/api/satp-auto/v3/identity/confirm", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ walletAddress: publicKey.toBase58(), profileId }),
@@ -524,10 +527,10 @@ export default function VerifyPage() {
         return;
       }
 
-      setSatpAutoStatus("Creating SATP identity on-chain...");
+      setSatpAutoStatus("Creating SATP V3 identity on-chain...");
       setSatpState({ loading: true, success: false, error: "", result: null });
 
-      const result = await autoCreateSatpIdentity(
+      const result = await autoCreateSatpV3Identity(
         connection,
         publicKey.toBase58(),
         profileId,
@@ -621,11 +624,9 @@ export default function VerifyPage() {
     if (!connected || !publicKey || !sendTransaction || !profileId) return;
     setSatpState({ loading: true, success: false, error: "", result: null });
     try {
-      assertFrontendSolanaIrysWriteEnabled("frontend manual SATP identity registration");
       const connection = new Connection(SOLANA_RPC, "confirmed");
       
-      // Use SATP V3 auto-create flow
-      const result = await autoCreateSatpIdentity(
+      const result = await autoCreateSatpV3Identity(
         connection,
         publicKey.toBase58(),
         profileId,
