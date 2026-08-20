@@ -4,6 +4,11 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const {
+  ADVERTISED_ESCROW_PROGRAM_ID,
+  ADVERTISED_NETWORK,
+  HOST_ENV_SPLIT_NOTE,
+  LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID,
+  LEFTOVER_RUNTIME_NETWORK,
   liveEscrowGateStatus,
 } = require('./write-surface-gate');
 
@@ -231,8 +236,16 @@ function getEscrowV3AuthorityReadback({
         matchesExpectedProgramId: trackedIdlMatches,
       },
       sourceComplete: leftoverSourceComplete,
-      note: 'AgentFolio onchain/escrow_v3 is leftover non-authoritative inventory; SATP satp-client package is the IDL/program source of truth',
+      leftoverRuntimeNetwork: liveEscrow.leftoverRuntimeNetwork || LEFTOVER_RUNTIME_NETWORK,
+      leftoverRuntimeProgramId: normalizeRuntimeProgramId(satpRuntime.devnetEscrowProgramId)
+        || liveEscrow.leftoverRuntimeProgramId
+        || LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID,
+      hostEnvSplit: HOST_ENV_SPLIT_NOTE,
+      note: 'AgentFolio onchain/escrow_v3 is leftover non-authoritative inventory; SATP satp-client package is the IDL/program source of truth. HXCU-vs-B1Se is a host env split, not a missing IDL.',
     },
+    advertisedNetwork: ADVERTISED_NETWORK,
+    advertisedEscrowProgramId: ADVERTISED_ESCROW_PROGRAM_ID,
+    hostEnvSplit: HOST_ENV_SPLIT_NOTE,
     sourceWorkspace,
     anchorToml,
     programSource,
@@ -313,16 +326,22 @@ function getEscrowV3ProvenanceReadback({ authorityReadback, network = 'mainnet' 
   return {
     label: readback.label || AUTHORITY_LABEL,
     authoritativeSource: AUTHORITATIVE_SOURCE,
+    advertisedNetwork: ADVERTISED_NETWORK,
+    advertisedEscrowProgramId: ADVERTISED_ESCROW_PROGRAM_ID,
     escrowProgramId,
     artifactCommit: readback.satpArtifact?.commit || null,
     sourceHash,
     idlHash,
     idlProgramId,
     runtimeProgramId,
+    leftoverRuntimeProgramId: normalizeRuntimeProgramId(runtime.devnetEscrowProgramId)
+      || LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID,
+    leftoverRuntimeNetwork: LEFTOVER_RUNTIME_NETWORK,
     runtimeProgramIds: {
       mainnet: normalizeRuntimeProgramId(runtime.mainnetEscrowProgramId),
       devnet: normalizeRuntimeProgramId(runtime.devnetEscrowProgramId),
     },
+    hostEnvSplit: HOST_ENV_SPLIT_NOTE,
     mismatchStatus: mismatches.length ? 'mismatch' : 'matched',
     mismatches,
     failClosed: mismatches.length > 0,
@@ -331,6 +350,8 @@ function getEscrowV3ProvenanceReadback({ authorityReadback, network = 'mainnet' 
 }
 
 module.exports = {
+  ADVERTISED_ESCROW_PROGRAM_ID,
+  ADVERTISED_NETWORK,
   AUTHORITY_ANCHOR_TOML,
   AUTHORITY_IDL_PATH,
   AUTHORITY_LABEL,
@@ -339,6 +360,9 @@ module.exports = {
   AUTHORITY_PROGRAM_SOURCE,
   AUTHORITY_SOURCE_WORKSPACE,
   AUTHORITATIVE_SOURCE,
+  HOST_ENV_SPLIT_NOTE,
+  LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID,
+  LEFTOVER_RUNTIME_NETWORK,
   SATP_ESCROW_IDL_FALLBACK_BLOB_SHA,
   SATP_ESCROW_IDL_FALLBACK_COMMIT,
   SATP_ESCROW_IDL_FALLBACK_PATH,

@@ -536,11 +536,17 @@ function resolveEscrowAgentBinding(
 router.get('/health', (req, res) => {
   const agentId = getSingleQueryString(req.query.agentId);
   const escrowAuthority = getEscrowV3AuthorityReadback({ satpClient });
+  const liveEscrow = liveEscrowGateStatus();
   res.json({
     status: 'ok',
     network: NETWORK,
+    advertisedNetwork: liveEscrow.advertisedNetwork,
+    advertisedEscrowProgramId: liveEscrow.advertisedEscrowProgramId,
+    leftoverRuntimeNetwork: liveEscrow.leftoverRuntimeNetwork,
+    leftoverRuntimeProgramId: liveEscrow.leftoverRuntimeProgramId,
+    hostEnvSplit: liveEscrow.hostEnvSplit,
     sdkAvailable: Boolean(SATPV3SDK),
-    liveEscrow: liveEscrowGateStatus(),
+    liveEscrow,
     escrowAuthority,
     escrowProvenance: getEscrowV3ProvenanceReadback({ authorityReadback: escrowAuthority, network: NETWORK }),
     selectedAgentSatpIdentity: deriveSelectedAgentSatpReadback(agentId),
