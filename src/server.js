@@ -53,6 +53,11 @@ const {
   normalizeLevel,
   buildReputationSurface,
 } = require('./lib/reputation-surface');
+const {
+  CURRENT_SATP_EXPLORER,
+  labelLeaderboardResponse,
+  peekExplorerAgentsSafe,
+} = require('./lib/leaderboard-honesty');
 
 // Chain Cache — on-chain data layer (identities + attestations refresh loop)
 const chainCache = require('./lib/chain-cache');
@@ -2324,14 +2329,28 @@ app.get('/api/leaderboard', publicLeaderboardLimiter, (req, res) => {
       };
     }).sort((a, b) => (b.score - a.score) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
 
-    res.json({
+    // AF-LB-001: leftover unified 3/320 (verifiable-trust-score) is not SATP V3.
+    // Label it and point current at explorer. Do not rewrite rank. Cheap V3
+    // attach only if explorer cache is already warm — no extra RPC here.
+    let explorerAgents = [];
+    try {
+      const resolved = require.resolve('./routes/satp-explorer-api');
+      const cachedModule = require.cache[resolved];
+      explorerAgents = peekExplorerAgentsSafe(cachedModule && cachedModule.exports);
+    } catch (_) {
+      explorerAgents = [];
+    }
+
+    const honest = labelLeaderboardResponse({
+      current: CURRENT_SATP_EXPLORER,
       ok: true,
       count: Math.min(limit, leaderboard.length),
       total: leaderboard.length,
       limit,
       leaderboard: leaderboard.slice(0, limit),
       payment: { required: false, paidEndpoint: '/api/leaderboard/scores' },
-    });
+    }, explorerAgents);
+    res.json(honest);
   } catch (err) {
     console.error('[Leaderboard] Failed to build public leaderboard:', err.message);
     res.status(500).json({ ok: false, error: 'Failed to build leaderboard' });

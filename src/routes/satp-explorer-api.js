@@ -47,6 +47,13 @@ function clearSatpExplorerCache() {
   agentCache = null;
 }
 
+function peekSatpExplorerCache() {
+  if (agentCache && (Date.now() - agentCache.timestamp < CACHE_TTL) && !hasIncompleteExplorerCache(agentCache.data)) {
+    return agentCache.data;
+  }
+  return null;
+}
+
 const normalizeExplorerReputationScore = (value) => {
   const numeric = Number(value || 0);
   return numeric > 10000 ? Math.round(numeric / 1000) : numeric;
@@ -677,4 +684,4 @@ for (const agent of filteredAgents) {
   }
 }
 
-module.exports = { getSatpAgents, clearSatpExplorerCache };
+module.exports = { getSatpAgents, clearSatpExplorerCache, peekSatpExplorerCache };
