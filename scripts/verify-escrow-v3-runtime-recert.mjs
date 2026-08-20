@@ -302,6 +302,7 @@ evidence.sourceDeployedIdlEqual = sourceDeployedIdlEqual;
 console.log(JSON.stringify(evidence, null, 2));
 
 if (!runtimeVerified) process.exitCode = 1;
+if (fullPacketProvided && !sourcePacketVerified) process.exitCode = 1;
 if (process.argv.includes('--strict-source') && fullPacketProvided && !sourceDeployedIdlEqual) {
   process.exitCode = 3;
 }
