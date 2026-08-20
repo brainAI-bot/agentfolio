@@ -10,6 +10,10 @@ const {
   AUTHORITY_PROGRAM_ID,
   AUTHORITY_PROGRAM_ID_PROVENANCE,
   AUTHORITATIVE_SOURCE,
+  SATP_ESCROW_IDL_FALLBACK_BLOB_SHA,
+  SATP_ESCROW_IDL_FALLBACK_COMMIT,
+  SATP_ESCROW_IDL_FALLBACK_PATH,
+  SATP_ESCROW_IDL_FALLBACK_SOURCE,
   SATP_ESCROW_IDL_PACKAGE_PATH,
   getEscrowV3AuthorityReadback,
   getEscrowV3ProvenanceReadback,
@@ -363,8 +367,12 @@ test('packaged SATP escrow IDL at idls/v3/escrow_v3.json with empty address matc
   });
 
   assert.equal(SATP_ESCROW_IDL_PACKAGE_PATH, 'node_modules/@brainai/satp-client/idls/v3/escrow_v3.json');
+  assert.equal(readback.packagedSatpEscrowIdl.path, SATP_ESCROW_IDL_PACKAGE_PATH);
   assert.match(readback.packagedSatpEscrowIdl.path, /idls\/v3\/escrow_v3\.json$/);
   assert.equal(readback.packagedSatpEscrowIdl.exists, true);
+  assert.equal(readback.packagedSatpEscrowIdl.packagedMissing, false);
+  assert.equal(readback.packagedSatpEscrowIdl.source, AUTHORITATIVE_SOURCE);
+  assert.equal(readback.packagedSatpEscrowIdl.fallback.used, false);
   assert.equal(readback.packagedSatpEscrowIdl.addressField, '');
   assert.equal(readback.packagedSatpEscrowIdl.address, AUTHORITY_PROGRAM_ID);
   assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedProgramId, true);
@@ -594,4 +602,92 @@ test('escrow_v3 authority verifier prints JSON evidence and reserves strict fail
   });
   assert.equal(strict.status, 1);
   assert.match(strict.stdout, /blocked_pending_authoritative_source_idl/);
+});
+
+test('repo-checked SATP escrow IDL fallback is used when packaged file is missing', () => {
+  const missingPackaged = path.join(
+    fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'af-g10-missing-packaged-')),
+    'escrow_v3.json',
+  );
+  const readback = getEscrowV3AuthorityReadback({
+    satpClient,
+    packagedSatpEscrowIdlPath: missingPackaged,
+  });
+  const provenance = getEscrowV3ProvenanceReadback({
+    authorityReadback: readback,
+    network: 'mainnet',
+  });
+
+  assert.equal(readback.packagedSatpEscrowIdl.exists, true);
+  assert.equal(readback.packagedSatpEscrowIdl.packagedMissing, true);
+  assert.equal(readback.packagedSatpEscrowIdl.source, SATP_ESCROW_IDL_FALLBACK_SOURCE);
+  assert.equal(readback.packagedSatpEscrowIdl.path, SATP_ESCROW_IDL_FALLBACK_PATH);
+  assert.equal(readback.packagedSatpEscrowIdl.fallback.used, true);
+  assert.equal(readback.packagedSatpEscrowIdl.fallback.path, SATP_ESCROW_IDL_FALLBACK_PATH);
+  assert.equal(readback.packagedSatpEscrowIdl.fallback.satpCommit, SATP_ESCROW_IDL_FALLBACK_COMMIT);
+  assert.equal(readback.packagedSatpEscrowIdl.fallback.blobSha, SATP_ESCROW_IDL_FALLBACK_BLOB_SHA);
+  assert.match(readback.packagedSatpEscrowIdl.sha256, /^[0-9a-f]{64}$/);
+  assert.equal(
+    readback.packagedSatpEscrowIdl.sha256,
+    require('node:crypto').createHash('sha256')
+      .update(fs.readFileSync(path.resolve(__dirname, '..', SATP_ESCROW_IDL_FALLBACK_PATH)))
+      .digest('hex'),
+  );
+  assert.equal(readback.packagedSatpEscrowIdl.addressField, '');
+  assert.equal(readback.packagedSatpEscrowIdl.address, AUTHORITY_PROGRAM_ID);
+  assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedProgramId, true);
+  assert.equal(provenance.authoritativeSource, 'satp-client-package');
+  assert.equal(provenance.sourceHash, readback.packagedSatpEscrowIdl.sha256);
+  assert.equal(provenance.idlHash, readback.packagedSatpEscrowIdl.sha256);
+  assert.equal(provenance.idlProgramId, AUTHORITY_PROGRAM_ID);
+  assert.ok(!provenance.mismatches.includes('missing_packaged_idl'));
+  assert.ok(!provenance.mismatches.includes('packaged_idl_program_id_mismatch'));
+  assert.equal(readback.releaseGate.liveEscrowWritesAllowed, false);
+  assert.equal(provenance.liveEscrowWritesAllowed, false);
+  assert.equal(readback.status, 'blocked_pending_authoritative_source_idl');
+});
+
+test('packaged SATP escrow IDL path still wins when the file exists', () => {
+  const packagedPath = path.resolve(__dirname, '..', SATP_ESCROW_IDL_PACKAGE_PATH);
+  assert.equal(fs.existsSync(packagedPath), true);
+
+  const readback = getEscrowV3AuthorityReadback({ satpClient });
+
+  assert.equal(readback.packagedSatpEscrowIdl.path, SATP_ESCROW_IDL_PACKAGE_PATH);
+  assert.equal(readback.packagedSatpEscrowIdl.exists, true);
+  assert.equal(readback.packagedSatpEscrowIdl.packagedMissing, false);
+  assert.equal(readback.packagedSatpEscrowIdl.source, 'satp-client-package');
+  assert.equal(readback.packagedSatpEscrowIdl.fallback.used, false);
+  assert.notEqual(readback.packagedSatpEscrowIdl.path, SATP_ESCROW_IDL_FALLBACK_PATH);
+});
+
+test('fallback IDL does not ungate fail-closed live escrow writes', () => {
+  const missingPackaged = path.join(
+    fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'af-g10-fallback-gate-')),
+    'escrow_v3.json',
+  );
+  const env = {
+    ...process.env,
+  };
+  delete env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
+  delete env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
+  delete env.AGENTFOLIO_ESCROW_KILL_SWITCH;
+
+  const readback = getEscrowV3AuthorityReadback({
+    satpClient,
+    env,
+    packagedSatpEscrowIdlPath: missingPackaged,
+  });
+  const provenance = getEscrowV3ProvenanceReadback({
+    authorityReadback: readback,
+    network: 'mainnet',
+  });
+
+  assert.equal(readback.packagedSatpEscrowIdl.exists, true);
+  assert.equal(readback.packagedSatpEscrowIdl.source, SATP_ESCROW_IDL_FALLBACK_SOURCE);
+  assert.equal(readback.releaseGate.liveEscrowWritesAllowed, false);
+  assert.equal(readback.releaseGate.ownerAuthorizationRequired, true);
+  assert.equal(readback.releaseGate.ownerAuthorizationStatus, 'missing_owner_authorization');
+  assert.equal(provenance.liveEscrowWritesAllowed, false);
+  assert.equal(provenance.authoritativeSource, 'satp-client-package');
 });

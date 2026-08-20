@@ -18,6 +18,15 @@ const AUTHORITY_PROGRAM_SOURCE = 'onchain/escrow_v3/programs/escrow_v3/src/lib.r
 const SATP_ESCROW_IDL_PACKAGE_RELATIVE = 'idls/v3/escrow_v3.json';
 const SATP_ESCROW_IDL_PACKAGE_PATH = 'node_modules/@brainai/satp-client/idls/v3/escrow_v3.json';
 const AUTHORITATIVE_SOURCE = 'satp-client-package';
+// Repo-checked fallback is a byte-for-byte copy of SATP idls/v3/escrow_v3.json
+// at commit 240dba99dc4e555e9dd221d93f76f2726bd8159e
+// (git blob d616b30414c9e718a4da39cc51c473a84136ff9b, 20504 bytes).
+// Used only when the packaged satp-client file is missing (host git-pin
+// install does not ship idls/). Authoritative source remains satp-client-package.
+const SATP_ESCROW_IDL_FALLBACK_PATH = 'third_party/satp/240dba99/idls/v3/escrow_v3.json';
+const SATP_ESCROW_IDL_FALLBACK_COMMIT = '240dba99dc4e555e9dd221d93f76f2726bd8159e';
+const SATP_ESCROW_IDL_FALLBACK_BLOB_SHA = 'd616b30414c9e718a4da39cc51c473a84136ff9b';
+const SATP_ESCROW_IDL_FALLBACK_SOURCE = 'repo-checked-fallback';
 
 function toPosixRelative(from, to) {
   const rel = path.relative(from, to);
@@ -53,6 +62,42 @@ function resolvePackagedSatpEscrowIdlPath() {
     if (fs.existsSync(candidate)) return candidate;
   }
   return candidates[0] || path.join(REPO_ROOT, SATP_ESCROW_IDL_PACKAGE_PATH);
+}
+
+function resolveSatpEscrowIdl({ packagedSatpEscrowIdlPath, repoCheckedFallbackPath } = {}) {
+  const packagedPath = packagedSatpEscrowIdlPath || resolvePackagedSatpEscrowIdlPath();
+  const fallbackPath = repoCheckedFallbackPath
+    || path.join(REPO_ROOT, SATP_ESCROW_IDL_FALLBACK_PATH);
+
+  if (fs.existsSync(packagedPath)) {
+    return {
+      usedPath: packagedPath,
+      displayPath: SATP_ESCROW_IDL_PACKAGE_PATH,
+      packagedMissing: false,
+      source: AUTHORITATIVE_SOURCE,
+      fallbackUsed: false,
+    };
+  }
+
+  if (fs.existsSync(fallbackPath)) {
+    const fallbackDisplay = toPosixRelative(REPO_ROOT, fallbackPath)
+      || SATP_ESCROW_IDL_FALLBACK_PATH;
+    return {
+      usedPath: fallbackPath,
+      displayPath: fallbackDisplay,
+      packagedMissing: true,
+      source: SATP_ESCROW_IDL_FALLBACK_SOURCE,
+      fallbackUsed: true,
+    };
+  }
+
+  return {
+    usedPath: packagedPath,
+    displayPath: SATP_ESCROW_IDL_PACKAGE_PATH,
+    packagedMissing: true,
+    source: null,
+    fallbackUsed: false,
+  };
 }
 
 function readJsonIfPresent(targetPath) {
@@ -135,15 +180,23 @@ function readSatpRuntimeIds(satpClient) {
   };
 }
 
-function getEscrowV3AuthorityReadback({ satpClient, env = process.env } = {}) {
+function getEscrowV3AuthorityReadback({
+  satpClient,
+  env = process.env,
+  packagedSatpEscrowIdlPath,
+  repoCheckedFallbackPath,
+} = {}) {
   const sourceWorkspace = fileInfo(AUTHORITY_SOURCE_WORKSPACE);
   const anchorToml = fileInfo(AUTHORITY_ANCHOR_TOML);
   const programSource = fileInfo(AUTHORITY_PROGRAM_SOURCE);
   const trackedIdl = fileInfo(AUTHORITY_IDL_PATH);
   const trackedIdlJson = readJsonIfPresent(AUTHORITY_IDL_PATH);
-  const packagedIdlFullPath = resolvePackagedSatpEscrowIdlPath();
-  const packagedSatpEscrowIdl = fileInfo(packagedIdlFullPath, SATP_ESCROW_IDL_PACKAGE_PATH);
-  const packagedSatpEscrowIdlJson = readJsonIfPresent(packagedIdlFullPath);
+  const resolvedIdl = resolveSatpEscrowIdl({
+    packagedSatpEscrowIdlPath,
+    repoCheckedFallbackPath,
+  });
+  const packagedSatpEscrowIdl = fileInfo(resolvedIdl.usedPath, resolvedIdl.displayPath);
+  const packagedSatpEscrowIdlJson = readJsonIfPresent(resolvedIdl.usedPath);
   const satpRuntime = readSatpRuntimeIds(satpClient);
 
   const trackedIdlAddress = trackedIdlJson?.address || null;
@@ -190,10 +243,18 @@ function getEscrowV3AuthorityReadback({ satpClient, env = process.env } = {}) {
     },
     packagedSatpEscrowIdl: {
       ...packagedSatpEscrowIdl,
-      path: packagedSatpEscrowIdl.path || SATP_ESCROW_IDL_PACKAGE_PATH,
+      path: packagedSatpEscrowIdl.path || resolvedIdl.displayPath,
       address: packagedIdlAddress,
       addressField: packagedSatpEscrowIdlJson?.address ?? null,
       matchesExpectedProgramId: packagedIdlMatches,
+      packagedMissing: resolvedIdl.packagedMissing,
+      source: resolvedIdl.source,
+      fallback: {
+        path: SATP_ESCROW_IDL_FALLBACK_PATH,
+        satpCommit: SATP_ESCROW_IDL_FALLBACK_COMMIT,
+        blobSha: SATP_ESCROW_IDL_FALLBACK_BLOB_SHA,
+        used: resolvedIdl.fallbackUsed,
+      },
     },
     satpArtifact: {
       commit: getSatpClientCommit(),
@@ -278,9 +339,14 @@ module.exports = {
   AUTHORITY_PROGRAM_SOURCE,
   AUTHORITY_SOURCE_WORKSPACE,
   AUTHORITATIVE_SOURCE,
+  SATP_ESCROW_IDL_FALLBACK_BLOB_SHA,
+  SATP_ESCROW_IDL_FALLBACK_COMMIT,
+  SATP_ESCROW_IDL_FALLBACK_PATH,
+  SATP_ESCROW_IDL_FALLBACK_SOURCE,
   SATP_ESCROW_IDL_PACKAGE_PATH,
   SATP_ESCROW_IDL_PACKAGE_RELATIVE,
   getEscrowV3AuthorityReadback,
   getEscrowV3ProvenanceReadback,
   resolvePackagedSatpEscrowIdlPath,
+  resolveSatpEscrowIdl,
 };
