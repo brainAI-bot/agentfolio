@@ -5,6 +5,12 @@ const ENABLE_LIVE_ESCROW_ENV = 'AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES';
 const LIVE_ESCROW_OWNER_AUTHORIZATION_ENV = 'AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION';
 const LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE = 'owner-approved-live-escrow-writes';
 const ESCROW_KILL_SWITCH_ENV = 'AGENTFOLIO_ESCROW_KILL_SWITCH';
+// Advertised SATP /api/satp/programs surface. Leftover host runtime stays devnet/B1Se.
+const ADVERTISED_NETWORK = 'mainnet-beta';
+const ADVERTISED_ESCROW_PROGRAM_ID = 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C';
+const LEFTOVER_RUNTIME_NETWORK = 'devnet';
+const LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID = 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg';
+const HOST_ENV_SPLIT_NOTE = 'HXCU-vs-B1Se is a host env split (advertised SATP /api/satp/programs mainnet-beta HXCU vs leftover host runtime devnet B1Se), not a missing IDL';
 const READ_ONLY_CODE = 'SOLANA_IRYS_WRITES_READ_ONLY';
 const BOA_READ_ONLY_CODE = 'BOA_WRITES_READ_ONLY';
 const LIVE_ESCROW_READ_ONLY_CODE = 'LIVE_ESCROW_WRITES_READ_ONLY';
@@ -69,10 +75,15 @@ function liveEscrowGateStatus(env = process.env) {
       status: ownerAuthorized ? 'owner_authorized' : 'missing_owner_authorization',
     },
     verifiedRuntime: {
-      network: 'devnet',
+      network: LEFTOVER_RUNTIME_NETWORK,
       pdaDerive: 'verified',
     },
-    runtimeNetwork: 'devnet',
+    runtimeNetwork: LEFTOVER_RUNTIME_NETWORK,
+    leftoverRuntimeNetwork: LEFTOVER_RUNTIME_NETWORK,
+    leftoverRuntimeProgramId: LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID,
+    advertisedNetwork: ADVERTISED_NETWORK,
+    advertisedEscrowProgramId: ADVERTISED_ESCROW_PROGRAM_ID,
+    hostEnvSplit: HOST_ENV_SPLIT_NOTE,
     mainnetLiveFundsCleared: enabled,
     readOnlyPosture: 'GET health and PDA derivation routes remain read-only HTTP 200 when program IDs resolve; live-funds POST routes fail closed.',
     publicCopy: enabled
@@ -233,12 +244,17 @@ function sendLegacyEscrowRouteDisabledResponse(res, operation) {
 }
 
 module.exports = {
+  ADVERTISED_ESCROW_PROGRAM_ID,
+  ADVERTISED_NETWORK,
   BOA_READ_ONLY_CODE,
   CUSTODIAL_ESCROW_DISABLED_CODE,
   ENABLE_LIVE_ESCROW_ENV,
   ENABLE_WRITES_ENV,
   ESCROW_KILL_SWITCH_CODE,
   ESCROW_KILL_SWITCH_ENV,
+  HOST_ENV_SPLIT_NOTE,
+  LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID,
+  LEFTOVER_RUNTIME_NETWORK,
   LIVE_ESCROW_OWNER_AUTHORIZATION_ENV,
   LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE,
   LEGACY_ESCROW_ROUTE_DISABLED_CODE,
