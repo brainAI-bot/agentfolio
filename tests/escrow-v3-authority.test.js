@@ -9,6 +9,8 @@ const satpClient = require('@brainai/satp-client');
 const {
   AUTHORITY_PROGRAM_ID,
   AUTHORITY_PROGRAM_ID_PROVENANCE,
+  AUTHORITATIVE_SOURCE,
+  SATP_ESCROW_IDL_PACKAGE_PATH,
   getEscrowV3AuthorityReadback,
   getEscrowV3ProvenanceReadback,
 } = require('../src/lib/escrow-v3-authority');
@@ -33,7 +35,9 @@ function authorityReadbackFixture(overrides = {}) {
     },
     packagedSatpEscrowIdl: {
       exists: true,
+      path: SATP_ESCROW_IDL_PACKAGE_PATH,
       address: AUTHORITY_PROGRAM_ID,
+      sha256: 'packaged-idl-sha',
       matchesExpectedProgramId: true,
     },
     satpArtifact: {
@@ -133,13 +137,19 @@ test('escrow_v3 authority readback names the HQ-selected program id from SATP ma
   assert.equal(readback.label, 'escrow_v3');
   assert.equal(readback.expectedProgramId, AUTHORITY_PROGRAM_ID);
   assert.equal(readback.expectedProgramIdProvenance, AUTHORITY_PROGRAM_ID_PROVENANCE);
-  assert.match(readback.expectedProgramIdProvenance, /2752dcc99b7ece9f5452c7273123232a92d7067f/);
+  assert.match(readback.expectedProgramIdProvenance, /240dba99dc4e555e9dd221d93f76f2726bd8159e/);
+  assert.match(readback.expectedProgramIdProvenance, /satp-client/);
+  assert.doesNotMatch(readback.expectedProgramIdProvenance, /AgentFolio onchain is the authority/);
   assert.equal(AUTHORITY_PROGRAM_ID, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
   assert.equal(readback.anchorToml.exists, true);
   assert.equal(readback.programSource.exists, true);
   assert.equal(readback.trackedIdl.exists, true);
   assert.equal(readback.trackedIdl.address, AUTHORITY_PROGRAM_ID);
   assert.equal(readback.trackedIdl.matchesExpectedProgramId, true);
+  assert.match(readback.packagedSatpEscrowIdl.path, /idls\/v3\/escrow_v3\.json$/);
+  assert.equal(readback.packagedSatpEscrowIdl.exists, true);
+  assert.equal(readback.packagedSatpEscrowIdl.address, AUTHORITY_PROGRAM_ID);
+  assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedProgramId, true);
   assert.equal(readback.status, 'blocked_pending_authoritative_source_idl');
   assert.equal(readback.releaseGate.liveEscrowWritesAllowed, false);
   assert.equal(readback.releaseGate.ownerAuthorizationRequired, true);
@@ -181,9 +191,11 @@ test('escrow_v3 provenance readback exposes hashes, artifact commit, runtime id,
   });
 
   assert.equal(provenance.escrowProgramId, AUTHORITY_PROGRAM_ID);
+  assert.equal(provenance.authoritativeSource, AUTHORITATIVE_SOURCE);
+  assert.equal(provenance.authoritativeSource, 'satp-client-package');
   assert.equal(provenance.artifactCommit, 'artifact-commit');
-  assert.equal(provenance.sourceHash, 'source-sha');
-  assert.equal(provenance.idlHash, 'idl-sha');
+  assert.equal(provenance.sourceHash, 'packaged-idl-sha');
+  assert.equal(provenance.idlHash, 'packaged-idl-sha');
   assert.equal(provenance.idlProgramId, AUTHORITY_PROGRAM_ID);
   assert.equal(provenance.runtimeProgramId, AUTHORITY_PROGRAM_ID);
   assert.deepEqual(provenance.runtimeProgramIds, {
@@ -196,20 +208,37 @@ test('escrow_v3 provenance readback exposes hashes, artifact commit, runtime id,
   assert.equal(provenance.liveEscrowWritesAllowed, true);
 });
 
-test('escrow_v3 provenance readback fails closed when source, IDL, or runtime disagree', () => {
-  const sourceMissing = getEscrowV3ProvenanceReadback({
+test('escrow_v3 provenance readback fails closed when packaged IDL or runtime disagree', () => {
+  const leftoverAfMissing = getEscrowV3ProvenanceReadback({
     authorityReadback: authorityReadbackFixture({
       programSource: { exists: false, sha256: null },
+      trackedIdl: { exists: false, sha256: null, address: null, matchesExpectedProgramId: false },
+      anchorToml: { exists: false },
+    }),
+  });
+  assert.equal(leftoverAfMissing.mismatchStatus, 'matched');
+  assert.equal(leftoverAfMissing.failClosed, false);
+  assert.ok(!leftoverAfMissing.mismatches.includes('missing_source_hash'));
+  assert.ok(!leftoverAfMissing.mismatches.includes('missing_idl_hash'));
+  assert.ok(!leftoverAfMissing.mismatches.includes('missing_anchor_toml'));
+  assert.ok(!leftoverAfMissing.mismatches.includes('tracked_idl_program_id_mismatch'));
+  assert.equal(leftoverAfMissing.authoritativeSource, 'satp-client-package');
+  assert.equal(leftoverAfMissing.sourceHash, 'packaged-idl-sha');
+  assert.equal(leftoverAfMissing.idlHash, 'packaged-idl-sha');
+
+  const sourceMissing = getEscrowV3ProvenanceReadback({
+    authorityReadback: authorityReadbackFixture({
+      packagedSatpEscrowIdl: { exists: false, sha256: null, address: null, matchesExpectedProgramId: false },
     }),
   });
   assert.equal(sourceMissing.mismatchStatus, 'mismatch');
   assert.equal(sourceMissing.failClosed, true);
   assert.equal(sourceMissing.liveEscrowWritesAllowed, false);
-  assert.deepEqual(sourceMissing.mismatches, ['missing_source_hash']);
+  assert.deepEqual(sourceMissing.mismatches, ['missing_packaged_idl']);
 
   const idlMismatch = getEscrowV3ProvenanceReadback({
     authorityReadback: authorityReadbackFixture({
-      trackedIdl: {
+      packagedSatpEscrowIdl: {
         address: '11111111111111111111111111111111',
         matchesExpectedProgramId: false,
       },
@@ -218,7 +247,7 @@ test('escrow_v3 provenance readback fails closed when source, IDL, or runtime di
   assert.equal(idlMismatch.mismatchStatus, 'mismatch');
   assert.equal(idlMismatch.failClosed, true);
   assert.equal(idlMismatch.liveEscrowWritesAllowed, false);
-  assert.deepEqual(idlMismatch.mismatches, ['tracked_idl_program_id_mismatch']);
+  assert.deepEqual(idlMismatch.mismatches, ['packaged_idl_program_id_mismatch']);
 
   const runtimeMismatch = getEscrowV3ProvenanceReadback({
     authorityReadback: authorityReadbackFixture({
@@ -239,14 +268,6 @@ test('escrow_v3 provenance readback fails closed when source, IDL, or runtime di
 
 test('escrow_v3 provenance readback derives fail-closed state from full authority booleans', () => {
   const cases = [
-    {
-      name: 'missing Anchor.toml',
-      overrides: {
-        status: 'blocked_pending_authoritative_source_idl',
-        anchorToml: { exists: false },
-      },
-      mismatch: 'missing_anchor_toml',
-    },
     {
       name: 'missing packaged IDL',
       overrides: {
@@ -332,6 +353,34 @@ test('escrow_v3 provenance readback denies live writes when release gate is abse
   assert.equal(provenance.mismatchStatus, 'matched');
   assert.equal(provenance.failClosed, false);
   assert.equal(provenance.liveEscrowWritesAllowed, false);
+});
+
+test('packaged SATP escrow IDL at idls/v3/escrow_v3.json with empty address matches mainnet HXCU', () => {
+  const readback = getEscrowV3AuthorityReadback({ satpClient });
+  const provenance = getEscrowV3ProvenanceReadback({
+    authorityReadback: readback,
+    network: 'mainnet',
+  });
+
+  assert.equal(SATP_ESCROW_IDL_PACKAGE_PATH, 'node_modules/@brainai/satp-client/idls/v3/escrow_v3.json');
+  assert.match(readback.packagedSatpEscrowIdl.path, /idls\/v3\/escrow_v3\.json$/);
+  assert.equal(readback.packagedSatpEscrowIdl.exists, true);
+  assert.equal(readback.packagedSatpEscrowIdl.addressField, '');
+  assert.equal(readback.packagedSatpEscrowIdl.address, AUTHORITY_PROGRAM_ID);
+  assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedProgramId, true);
+  assert.match(readback.packagedSatpEscrowIdl.sha256, /^[0-9a-f]{64}$/);
+  assert.equal(readback.satpArtifact.runtime.mainnetEscrowProgramId, AUTHORITY_PROGRAM_ID);
+  assert.equal(readback.satpArtifact.runtime.devnetEscrowProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
+  assert.equal(readback.satpArtifact.devnetMatchesExpectedProgramId, false);
+  assert.equal(provenance.authoritativeSource, 'satp-client-package');
+  assert.equal(provenance.sourceHash, readback.packagedSatpEscrowIdl.sha256);
+  assert.equal(provenance.idlHash, readback.packagedSatpEscrowIdl.sha256);
+  assert.equal(provenance.idlProgramId, AUTHORITY_PROGRAM_ID);
+  assert.ok(!provenance.mismatches.includes('missing_packaged_idl'));
+  assert.ok(!provenance.mismatches.includes('packaged_idl_program_id_mismatch'));
+  assert.equal(readback.releaseGate.liveEscrowWritesAllowed, false);
+  assert.equal(provenance.liveEscrowWritesAllowed, false);
+  assert.equal(readback.status, 'blocked_pending_authoritative_source_idl');
 });
 
 test('SATP mainnet program verifier checks every registry id in explicit fixture mode and can fail closed', () => {
