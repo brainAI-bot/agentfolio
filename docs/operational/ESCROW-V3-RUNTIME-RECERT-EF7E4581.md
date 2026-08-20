@@ -16,13 +16,16 @@ publish, or Solana write. `ROADMAP.md` is intentionally unchanged.
 | ProgramData | `Fg1DJyKX9CngiMihZxJY2zjaQ8T1PK5QuiVhNvJmeTqk` |
 | Upgrade authority | `Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc` |
 | Upgrade slot / UTC | `440327121` / `2026-08-19T19:37:14Z` |
-| ProgramData payload | `346856` bytes; 15 trailing allocation bytes |
+| ProgramData payload | `346856` bytes; 15 trailing zero bytes |
 | Trimmed deployed ELF | `346841` bytes; SHA-256 `88058f4322bb8cbb9227b6f35ae3c78baf2be9c01a3bd70523f803f9bfa7f078` |
 
 The verifier follows the upgradeable-loader Program account to ProgramData,
 decodes the slot and authority from the ProgramData header, fetches the upgrade
 transaction, hashes the live bytes, and fails closed if any pinned runtime
-field drifts.
+field drifts. A cheap runtime-only GitHub Actions job runs every six hours and
+can also be dispatched manually. RPC rate limits and server failures are
+retried with backoff, then reported as `infrastructure_error` with exit code 2
+rather than being presented as runtime drift.
 
 ## Candidate source and reproducible build result
 
@@ -45,9 +48,11 @@ The comparison is not equal:
 | default | `346856` bytes; SHA-256 `bba42f0b11ee1be4d1449176facdc7a83b0e491bfc246427091e1a62a02dc42f` | `346856` bytes; SHA-256 `53e922d8792d3ec2d447c497f37dfe8e4ffd1d9bde0f9d6edc0bb3578e67c17f` | DIFFER |
 | `mainnet` feature | `346856` bytes; SHA-256 `4f21da13659cbe99a606b408a5f1d3523c0e41de20538028939bbb1b54c3cc0d` | `346856` bytes; SHA-256 `53e922d8792d3ec2d447c497f37dfe8e4ffd1d9bde0f9d6edc0bb3578e67c17f` | DIFFER |
 
-The deployed payload has 15 trailing allocation zero bytes; removing them
+The deployed payload ends in 15 zero bytes; removing them
 produces the required `346841`-byte / `88058f...` runtime hash. Neither fresh
-candidate build equals the allocated payload or the trimmed runtime bytes.
+candidate build equals the allocated payload. The verifier applies the same
+trailing-zero normalization to both the candidate and deployed bytes before
+the normalized comparison, and they remain unequal.
 Therefore commit `0bf088e` is not reproducible provenance for this deployment.
 
 ## IDL readback
@@ -80,6 +85,13 @@ The runtime identity gate passes. The source-build gate fails on the exact
 hashes above, and the IDL comparison independently records the observed
 five-instruction mismatch. Therefore
 `source == deployed binary == published IDL` remains **not certified**.
+
+These outcomes are machine-distinct. Runtime drift reports
+`verification_failed` and exits 1. RPC/infrastructure failure exits 2. The
+known source-build mismatch reports `runtime_verified_source_build_mismatch`
+while leaving the ordinary runtime monitor green. Callers that intentionally
+want source/IDL inequality to fail the command can pass `--strict-source`,
+which exits 3.
 
 The concrete unblock is the authoritative source commit plus complete locked
 build inputs that reproduce deployed payload SHA-256 `53e922...` (trimmed

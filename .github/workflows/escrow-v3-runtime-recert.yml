@@ -6,6 +6,8 @@ on:
       - ".github/workflows/escrow-v3-runtime-recert.yml"
       - "scripts/verify-escrow-v3-runtime-recert.mjs"
       - "docs/operational/ESCROW-V3-RUNTIME-RECERT-EF7E4581.md"
+  schedule:
+    - cron: "17 */6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -17,8 +19,23 @@ env:
   SBF_TOOLS_VERSION: "v1.52"
 
 jobs:
-  runtime-recert:
+  runtime-readback:
+    name: Pinned runtime identity readback
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out AgentFolio verifier
+        uses: actions/checkout@v4
+
+      - name: Verify pinned runtime identity
+        env:
+          SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+        run: node scripts/verify-escrow-v3-runtime-recert.mjs
+
+  provenance-reproduction:
     name: Source, deployed binary, and IDL readback
+    if: github.event_name != 'schedule'
     runs-on: macos-latest
     timeout-minutes: 45
 
@@ -82,6 +99,8 @@ jobs:
           wc -c target/deploy/escrow_v3.so
 
       - name: Compare source build, deployed bytes, and IDLs
+        env:
+          SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
         run: |
           node agentfolio/scripts/verify-escrow-v3-runtime-recert.mjs \
             --artifact satp/target/deploy/escrow_v3.so \

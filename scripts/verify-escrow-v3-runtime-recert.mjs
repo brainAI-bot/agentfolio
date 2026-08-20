@@ -23,6 +23,21 @@ const LOADER = 'BPFLoaderUpgradeab1e11111111111111111111111';
 const PROGRAMDATA_HEADER_LENGTH = 45;
 const IDL_HEADER_LENGTH = 44;
 const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const RPC_ATTEMPTS = 4;
+
+class InputError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'InputError';
+  }
+}
+
+class RpcInfrastructureError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'RpcInfrastructureError';
+  }
+}
 
 function arg(name) {
   const index = process.argv.indexOf(name);
@@ -51,16 +66,54 @@ function trimTrailingZeroes(bytes) {
   return bytes.subarray(0, end);
 }
 
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 async function rpc(method, params) {
-  const response = await fetch(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: method, method, params }),
-  });
-  if (!response.ok) throw new Error(`RPC ${method} returned HTTP ${response.status}`);
-  const body = await response.json();
-  if (body.error) throw new Error(`RPC ${method} failed: ${JSON.stringify(body.error)}`);
-  return body.result;
+  for (let attempt = 1; attempt <= RPC_ATTEMPTS; attempt += 1) {
+    let response;
+    try {
+      response = await fetch(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: method, method, params }),
+      });
+    } catch (error) {
+      if (attempt < RPC_ATTEMPTS) {
+        await sleep(500 * (2 ** (attempt - 1)));
+        continue;
+      }
+      throw new RpcInfrastructureError(`RPC ${method} network failure after ${attempt} attempts: ${error.message}`);
+    }
+
+    if (!response.ok) {
+      const retryable = response.status === 429 || response.status >= 500;
+      if (retryable && attempt < RPC_ATTEMPTS) {
+        await sleep(500 * (2 ** (attempt - 1)));
+        continue;
+      }
+      throw new RpcInfrastructureError(`RPC ${method} returned HTTP ${response.status} after ${attempt} attempts`);
+    }
+
+    let body;
+    try {
+      body = await response.json();
+    } catch (error) {
+      throw new RpcInfrastructureError(`RPC ${method} returned invalid JSON: ${error.message}`);
+    }
+    if (body.error && [-32005, -32004, -32603].includes(body.error.code)
+      && attempt < RPC_ATTEMPTS) {
+      await sleep(500 * (2 ** (attempt - 1)));
+      continue;
+    }
+    if (body.error) {
+      throw new RpcInfrastructureError(`RPC ${method} failed: ${JSON.stringify(body.error)}`);
+    }
+    return body.result;
+  }
+
+  throw new RpcInfrastructureError(`RPC ${method} exhausted retries`);
 }
 
 async function account(address) {
@@ -80,6 +133,23 @@ function equalJson(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+async function main() {
+const artifactPath = arg('--artifact');
+const sourcePath = arg('--source');
+const sourceIdlPath = arg('--source-idl');
+const sourceCommit = arg('--source-commit');
+const packetArguments = [artifactPath, sourcePath, sourceIdlPath, sourceCommit];
+const anyPacketArgumentProvided = packetArguments.some(Boolean);
+const fullPacketProvided = packetArguments.every(Boolean);
+if (anyPacketArgumentProvided && !fullPacketProvided) {
+  throw new InputError(
+    '--artifact, --source, --source-idl, and --source-commit must be supplied together',
+  );
+}
+for (const packetPath of [artifactPath, sourcePath, sourceIdlPath].filter(Boolean)) {
+  if (!fs.existsSync(packetPath)) throw new InputError(`packet file is absent: ${packetPath}`);
+}
+
 const program = await account(EXPECTED.programId);
 const programData = await account(EXPECTED.programData);
 const publishedIdlAccount = await account(EXPECTED.publishedIdlAccount);
@@ -96,6 +166,9 @@ const allocatedBinary = programData.data.subarray(PROGRAMDATA_HEADER_LENGTH);
 const trimmedBinary = trimTrailingZeroes(allocatedBinary);
 const inflatedIdlBytes = zlib.inflateSync(publishedIdlAccount.data.subarray(IDL_HEADER_LENGTH));
 const publishedIdl = JSON.parse(inflatedIdlBytes);
+const upgradeTransactionTime = Number.isInteger(transaction.blockTime)
+  ? new Date(transaction.blockTime * 1000).toISOString()
+  : null;
 
 const checks = {
   programOwnerMatches: program.owner === LOADER,
@@ -106,8 +179,7 @@ const checks = {
   upgradeAuthorityMatches: upgradeAuthority === EXPECTED.upgradeAuthority,
   upgradeTransactionSucceeded: transaction.meta?.err === null,
   upgradeTransactionSlotMatches: transaction.slot === EXPECTED.upgradeSlot,
-  upgradeTransactionTimeMatches:
-    new Date(transaction.blockTime * 1000).toISOString() === EXPECTED.upgradeTime,
+  upgradeTransactionTimeMatches: upgradeTransactionTime === EXPECTED.upgradeTime,
   upgradeTransactionLogMatches: transaction.meta?.logMessages?.some(
     (line) => line.includes(`Upgraded program ${EXPECTED.programId}`),
   ) === true,
@@ -116,6 +188,7 @@ const checks = {
   publishedIdlAddressMatches: publishedIdl.address === EXPECTED.programId,
   publishedIdlHashMatches: sha256(inflatedIdlBytes) === EXPECTED.publishedIdlInflatedSha256,
 };
+const runtimeCheckNames = Object.keys(checks);
 
 const evidence = {
   label: 'escrow_v3_runtime_recert_ef7e4581',
@@ -131,14 +204,14 @@ const evidence = {
     upgradeAuthority,
     allocatedBinaryLength: allocatedBinary.length,
     allocatedBinarySha256: sha256(allocatedBinary),
-    trailingPaddingBytes: allocatedBinary.length - trimmedBinary.length,
+    trailingZeroBytes: allocatedBinary.length - trimmedBinary.length,
     trimmedBinaryLength: trimmedBinary.length,
     trimmedBinarySha256: sha256(trimmedBinary),
   },
   upgradeTransaction: {
     signature: EXPECTED.upgradeTransaction,
     slot: transaction.slot,
-    blockTime: new Date(transaction.blockTime * 1000).toISOString(),
+    blockTime: upgradeTransactionTime,
     succeeded: transaction.meta?.err === null,
   },
   publishedIdl: {
@@ -149,11 +222,11 @@ const evidence = {
   },
 };
 
-const artifactPath = arg('--artifact');
 if (artifactPath) {
   const artifact = fs.readFileSync(artifactPath);
+  const trimmedArtifact = trimTrailingZeroes(artifact);
   checks.reproducibleBuildMatchesAllocatedBinary = artifact.equals(allocatedBinary);
-  checks.reproducibleBuildMatchesTrimmedBinary = artifact.equals(trimmedBinary);
+  checks.reproducibleBuildMatchesTrimmedBinary = trimmedArtifact.equals(trimmedBinary);
   checks.reproducibleBuildMatchesDeployedBinary =
     checks.reproducibleBuildMatchesAllocatedBinary
     || checks.reproducibleBuildMatchesTrimmedBinary;
@@ -161,12 +234,14 @@ if (artifactPath) {
     path: artifactPath,
     length: artifact.length,
     sha256: sha256(artifact),
+    trailingZeroBytes: artifact.length - trimmedArtifact.length,
+    trimmedLength: trimmedArtifact.length,
+    trimmedSha256: sha256(trimmedArtifact),
     matchesAllocatedBinary: checks.reproducibleBuildMatchesAllocatedBinary,
     matchesTrimmedBinary: checks.reproducibleBuildMatchesTrimmedBinary,
   };
 }
 
-const sourcePath = arg('--source');
 if (sourcePath) {
   const source = fs.readFileSync(sourcePath);
   checks.sourceSha256Matches = sha256(source) === EXPECTED.sourceSha256;
@@ -174,14 +249,13 @@ if (sourcePath) {
     `declare_id!("${EXPECTED.programId}")`,
   );
   evidence.source = {
-    commit: arg('--source-commit'),
+    commit: sourceCommit,
     path: sourcePath,
     sha256: sha256(source),
   };
   checks.sourceCommitMatches = evidence.source.commit === EXPECTED.sourceCommit;
 }
 
-const sourceIdlPath = arg('--source-idl');
 if (sourceIdlPath) {
   const sourceIdlBytes = fs.readFileSync(sourceIdlPath);
   const sourceIdl = JSON.parse(sourceIdlBytes);
@@ -198,28 +272,55 @@ if (sourceIdlPath) {
   };
 }
 
-const fullPacketProvided = Boolean(artifactPath && sourcePath && sourceIdlPath && arg('--source-commit'));
-const runtimeVerified = Object.entries(checks)
-  .filter(([name]) => ![
-    'reproducibleBuildMatchesAllocatedBinary',
-    'reproducibleBuildMatchesTrimmedBinary',
-    'sourceIdlMatchesPublishedIdl',
-  ].includes(name))
-  .every(([, value]) => value === true);
-const sourceBuildVerified = fullPacketProvided && runtimeVerified;
+const runtimeVerified = runtimeCheckNames.every((name) => checks[name] === true);
+const sourcePacketVerified = fullPacketProvided && [
+  'sourceSha256Matches',
+  'sourceDeclaresMainnetProgram',
+  'sourceCommitMatches',
+  'sourceIdlSha256Matches',
+].every((name) => checks[name] === true);
+const sourceBuildVerified = sourcePacketVerified
+  && checks.reproducibleBuildMatchesDeployedBinary === true;
 const sourceDeployedIdlEqual = sourceBuildVerified && checks.sourceIdlMatchesPublishedIdl === true;
-evidence.status = sourceDeployedIdlEqual
-  ? 'source_deployed_idl_equal'
-  : sourceBuildVerified
-    ? 'runtime_and_source_build_verified_published_idl_mismatch'
-    : runtimeVerified
-      ? 'runtime_verified_full_source_packet_not_supplied'
-      : 'verification_failed';
+evidence.status = !runtimeVerified
+  ? 'verification_failed'
+  : !fullPacketProvided
+    ? 'runtime_verified'
+    : !sourcePacketVerified
+      ? 'runtime_verified_source_packet_verification_failed'
+      : !sourceBuildVerified
+        ? 'runtime_verified_source_build_mismatch'
+        : !sourceDeployedIdlEqual
+          ? 'runtime_and_source_build_verified_published_idl_mismatch'
+          : 'source_deployed_idl_equal';
 evidence.fullPacketProvided = fullPacketProvided;
 evidence.runtimeVerified = runtimeVerified;
+evidence.sourcePacketVerified = sourcePacketVerified;
 evidence.sourceBuildVerified = sourceBuildVerified;
 evidence.sourceDeployedIdlEqual = sourceDeployedIdlEqual;
 
 console.log(JSON.stringify(evidence, null, 2));
 
 if (!runtimeVerified) process.exitCode = 1;
+if (process.argv.includes('--strict-source') && fullPacketProvided && !sourceDeployedIdlEqual) {
+  process.exitCode = 3;
+}
+}
+
+main().catch((error) => {
+  const status = error instanceof InputError
+    ? 'input_error'
+    : error instanceof RpcInfrastructureError
+      ? 'infrastructure_error'
+      : 'verification_failed';
+  console.error(JSON.stringify({
+    label: 'escrow_v3_runtime_recert_ef7e4581',
+    observedAt: new Date().toISOString(),
+    status,
+    error: {
+      name: error.name,
+      message: error.message,
+    },
+  }, null, 2));
+  process.exitCode = status === 'verification_failed' ? 1 : 2;
+});
