@@ -71,18 +71,66 @@ describe('AF-LB-001 leftover leaderboard honesty', () => {
     assert.equal(payload.payment.required, false);
   });
 
-  it('leaves a satp_trust_scores row source unchanged so rank fixtures stay stable', () => {
+  it('labels a joined satp_trust_scores 3/320 row leftover, not unlabeled satp_trust_scores', () => {
+    // Handler rewrite: score>0 becomes source=satp_trust_scores before the labeler.
     const row = {
-      agentId: 'agent_alice',
-      score: 777,
-      level: 4,
-      verificationLevel: 4,
+      agentId: 'agent_p1reg_35028542',
+      id: 'agent_p1reg_35028542',
+      name: 'p1reg_35028542',
+      handle: 'agent_p1reg_35028542',
+      score: 320,
+      reputationScore: 320,
+      level: 3,
+      levelName: 'Established',
+      verificationLevel: 3,
+      verificationLabel: 'Established',
       source: 'satp_trust_scores',
+      profileJoined: true,
     };
-    const labeled = labelLeaderboardHonesty(row, []);
-    assert.equal(labeled.source, 'satp_trust_scores');
-    assert.equal(labeled.score, 777);
-    assert.equal(labeled.notSatpV3, undefined);
+
+    assert.equal(isUnlabeledOffchainL3_320(row), true, 'satp_trust_scores 3/320 is unlabeled leftover');
+
+    const labeled = labelLeaderboardHonesty(row, [EXPLORER_P1REG]);
+
+    assert.equal(isUnlabeledOffchainL3_320(labeled), false);
+    assert.equal(labeled.source, 'offchain-stale');
+    assert.notEqual(labeled.source, 'satp_trust_scores');
+    assert.equal(labeled.notSatpV3, true);
+    assert.equal(labeled.leftoverSource, 'satp_trust_scores');
+    assert.equal(labeled.current, CURRENT_SATP_EXPLORER);
+    assert.equal(labeled.current, '/api/satp/explorer/agents');
+
+    // Rank stays leftover 3/320 — do not rewrite from explorer 2/8.
+    assert.equal(labeled.score, 320);
+    assert.equal(labeled.reputationScore, 320);
+    assert.equal(labeled.level, 3);
+    assert.equal(labeled.verificationLevel, 3);
+
+    const payload = labelLeaderboardResponse({
+      ok: true,
+      leaderboard: [row],
+      payment: { required: false, paidEndpoint: '/api/leaderboard/scores' },
+    }, [EXPLORER_P1REG]);
+    assert.equal(payload.current, '/api/satp/explorer/agents');
+    assert.equal(payload.leaderboard[0].source, 'offchain-stale');
+    assert.equal(payload.leaderboard[0].score, 320);
+    assert.equal(payload.leaderboard[0].level, 3);
+  });
+
+  it('does not relabel v3_onchain or explorer rows as leftover', () => {
+    for (const source of ['v3_onchain', 'explorer']) {
+      const labeled = labelLeaderboardHonesty({
+        agentId: 'agent_p1reg_35028542',
+        score: 8,
+        reputationScore: 8,
+        level: 2,
+        verificationLevel: 2,
+        source,
+      }, []);
+      assert.equal(labeled.source, source);
+      assert.equal(labeled.notSatpV3, undefined);
+      assert.equal(labeled.leftoverSource, undefined);
+    }
   });
 });
 

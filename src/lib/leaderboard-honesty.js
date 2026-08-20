@@ -2,24 +2,23 @@
  * AF-LB-001 — leftover public leaderboard honesty.
  *
  * /api/leaderboard still ranks leftover off-chain unified scores
- * (source=verifiable-trust-score, e.g. live p1reg 3/320). SATP V3
- * current lives at /api/satp/explorer/agents (p1reg is 2/8).
+ * (live p1reg 3/320). The handler sets source=satp_trust_scores when
+ * leaderboard_score>0, else computed / verifiable-trust-score. None of
+ * those are SATP V3. Current lives at /api/satp/explorer/agents (p1reg is 2/8).
  *
- * Do not rewrite rank. Label leftover off-chain rows and point current
- * at the explorer. If a cached V3 row is available, attach it.
+ * Do not rewrite rank. Treat every source that is not v3_onchain or
+ * explorer as leftover offchain-stale and point current at the explorer.
+ * If a cached V3 row is available, attach it.
  */
 
 const CURRENT_SATP_EXPLORER = '/api/satp/explorer/agents';
 
-const OFFCHAIN_LEFTOVER_SOURCES = new Set([
-  'verifiable-trust-score',
-  'computed',
-]);
-
+// Only these stay unlabeled as leftover. satp_trust_scores, computed,
+// verifiable-trust-score, solana-mainnet-v3, and any other leftover source
+// become offchain-stale.
 const SATP_V3_SOURCES = new Set([
   'v3_onchain',
   'explorer',
-  'solana-mainnet-v3',
 ]);
 
 function normalizeAgentKey(value) {
@@ -31,7 +30,9 @@ function isSatpV3Source(source) {
 }
 
 function isOffchainLeftoverSource(source) {
-  return OFFCHAIN_LEFTOVER_SOURCES.has(String(source || ''));
+  const value = String(source || '');
+  if (!value) return false;
+  return !isSatpV3Source(value);
 }
 
 function matchExplorerAgent(agents, entry) {
@@ -124,7 +125,7 @@ function isUnlabeledOffchainL3_320(entry) {
   if (entry.source === 'offchain-stale' || entry.source === 'notSatpV3' || entry.notSatpV3 === true) {
     return false;
   }
-  return isOffchainLeftoverSource(entry.source) || entry.source === 'verifiable-trust-score';
+  return isOffchainLeftoverSource(entry.source);
 }
 
 module.exports = {

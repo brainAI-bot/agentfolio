@@ -2329,9 +2329,10 @@ app.get('/api/leaderboard', publicLeaderboardLimiter, (req, res) => {
       };
     }).sort((a, b) => (b.score - a.score) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
 
-    // AF-LB-001: leftover unified 3/320 (verifiable-trust-score) is not SATP V3.
-    // Label it and point current at explorer. Do not rewrite rank. Cheap V3
-    // attach only if explorer cache is already warm — no extra RPC here.
+    // AF-LB-001: leftover unified 3/320 (satp_trust_scores / computed /
+    // verifiable-trust-score) is not SATP V3. Label every non-V3 source and
+    // point current at explorer. Do not rewrite rank. Cheap V3 attach only
+    // if explorer cache is already warm — no extra RPC here.
     let explorerAgents = [];
     try {
       const resolved = require.resolve('./routes/satp-explorer-api');
