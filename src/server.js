@@ -12,6 +12,7 @@ const path = require('path');
 const fs = require('fs');
 const { getDeployProvenance } = require('./lib/deploy-provenance');
 const { writeJsonAtomicSync } = require('./lib/atomic-file');
+const { sendBoaWriteGateResponse } = require('./lib/write-surface-gate');
 const {
   AGENTFOLIO_CORS_ORIGINS,
   agentFolioAliasRoutingMiddleware,
@@ -1669,6 +1670,8 @@ app.get('/api/burn-to-become/collections', (req, res) => {
 });
 
 app.post('/api/burn-to-become/collections', (req, res) => {
+  if (sendBoaWriteGateResponse(res, 'Burn-to-Become collection creation')) return;
+
   const { name, description, mintAddress, burnAddress, transformTo, metadata } = req.body;
   if (!name || !mintAddress) {
     return res.status(400).json({ error: 'name and mintAddress are required' });

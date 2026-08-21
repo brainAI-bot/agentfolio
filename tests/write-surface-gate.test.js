@@ -142,6 +142,7 @@ test('live escrow write gate requires explicit opt-in and honors kill switch', (
 
 test('runtime Solana/Irys write entry points are wired through the gate', () => {
   const expected = new Map([
+    ['src/server.js', 'sendBoaWriteGateResponse'],
     ['tools/fix-aremes-authority.js', 'assertSolanaIrysWriteEnabled'],
     ['tools/score-sync.js', 'assertSolanaIrysWriteEnabled'],
     ['tools/self-attest.js', 'assertSolanaIrysWriteEnabled'],
@@ -186,6 +187,21 @@ test('runtime Solana/Irys write entry points are wired through the gate', () => 
     const source = fs.readFileSync(path.join(ROOT, relativeFile), 'utf8');
     assert.ok(source.includes(marker), relativeFile + ' is missing ' + marker);
   }
+});
+
+test('Burn-to-Become collection creation fails closed before reading or writing data', () => {
+  const source = fs.readFileSync(path.join(ROOT, 'src/server.js'), 'utf8');
+  const routeStart = source.indexOf("app.post('/api/burn-to-become/collections'");
+  const routeEnd = source.indexOf("// Burn-to-Become full flow routes", routeStart);
+  const route = source.slice(routeStart, routeEnd);
+  const gateIndex = route.indexOf('sendBoaWriteGateResponse');
+  const bodyIndex = route.indexOf('req.body');
+  const writeIndex = route.indexOf('writeJsonAtomicSync');
+
+  assert.notEqual(routeStart, -1, 'expected collection creation route');
+  assert.ok(gateIndex >= 0, 'collection creation route must invoke the BOA write gate');
+  assert.ok(gateIndex < bodyIndex, 'write gate must run before request body data is read');
+  assert.ok(gateIndex < writeIndex, 'write gate must run before collections data is written');
 });
 
 test('executable Solana/Irys write surfaces are covered by the read-only gate', () => {
