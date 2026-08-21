@@ -1,0 +1,109 @@
+name: Escrow V3 Runtime Re-certification
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/escrow-v3-runtime-recert.yml"
+      - "scripts/verify-escrow-v3-runtime-recert.mjs"
+      - "docs/operational/ESCROW-V3-RUNTIME-RECERT-EF7E4581.md"
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SATP_SOURCE_COMMIT: "0bf088e5618f173dff7e0fba622bc2911212c52e"
+  SOLANA_VERSION: "2.1.21"
+  SBF_TOOLS_VERSION: "v1.52"
+
+jobs:
+  runtime-readback:
+    name: Pinned runtime identity readback
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out AgentFolio verifier
+        uses: actions/checkout@v4
+
+      - name: Verify pinned runtime identity
+        env:
+          SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+        run: node scripts/verify-escrow-v3-runtime-recert.mjs
+
+  provenance-reproduction:
+    name: Source, deployed binary, and IDL readback
+    if: github.event_name != 'schedule'
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out AgentFolio verifier
+        uses: actions/checkout@v4
+        with:
+          path: agentfolio
+
+      - name: Check out pinned SATP source
+        uses: actions/checkout@v4
+        with:
+          repository: brainAI-bot/satp
+          ref: ${{ env.SATP_SOURCE_COMMIT }}
+          path: satp
+
+      - name: Install Rust 1.86.0
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: "1.86.0"
+          cache: false
+
+      - name: Install the IDL generator toolchain
+        run: rustup toolchain install 1.89.0 --profile minimal
+
+      - name: Install Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Pin and report the SBF toolchain
+        run: |
+          set -euo pipefail
+          rustc --version
+          cargo --version
+          solana --version
+          cargo build-sbf --version
+          sdk_install="$HOME/.local/share/solana/install/active_release/bin/sdk/sbf/scripts/install.sh"
+          perl -0pi -e "s/(# Install platform tools\nversion=)v[0-9.]+/\${1}${SBF_TOOLS_VERSION}/" "$sdk_install"
+          resolved="$(awk '/# Install platform tools/{seen=1; next} seen && /^version=/{sub(/^version=/, ""); print; exit}' "$sdk_install")"
+          echo "resolved SBF platform-tools version=${resolved}"
+          test "$resolved" = "$SBF_TOOLS_VERSION"
+
+      - name: Verify source-generated IDL is current
+        working-directory: satp
+        env:
+          RUSTFLAGS: ""
+        run: |
+          set -euo pipefail
+          node scripts/generate-v3-idls.mjs --check
+          python3 scripts/validate-idls.py
+
+      - name: Reproduce the mainnet escrow artifact
+        working-directory: satp
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.cache/solana"
+          cargo clean --manifest-path programs/escrow_v3/Cargo.toml
+          cargo build-sbf --force-tools-install --tools-version "${SBF_TOOLS_VERSION}" --manifest-path programs/escrow_v3/Cargo.toml --features mainnet
+          shasum -a 256 target/deploy/escrow_v3.so
+          wc -c target/deploy/escrow_v3.so
+
+      - name: Compare source build, deployed bytes, and IDLs
+        env:
+          SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+        run: |
+          node agentfolio/scripts/verify-escrow-v3-runtime-recert.mjs \
+            --artifact satp/target/deploy/escrow_v3.so \
+            --source satp/programs/escrow_v3/src/lib.rs \
+            --source-idl satp/idls/v3/escrow_v3.json \
+            --source-commit "${SATP_SOURCE_COMMIT}"
