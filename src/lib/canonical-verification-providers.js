@@ -1,5 +1,7 @@
 'use strict';
 
+const net = require('node:net');
+
 const CANONICAL_TRUST_PROVIDERS = Object.freeze(['solana', 'github', 'domain', 'website']);
 const CANONICAL_TRUST_PROVIDER_SET = new Set(CANONICAL_TRUST_PROVIDERS);
 
@@ -98,6 +100,79 @@ function isAutoPassAttestation(data = {}) {
   ].some(isKnownAutoPassMarker);
 }
 
+function isPublicVerificationHostname(hostname) {
+  const normalized = String(hostname || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.$/, '');
+  if (!normalized) return false;
+  if (
+    normalized === 'localhost' ||
+    normalized.endsWith('.localhost') ||
+    normalized.endsWith('.local') ||
+    normalized.endsWith('.internal')
+  ) return false;
+
+  const ipVersion = net.isIP(normalized);
+  if (ipVersion === 4) {
+    const octets = normalized.split('.').map(Number);
+    const [a, b] = octets;
+    return !(
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 0) ||
+      (a === 192 && b === 168) ||
+      (a === 198 && (b === 18 || b === 19 || b === 51)) ||
+      (a === 203 && b === 0) ||
+      a >= 224
+    );
+  }
+  if (ipVersion === 6) {
+    if (normalized === '::' || normalized === '::1') return false;
+    if (/^(?:fc|fd|fe[89ab])/i.test(normalized)) return false;
+    if (normalized.startsWith('2001:db8:')) return false;
+    const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+    return mapped ? isPublicVerificationHostname(mapped[1]) : true;
+  }
+
+  return normalized.includes('.');
+}
+
+function isPublicVerificationUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return false;
+  try {
+    const parsed = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`);
+    return (
+      ['http:', 'https:'].includes(parsed.protocol) &&
+      !parsed.username &&
+      !parsed.password &&
+      isPublicVerificationHostname(parsed.hostname)
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+function isCanonicalTrustDataEntry(platform, data = {}) {
+  const normalized = normalizeTrustProvider(platform);
+  if (!isCanonicalTrustProvider(normalized) || isAutoPassAttestation(data)) return false;
+  if (!data || typeof data !== 'object') return false;
+
+  if (normalized === 'website') {
+    return isPublicVerificationUrl(data.url || data.websiteUrl || data.identifier || data.address);
+  }
+  if (normalized === 'domain') {
+    return isPublicVerificationUrl(data.domain || data.identifier || data.address || data.url);
+  }
+  return true;
+}
+
 function filterCanonicalTrustVerifications(verifications = []) {
   return (verifications || []).filter((verification) => (
     isCanonicalTrustProvider(verification?.platform || verification?.type) &&
@@ -109,9 +184,33 @@ function filterCanonicalTrustData(verificationData = {}) {
   const filtered = {};
   for (const [platform, data] of Object.entries(verificationData || {})) {
     const normalized = normalizeTrustProvider(platform);
-    if (isCanonicalTrustProvider(normalized) && !isAutoPassAttestation(data)) filtered[normalized] = data;
+    if (isCanonicalTrustDataEntry(normalized, data)) filtered[normalized] = data;
   }
   return filtered;
+}
+
+function sanitizeLegacyVerificationSummary(summary, verificationData = {}) {
+  const parsed = parseJsonish(summary, {});
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+
+  const canonicalData = filterCanonicalTrustData(verificationData);
+  const verifiedCanonicalPlatforms = new Set(
+    Object.entries(canonicalData)
+      .filter(([, data]) => data && (data.verified === true || data.linked === true || data.success === true))
+      .map(([platform]) => platform)
+  );
+  const verifiedPlatforms = [...new Set(
+    (Array.isArray(parsed.verifiedPlatforms) ? parsed.verifiedPlatforms : [])
+      .map(normalizeTrustProvider)
+      .filter((platform) => verifiedCanonicalPlatforms.has(platform))
+  )];
+  const sanitized = { ...parsed, verifiedPlatforms };
+
+  if (verifiedPlatforms.length === 0) {
+    sanitized.score = 0;
+    sanitized.tier = 'unverified';
+  }
+  return sanitized;
 }
 
 function hasVerifiedCanonicalTrustData(verificationData = {}) {
@@ -140,8 +239,12 @@ module.exports = {
   isRetiredTrustProvider,
   isLiveDisplayVerificationProvider,
   isAutoPassAttestation,
+  isPublicVerificationHostname,
+  isPublicVerificationUrl,
+  isCanonicalTrustDataEntry,
   filterCanonicalTrustVerifications,
   filterCanonicalTrustData,
   hasVerifiedCanonicalTrustData,
+  sanitizeLegacyVerificationSummary,
   retiredProviderResponse,
 };

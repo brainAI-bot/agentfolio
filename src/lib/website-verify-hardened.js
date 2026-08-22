@@ -6,6 +6,7 @@
  * 2. POST /api/profile/:id/verify/website/complete — checks .well-known file for token
  */
 const crypto = require('crypto');
+const { isPublicVerificationUrl } = require('./canonical-verification-providers');
 
 const challenges = new Map();
 const CHALLENGE_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -25,6 +26,9 @@ function initiateWebsiteVerification(profileId, websiteUrl) {
   }
   if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
     throw new Error('URL must use http or https protocol');
+  }
+  if (!isPublicVerificationUrl(parsedUrl.href)) {
+    throw new Error('Website verification URL must use a public hostname');
   }
 
   // Rate limit
@@ -81,7 +85,7 @@ async function completeWebsiteVerification(challengeId) {
     const res = await fetch(verificationUrl, {
       headers: { 'User-Agent': 'AgentFolio-Website-Verify/1.0' },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      redirect: 'follow',
+      redirect: 'error',
     });
 
     if (!res.ok) {
