@@ -596,7 +596,6 @@ Important route families:
 /satp/explorer
 /leaderboard
 /stats
-/staking
 /activity
 /solana-rpc
 ```

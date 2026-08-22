@@ -1356,17 +1356,7 @@ POST /api/profile/:id/endorse    — Endorse an agent (auth required)
 GET  /api/endorsements            — List all endorsements
 ```
 
-### 8.3 Staking
-
-```
-POST /api/staking/stake           — Stake tokens on an agent
-POST /api/staking/unstake         — Unstake tokens
-GET  /api/staking/balance         — Get stake balance
-GET  /api/staking/agent           — Agent staking info
-GET  /api/staking/leaderboard     — Top staked agents
-```
-
-### 8.4 Escrow
+### 8.3 Escrow
 
 Escrow APIs expose gate and status metadata. Devnet-safe runtime smoke is verified; mainnet/live-funds escrow remains gated pending security re-review.
 
