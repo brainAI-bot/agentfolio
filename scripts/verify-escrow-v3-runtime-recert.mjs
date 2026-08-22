@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 
+import { allocatedPayloadInvariant } from './lib/allocated-payload-invariant.mjs';
+
 const EXPECTED = Object.freeze({
   programId: 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C',
   programData: 'Fg1DJyKX9CngiMihZxJY2zjaQ8T1PK5QuiVhNvJmeTqk',
@@ -166,6 +168,10 @@ const programDataSlot = Number(programData.data.readBigUInt64LE(4));
 const upgradeAuthority = encodeBase58(programData.data.subarray(13, 45));
 const allocatedBinary = programData.data.subarray(PROGRAMDATA_HEADER_LENGTH);
 const trimmedBinary = trimTrailingZeroes(allocatedBinary);
+const allocatedPayloadChecks = allocatedPayloadInvariant(allocatedBinary, {
+  length: EXPECTED.allocatedBinaryLength,
+  sha256: EXPECTED.allocatedBinarySha256,
+});
 const inflatedIdlBytes = zlib.inflateSync(publishedIdlAccount.data.subarray(IDL_HEADER_LENGTH));
 const publishedIdl = JSON.parse(inflatedIdlBytes);
 const upgradeTransactionTime = Number.isInteger(transaction.blockTime)
@@ -185,8 +191,7 @@ const checks = {
   upgradeTransactionLogMatches: transaction.meta?.logMessages?.some(
     (line) => line.includes(`Upgraded program ${EXPECTED.programId}`),
   ) === true,
-  allocatedBinaryLengthMatches: allocatedBinary.length === EXPECTED.allocatedBinaryLength,
-  allocatedBinarySha256Matches: sha256(allocatedBinary) === EXPECTED.allocatedBinarySha256,
+  ...allocatedPayloadChecks,
   trimmedBinaryLengthMatches: trimmedBinary.length === EXPECTED.trimmedBinaryLength,
   trimmedBinarySha256Matches: sha256(trimmedBinary) === EXPECTED.trimmedBinarySha256,
   publishedIdlAddressMatches: publishedIdl.address === EXPECTED.programId,
