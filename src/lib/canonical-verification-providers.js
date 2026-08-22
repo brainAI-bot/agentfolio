@@ -196,6 +196,7 @@ function isPublicVerificationUrl(value) {
       ['http:', 'https:'].includes(parsed.protocol) &&
       !parsed.username &&
       !parsed.password &&
+      !parsed.port &&
       isPublicVerificationHostname(parsed.hostname)
     );
   } catch (_) {

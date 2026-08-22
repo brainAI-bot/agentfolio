@@ -16,6 +16,27 @@ test('rejects a hostname when any resolved address is private', async () => {
   );
 });
 
+test('rejects non-web ports before DNS resolution or request dispatch', async () => {
+  let lookupCalled = false;
+  let requestCalled = false;
+
+  await assert.rejects(
+    fetchPublicVerificationText('https://example.com:22/proof', {
+      lookup: async () => {
+        lookupCalled = true;
+        return [{ address: '93.184.216.34', family: 4 }];
+      },
+      request: () => {
+        requestCalled = true;
+      },
+    }),
+    /standard web port/
+  );
+
+  assert.equal(lookupCalled, false);
+  assert.equal(requestCalled, false);
+});
+
 test('pins the validated DNS result into the request lookup', async () => {
   let resolverCalls = 0;
   const lookup = async () => {

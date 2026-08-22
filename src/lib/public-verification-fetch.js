@@ -50,13 +50,16 @@ function createPinnedLookup(records) {
 
 async function fetchPublicVerificationText(value, options = {}) {
   if (!isPublicVerificationUrl(value)) {
-    throw new Error('Website verification URL must use a public hostname');
+    throw new Error('Website verification URL must use a public hostname and standard web port');
   }
   const parsed = new URL(value);
   const records = await resolvePublicAddresses(parsed.hostname, options.lookup);
   const requestImpl = options.request || (parsed.protocol === 'https:' ? https.request : http.request);
 
   return new Promise((resolve, reject) => {
+    // The URL is limited to HTTP(S) on its standard port, every resolved address
+    // was validated as public above, and this lookup pins those exact records.
+    // lgtm[js/request-forgery]
     const request = requestImpl(parsed, {
       method: 'GET',
       headers: options.headers || {},

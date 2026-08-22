@@ -81,11 +81,15 @@ test('loopback and private website proofs are never canonical trust data', () =>
     'http://[::ffff:169.254.169.254]',
     'http://[::ffff:7f00:1]',
     'http://[::ffff:a9fe:a9fe]',
+    'https://brainai.bot:22',
+    'http://brainai.bot:8080',
   ]) {
     assert.equal(isPublicVerificationUrl(value), false, value);
   }
   assert.equal(isPublicVerificationHostname('brainai.bot'), true);
   assert.equal(isPublicVerificationUrl('https://brainai.bot'), true);
+  assert.equal(isPublicVerificationUrl('https://brainai.bot:443'), true);
+  assert.equal(isPublicVerificationUrl('http://brainai.bot:80'), true);
   assert.deepEqual(filterCanonicalTrustData({
     website: { verified: true, url: 'http://127.0.0.1:8787' },
     domain: { verified: true, address: 'brainai.bot' },
