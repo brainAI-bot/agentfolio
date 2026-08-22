@@ -44,4 +44,5 @@ test('public profile serializers sanitize stale verification summaries', () => {
   assert.match(profileStore, /sanitizeLegacyVerificationSummary\(rest\.verification, verificationData\)/);
   assert.match(profileStore, /verification:\s*canonicalVerificationSummary/);
   assert.match(profileStore, /verification, verification_data: verificationData/);
+  assert.match(profileStore, /isPublicDisplayVerificationDataEntry\(platform, entry\)/);
 });

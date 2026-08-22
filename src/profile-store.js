@@ -27,7 +27,7 @@ const {
   isCanonicalTrustProvider,
   filterCanonicalTrustVerifications,
   filterCanonicalTrustData,
-  isCanonicalTrustDataEntry,
+  isPublicDisplayVerificationDataEntry,
   normalizeTrustProvider,
   sanitizeLegacyVerificationSummary,
 } = require('./lib/canonical-verification-providers');
@@ -651,10 +651,7 @@ function enrichProfile(row) {
       } catch (e) { /* chain-cache not available */ }
       // Filter out verifications with empty/null identifiers (e.g. moltbook with no username)
       for (const [platform, entry] of Object.entries(vMap)) {
-        if (
-          (!entry.identifier && !entry.address && platform !== 'mcp' && platform !== 'a2a') ||
-          !isCanonicalTrustDataEntry(platform, entry)
-        ) {
+        if (!isPublicDisplayVerificationDataEntry(platform, entry)) {
           delete vMap[platform];
         }
       }

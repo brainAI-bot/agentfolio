@@ -8,6 +8,7 @@ const {
   hasVerifiedCanonicalTrustData,
   isPublicVerificationHostname,
   isPublicVerificationUrl,
+  isPublicDisplayVerificationDataEntry,
   isCanonicalTrustProvider,
   retiredProviderResponse,
   sanitizeLegacyVerificationSummary,
@@ -75,6 +76,11 @@ test('loopback and private website proofs are never canonical trust data', () =>
     'http://169.254.169.254/latest/meta-data',
     'http://192.168.1.10',
     'http://[::1]:8787',
+    'http://[::ffff:127.0.0.1]:8787',
+    'http://[::127.0.0.1]',
+    'http://[::ffff:169.254.169.254]',
+    'http://[::ffff:7f00:1]',
+    'http://[::ffff:a9fe:a9fe]',
   ]) {
     assert.equal(isPublicVerificationUrl(value), false, value);
   }
@@ -97,8 +103,6 @@ test('legacy verification summaries expose only currently valid canonical proofs
     website: { verified: true, url: 'http://127.0.0.1:8787' },
     domain: { verified: true, address: 'brainai.bot' },
   }), {
-    score: 200,
-    tier: 'verified',
     verifiedPlatforms: ['domain'],
   });
 
@@ -110,10 +114,17 @@ test('legacy verification summaries expose only currently valid canonical proofs
     website: { verified: true, url: 'http://127.0.0.1:8787' },
     agentmail: { verified: true },
   }), {
-    score: 0,
-    tier: 'unverified',
     verifiedPlatforms: [],
   });
+});
+
+test('display-only providers survive canonical trust filtering', () => {
+  assert.equal(isPublicDisplayVerificationDataEntry('mcp', {}), true);
+  assert.equal(isPublicDisplayVerificationDataEntry('a2a', {}), true);
+  assert.equal(isPublicDisplayVerificationDataEntry('discord', { identifier: 'agent' }), true);
+  assert.equal(isPublicDisplayVerificationDataEntry('ethereum', { address: '0xabc' }), true);
+  assert.equal(isPublicDisplayVerificationDataEntry('website', { identifier: 'http://127.0.0.1' }), false);
+  assert.equal(isPublicDisplayVerificationDataEntry('agentmail', { identifier: 'agent@example.com' }), false);
 });
 
 test('website verification initiation rejects loopback targets', async () => {

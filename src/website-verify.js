@@ -10,6 +10,7 @@
  */
 const crypto = require('crypto');
 const { isPublicVerificationUrl } = require('./lib/canonical-verification-providers');
+const { fetchPublicVerificationText } = require('./lib/public-verification-fetch');
 
 const challenges = new Map();
 const CHALLENGE_TTL_MS = 60 * 60 * 1000; // 1 hour (time to deploy the file)
@@ -89,12 +90,11 @@ async function verifyWebsiteChallenge(challengeId, method = 'auto') {
   const verificationUrl = `${ch.websiteUrl}/.well-known/agentfolio-verification.txt`;
 
   try {
-    const res = await fetch(verificationUrl, {
+    const res = await fetchPublicVerificationText(verificationUrl, {
       headers: {
         'User-Agent': 'AgentFolio-Verification/1.0',
         'Accept': 'text/plain',
       },
-      redirect: 'error',
       signal: AbortSignal.timeout(10000),
     });
 

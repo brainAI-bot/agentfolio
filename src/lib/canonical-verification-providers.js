@@ -136,11 +136,55 @@ function isPublicVerificationHostname(hostname) {
     if (normalized === '::' || normalized === '::1') return false;
     if (/^(?:fc|fd|fe[89ab])/i.test(normalized)) return false;
     if (normalized.startsWith('2001:db8:')) return false;
-    const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
-    return mapped ? isPublicVerificationHostname(mapped[1]) : true;
+    if (normalized.startsWith('ff')) return false;
+
+    const groups = parseIpv6Groups(normalized);
+    if (!groups) return false;
+    const mappedPrefix = groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff;
+    const compatiblePrefix = groups.slice(0, 6).every((group) => group === 0);
+    if (mappedPrefix || compatiblePrefix) {
+      const ipv4 = [
+        groups[6] >> 8,
+        groups[6] & 0xff,
+        groups[7] >> 8,
+        groups[7] & 0xff,
+      ].join('.');
+      return isPublicVerificationHostname(ipv4);
+    }
+    return true;
   }
 
   return normalized.includes('.');
+}
+
+function parseIpv6Groups(address) {
+  let normalized = String(address || '').toLowerCase();
+  const dottedTail = normalized.match(/(?:^|:)(\d+\.\d+\.\d+\.\d+)$/);
+  if (dottedTail) {
+    const octets = dottedTail[1].split('.').map(Number);
+    if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+      return null;
+    }
+    const replacement = `${((octets[0] << 8) | octets[1]).toString(16)}:${((octets[2] << 8) | octets[3]).toString(16)}`;
+    normalized = normalized.slice(0, -dottedTail[1].length) + replacement;
+  }
+
+  const halves = normalized.split('::');
+  if (halves.length > 2) return null;
+  const left = halves[0] ? halves[0].split(':') : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const omitted = 8 - left.length - right.length;
+  if ((halves.length === 1 && omitted !== 0) || (halves.length === 2 && omitted < 1)) return null;
+
+  const groups = [
+    ...left,
+    ...Array(omitted).fill('0'),
+    ...right,
+  ].map((group) => Number.parseInt(group, 16));
+  if (groups.length !== 8 || groups.some((group) => !Number.isInteger(group) || group < 0 || group > 0xffff)) {
+    return null;
+  }
+  return groups;
 }
 
 function isPublicVerificationUrl(value) {
@@ -171,6 +215,13 @@ function isCanonicalTrustDataEntry(platform, data = {}) {
     return isPublicVerificationUrl(data.domain || data.identifier || data.address || data.url);
   }
   return true;
+}
+
+function isPublicDisplayVerificationDataEntry(platform, data = {}) {
+  const normalized = normalizeTrustProvider(platform);
+  if (!isLiveDisplayVerificationProvider(normalized) || !data || typeof data !== 'object') return false;
+  if (isCanonicalTrustProvider(normalized)) return isCanonicalTrustDataEntry(normalized, data);
+  return Boolean(data.identifier || data.address || normalized === 'mcp' || normalized === 'a2a');
 }
 
 function filterCanonicalTrustVerifications(verifications = []) {
@@ -205,11 +256,10 @@ function sanitizeLegacyVerificationSummary(summary, verificationData = {}) {
       .filter((platform) => verifiedCanonicalPlatforms.has(platform))
   )];
   const sanitized = { ...parsed, verifiedPlatforms };
-
-  if (verifiedPlatforms.length === 0) {
-    sanitized.score = 0;
-    sanitized.tier = 'unverified';
-  }
+  // Legacy score/tier values were computed from the unsanitized provider set.
+  // Public serializers must not retain a score whose supporting proofs were removed.
+  delete sanitized.score;
+  delete sanitized.tier;
   return sanitized;
 }
 
@@ -242,6 +292,7 @@ module.exports = {
   isPublicVerificationHostname,
   isPublicVerificationUrl,
   isCanonicalTrustDataEntry,
+  isPublicDisplayVerificationDataEntry,
   filterCanonicalTrustVerifications,
   filterCanonicalTrustData,
   hasVerifiedCanonicalTrustData,
