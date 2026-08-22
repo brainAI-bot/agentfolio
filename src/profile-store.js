@@ -27,7 +27,9 @@ const {
   isCanonicalTrustProvider,
   filterCanonicalTrustVerifications,
   filterCanonicalTrustData,
+  isCanonicalTrustDataEntry,
   normalizeTrustProvider,
+  sanitizeLegacyVerificationSummary,
 } = require('./lib/canonical-verification-providers');
 const { resolveContainedPath, writeJsonAtomicSync } = require('./lib/atomic-file');
 
@@ -582,6 +584,10 @@ function enrichProfile(row) {
     jobHistory: jobStats,
   });
   const canonicalVerificationData = filterCanonicalTrustData(parseJsonField(row.verification_data, {}));
+  const canonicalVerificationSummary = sanitizeLegacyVerificationSummary(
+    row.verification,
+    canonicalVerificationData
+  );
 
   return {
     ...row,
@@ -592,6 +598,7 @@ function enrichProfile(row) {
     links: parseJsonField(row.links, {}),
     wallets: parseJsonField(row.wallets, {}),
     skills: parseJsonField(row.skills),
+    verification: canonicalVerificationSummary,
     verification_data: canonicalVerificationData,
     portfolio: parseJsonField(row.portfolio),
     endorsements_given: parseJsonField(row.endorsements_given),
@@ -644,7 +651,10 @@ function enrichProfile(row) {
       } catch (e) { /* chain-cache not available */ }
       // Filter out verifications with empty/null identifiers (e.g. moltbook with no username)
       for (const [platform, entry] of Object.entries(vMap)) {
-        if (!entry.identifier && !entry.address && platform !== 'mcp' && platform !== 'a2a') {
+        if (
+          (!entry.identifier && !entry.address && platform !== 'mcp' && platform !== 'a2a') ||
+          !isCanonicalTrustDataEntry(platform, entry)
+        ) {
           delete vMap[platform];
         }
       }
@@ -1143,8 +1153,9 @@ function registerRoutes(app) {
         verificationData = filterCanonicalTrustData(vd);
         claimed = Object.values(verificationData).some(v => v && v.verified === true);
       } catch (_) {}
+      const verification = sanitizeLegacyVerificationSummary(rest.verification, verificationData);
       const { _trust_score: ts, ...cleanRest } = rest;
-      return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification_data: verificationData, portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: parseJsonField(cleanRest.metadata), nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, claimed };
+      return { ...cleanRest, avatar: resolvedAvatar, capabilities: parseJsonField(cleanRest.capabilities), tags: parseJsonField(cleanRest.tags), links: parseJsonField(cleanRest.links), wallets: parseJsonField(cleanRest.wallets), skills: parseJsonField(cleanRest.skills), verification, verification_data: verificationData, portfolio: parseJsonField(cleanRest.portfolio), endorsements_given: parseJsonField(cleanRest.endorsements_given), custom_badges: parseJsonField(cleanRest.custom_badges), metadata: parseJsonField(cleanRest.metadata), nft_avatar: parseJsonField(cleanRest.nft_avatar), trust_score: ts || 0, claimed };
     });
 
     // V3 on-chain score overlay — authoritative
