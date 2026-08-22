@@ -59,7 +59,6 @@ async function fetchPublicVerificationText(value, options = {}) {
   return new Promise((resolve, reject) => {
     // The URL is limited to HTTP(S) on its standard port, every resolved address
     // was validated as public above, and this lookup pins those exact records.
-    // lgtm[js/request-forgery]
     const request = requestImpl(parsed, {
       method: 'GET',
       headers: options.headers || {},
