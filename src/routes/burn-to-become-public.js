@@ -24,6 +24,7 @@ const { buildBurnToBecomeForWallet } = require('./prepare-birth-endpoint');
 const { getRateLimitDelay } = require('../lib/rate-limit-retry');
 const { loadNormalizedTrust } = require('../lib/normalized-trust');
 const { sendBoaWriteGateResponse } = require('../lib/write-surface-gate');
+const { buildBurnToBecomeCollectionsPayload } = require('../lib/burn-to-become-collections');
 const {
   checkBoaEligibilityFromTrust,
   resolveTrustScoreFromDb,
@@ -935,18 +936,7 @@ function handleBurnToBecome(req, res, url) {
   // GET /api/burn-to-become/collections
   if (url.pathname === "/api/burn-to-become/collections" && req.method === "GET") {
     const minted = loadMintedSet();
-    sendJson(200, {
-      collections: [{
-        name: "Burned-Out Agents",
-        total: 100,
-        minted: minted.size,
-        remaining: Math.max(0, 100 - minted.size),
-        mintPrice: "1 SOL",
-        freeMintThreshold: 100
-      }],
-      total: 1,
-      message: "Burn-to-Become collections"
-    });
+    sendJson(200, buildBurnToBecomeCollectionsPayload(minted.size));
     return true;
   }
 

@@ -1656,18 +1656,9 @@ app.get('/api/profile/:id/trading', async (req, res) => {
   }
 });
 
-// Burn-to-Become NFT collections
+// Burn-to-Become collection writes. The public read shape is served by
+// routes/burn-to-become-public below so this mutable file cannot shadow it.
 const burnCollectionsFile = path.join(__dirname, '..', 'data', 'burn-to-become', 'collections.json');
-
-app.get('/api/burn-to-become/collections', (req, res) => {
-  let collections = [];
-  try {
-    if (fs.existsSync(burnCollectionsFile)) {
-      collections = JSON.parse(fs.readFileSync(burnCollectionsFile, 'utf8'));
-    }
-  } catch (e) { /* empty */ }
-  res.json({ collections, total: collections.length });
-});
 
 app.post('/api/burn-to-become/collections', (req, res) => {
   if (sendBoaWriteGateResponse(res, 'Burn-to-Become collection creation')) return;
