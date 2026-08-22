@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 
+import { allocatedPayloadInvariant } from './lib/allocated-payload-invariant.mjs';
+
 const EXPECTED = Object.freeze({
   programId: 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C',
   programData: 'Fg1DJyKX9CngiMihZxJY2zjaQ8T1PK5QuiVhNvJmeTqk',
@@ -10,6 +12,8 @@ const EXPECTED = Object.freeze({
   upgradeTransaction: '3dKQibtuBon7f8dL9DSjsjCwLr1N9pw6pbgR1Kg69wTAnfwkA8RbKn4e7sqH39yhwwWEHkpWhhDxSG62DeBEsy1E',
   upgradeSlot: 440327121,
   upgradeTime: '2026-08-19T19:37:14.000Z',
+  allocatedBinaryLength: 346856,
+  allocatedBinarySha256: '53e922d8792d3ec2d447c497f37dfe8e4ffd1d9bde0f9d6edc0bb3578e67c17f',
   trimmedBinaryLength: 346841,
   trimmedBinarySha256: '88058f4322bb8cbb9227b6f35ae3c78baf2be9c01a3bd70523f803f9bfa7f078',
   publishedIdlAccount: 'D2TVCWarEDQ3w3YFMpackzymm9MGQKeWd1p1pCeZmBcn',
@@ -164,6 +168,10 @@ const programDataSlot = Number(programData.data.readBigUInt64LE(4));
 const upgradeAuthority = encodeBase58(programData.data.subarray(13, 45));
 const allocatedBinary = programData.data.subarray(PROGRAMDATA_HEADER_LENGTH);
 const trimmedBinary = trimTrailingZeroes(allocatedBinary);
+const allocatedPayloadChecks = allocatedPayloadInvariant(allocatedBinary, {
+  length: EXPECTED.allocatedBinaryLength,
+  sha256: EXPECTED.allocatedBinarySha256,
+});
 const inflatedIdlBytes = zlib.inflateSync(publishedIdlAccount.data.subarray(IDL_HEADER_LENGTH));
 const publishedIdl = JSON.parse(inflatedIdlBytes);
 const upgradeTransactionTime = Number.isInteger(transaction.blockTime)
@@ -183,6 +191,7 @@ const checks = {
   upgradeTransactionLogMatches: transaction.meta?.logMessages?.some(
     (line) => line.includes(`Upgraded program ${EXPECTED.programId}`),
   ) === true,
+  ...allocatedPayloadChecks,
   trimmedBinaryLengthMatches: trimmedBinary.length === EXPECTED.trimmedBinaryLength,
   trimmedBinarySha256Matches: sha256(trimmedBinary) === EXPECTED.trimmedBinarySha256,
   publishedIdlAddressMatches: publishedIdl.address === EXPECTED.programId,
