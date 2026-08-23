@@ -1,6 +1,7 @@
 'use strict';
 
 const net = require('node:net');
+const ipaddr = require('ipaddr.js');
 
 const CANONICAL_TRUST_PROVIDERS = Object.freeze(['solana', 'github', 'domain', 'website']);
 const CANONICAL_TRUST_PROVIDER_SET = new Set(CANONICAL_TRUST_PROVIDERS);
@@ -115,76 +116,34 @@ function isPublicVerificationHostname(hostname) {
   ) return false;
 
   const ipVersion = net.isIP(normalized);
-  if (ipVersion === 4) {
-    const octets = normalized.split('.').map(Number);
-    const [a, b] = octets;
-    return !(
-      a === 0 ||
-      a === 10 ||
-      a === 127 ||
-      (a === 100 && b >= 64 && b <= 127) ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 0) ||
-      (a === 192 && b === 168) ||
-      (a === 198 && (b === 18 || b === 19 || b === 51)) ||
-      (a === 203 && b === 0) ||
-      a >= 224
-    );
-  }
-  if (ipVersion === 6) {
-    if (normalized === '::' || normalized === '::1') return false;
-    if (/^(?:fc|fd|fe[89ab])/i.test(normalized)) return false;
-    if (normalized.startsWith('2001:db8:')) return false;
-    if (normalized.startsWith('ff')) return false;
-
-    const groups = parseIpv6Groups(normalized);
-    if (!groups) return false;
-    const mappedPrefix = groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff;
-    const compatiblePrefix = groups.slice(0, 6).every((group) => group === 0);
-    if (mappedPrefix || compatiblePrefix) {
-      const ipv4 = [
-        groups[6] >> 8,
-        groups[6] & 0xff,
-        groups[7] >> 8,
-        groups[7] & 0xff,
-      ].join('.');
-      return isPublicVerificationHostname(ipv4);
+  if (ipVersion) {
+    let address;
+    try {
+      address = ipaddr.parse(normalized);
+    } catch (_) {
+      return false;
     }
-    return true;
+
+    if (address.kind() === 'ipv6') {
+      const groups = address.parts;
+      const compatiblePrefix = groups.slice(0, 6).every((group) => group === 0);
+      if (address.isIPv4MappedAddress() || compatiblePrefix) {
+        const ipv4 = [
+          groups[6] >> 8,
+          groups[6] & 0xff,
+          groups[7] >> 8,
+          groups[7] & 0xff,
+        ].join('.');
+        return isPublicVerificationHostname(ipv4);
+      }
+    }
+
+    // ipaddr.js maintains the IANA special-purpose ranges. Fail closed by
+    // accepting only addresses it classifies as globally routable unicast.
+    return address.range() === 'unicast';
   }
 
   return normalized.includes('.');
-}
-
-function parseIpv6Groups(address) {
-  let normalized = String(address || '').toLowerCase();
-  const dottedTail = normalized.match(/(?:^|:)(\d+\.\d+\.\d+\.\d+)$/);
-  if (dottedTail) {
-    const octets = dottedTail[1].split('.').map(Number);
-    if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
-      return null;
-    }
-    const replacement = `${((octets[0] << 8) | octets[1]).toString(16)}:${((octets[2] << 8) | octets[3]).toString(16)}`;
-    normalized = normalized.slice(0, -dottedTail[1].length) + replacement;
-  }
-
-  const halves = normalized.split('::');
-  if (halves.length > 2) return null;
-  const left = halves[0] ? halves[0].split(':') : [];
-  const right = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
-  const omitted = 8 - left.length - right.length;
-  if ((halves.length === 1 && omitted !== 0) || (halves.length === 2 && omitted < 1)) return null;
-
-  const groups = [
-    ...left,
-    ...Array(omitted).fill('0'),
-    ...right,
-  ].map((group) => Number.parseInt(group, 16));
-  if (groups.length !== 8 || groups.some((group) => !Number.isInteger(group) || group < 0 || group > 0xffff)) {
-    return null;
-  }
-  return groups;
 }
 
 function isPublicVerificationUrl(value) {

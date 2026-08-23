@@ -16,6 +16,18 @@ test('rejects a hostname when any resolved address is private', async () => {
   );
 });
 
+test('rejects non-global IPv6 records before they can be pinned', async () => {
+  for (const address of ['fec0::1', '64:ff9b:1::1']) {
+    await assert.rejects(
+      resolvePublicAddresses('verification.example', async () => [
+        { address, family: 6 },
+      ]),
+      /non-public address/,
+      address
+    );
+  }
+});
+
 test('rejects non-web ports before DNS resolution or request dispatch', async () => {
   let lookupCalled = false;
   let requestCalled = false;
