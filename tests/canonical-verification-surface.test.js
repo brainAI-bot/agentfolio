@@ -36,3 +36,13 @@ test('health reports Discord and Ethereum as display providers, not retired prov
   assert.match(server, /eth_verification:\s*ethVerify \? 'active_display_non_trust'/);
   assert.match(server, /live_display_verification_providers/);
 });
+
+test('public profile serializers sanitize stale verification summaries', () => {
+  const profileStore = read('src/profile-store.js');
+
+  assert.match(profileStore, /sanitizeLegacyVerificationSummary\(\s*row\.verification/);
+  assert.match(profileStore, /sanitizeLegacyVerificationSummary\(rest\.verification, verificationData\)/);
+  assert.match(profileStore, /verification:\s*canonicalVerificationSummary/);
+  assert.match(profileStore, /verification, verification_data: verificationData/);
+  assert.match(profileStore, /isPublicDisplayVerificationDataEntry\(platform, entry\)/);
+});

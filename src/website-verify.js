@@ -9,6 +9,8 @@
  * 4. We fetch and verify the token
  */
 const crypto = require('crypto');
+const { isPublicVerificationUrl } = require('./lib/canonical-verification-providers');
+const { fetchPublicVerificationText } = require('./lib/public-verification-fetch');
 
 const challenges = new Map();
 const CHALLENGE_TTL_MS = 60 * 60 * 1000; // 1 hour (time to deploy the file)
@@ -27,9 +29,12 @@ async function initiateWebsiteVerification(profileId, websiteUrl) {
   let origin;
   try {
     const parsed = new URL(clean);
+    if (!isPublicVerificationUrl(parsed.href)) {
+      throw new Error('Website verification URL must use a public hostname');
+    }
     origin = parsed.origin; // e.g. https://example.com
   } catch (e) {
-    throw new Error('Invalid website URL');
+    throw new Error(e.message === 'Website verification URL must use a public hostname' ? e.message : 'Invalid website URL');
   }
 
   const challengeId = crypto.randomUUID();
@@ -85,12 +90,11 @@ async function verifyWebsiteChallenge(challengeId, method = 'auto') {
   const verificationUrl = `${ch.websiteUrl}/.well-known/agentfolio-verification.txt`;
 
   try {
-    const res = await fetch(verificationUrl, {
+    const res = await fetchPublicVerificationText(verificationUrl, {
       headers: {
         'User-Agent': 'AgentFolio-Verification/1.0',
         'Accept': 'text/plain',
       },
-      redirect: 'follow',
       signal: AbortSignal.timeout(10000),
     });
 

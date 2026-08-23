@@ -45,6 +45,7 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
     "ghost-cursor": "^1.4.2",
+    "ipaddr.js": "^2.5.0",
     "jsonwebtoken": "^9.0.3",
     "playwright": "^1.58.2",
     "sharp": "^0.34.5",

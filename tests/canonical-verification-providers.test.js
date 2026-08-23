@@ -6,8 +6,12 @@ const {
   filterCanonicalTrustData,
   filterCanonicalTrustVerifications,
   hasVerifiedCanonicalTrustData,
+  isPublicVerificationHostname,
+  isPublicVerificationUrl,
+  isPublicDisplayVerificationDataEntry,
   isCanonicalTrustProvider,
   retiredProviderResponse,
+  sanitizeLegacyVerificationSummary,
 } = require('../src/lib/canonical-verification-providers');
 const { calculateVerificationLevel, calculateReputationScore } = require('../src/lib/scoring-engine-v2');
 const { calculateVerificationScore } = require('../src/lib/verification-score');
@@ -61,6 +65,91 @@ test('retired-only verification_data is not exposed or counted as claimed/verifi
 
   assert.deepEqual(filterCanonicalTrustData(retiredOnlyVerificationData), {});
   assert.equal(hasVerifiedCanonicalTrustData(retiredOnlyVerificationData), false);
+});
+
+test('loopback and private website proofs are never canonical trust data', () => {
+  for (const value of [
+    'http://127.0.0.1:8787',
+    'http://127.1:8787',
+    'http://localhost:8787',
+    'http://10.0.0.1',
+    'http://169.254.169.254/latest/meta-data',
+    'http://192.168.1.10',
+    'http://[::1]:8787',
+    'http://[::ffff:127.0.0.1]:8787',
+    'http://[::127.0.0.1]',
+    'http://[::ffff:169.254.169.254]',
+    'http://[::ffff:7f00:1]',
+    'http://[::ffff:a9fe:a9fe]',
+    'http://[fec0::1]',
+    'http://[64:ff9b:1::1]',
+    'http://[4000::1]',
+    'http://[8000::1]',
+    'http://[f000::1]',
+    'https://brainai.bot:22',
+    'http://brainai.bot:8080',
+  ]) {
+    assert.equal(isPublicVerificationUrl(value), false, value);
+  }
+  assert.equal(isPublicVerificationHostname('brainai.bot'), true);
+  assert.equal(isPublicVerificationHostname('2606:4700:4700::1111'), true);
+  assert.equal(isPublicVerificationUrl('https://brainai.bot'), true);
+  assert.equal(isPublicVerificationUrl('https://[2606:4700:4700::1111]'), true);
+  assert.equal(isPublicVerificationUrl('https://brainai.bot:443'), true);
+  assert.equal(isPublicVerificationUrl('http://brainai.bot:80'), true);
+  assert.deepEqual(filterCanonicalTrustData({
+    website: { verified: true, url: 'http://127.0.0.1:8787' },
+    domain: { verified: true, address: 'brainai.bot' },
+  }), {
+    domain: { verified: true, address: 'brainai.bot' },
+  });
+});
+
+test('legacy verification summaries expose only currently valid canonical proofs', () => {
+  assert.deepEqual(sanitizeLegacyVerificationSummary({
+    score: 200,
+    tier: 'verified',
+    verifiedPlatforms: ['satp_v3', 'website', 'agentmail', 'domain'],
+  }, {
+    website: { verified: true, url: 'http://127.0.0.1:8787' },
+    domain: { verified: true, address: 'brainai.bot' },
+  }), {
+    verifiedPlatforms: ['domain'],
+  });
+
+  assert.deepEqual(sanitizeLegacyVerificationSummary({
+    score: 200,
+    tier: 'verified',
+    verifiedPlatforms: ['website', 'agentmail'],
+  }, {
+    website: { verified: true, url: 'http://127.0.0.1:8787' },
+    agentmail: { verified: true },
+  }), {
+    verifiedPlatforms: [],
+  });
+});
+
+test('display-only providers survive canonical trust filtering', () => {
+  assert.equal(isPublicDisplayVerificationDataEntry('mcp', {}), true);
+  assert.equal(isPublicDisplayVerificationDataEntry('a2a', {}), true);
+  assert.equal(isPublicDisplayVerificationDataEntry('discord', { identifier: 'agent' }), true);
+  assert.equal(isPublicDisplayVerificationDataEntry('ethereum', { address: '0xabc' }), true);
+  assert.equal(isPublicDisplayVerificationDataEntry('website', { identifier: 'http://127.0.0.1' }), false);
+  assert.equal(isPublicDisplayVerificationDataEntry('agentmail', { identifier: 'agent@example.com' }), false);
+});
+
+test('website verification initiation rejects loopback targets', async () => {
+  const hardened = require('../src/lib/website-verify-hardened');
+  const legacy = require('../src/website-verify');
+
+  assert.throws(
+    () => hardened.initiateWebsiteVerification('agent-test', 'http://127.0.0.1:8787'),
+    /public hostname/
+  );
+  await assert.rejects(
+    legacy.initiateWebsiteVerification('agent-test', 'http://localhost:8787'),
+    /public hostname/
+  );
 });
 
 test('canonical verification_data survives exposure filtering and counts as claimed', () => {
