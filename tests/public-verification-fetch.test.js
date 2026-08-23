@@ -17,7 +17,7 @@ test('rejects a hostname when any resolved address is private', async () => {
 });
 
 test('rejects non-global IPv6 records before they can be pinned', async () => {
-  for (const address of ['fec0::1', '64:ff9b:1::1']) {
+  for (const address of ['fec0::1', '64:ff9b:1::1', '4000::1', '8000::1', 'f000::1']) {
     await assert.rejects(
       resolvePublicAddresses('verification.example', async () => [
         { address, family: 6 },
@@ -26,6 +26,13 @@ test('rejects non-global IPv6 records before they can be pinned', async () => {
       address
     );
   }
+
+  assert.deepEqual(
+    await resolvePublicAddresses('verification.example', async () => [
+      { address: '2606:4700:4700::1111', family: 6 },
+    ]),
+    [{ address: '2606:4700:4700::1111', family: 6 }]
+  );
 });
 
 test('rejects non-web ports before DNS resolution or request dispatch', async () => {

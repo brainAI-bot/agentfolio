@@ -83,6 +83,9 @@ test('loopback and private website proofs are never canonical trust data', () =>
     'http://[::ffff:a9fe:a9fe]',
     'http://[fec0::1]',
     'http://[64:ff9b:1::1]',
+    'http://[4000::1]',
+    'http://[8000::1]',
+    'http://[f000::1]',
     'https://brainai.bot:22',
     'http://brainai.bot:8080',
   ]) {

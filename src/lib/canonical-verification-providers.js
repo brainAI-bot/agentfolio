@@ -136,6 +136,11 @@ function isPublicVerificationHostname(hostname) {
         ].join('.');
         return isPublicVerificationHostname(ipv4);
       }
+
+      // ipaddr.js uses "unicast" as its fallback for otherwise unclassified
+      // IPv6 space. Restrict that fallback to IANA's currently assignable
+      // global-unicast block (2000::/3) so reserved space fails closed.
+      if ((groups[0] & 0xe000) !== 0x2000) return false;
     }
 
     // ipaddr.js maintains the IANA special-purpose ranges. Fail closed by
