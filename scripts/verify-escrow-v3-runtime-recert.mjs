@@ -5,22 +5,27 @@ import zlib from 'node:zlib';
 
 import { allocatedPayloadInvariant } from './lib/allocated-payload-invariant.mjs';
 
+const RECEIPT = JSON.parse(fs.readFileSync(
+  new URL('../config/escrow-v3-provenance-ef7e4581.json', import.meta.url),
+  'utf8',
+));
+
 const EXPECTED = Object.freeze({
-  programId: 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C',
-  programData: 'Fg1DJyKX9CngiMihZxJY2zjaQ8T1PK5QuiVhNvJmeTqk',
+  programId: RECEIPT.program.programId,
+  programData: RECEIPT.program.programData,
   upgradeAuthority: 'Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc',
   upgradeTransaction: '3dKQibtuBon7f8dL9DSjsjCwLr1N9pw6pbgR1Kg69wTAnfwkA8RbKn4e7sqH39yhwwWEHkpWhhDxSG62DeBEsy1E',
   upgradeSlot: 440327121,
   upgradeTime: '2026-08-19T19:37:14.000Z',
-  allocatedBinaryLength: 346856,
-  allocatedBinarySha256: '53e922d8792d3ec2d447c497f37dfe8e4ffd1d9bde0f9d6edc0bb3578e67c17f',
-  trimmedBinaryLength: 346841,
-  trimmedBinarySha256: '88058f4322bb8cbb9227b6f35ae3c78baf2be9c01a3bd70523f803f9bfa7f078',
-  publishedIdlAccount: 'D2TVCWarEDQ3w3YFMpackzymm9MGQKeWd1p1pCeZmBcn',
-  publishedIdlInflatedSha256: '864e8af057c1b196156222ecda5853936bf4c6e0f3ae9f5c1e2ca2e53ed6c768',
-  sourceCommit: '0bf088e5618f173dff7e0fba622bc2911212c52e',
-  sourceSha256: 'f4696cc27c5e2ff6163a90f877fd4431efa8809d2f6ae4c792c3c7cd18193c4d',
-  sourceIdlSha256: '3d7e7a14788449f65c1a187a96543f7677bf08937e61638734ed3886dcf60a5a',
+  allocatedBinaryLength: RECEIPT.deployedRuntime.allocatedBytes,
+  allocatedBinarySha256: RECEIPT.deployedRuntime.allocatedSha256,
+  trimmedBinaryLength: RECEIPT.deployedRuntime.trimmedBytes,
+  trimmedBinarySha256: RECEIPT.deployedRuntime.trimmedSha256,
+  publishedIdlAccount: RECEIPT.program.publishedIdlAccount,
+  publishedIdlInflatedSha256: RECEIPT.publishedIdl.inflatedSha256,
+  sourceCommit: RECEIPT.source.commit,
+  sourceSha256: RECEIPT.source.sha256,
+  sourceIdlSha256: RECEIPT.sourceIdl.sha256,
 });
 
 const LOADER = 'BPFLoaderUpgradeab1e11111111111111111111111';

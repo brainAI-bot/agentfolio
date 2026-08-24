@@ -8,7 +8,7 @@ const {
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } = require('@solana/spl-token');
-const { Connection, PublicKey, VersionedTransaction } = require('@solana/web3.js');
+const { Connection, PublicKey } = require('@solana/web3.js');
 
 const escrowV3Router = require('../src/routes/escrow-v3-routes');
 const {
@@ -48,20 +48,6 @@ function listen(app) {
   return new Promise((resolve) => {
     const server = app.listen(0, () => resolve(server));
   });
-}
-
-function decodeTransferCheckedAmount(transactionBase64) {
-  const tx = VersionedTransaction.deserialize(Buffer.from(transactionBase64, 'base64'));
-  const transferIx = tx.message.compiledInstructions.find((ix) => {
-    const programId = tx.message.staticAccountKeys[ix.programIdIndex];
-    const data = Buffer.from(ix.data);
-    return programId?.equals(TOKEN_PROGRAM_ID) && data[0] === 12;
-  });
-
-  assert.ok(transferIx, 'unsigned transaction includes SPL transfer_checked');
-  const data = Buffer.from(transferIx.data);
-  assert.equal(data[9], 6, 'SPL transfer_checked uses USDC mint decimals');
-  return Number(data.readBigUInt64LE(1));
 }
 
 function seedPrecisionJob() {
@@ -136,7 +122,7 @@ test('USDC amount conversion honors the mint decimals without silent truncation'
   );
 });
 
-test('USDC V3 live-gate-enabled route preserves precision-boundary amount in transfer_checked', async () => {
+test('USDC V3 environment gates cannot bypass the pinned provenance mismatch', async () => {
   const previousEnable = process.env[ENABLE_LIVE_ESCROW_ENV];
   const previousOwnerAuth = process.env[LIVE_ESCROW_OWNER_AUTHORIZATION_ENV];
   const previousWrites = process.env[ENABLE_WRITES_ENV];
@@ -179,10 +165,13 @@ test('USDC V3 live-gate-enabled route preserves precision-boundary amount in tra
     });
     const body = await res.json();
 
-    assert.equal(res.status, 200);
-    assert.equal(body.amountUSDC, '9000000000.000001');
-    assert.equal(body.amountRaw, 9_000_000_000_000_001);
-    assert.equal(decodeTransferCheckedAmount(body.transaction), 9_000_000_000_000_001);
+    assert.equal(res.status, 423);
+    assert.equal(body.code, 'ESCROW_V3_PROVENANCE_MISMATCH');
+    assert.equal(body.escrowProvenance.failClosed, true);
+    assert.equal(body.escrowProvenance.liveEscrowWritesAllowed, false);
+    assert.ok(body.escrowProvenance.mismatches.includes('source_build_deployed_runtime_mismatch'));
+    assert.ok(body.escrowProvenance.mismatches.includes('source_idl_published_idl_mismatch'));
+    assert.equal(body.transaction, undefined);
   } finally {
     cleanupPrecisionJob();
     Connection.prototype.getAccountInfo = originalGetAccountInfo;
@@ -232,6 +221,24 @@ test('USDC escrow builder derives SPL vault PDA, ATAs, and transfer_checked path
   assert.equal(programIx.keys[2].pubkey.toBase58(), clientATA.toBase58());
   assert.equal(programIx.keys[3].pubkey.toBase58(), USDC_MINT.toBase58());
   assert.equal(programIx.keys[5].pubkey.toBase58(), vaultAuthorityPDA.toBase58());
+});
+
+test('USDC escrow builder preserves the precision-boundary u64 in transfer_checked bytes', async () => {
+  const expectedAmount = 9_000_000_000_000_001n;
+  const build = await buildCreateEscrowTxInstructions({
+    clientWallet: VALID_CLIENT,
+    jobId: PRECISION_JOB_ID,
+    amountUSDC: '9000000000.000001',
+    deadlineUnix: 2_000_000_000,
+    vaultAtaExists: true,
+  });
+
+  assert.equal(build.amountRaw, Number(expectedAmount));
+  const transferIx = build.instructions[0];
+  assert.equal(transferIx.programId.toBase58(), TOKEN_PROGRAM_ID.toBase58());
+  assert.equal(transferIx.data[0], 12, 'SPL Token transfer_checked instruction');
+  assert.equal(transferIx.data.readBigUInt64LE(1), expectedAmount);
+  assert.equal(transferIx.data[9], 6, 'SPL transfer_checked uses USDC mint decimals');
 });
 
 test('USDC escrow builder skips vault ATA creation when the vault ATA already exists', async () => {

@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/escrow-v3-runtime-recert.yml"
+      - "config/escrow-v3-provenance-ef7e4581.json"
       - "scripts/verify-escrow-v3-runtime-recert.mjs"
       - "docs/operational/ESCROW-V3-RUNTIME-RECERT-EF7E4581.md"
       - "docs/operational/ESCROW-V3-RUNTIME-PROVENANCE-RECERT-20260824.md"
