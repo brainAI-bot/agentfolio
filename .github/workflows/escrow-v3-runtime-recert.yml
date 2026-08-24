@@ -6,6 +6,7 @@ on:
       - ".github/workflows/escrow-v3-runtime-recert.yml"
       - "scripts/verify-escrow-v3-runtime-recert.mjs"
       - "docs/operational/ESCROW-V3-RUNTIME-RECERT-EF7E4581.md"
+      - "docs/operational/ESCROW-V3-RUNTIME-PROVENANCE-RECERT-20260824.md"
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
