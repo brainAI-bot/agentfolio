@@ -5,8 +5,11 @@ on:
     paths:
       - ".github/workflows/escrow-v3-runtime-recert.yml"
       - "scripts/verify-escrow-v3-runtime-recert.mjs"
+      - "scripts/lib/escrow-v3-provenance-forensics.mjs"
+      - "tests/escrow-v3-runtime-recert.test.js"
       - "docs/operational/ESCROW-V3-RUNTIME-RECERT-EF7E4581.md"
       - "docs/operational/ESCROW-V3-RUNTIME-PROVENANCE-RECERT-20260824.md"
+      - "docs/operational/ESCROW-V3-PROVENANCE-MISMATCH-REMEDIATION-20260824.md"
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
@@ -33,6 +36,9 @@ jobs:
         env:
           SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
         run: node scripts/verify-escrow-v3-runtime-recert.mjs
+
+      - name: Test fail-closed provenance forensics
+        run: node --test tests/escrow-v3-runtime-recert.test.js
 
   provenance-reproduction:
     name: Source, deployed binary, and IDL readback

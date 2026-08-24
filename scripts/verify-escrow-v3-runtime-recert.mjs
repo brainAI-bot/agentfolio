@@ -4,6 +4,10 @@ import fs from 'node:fs';
 import zlib from 'node:zlib';
 
 import { allocatedPayloadInvariant } from './lib/allocated-payload-invariant.mjs';
+import {
+  elfForensics,
+  instructionLabelPresence,
+} from './lib/escrow-v3-provenance-forensics.mjs';
 
 const EXPECTED = Object.freeze({
   programId: 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C',
@@ -234,6 +238,7 @@ const evidence = {
 if (artifactPath) {
   const artifact = fs.readFileSync(artifactPath);
   const trimmedArtifact = trimTrailingZeroes(artifact);
+  const forensics = elfForensics(artifact, allocatedBinary);
   checks.reproducibleBuildMatchesAllocatedBinary = artifact.equals(allocatedBinary);
   checks.reproducibleBuildMatchesTrimmedBinary = trimmedArtifact.equals(trimmedBinary);
   checks.reproducibleBuildMatchesDeployedBinary =
@@ -248,6 +253,10 @@ if (artifactPath) {
     trimmedSha256: sha256(trimmedArtifact),
     matchesAllocatedBinary: checks.reproducibleBuildMatchesAllocatedBinary,
     matchesTrimmedBinary: checks.reproducibleBuildMatchesTrimmedBinary,
+    byteDifferenceCount: forensics.byteDifferenceCount,
+    elfSectionLayoutMatches: forensics.sectionLayoutMatches,
+    candidateElfSections: forensics.candidateSections,
+    deployedElfSections: forensics.deployedSections,
   };
 }
 
@@ -270,14 +279,23 @@ if (sourceIdlPath) {
   const sourceIdl = JSON.parse(sourceIdlBytes);
   const sourceNames = instructionNames(sourceIdl);
   const publishedNames = instructionNames(publishedIdl);
+  const publishedIdlGap = sourceNames.filter((name) => !publishedNames.includes(name));
+  const deployedPublishedIdlGapLabels = instructionLabelPresence({
+    instructions: (sourceIdl.instructions || []).filter(
+      ({ name }) => publishedIdlGap.includes(name),
+    ),
+  }, allocatedBinary);
   checks.sourceIdlSha256Matches = sha256(sourceIdlBytes) === EXPECTED.sourceIdlSha256;
   checks.sourceIdlMatchesPublishedIdl = equalJson(sourceNames, publishedNames);
+  checks.publishedIdlGapInstructionLabelsPresentInDeployed =
+    deployedPublishedIdlGapLabels.every(({ present }) => present);
   evidence.sourceIdl = {
     path: sourceIdlPath,
     sha256: sha256(sourceIdlBytes),
     instructionNames: sourceNames,
-    missingFromPublishedIdl: sourceNames.filter((name) => !publishedNames.includes(name)),
+    missingFromPublishedIdl: publishedIdlGap,
     extraInPublishedIdl: publishedNames.filter((name) => !sourceNames.includes(name)),
+    deployedPublishedIdlGapInstructionLabels: deployedPublishedIdlGapLabels,
   };
 }
 
@@ -287,6 +305,7 @@ const sourcePacketVerified = fullPacketProvided && [
   'sourceDeclaresMainnetProgram',
   'sourceCommitMatches',
   'sourceIdlSha256Matches',
+  'publishedIdlGapInstructionLabelsPresentInDeployed',
 ].every((name) => checks[name] === true);
 const sourceBuildVerified = sourcePacketVerified
   && checks.reproducibleBuildMatchesDeployedBinary === true;
