@@ -13,6 +13,19 @@ describe('@brainai/satp-client git pin (G5)', () => {
     assert.match(pin, new RegExp(PIN_SHA));
   });
 
+  it('runtime recertification checks out the same authoritative SATP source', () => {
+    const workflow = fs.readFileSync(
+      path.join(__dirname, '..', '.github', 'workflows', 'escrow-v3-runtime-recert.yml'),
+      'utf8',
+    );
+    const verifier = fs.readFileSync(
+      path.join(__dirname, '..', 'scripts', 'verify-escrow-v3-runtime-recert.mjs'),
+      'utf8',
+    );
+    assert.match(workflow, new RegExp(`SATP_SOURCE_COMMIT: ["']${PIN_SHA}["']`));
+    assert.match(verifier, new RegExp(`sourceCommit: ["']${PIN_SHA}["']`));
+  });
+
   it('require() yields verifyIdentityAttestationRequest', () => {
     const c = require('@brainai/satp-client');
     assert.strictEqual(typeof c.verifyIdentityAttestationRequest, 'function');
