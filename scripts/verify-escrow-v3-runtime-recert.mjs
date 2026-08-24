@@ -5,27 +5,32 @@ import zlib from 'node:zlib';
 
 import { allocatedPayloadInvariant } from './lib/allocated-payload-invariant.mjs';
 
+const RECEIPT = JSON.parse(fs.readFileSync(
+  new URL('../config/escrow-v3-provenance-ef7e4581.json', import.meta.url),
+  'utf8',
+));
+
 const EXPECTED = Object.freeze({
-  programId: 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C',
-  programData: 'Fg1DJyKX9CngiMihZxJY2zjaQ8T1PK5QuiVhNvJmeTqk',
+  programId: RECEIPT.program.programId,
+  programData: RECEIPT.program.programData,
   upgradeAuthority: 'Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc',
   upgradeTransaction: '21jwie1FpQGvjV5yFQ6ofgcKPzp3hrM2DKtLGeyQ4XVr2DQg5LYg7fqira9XSsUTTbfJBM9V8yY8Pe1fchDimkVx',
   upgradeSlot: 441423817,
   upgradeTime: '2026-08-24T15:28:18.000Z',
-  allocatedBinaryLength: 346856,
-  allocatedBinarySha256: '4f21da13659cbe99a606b408a5f1d3523c0e41de20538028939bbb1b54c3cc0d',
-  trimmedBinaryLength: 346841,
-  trimmedBinarySha256: '2f3bb05486f39d3f61a454905048b6e5732b798643405836b62a6d9795a20a6d',
-  publishedIdlAccount: '4zNAR5DGuWuUnEbwGb7FzEVUUCx2xKca2bmHCeVpjQCJ',
+  allocatedBinaryLength: RECEIPT.deployedRuntime.allocatedBytes,
+  allocatedBinarySha256: RECEIPT.deployedRuntime.allocatedSha256,
+  trimmedBinaryLength: RECEIPT.deployedRuntime.trimmedBytes,
+  trimmedBinarySha256: RECEIPT.deployedRuntime.trimmedSha256,
+  publishedIdlAccount: RECEIPT.program.publishedIdlAccount,
   publishedIdlAccountOwner: 'ProgM6JCCvbYkfKqJYHePx4xxSUSqJp7rh8Lyv7nk7S',
   publishedIdlTransaction: '3nUp72KUkwtRbkKDjFBdg6X8qk85qJLwZLYn36xrwVmdNkbQ1RstQCaRzXHgFS58TE2nTacYimsscBTRJWbRgH1j',
   publishedIdlTransactionSlot: 441423878,
   publishedIdlTransactionTime: '2026-08-24T15:28:42.000Z',
-  publishedIdlInflatedSha256: 'e8c142f27e225d8edc2f8f41e6fb698ebbb73f69d2fc078d5bf963234ebc8fa9',
-  publishedIdlInstructionCount: 14,
+  publishedIdlInflatedSha256: RECEIPT.publishedIdl.inflatedSha256,
+  publishedIdlInstructionCount: RECEIPT.publishedIdl.instructionCount,
   sourceCommit: '93fc6c0d86302cfe8b0d8c798ba2817d7eeace44',
-  sourceSha256: 'f4696cc27c5e2ff6163a90f877fd4431efa8809d2f6ae4c792c3c7cd18193c4d',
-  sourceIdlSha256: 'e8c142f27e225d8edc2f8f41e6fb698ebbb73f69d2fc078d5bf963234ebc8fa9',
+  sourceSha256: RECEIPT.source.sha256,
+  sourceIdlSha256: RECEIPT.sourceIdl.sha256,
 });
 
 const LOADER = 'BPFLoaderUpgradeab1e11111111111111111111111';

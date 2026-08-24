@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "marker": "[#ef7e4581]",
+  "status": "verified",
+  "baseline": {
+    "agentfolioPullRequest": 270,
+    "mergeCommit": "b4f3b0c020ee06743245db6e756270f3777d85e4",
+    "authoritativeRefreshPullRequest": 273,
+    "authoritativeRefreshHead": "3ca68c17e4a653d0dee6ccd99e56ef0d5f84dbd9",
+    "receiptObservedAt": "2026-08-24T21:22:40.126Z"
+  },
+  "program": {
+    "cluster": "mainnet-beta",
+    "programId": "HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C",
+    "programData": "Fg1DJyKX9CngiMihZxJY2zjaQ8T1PK5QuiVhNvJmeTqk",
+    "publishedIdlAccount": "4zNAR5DGuWuUnEbwGb7FzEVUUCx2xKca2bmHCeVpjQCJ"
+  },
+  "source": {
+    "repository": "brainAI-bot/satp",
+    "commit": "93fc6c0d86302cfe8b0d8c798ba2817d7eeace44",
+    "path": "programs/escrow_v3/src/lib.rs",
+    "sha256": "f4696cc27c5e2ff6163a90f877fd4431efa8809d2f6ae4c792c3c7cd18193c4d"
+  },
+  "buildInputs": {
+    "cargoLockSha256": "d98db19e0d86ca3248376d4857b150b240be05c4bc3a409d7cb638ce4d5d2237",
+    "rustToolchainTomlSha256": "615e131a336708d73f4b69a4a4a5a6f96b10f4399a1a075408e0616cda21544b",
+    "anchorTomlSha256": "785c886cbd5a583171293a268319f76e462f6c05b13d354f245dd853cf34e45c"
+  },
+  "toolchain": {
+    "rust": "1.86.0",
+    "solanaCli": "2.1.21",
+    "sbfPlatformTools": "v1.52",
+    "runner": "github-actions-macos-latest"
+  },
+  "rebuild": {
+    "command": "cargo build-sbf --force-tools-install --tools-version v1.52 --manifest-path programs/escrow_v3/Cargo.toml --features mainnet",
+    "bytes": 346856,
+    "sha256": "4f21da13659cbe99a606b408a5f1d3523c0e41de20538028939bbb1b54c3cc0d"
+  },
+  "deployedRuntime": {
+    "allocatedBytes": 346856,
+    "allocatedSha256": "4f21da13659cbe99a606b408a5f1d3523c0e41de20538028939bbb1b54c3cc0d",
+    "trimmedBytes": 346841,
+    "trimmedSha256": "2f3bb05486f39d3f61a454905048b6e5732b798643405836b62a6d9795a20a6d"
+  },
+  "sourceIdl": {
+    "path": "idls/v3/escrow_v3.json",
+    "sha256": "e8c142f27e225d8edc2f8f41e6fb698ebbb73f69d2fc078d5bf963234ebc8fa9",
+    "instructionCount": 14
+  },
+  "publishedIdl": {
+    "inflatedBytes": 20548,
+    "inflatedSha256": "e8c142f27e225d8edc2f8f41e6fb698ebbb73f69d2fc078d5bf963234ebc8fa9",
+    "instructionCount": 14
+  },
+  "bindings": {
+    "rebuiltArtifactMatchesAllocatedRuntime": true,
+    "rebuiltArtifactMatchesTrimmedRuntime": false,
+    "sourceIdlMatchesPublishedIdl": true,
+    "sourceEqualsDeployedEqualsPublishedIdl": true
+  },
+  "residualGate": "Live mainnet escrow writes require the release flag, inactive kill switch, and explicit Owner authorization. The former structurally-false devnet-program equality term is no longer a mainnet provenance gate."
+}

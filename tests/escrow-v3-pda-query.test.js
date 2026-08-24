@@ -179,7 +179,8 @@ test('GET /api/v3/escrow/health exposes live escrow gate status', async () => {
     assert.match(body.escrowProvenance.idlHash, /^[0-9a-f]{64}$/);
     assert.match(body.escrowProvenance.runtimeProgramId, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
     assert.equal(body.escrowProvenance.mismatchStatus, 'matched');
-    assert.equal(body.escrowProvenance.authoritativeSource, 'satp-client-package');
+    assert.equal(body.escrowProvenance.authoritativeSource, 'brainAI-bot/satp');
+    assert.equal(body.escrowProvenance.consumerInterfaceSource, 'satp-client-package');
     assert.equal(body.escrowAuthority.packagedSatpEscrowIdl.exists, true);
     assert.equal(body.escrowAuthority.packagedSatpEscrowIdl.matchesExpectedProgramId, true);
     assert.equal(body.escrowAuthority.packagedSatpEscrowIdl.instructionCount, 14);
@@ -242,9 +243,48 @@ test('GET /api/v3/escrow/health advertises mainnet HXCU next to leftover host ru
     assert.equal(body.escrowProvenance.mismatchStatus, 'matched');
     assert.deepEqual(body.escrowProvenance.mismatches, []);
     assert.ok(!body.escrowProvenance.mismatches.includes('missing_packaged_idl'));
-    assert.equal(body.escrowProvenance.authoritativeSource, 'satp-client-package');
+    assert.equal(body.escrowProvenance.authoritativeSource, 'brainAI-bot/satp');
+    assert.equal(body.escrowProvenance.consumerInterfaceSource, 'satp-client-package');
     assert.equal(body.escrowAuthority.releaseGate.liveEscrowWritesAllowed, false);
     assert.equal(body.escrowProvenance.liveEscrowWritesAllowed, false);
+  } finally {
+    if (previousEnable === undefined) delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
+    else process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = previousEnable;
+    if (previousOwnerAuthorization === undefined) delete process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
+    else process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION = previousOwnerAuthorization;
+    if (previousKill === undefined) delete process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
+    else process.env.AGENTFOLIO_ESCROW_KILL_SWITCH = previousKill;
+    await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  }
+});
+
+test('POST /api/v3/escrow/create reaches input validation after verified provenance and release gates clear', async () => {
+  const previousEnable = process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
+  const previousOwnerAuthorization = process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
+  const previousKill = process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
+  process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = '1';
+  process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION = 'owner-approved-live-escrow-writes';
+  delete process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
+
+  const app = express();
+  app.use(express.json());
+  app.use('/api/v3/escrow', escrowV3Router);
+  const server = await listen(app);
+
+  try {
+    const { port } = server.address();
+    const res = await fetch(`http://127.0.0.1:${port}/api/v3/escrow/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 400);
+    assert.equal(body.error, 'Missing required fields');
+    assert.equal(body.code, undefined);
+    assert.equal(body.escrowProvenance, undefined);
+    assert.equal(body.transaction, undefined);
   } finally {
     if (previousEnable === undefined) delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
     else process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = previousEnable;

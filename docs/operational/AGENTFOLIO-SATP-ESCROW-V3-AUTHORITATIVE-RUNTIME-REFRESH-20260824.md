@@ -42,10 +42,15 @@ read-only Solana RPC calls.
 
 ## Release posture
 
-This refresh changes package/runtime provenance only. It does not deploy or
-restart AgentFolio, submit a Solana transaction, publish npm, alter keypairs, or
-enable production writes.
+This refresh deliberately removes `satpDevnetMatches` from the mainnet
+`verified` predicate. The old term compared the separate B1Se devnet program
+with HXCU and was structurally false, so it permanently blocked live mainnet
+writes even when provenance, the release flag, the kill switch, and Owner
+authorization all cleared. B1Se remains visible as leftover devnet inventory,
+but it is no longer treated as a mainnet provenance gate.
 
-Live escrow writes remain false unless the independent live-write flag, kill
-switch posture, and explicit Owner authorization all permit them. Health and PDA
-derivation remain read-only.
+The change does not turn writes on today. Live escrow writes remain false unless
+the independent release flag, inactive kill switch, and explicit Owner
+authorization all permit them. This refresh does not deploy or restart
+AgentFolio, submit a Solana transaction, publish npm, alter keypairs, or enable
+production writes. Health and PDA derivation remain read-only.

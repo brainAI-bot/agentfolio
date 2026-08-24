@@ -106,6 +106,7 @@ const ESCROW_V3_DISCRIMINATORS = {
   release: Buffer.from([253, 249, 15, 206, 28, 127, 193, 241]),
   partialRelease: Buffer.from([20, 4, 101, 245, 53, 131, 213, 8]),
 };
+const ESCROW_V3_PROVENANCE_MISMATCH_CODE = 'ESCROW_V3_PROVENANCE_MISMATCH';
 
 function getSDK() {
   if (!sdkInstance && SATPV3SDK) {
@@ -130,6 +131,17 @@ function requireSDK(req, res, next) {
 
 function requireLiveEscrowWrites(req, res, next) {
   if (sendLiveEscrowGateResponse(res, `SATP V3 escrow ${req.method} ${req.path}`)) return;
+  const authorityReadback = getEscrowV3AuthorityReadback({ satpClient });
+  const provenance = getEscrowV3ProvenanceReadback({ authorityReadback, network: NETWORK });
+  if (provenance.failClosed) {
+    return res.status(423).json({
+      ok: false,
+      code: ESCROW_V3_PROVENANCE_MISMATCH_CODE,
+      error: 'Live escrow writes remain blocked by the pinned source/deployed/published-IDL provenance gap.',
+      operation: `SATP V3 escrow ${req.method} ${req.path}`,
+      escrowProvenance: provenance,
+    });
+  }
   next();
 }
 

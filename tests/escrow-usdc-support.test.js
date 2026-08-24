@@ -136,7 +136,7 @@ test('USDC amount conversion honors the mint decimals without silent truncation'
   );
 });
 
-test('USDC V3 live-gate-enabled route preserves precision-boundary amount in transfer_checked', async () => {
+test('USDC V3 verified provenance and live gates preserve precision-boundary amount in transfer_checked', async () => {
   const previousEnable = process.env[ENABLE_LIVE_ESCROW_ENV];
   const previousOwnerAuth = process.env[LIVE_ESCROW_OWNER_AUTHORIZATION_ENV];
   const previousWrites = process.env[ENABLE_WRITES_ENV];
@@ -232,6 +232,24 @@ test('USDC escrow builder derives SPL vault PDA, ATAs, and transfer_checked path
   assert.equal(programIx.keys[2].pubkey.toBase58(), clientATA.toBase58());
   assert.equal(programIx.keys[3].pubkey.toBase58(), USDC_MINT.toBase58());
   assert.equal(programIx.keys[5].pubkey.toBase58(), vaultAuthorityPDA.toBase58());
+});
+
+test('USDC escrow builder preserves the precision-boundary u64 in transfer_checked bytes', async () => {
+  const expectedAmount = 9_000_000_000_000_001n;
+  const build = await buildCreateEscrowTxInstructions({
+    clientWallet: VALID_CLIENT,
+    jobId: PRECISION_JOB_ID,
+    amountUSDC: '9000000000.000001',
+    deadlineUnix: 2_000_000_000,
+    vaultAtaExists: true,
+  });
+
+  assert.equal(build.amountRaw, Number(expectedAmount));
+  const transferIx = build.instructions[0];
+  assert.equal(transferIx.programId.toBase58(), TOKEN_PROGRAM_ID.toBase58());
+  assert.equal(transferIx.data[0], 12, 'SPL Token transfer_checked instruction');
+  assert.equal(transferIx.data.readBigUInt64LE(1), expectedAmount);
+  assert.equal(transferIx.data[9], 6, 'SPL transfer_checked uses USDC mint decimals');
 });
 
 test('USDC escrow builder skips vault ATA creation when the vault ATA already exists', async () => {
