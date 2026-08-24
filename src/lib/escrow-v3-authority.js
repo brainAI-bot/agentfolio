@@ -14,7 +14,9 @@ const {
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const AUTHORITY_PROGRAM_ID = 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C';
-const AUTHORITY_PROGRAM_ID_PROVENANCE = 'H2/D1 expected program id from git-pinned @brainai/satp-client commit 240dba99dc4e555e9dd221d93f76f2726bd8159e (packaged idls/v3/escrow_v3.json + getV3ProgramIds(\'mainnet\').ESCROW); AgentFolio onchain/escrow_v3 is leftover inventory, not the IDL or program source of truth';
+const AUTHORITY_PROGRAM_ID_PROVENANCE = 'HQ task AGENTFOLIO-SATP-ESCROW-V3-AUTHORITATIVE-RUNTIME-REFRESH-20260824: finalized SATP mainnet runtime from git-pinned @brainai/satp-client commit 93fc6c0d86302cfe8b0d8c798ba2817d7eeace44 (packaged idls/v3/escrow_v3.json + getV3ProgramIds(\'mainnet\').ESCROW); AgentFolio onchain/escrow_v3 and the B1Se devnet runtime are leftover inventory, not the mainnet IDL or program source of truth';
+const AUTHORITY_INSTRUCTION_COUNT = 14;
+const AUTHORITY_IDL_SHA256 = 'e8c142f27e225d8edc2f8f41e6fb698ebbb73f69d2fc078d5bf963234ebc8fa9';
 const AUTHORITY_LABEL = 'escrow_v3';
 const AUTHORITY_SOURCE_WORKSPACE = 'onchain/escrow_v3';
 const AUTHORITY_ANCHOR_TOML = 'onchain/escrow_v3/Anchor.toml';
@@ -24,13 +26,13 @@ const SATP_ESCROW_IDL_PACKAGE_RELATIVE = 'idls/v3/escrow_v3.json';
 const SATP_ESCROW_IDL_PACKAGE_PATH = 'node_modules/@brainai/satp-client/idls/v3/escrow_v3.json';
 const AUTHORITATIVE_SOURCE = 'satp-client-package';
 // Repo-checked fallback is a byte-for-byte copy of SATP idls/v3/escrow_v3.json
-// at commit 240dba99dc4e555e9dd221d93f76f2726bd8159e
-// (git blob d616b30414c9e718a4da39cc51c473a84136ff9b, 20504 bytes).
+// at commit 93fc6c0d86302cfe8b0d8c798ba2817d7eeace44
+// (git blob 3d3d675926b6d4e8259adde5783a18827a7a946f, 20548 bytes).
 // Used only when the packaged satp-client file is missing (host git-pin
 // install does not ship idls/). Authoritative source remains satp-client-package.
-const SATP_ESCROW_IDL_FALLBACK_PATH = 'third_party/satp/240dba99/idls/v3/escrow_v3.json';
-const SATP_ESCROW_IDL_FALLBACK_COMMIT = '240dba99dc4e555e9dd221d93f76f2726bd8159e';
-const SATP_ESCROW_IDL_FALLBACK_BLOB_SHA = 'd616b30414c9e718a4da39cc51c473a84136ff9b';
+const SATP_ESCROW_IDL_FALLBACK_PATH = 'third_party/satp/93fc6c0d/idls/v3/escrow_v3.json';
+const SATP_ESCROW_IDL_FALLBACK_COMMIT = '93fc6c0d86302cfe8b0d8c798ba2817d7eeace44';
+const SATP_ESCROW_IDL_FALLBACK_BLOB_SHA = '3d3d675926b6d4e8259adde5783a18827a7a946f';
 const SATP_ESCROW_IDL_FALLBACK_SOURCE = 'repo-checked-fallback';
 
 function toPosixRelative(from, to) {
@@ -207,17 +209,26 @@ function getEscrowV3AuthorityReadback({
   const trackedIdlAddress = trackedIdlJson?.address || null;
   const packagedIdlAddressField = nonEmptyIdlAddress(packagedSatpEscrowIdlJson?.address);
   const satpMainnetEscrow = normalizeRuntimeProgramId(satpRuntime.mainnetEscrowProgramId);
-  // Empty IDL.address is expected on the 240dba99 packaged file; fall back to mainnet ESCROW.
-  // Do not require satpDevnetMatches === HXCU for this packaged match.
+  // The authoritative package now carries an explicit HXCU IDL address. Keep the
+  // runtime fallback for compatibility with earlier package layouts.
   const packagedIdlAddress = packagedIdlAddressField || satpMainnetEscrow || null;
+  const packagedIdlInstructionCount = Array.isArray(packagedSatpEscrowIdlJson?.instructions)
+    ? packagedSatpEscrowIdlJson.instructions.length
+    : null;
   const leftoverSourceComplete = anchorToml.exists && programSource.exists && trackedIdl.exists;
   const trackedIdlMatches = trackedIdlAddress === AUTHORITY_PROGRAM_ID;
   const satpMainnetMatches = satpRuntime.mainnetEscrowProgramId === AUTHORITY_PROGRAM_ID;
   const satpDevnetMatches = satpRuntime.devnetEscrowProgramId === AUTHORITY_PROGRAM_ID;
   const packagedIdlMatches = packagedSatpEscrowIdl.exists && packagedIdlAddress === AUTHORITY_PROGRAM_ID;
+  const packagedIdlInstructionCountMatches = packagedIdlInstructionCount === AUTHORITY_INSTRUCTION_COUNT;
+  const packagedIdlHashMatches = packagedSatpEscrowIdl.sha256 === AUTHORITY_IDL_SHA256;
   // AF onchain/escrow_v3 is leftover inventory. SATP package is the authority.
-  // Keep satpDevnetMatches in verified so live status stays blocked (do not ungate).
-  const verified = packagedIdlMatches && satpMainnetMatches && satpDevnetMatches;
+  // B1Se is the separate devnet runtime and must not invalidate finalized mainnet
+  // HXCU provenance. Live writes remain independently owner-gated below.
+  const verified = packagedIdlMatches
+    && packagedIdlInstructionCountMatches
+    && packagedIdlHashMatches
+    && satpMainnetMatches;
   const liveEscrow = liveEscrowGateStatus(env);
   const liveEscrowWritesAllowed = verified && liveEscrow.enabled;
 
@@ -260,6 +271,10 @@ function getEscrowV3AuthorityReadback({
       address: packagedIdlAddress,
       addressField: packagedSatpEscrowIdlJson?.address ?? null,
       matchesExpectedProgramId: packagedIdlMatches,
+      instructionCount: packagedIdlInstructionCount,
+      matchesExpectedInstructionCount: packagedIdlInstructionCountMatches,
+      expectedSha256: AUTHORITY_IDL_SHA256,
+      matchesExpectedSha256: packagedIdlHashMatches,
       packagedMissing: resolvedIdl.packagedMissing,
       source: resolvedIdl.source,
       fallback: {
@@ -282,8 +297,8 @@ function getEscrowV3AuthorityReadback({
       ownerAuthorizationEnv: liveEscrow.ownerAuthorization.env,
       readOnlyPosture: liveEscrow.readOnlyPosture,
       reason: liveEscrowWritesAllowed
-        ? 'escrow_v3 source, IDL, SATP runtime, packaged IDL, live escrow flag, and explicit Owner authorization all agree'
-        : 'escrow_v3 PDA reads may derive from the published SATP client, but live escrow writes stay read-only until source/IDL provenance, release gating, and explicit Owner authorization all clear',
+        ? 'authoritative SATP mainnet runtime and 14-instruction IDL, live escrow flag, and explicit Owner authorization all agree'
+        : 'authoritative SATP mainnet runtime and 14-instruction IDL are readable, but live escrow writes stay read-only until release gating and explicit Owner authorization clear',
     },
   };
 }
@@ -299,6 +314,7 @@ function getEscrowV3ProvenanceReadback({ authorityReadback, network = 'mainnet' 
   const sourceHash = packaged.sha256 || null;
   const idlHash = packaged.sha256 || null;
   const idlProgramId = packaged.address || null;
+  const idlInstructionCount = packaged.instructionCount ?? null;
   const escrowProgramId = readback.expectedProgramId || null;
 
   const mismatches = [];
@@ -309,13 +325,14 @@ function getEscrowV3ProvenanceReadback({ authorityReadback, network = 'mainnet' 
     mismatches.push('missing_packaged_idl');
   } else if (packaged.matchesExpectedProgramId !== true) {
     mismatches.push('packaged_idl_program_id_mismatch');
+  } else if (packaged.matchesExpectedInstructionCount !== true) {
+    mismatches.push('packaged_idl_instruction_count_mismatch');
+  } else if (packaged.matchesExpectedSha256 !== true) {
+    mismatches.push('packaged_idl_hash_mismatch');
   }
   if (runtime.available === false) mismatches.push('runtime_unavailable');
   if (readback.satpArtifact?.mainnetMatchesExpectedProgramId !== true) {
     mismatches.push('mainnet_runtime_program_id_mismatch');
-  }
-  if (readback.satpArtifact?.devnetMatchesExpectedProgramId !== true) {
-    mismatches.push('devnet_runtime_program_id_mismatch');
   }
   if (readback.status && readback.status !== 'verified' && mismatches.length === 0) {
     mismatches.push('authority_status_not_verified');
@@ -333,6 +350,7 @@ function getEscrowV3ProvenanceReadback({ authorityReadback, network = 'mainnet' 
     sourceHash,
     idlHash,
     idlProgramId,
+    idlInstructionCount,
     runtimeProgramId,
     leftoverRuntimeProgramId: normalizeRuntimeProgramId(runtime.devnetEscrowProgramId)
       || LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID,
@@ -353,7 +371,9 @@ module.exports = {
   ADVERTISED_ESCROW_PROGRAM_ID,
   ADVERTISED_NETWORK,
   AUTHORITY_ANCHOR_TOML,
+  AUTHORITY_IDL_SHA256,
   AUTHORITY_IDL_PATH,
+  AUTHORITY_INSTRUCTION_COUNT,
   AUTHORITY_LABEL,
   AUTHORITY_PROGRAM_ID,
   AUTHORITY_PROGRAM_ID_PROVENANCE,

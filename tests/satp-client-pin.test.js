@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const PIN_SHA = '240dba99dc4e555e9dd221d93f76f2726bd8159e';
+const PIN_SHA = '93fc6c0d86302cfe8b0d8c798ba2817d7eeace44';
 
 describe('@brainai/satp-client pin', () => {
-  it('pins SATP 240dba99 via git commit in package.json and the lockfile', () => {
+  it('pins the authoritative SATP runtime via git commit in package.json and the lockfile', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
     const pin = pkg.dependencies['@brainai/satp-client'];
     assert.match(String(pin), new RegExp(PIN_SHA));

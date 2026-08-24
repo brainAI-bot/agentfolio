@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const PIN_SHA = '240dba99dc4e555e9dd221d93f76f2726bd8159e';
+const PIN_SHA = '93fc6c0d86302cfe8b0d8c798ba2817d7eeace44';
 
 describe('@brainai/satp-client git pin (G5)', () => {
   it('package.json pin contains the HQ SATP SHA', () => {
