@@ -143,7 +143,8 @@ function isValidEscrowV3ProvenanceReceipt(receipt) {
     && receipt.bindings.rebuiltArtifactMatchesAllocatedRuntime === rebuiltMatchesAllocated
     && receipt.bindings.rebuiltArtifactMatchesTrimmedRuntime === rebuiltMatchesTrimmed
     && receipt.bindings.sourceIdlMatchesPublishedIdl === sourceIdlMatchesPublished
-    && receipt.bindings.sourceEqualsDeployedEqualsPublishedIdl === threeWayBindingVerified;
+    && receipt.bindings.sourceEqualsDeployedEqualsPublishedIdl === threeWayBindingVerified
+    && receipt.status === (threeWayBindingVerified ? 'verified' : 'provenance_gap');
 }
 
 function fileInfo(targetPath, displayPath = null) {

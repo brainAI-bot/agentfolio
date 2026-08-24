@@ -283,6 +283,23 @@ test('escrow_v3 provenance receipt cannot self-assert equality that its pinned h
   assert.equal(provenance.liveEscrowWritesAllowed, false);
 });
 
+test('escrow_v3 provenance receipt status cannot claim verified over a false three-way binding', () => {
+  const receipt = structuredClone(loadEscrowV3ProvenanceReceipt());
+  assert.equal(receipt.bindings.sourceEqualsDeployedEqualsPublishedIdl, false);
+  receipt.status = 'verified';
+
+  assert.equal(isValidEscrowV3ProvenanceReceipt(receipt), false);
+
+  const provenance = getEscrowV3ProvenanceReadback({
+    authorityReadback: authorityReadbackFixture(),
+    provenanceReceipt: receipt,
+  });
+  assert.equal(provenance.provenanceStatus, 'unverified');
+  assert.ok(provenance.mismatches.includes('invalid_provenance_receipt'));
+  assert.equal(provenance.authoritativeSource, null);
+  assert.equal(provenance.liveEscrowWritesAllowed, false);
+});
+
 test('escrow_v3 provenance readback fails closed when its pinned receipt is absent', () => {
   const provenance = getEscrowV3ProvenanceReadback({
     authorityReadback: authorityReadbackFixture(),
