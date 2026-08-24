@@ -20,6 +20,7 @@ const AUTHORITY_SOURCE_WORKSPACE = 'onchain/escrow_v3';
 const AUTHORITY_ANCHOR_TOML = 'onchain/escrow_v3/Anchor.toml';
 const AUTHORITY_IDL_PATH = 'onchain/escrow_v3/target/idl/escrow_v3.json';
 const AUTHORITY_PROGRAM_SOURCE = 'onchain/escrow_v3/programs/escrow_v3/src/lib.rs';
+const PROVENANCE_RECEIPT_PATH = 'config/escrow-v3-provenance-ef7e4581.json';
 const SATP_ESCROW_IDL_PACKAGE_RELATIVE = 'idls/v3/escrow_v3.json';
 const SATP_ESCROW_IDL_PACKAGE_PATH = 'node_modules/@brainai/satp-client/idls/v3/escrow_v3.json';
 const AUTHORITATIVE_SOURCE = 'satp-client-package';
@@ -109,6 +110,40 @@ function readJsonIfPresent(targetPath) {
   const fullPath = path.isAbsolute(targetPath) ? targetPath : path.join(REPO_ROOT, targetPath);
   if (!fs.existsSync(fullPath)) return null;
   return JSON.parse(fs.readFileSync(fullPath, 'utf8'));
+}
+
+function loadEscrowV3ProvenanceReceipt() {
+  return readJsonIfPresent(PROVENANCE_RECEIPT_PATH);
+}
+
+function isSha256(value) {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+}
+
+function isValidEscrowV3ProvenanceReceipt(receipt) {
+  const rebuiltMatchesAllocated = receipt?.rebuild?.sha256 === receipt?.deployedRuntime?.allocatedSha256;
+  const rebuiltMatchesTrimmed = receipt?.rebuild?.sha256 === receipt?.deployedRuntime?.trimmedSha256;
+  const sourceIdlMatchesPublished = receipt?.sourceIdl?.sha256 === receipt?.publishedIdl?.inflatedSha256;
+  const threeWayBindingVerified = (rebuiltMatchesAllocated || rebuiltMatchesTrimmed)
+    && sourceIdlMatchesPublished;
+
+  return receipt?.schemaVersion === 1
+    && receipt.marker === '[#ef7e4581]'
+    && receipt.program?.programId === AUTHORITY_PROGRAM_ID
+    && isSha256(receipt.source?.sha256)
+    && isSha256(receipt.rebuild?.sha256)
+    && isSha256(receipt.deployedRuntime?.allocatedSha256)
+    && isSha256(receipt.deployedRuntime?.trimmedSha256)
+    && isSha256(receipt.sourceIdl?.sha256)
+    && isSha256(receipt.publishedIdl?.inflatedSha256)
+    && typeof receipt.bindings?.rebuiltArtifactMatchesAllocatedRuntime === 'boolean'
+    && typeof receipt.bindings?.rebuiltArtifactMatchesTrimmedRuntime === 'boolean'
+    && typeof receipt.bindings?.sourceIdlMatchesPublishedIdl === 'boolean'
+    && typeof receipt.bindings?.sourceEqualsDeployedEqualsPublishedIdl === 'boolean'
+    && receipt.bindings.rebuiltArtifactMatchesAllocatedRuntime === rebuiltMatchesAllocated
+    && receipt.bindings.rebuiltArtifactMatchesTrimmedRuntime === rebuiltMatchesTrimmed
+    && receipt.bindings.sourceIdlMatchesPublishedIdl === sourceIdlMatchesPublished
+    && receipt.bindings.sourceEqualsDeployedEqualsPublishedIdl === threeWayBindingVerified;
 }
 
 function fileInfo(targetPath, displayPath = null) {
@@ -288,7 +323,11 @@ function getEscrowV3AuthorityReadback({
   };
 }
 
-function getEscrowV3ProvenanceReadback({ authorityReadback, network = 'mainnet' } = {}) {
+function getEscrowV3ProvenanceReadback({
+  authorityReadback,
+  network = 'mainnet',
+  provenanceReceipt = loadEscrowV3ProvenanceReceipt(),
+} = {}) {
   const readback = authorityReadback || getEscrowV3AuthorityReadback();
   const normalizedNetwork = String(network || '').toLowerCase().includes('devnet') ? 'devnet' : 'mainnet';
   const runtime = readback.satpArtifact?.runtime || {};
@@ -296,16 +335,36 @@ function getEscrowV3ProvenanceReadback({ authorityReadback, network = 'mainnet' 
     ? normalizeRuntimeProgramId(runtime.devnetEscrowProgramId)
     : normalizeRuntimeProgramId(runtime.mainnetEscrowProgramId);
   const packaged = readback.packagedSatpEscrowIdl || {};
-  const sourceHash = packaged.sha256 || null;
-  const idlHash = packaged.sha256 || null;
+  const receiptValid = isValidEscrowV3ProvenanceReceipt(provenanceReceipt);
+  const bindings = receiptValid ? provenanceReceipt.bindings : null;
+  const threeWayBindingVerified = bindings?.sourceEqualsDeployedEqualsPublishedIdl === true;
+  const sourceHash = receiptValid ? provenanceReceipt.source.sha256 : null;
+  const sourceIdlHash = receiptValid ? provenanceReceipt.sourceIdl.sha256 : null;
+  const publishedIdlHash = receiptValid ? provenanceReceipt.publishedIdl.inflatedSha256 : null;
   const idlProgramId = packaged.address || null;
   const escrowProgramId = readback.expectedProgramId || null;
 
   const mismatches = [];
+  if (!provenanceReceipt) {
+    mismatches.push('missing_provenance_receipt');
+  } else if (!receiptValid) {
+    mismatches.push('invalid_provenance_receipt');
+  } else {
+    if (bindings.rebuiltArtifactMatchesAllocatedRuntime !== true
+      && bindings.rebuiltArtifactMatchesTrimmedRuntime !== true) {
+      mismatches.push('source_build_deployed_runtime_mismatch');
+    }
+    if (bindings.sourceIdlMatchesPublishedIdl !== true) {
+      mismatches.push('source_idl_published_idl_mismatch');
+    }
+    if (provenanceReceipt.program.programId !== escrowProgramId) {
+      mismatches.push('receipt_program_id_mismatch');
+    }
+  }
   // AF onchain/escrow_v3 missing is leftover inventory, not a provenance mismatch.
   if (!packaged.exists) {
     mismatches.push('missing_packaged_idl');
-  } else if (!sourceHash || !idlHash) {
+  } else if (!packaged.sha256) {
     mismatches.push('missing_packaged_idl');
   } else if (packaged.matchesExpectedProgramId !== true) {
     mismatches.push('packaged_idl_program_id_mismatch');
@@ -317,21 +376,34 @@ function getEscrowV3ProvenanceReadback({ authorityReadback, network = 'mainnet' 
   if (readback.satpArtifact?.devnetMatchesExpectedProgramId !== true) {
     mismatches.push('devnet_runtime_program_id_mismatch');
   }
-  if (readback.status && readback.status !== 'verified' && mismatches.length === 0) {
+  if (readback.status && readback.status !== 'verified') {
     mismatches.push('authority_status_not_verified');
   }
-  const liveEscrowWritesAllowed = mismatches.length === 0
+  const liveEscrowWritesAllowed = threeWayBindingVerified
+    && mismatches.length === 0
     && readback.releaseGate?.liveEscrowWritesAllowed === true;
 
   return {
     label: readback.label || AUTHORITY_LABEL,
-    authoritativeSource: AUTHORITATIVE_SOURCE,
+    authoritativeSource: threeWayBindingVerified ? provenanceReceipt.source.repository : null,
+    consumerInterfaceSource: AUTHORITATIVE_SOURCE,
+    provenanceReceiptPath: PROVENANCE_RECEIPT_PATH,
+    provenanceStatus: receiptValid ? provenanceReceipt.status : 'unverified',
+    receiptBaseline: receiptValid ? provenanceReceipt.baseline : null,
     advertisedNetwork: ADVERTISED_NETWORK,
     advertisedEscrowProgramId: ADVERTISED_ESCROW_PROGRAM_ID,
     escrowProgramId,
-    artifactCommit: readback.satpArtifact?.commit || null,
+    artifactCommit: receiptValid ? provenanceReceipt.source.commit : null,
     sourceHash,
-    idlHash,
+    idlHash: sourceIdlHash,
+    sourceIdlHash,
+    publishedIdlHash,
+    rebuiltArtifactHash: receiptValid ? provenanceReceipt.rebuild.sha256 : null,
+    deployedRuntime: receiptValid ? provenanceReceipt.deployedRuntime : null,
+    buildInputs: receiptValid ? provenanceReceipt.buildInputs : null,
+    toolchain: receiptValid ? provenanceReceipt.toolchain : null,
+    bindings,
+    residualGate: receiptValid ? provenanceReceipt.residualGate : null,
     idlProgramId,
     runtimeProgramId,
     leftoverRuntimeProgramId: normalizeRuntimeProgramId(runtime.devnetEscrowProgramId)
@@ -363,6 +435,7 @@ module.exports = {
   HOST_ENV_SPLIT_NOTE,
   LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID,
   LEFTOVER_RUNTIME_NETWORK,
+  PROVENANCE_RECEIPT_PATH,
   SATP_ESCROW_IDL_FALLBACK_BLOB_SHA,
   SATP_ESCROW_IDL_FALLBACK_COMMIT,
   SATP_ESCROW_IDL_FALLBACK_PATH,
@@ -371,6 +444,8 @@ module.exports = {
   SATP_ESCROW_IDL_PACKAGE_RELATIVE,
   getEscrowV3AuthorityReadback,
   getEscrowV3ProvenanceReadback,
+  isValidEscrowV3ProvenanceReceipt,
+  loadEscrowV3ProvenanceReceipt,
   resolvePackagedSatpEscrowIdlPath,
   resolveSatpEscrowIdl,
 };

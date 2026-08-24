@@ -136,7 +136,7 @@ test('USDC amount conversion honors the mint decimals without silent truncation'
   );
 });
 
-test('USDC V3 live-gate-enabled route preserves precision-boundary amount in transfer_checked', async () => {
+test('USDC V3 environment gates cannot bypass the pinned provenance mismatch', async () => {
   const previousEnable = process.env[ENABLE_LIVE_ESCROW_ENV];
   const previousOwnerAuth = process.env[LIVE_ESCROW_OWNER_AUTHORIZATION_ENV];
   const previousWrites = process.env[ENABLE_WRITES_ENV];
@@ -179,10 +179,13 @@ test('USDC V3 live-gate-enabled route preserves precision-boundary amount in tra
     });
     const body = await res.json();
 
-    assert.equal(res.status, 200);
-    assert.equal(body.amountUSDC, '9000000000.000001');
-    assert.equal(body.amountRaw, 9_000_000_000_000_001);
-    assert.equal(decodeTransferCheckedAmount(body.transaction), 9_000_000_000_000_001);
+    assert.equal(res.status, 423);
+    assert.equal(body.code, 'ESCROW_V3_PROVENANCE_MISMATCH');
+    assert.equal(body.escrowProvenance.failClosed, true);
+    assert.equal(body.escrowProvenance.liveEscrowWritesAllowed, false);
+    assert.ok(body.escrowProvenance.mismatches.includes('source_build_deployed_runtime_mismatch'));
+    assert.ok(body.escrowProvenance.mismatches.includes('source_idl_published_idl_mismatch'));
+    assert.equal(body.transaction, undefined);
   } finally {
     cleanupPrecisionJob();
     Connection.prototype.getAccountInfo = originalGetAccountInfo;

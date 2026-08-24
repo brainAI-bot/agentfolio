@@ -177,12 +177,16 @@ test('GET /api/v3/escrow/health exposes live escrow gate status', async () => {
     assert.match(body.escrowProvenance.idlHash, /^[0-9a-f]{64}$/);
     assert.match(body.escrowProvenance.runtimeProgramId, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
     assert.equal(body.escrowProvenance.mismatchStatus, 'mismatch');
-    assert.equal(body.escrowProvenance.authoritativeSource, 'satp-client-package');
+    assert.equal(body.escrowProvenance.authoritativeSource, null);
+    assert.equal(body.escrowProvenance.consumerInterfaceSource, 'satp-client-package');
     assert.equal(body.escrowAuthority.packagedSatpEscrowIdl.exists, true);
     assert.equal(body.escrowAuthority.packagedSatpEscrowIdl.matchesExpectedProgramId, true);
     assert.match(body.escrowAuthority.packagedSatpEscrowIdl.path, /idls\/v3\/escrow_v3\.json$/);
     assert.deepEqual(body.escrowProvenance.mismatches, [
+      'source_build_deployed_runtime_mismatch',
+      'source_idl_published_idl_mismatch',
       'devnet_runtime_program_id_mismatch',
+      'authority_status_not_verified',
     ]);
     assert.equal(body.escrowProvenance.failClosed, true);
     assert.equal(body.escrowProvenance.liveEscrowWritesAllowed, false);
@@ -238,9 +242,50 @@ test('GET /api/v3/escrow/health advertises mainnet HXCU next to leftover host ru
     assert.equal(body.escrowProvenance.leftoverRuntimeProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
     assert.ok(body.escrowProvenance.mismatches.includes('devnet_runtime_program_id_mismatch'));
     assert.ok(!body.escrowProvenance.mismatches.includes('missing_packaged_idl'));
-    assert.equal(body.escrowProvenance.authoritativeSource, 'satp-client-package');
+    assert.equal(body.escrowProvenance.authoritativeSource, null);
+    assert.equal(body.escrowProvenance.consumerInterfaceSource, 'satp-client-package');
     assert.equal(body.escrowAuthority.releaseGate.liveEscrowWritesAllowed, false);
     assert.equal(body.escrowProvenance.liveEscrowWritesAllowed, false);
+  } finally {
+    if (previousEnable === undefined) delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
+    else process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = previousEnable;
+    if (previousOwnerAuthorization === undefined) delete process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
+    else process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION = previousOwnerAuthorization;
+    if (previousKill === undefined) delete process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
+    else process.env.AGENTFOLIO_ESCROW_KILL_SWITCH = previousKill;
+    await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  }
+});
+
+test('POST /api/v3/escrow/create cannot bypass the pinned provenance gap with environment flags', async () => {
+  const previousEnable = process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
+  const previousOwnerAuthorization = process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
+  const previousKill = process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
+  process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = '1';
+  process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION = 'owner-approved-live-escrow-writes';
+  delete process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
+
+  const app = express();
+  app.use(express.json());
+  app.use('/api/v3/escrow', escrowV3Router);
+  const server = await listen(app);
+
+  try {
+    const { port } = server.address();
+    const res = await fetch(`http://127.0.0.1:${port}/api/v3/escrow/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const body = await res.json();
+
+    assert.equal(res.status, 423);
+    assert.equal(body.code, 'ESCROW_V3_PROVENANCE_MISMATCH');
+    assert.equal(body.escrowProvenance.failClosed, true);
+    assert.equal(body.escrowProvenance.liveEscrowWritesAllowed, false);
+    assert.ok(body.escrowProvenance.mismatches.includes('source_build_deployed_runtime_mismatch'));
+    assert.ok(body.escrowProvenance.mismatches.includes('source_idl_published_idl_mismatch'));
+    assert.equal(body.transaction, undefined);
   } finally {
     if (previousEnable === undefined) delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
     else process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = previousEnable;
