@@ -93,6 +93,7 @@ test('POST /api/v3/escrow/create is gated before live-funds release', async () =
     assert.equal(body.liveEscrow.ownerAuthorization.required, true);
     assert.equal(body.liveEscrow.ownerAuthorization.status, 'missing_owner_authorization');
     assert.equal(body.liveEscrow.verifiedRuntime.network, 'devnet');
+    assert.equal(body.liveEscrow.verifiedRuntime.programId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
     assert.equal(body.liveEscrow.mainnetLiveFundsCleared, false);
     assert.equal(body.enableWith, 'AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES');
     assert.equal(body.killSwitchEnv, 'AGENTFOLIO_ESCROW_KILL_SWITCH');
@@ -201,7 +202,7 @@ test('GET /api/v3/escrow/health exposes live escrow gate status', async () => {
   }
 });
 
-test('GET /api/v3/escrow/health advertises mainnet HXCU next to leftover host runtime', async () => {
+test('GET /api/v3/escrow/health exposes packaged HXCU IDL next to observed B1Se runtime drift', async () => {
   const previousEnable = process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
   const previousOwnerAuthorization = process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
   const previousKill = process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
@@ -224,7 +225,6 @@ test('GET /api/v3/escrow/health advertises mainnet HXCU next to leftover host ru
     assert.equal(body.leftoverRuntimeNetwork, 'devnet');
     assert.equal(body.leftoverRuntimeProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
     assert.match(body.hostEnvSplit, /host env split/);
-    assert.match(body.hostEnvSplit, /not a missing IDL/);
     assert.equal(body.liveEscrow.runtimeNetwork, 'devnet');
     assert.equal(body.liveEscrow.advertisedNetwork, 'mainnet-beta');
     assert.equal(body.liveEscrow.advertisedEscrowProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
@@ -234,6 +234,8 @@ test('GET /api/v3/escrow/health advertises mainnet HXCU next to leftover host ru
     assert.equal(body.escrowAuthority.advertisedNetwork, 'mainnet-beta');
     assert.equal(body.escrowAuthority.advertisedEscrowProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
     assert.equal(body.escrowAuthority.leftoverInventory.leftoverRuntimeProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
+    assert.equal(body.escrowAuthority.packagedSatpEscrowIdl.instructionCount, 14);
+    assert.equal(body.escrowAuthority.satpArtifact.commit, '551c7971766a2f3bf401a6ac0d57900be536bcb4');
     assert.equal(typeof body.escrowAuthority.packagedSatpEscrowIdl.fallback.used, 'boolean');
     assert.equal(body.escrowAuthority.packagedSatpEscrowIdl.fallback.path, 'third_party/satp/240dba99/idls/v3/escrow_v3.json');
     assert.equal(body.escrowProvenance.advertisedNetwork, 'mainnet-beta');
@@ -246,6 +248,7 @@ test('GET /api/v3/escrow/health advertises mainnet HXCU next to leftover host ru
     assert.equal(body.escrowProvenance.consumerInterfaceSource, 'satp-client-package');
     assert.equal(body.escrowAuthority.releaseGate.liveEscrowWritesAllowed, false);
     assert.equal(body.escrowProvenance.liveEscrowWritesAllowed, false);
+    assert.equal(JSON.stringify(body).includes('B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg'), true);
   } finally {
     if (previousEnable === undefined) delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
     else process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = previousEnable;

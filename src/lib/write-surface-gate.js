@@ -76,6 +76,7 @@ function liveEscrowGateStatus(env = process.env) {
     },
     verifiedRuntime: {
       network: LEFTOVER_RUNTIME_NETWORK,
+      programId: LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID,
       pdaDerive: 'verified',
     },
     runtimeNetwork: LEFTOVER_RUNTIME_NETWORK,

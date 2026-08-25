@@ -14,7 +14,7 @@ const {
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const AUTHORITY_PROGRAM_ID = 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C';
-const AUTHORITY_PROGRAM_ID_PROVENANCE = 'H2/D1 expected program id from git-pinned @brainai/satp-client commit 240dba99dc4e555e9dd221d93f76f2726bd8159e (packaged idls/v3/escrow_v3.json + getV3ProgramIds(\'mainnet\').ESCROW); AgentFolio onchain/escrow_v3 is leftover inventory, not the IDL or program source of truth';
+const AUTHORITY_PROGRAM_ID_PROVENANCE = 'Expected program id from git-pinned @brainai/satp-client commit 551c7971766a2f3bf401a6ac0d57900be536bcb4 (packaged 14-instruction idls/v3/escrow_v3.json + getV3ProgramIds(\'mainnet\').ESCROW); AgentFolio onchain/escrow_v3 is non-authoritative inventory';
 const AUTHORITY_LABEL = 'escrow_v3';
 const AUTHORITY_SOURCE_WORKSPACE = 'onchain/escrow_v3';
 const AUTHORITY_ANCHOR_TOML = 'onchain/escrow_v3/Anchor.toml';
@@ -243,16 +243,22 @@ function getEscrowV3AuthorityReadback({
   const trackedIdlAddress = trackedIdlJson?.address || null;
   const packagedIdlAddressField = nonEmptyIdlAddress(packagedSatpEscrowIdlJson?.address);
   const satpMainnetEscrow = normalizeRuntimeProgramId(satpRuntime.mainnetEscrowProgramId);
-  // Empty IDL.address is expected on the 240dba99 packaged file; fall back to mainnet ESCROW.
-  // Do not require satpDevnetMatches === HXCU for this packaged match.
+  const packagedIdlInstructionCount = Array.isArray(packagedSatpEscrowIdlJson?.instructions)
+    ? packagedSatpEscrowIdlJson.instructions.length
+    : null;
   const packagedIdlAddress = packagedIdlAddressField || satpMainnetEscrow || null;
   const leftoverSourceComplete = anchorToml.exists && programSource.exists && trackedIdl.exists;
   const trackedIdlMatches = trackedIdlAddress === AUTHORITY_PROGRAM_ID;
   const satpMainnetMatches = satpRuntime.mainnetEscrowProgramId === AUTHORITY_PROGRAM_ID;
   const satpDevnetMatches = satpRuntime.devnetEscrowProgramId === AUTHORITY_PROGRAM_ID;
-  const packagedIdlMatches = packagedSatpEscrowIdl.exists && packagedIdlAddress === AUTHORITY_PROGRAM_ID;
+  const packagedIdlMatches = packagedSatpEscrowIdl.exists
+    && resolvedIdl.packagedMissing === false
+    && packagedIdlAddress === AUTHORITY_PROGRAM_ID
+    && packagedIdlInstructionCount === 14;
   // AF onchain/escrow_v3 is leftover inventory. SATP package is the authority.
-  // Keep satpDevnetMatches in verified so live status stays blocked (do not ungate).
+  // Keep the independently observed devnet runtime mismatch structural: this
+  // prevents environment flags from turning the package refresh into an
+  // implicit mainnet live-funds release.
   const verified = packagedIdlMatches && satpMainnetMatches && satpDevnetMatches;
   const liveEscrow = liveEscrowGateStatus(env);
   const liveEscrowWritesAllowed = verified && liveEscrow.enabled;
@@ -295,6 +301,7 @@ function getEscrowV3AuthorityReadback({
       path: packagedSatpEscrowIdl.path || resolvedIdl.displayPath,
       address: packagedIdlAddress,
       addressField: packagedSatpEscrowIdlJson?.address ?? null,
+      instructionCount: packagedIdlInstructionCount,
       matchesExpectedProgramId: packagedIdlMatches,
       packagedMissing: resolvedIdl.packagedMissing,
       source: resolvedIdl.source,
@@ -396,7 +403,9 @@ function getEscrowV3ProvenanceReadback({
     escrowProgramId,
     artifactCommit: receiptValid ? provenanceReceipt.source.commit : null,
     sourceHash,
-    idlHash: sourceIdlHash,
+    // Public consumer IDL hash follows the packaged SATP interface. The
+    // independently pinned source/published hashes remain separate below.
+    idlHash: packaged.sha256 || sourceIdlHash,
     sourceIdlHash,
     publishedIdlHash,
     rebuiltArtifactHash: receiptValid ? provenanceReceipt.rebuild.sha256 : null,

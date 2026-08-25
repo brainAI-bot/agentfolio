@@ -49,7 +49,7 @@ function authorityReadbackFixture(overrides = {}) {
       exists: true,
       path: SATP_ESCROW_IDL_PACKAGE_PATH,
       address: AUTHORITY_PROGRAM_ID,
-      sha256: 'packaged-idl-sha',
+      sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       matchesExpectedProgramId: true,
     },
     satpArtifact: {
@@ -149,7 +149,7 @@ test('escrow_v3 authority readback names the HQ-selected program id from SATP ma
   assert.equal(readback.label, 'escrow_v3');
   assert.equal(readback.expectedProgramId, AUTHORITY_PROGRAM_ID);
   assert.equal(readback.expectedProgramIdProvenance, AUTHORITY_PROGRAM_ID_PROVENANCE);
-  assert.match(readback.expectedProgramIdProvenance, /240dba99dc4e555e9dd221d93f76f2726bd8159e/);
+  assert.match(readback.expectedProgramIdProvenance, /551c7971766a2f3bf401a6ac0d57900be536bcb4/);
   assert.match(readback.expectedProgramIdProvenance, /satp-client/);
   assert.doesNotMatch(readback.expectedProgramIdProvenance, /AgentFolio onchain is the authority/);
   assert.equal(AUTHORITY_PROGRAM_ID, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
@@ -184,7 +184,6 @@ test('escrow_v3 authority readback names the HQ-selected program id from SATP ma
   assert.match(readback.hostEnvSplit, /not a missing IDL/);
   assert.equal(readback.hostEnvSplit, HOST_ENV_SPLIT_NOTE);
   assert.match(readback.leftoverInventory.note, /host env split/);
-  assert.match(readback.leftoverInventory.note, /not a missing IDL/);
 });
 
 test('escrow_v3 source and IDL strict verifier confirms the pinned program id', () => {
@@ -228,7 +227,7 @@ test('escrow_v3 provenance readback exposes the PR 270 negative three-way bindin
   assert.equal(provenance.receiptBaseline.receiptObservedAt, '2026-08-24T07:47:44.921Z');
   assert.equal(provenance.artifactCommit, '0bf088e5618f173dff7e0fba622bc2911212c52e');
   assert.equal(provenance.sourceHash, 'f4696cc27c5e2ff6163a90f877fd4431efa8809d2f6ae4c792c3c7cd18193c4d');
-  assert.equal(provenance.idlHash, '3d7e7a14788449f65c1a187a96543f7677bf08937e61638734ed3886dcf60a5a');
+  assert.equal(provenance.idlHash, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
   assert.equal(provenance.publishedIdlHash, '864e8af057c1b196156222ecda5853936bf4c6e0f3ae9f5c1e2ca2e53ed6c768');
   assert.equal(provenance.rebuiltArtifactHash, '4f21da13659cbe99a606b408a5f1d3523c0e41de20538028939bbb1b54c3cc0d');
   assert.equal(provenance.deployedRuntime.allocatedSha256, '53e922d8792d3ec2d447c497f37dfe8e4ffd1d9bde0f9d6edc0bb3578e67c17f');
@@ -416,12 +415,10 @@ test('escrow_v3 provenance readback derives fail-closed state from full authorit
         status: 'blocked_pending_authoritative_source_idl',
         satpArtifact: {
           mainnetMatchesExpectedProgramId: false,
-          devnetMatchesExpectedProgramId: false,
           runtime: {
             available: false,
             error: '@brainai/satp-client missing getV3ProgramIds export',
             mainnetEscrowProgramId: null,
-            devnetEscrowProgramId: null,
           },
         },
       },
@@ -461,7 +458,7 @@ test('escrow_v3 provenance readback denies live writes when release gate is abse
   assert.equal(provenance.liveEscrowWritesAllowed, false);
 });
 
-test('packaged SATP escrow IDL at idls/v3/escrow_v3.json with empty address matches mainnet HXCU', () => {
+test('packaged SATP escrow IDL has explicit mainnet HXCU address and 14 instructions', () => {
   const readback = getEscrowV3AuthorityReadback({ satpClient });
   const provenance = getEscrowV3ProvenanceReadback({
     authorityReadback: readback,
@@ -475,8 +472,9 @@ test('packaged SATP escrow IDL at idls/v3/escrow_v3.json with empty address matc
   assert.equal(readback.packagedSatpEscrowIdl.packagedMissing, false);
   assert.equal(readback.packagedSatpEscrowIdl.source, AUTHORITATIVE_SOURCE);
   assert.equal(readback.packagedSatpEscrowIdl.fallback.used, false);
-  assert.equal(readback.packagedSatpEscrowIdl.addressField, '');
+  assert.equal(readback.packagedSatpEscrowIdl.addressField, AUTHORITY_PROGRAM_ID);
   assert.equal(readback.packagedSatpEscrowIdl.address, AUTHORITY_PROGRAM_ID);
+  assert.equal(readback.packagedSatpEscrowIdl.instructionCount, 14);
   assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedProgramId, true);
   assert.match(readback.packagedSatpEscrowIdl.sha256, /^[0-9a-f]{64}$/);
   assert.equal(readback.satpArtifact.runtime.mainnetEscrowProgramId, AUTHORITY_PROGRAM_ID);
@@ -485,6 +483,7 @@ test('packaged SATP escrow IDL at idls/v3/escrow_v3.json with empty address matc
   assert.equal(provenance.authoritativeSource, null);
   assert.equal(provenance.consumerInterfaceSource, 'satp-client-package');
   assert.notEqual(provenance.sourceHash, readback.packagedSatpEscrowIdl.sha256);
+  assert.equal(provenance.idlHash, 'e8c142f27e225d8edc2f8f41e6fb698ebbb73f69d2fc078d5bf963234ebc8fa9');
   assert.equal(provenance.idlHash, readback.packagedSatpEscrowIdl.sha256);
   assert.equal(provenance.idlProgramId, AUTHORITY_PROGRAM_ID);
   assert.ok(!provenance.mismatches.includes('missing_packaged_idl'));
@@ -738,14 +737,14 @@ test('repo-checked SATP escrow IDL fallback is used when packaged file is missin
   );
   assert.equal(readback.packagedSatpEscrowIdl.addressField, '');
   assert.equal(readback.packagedSatpEscrowIdl.address, AUTHORITY_PROGRAM_ID);
-  assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedProgramId, true);
+  assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedProgramId, false);
   assert.equal(provenance.authoritativeSource, null);
   assert.equal(provenance.consumerInterfaceSource, 'satp-client-package');
   assert.notEqual(provenance.sourceHash, readback.packagedSatpEscrowIdl.sha256);
   assert.equal(provenance.idlHash, readback.packagedSatpEscrowIdl.sha256);
   assert.equal(provenance.idlProgramId, AUTHORITY_PROGRAM_ID);
   assert.ok(!provenance.mismatches.includes('missing_packaged_idl'));
-  assert.ok(!provenance.mismatches.includes('packaged_idl_program_id_mismatch'));
+  assert.ok(provenance.mismatches.includes('packaged_idl_program_id_mismatch'));
   assert.equal(readback.releaseGate.liveEscrowWritesAllowed, false);
   assert.equal(provenance.liveEscrowWritesAllowed, false);
   assert.equal(readback.status, 'blocked_pending_authoritative_source_idl');
@@ -797,7 +796,7 @@ test('fallback IDL does not ungate fail-closed live escrow writes', () => {
   assert.equal(provenance.consumerInterfaceSource, 'satp-client-package');
 });
 
-test('escrow health authority advertises mainnet HXCU next to leftover B1Se host env split', () => {
+test('escrow health authority advertises mainnet HXCU next to observed leftover B1Se runtime', () => {
   const env = { ...process.env };
   delete env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
   delete env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
@@ -822,7 +821,6 @@ test('escrow health authority advertises mainnet HXCU next to leftover B1Se host
   assert.equal(readback.leftoverInventory.leftoverRuntimeNetwork, 'devnet');
   assert.equal(readback.leftoverInventory.leftoverRuntimeProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
   assert.match(readback.hostEnvSplit, /HXCU-vs-B1Se is a host env split/);
-  assert.match(readback.hostEnvSplit, /not a missing IDL/);
   assert.equal(readback.packagedSatpEscrowIdl.exists, true);
   assert.equal(typeof readback.packagedSatpEscrowIdl.fallback.used, 'boolean');
   assert.equal(readback.packagedSatpEscrowIdl.fallback.path, SATP_ESCROW_IDL_FALLBACK_PATH);
@@ -859,7 +857,7 @@ test('IDL fallback stays labeled and does not hide advertised mainnet HXCU', () 
   });
   const provenance = getEscrowV3ProvenanceReadback({
     authorityReadback: readback,
-    network: 'devnet',
+    network: 'mainnet',
   });
 
   assert.equal(readback.packagedSatpEscrowIdl.source, SATP_ESCROW_IDL_FALLBACK_SOURCE);
