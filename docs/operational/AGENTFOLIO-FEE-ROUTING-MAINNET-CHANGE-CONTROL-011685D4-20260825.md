@@ -39,10 +39,15 @@ event layout, deadline enforcement, and error definitions. A mainnet upgrade
 from the AgentFolio tree would therefore be a broad program replacement, not a
 fee-routing patch.
 
-The only admissible future target is a reviewed delta built from the exact
-certified SATP source commit. It must preserve all 14 instruction names and
-discriminators, the `EscrowV3` account layout, existing error numbers, existing
-authority checks, and all non-fee behavior.
+SATP PR [#160](https://github.com/brainAI-bot/satp/pull/160), exact head
+`6ac1f10a354429d7f3f03098c926f103756b1b14`, is now the authoritative
+delta-only candidate. It was built from the certified SATP lineage and preserves
+all 14 instruction names and discriminators, the `EscrowV3` account layout,
+existing error numbers, existing authority checks, and all five USDC routes.
+It remains **NO-GO** until exact-head GitHub checks are green, brainShield
+independently approves that same head, and Hani gives one explicit Owner approval
+in HQ containing the bounded write window. The rejected AgentFolio-local artifact
+remains reference-only and is not an upgrade candidate.
 
 ## Certified live baseline
 
@@ -86,21 +91,42 @@ The local SBF build is deterministic against the previously recorded
 AgentFolio candidate hash, but reproducibility does not make the candidate
 compatible with the live program.
 
-## Required delta-only target
+The authoritative SATP candidate has these independently reviewable inputs and
+outputs:
 
-A future implementation PR must start at SATP commit
-`93fc6c0d86302cfe8b0d8c798ba2817d7eeace44`, not copy the AgentFolio program
-over it. Its cumulative diff is limited to the following:
+| Item | SATP PR #160 exact candidate |
+| --- | --- |
+| PR head | `6ac1f10a354429d7f3f03098c926f103756b1b14` |
+| Build-source commit | `2930ca34bb36cc419f64b45cf2367896a93c19c5` |
+| Source SHA-256 | `d94957985c9fcd61cfcadbaadceaf81eb74fffddba26838726862a932e4bdd3c` |
+| Cargo.lock SHA-256 | `d98db19e0d86ca3248376d4857b150b240be05c4bc3a409d7cb638ce4d5d2237` |
+| Candidate SBF | `345744` bytes / `31234c83c007d39616ca7002e38a087e9e5ef69c3a074d97211e501ffddae704` |
+| Existing allocation | `346856` bytes; candidate fits with `1112` zero bytes |
+| Padded payload SHA-256 | `5471b9fc45ed03bd9ddd468224c7002a77e664a1481d4c9bf9358283bc11a62b` |
+| Generated IDL | `9bb7e2a441af653108b21360a8aa14daa9bd8d54eebbc5eef88e7f3de881ba10` |
+| Generated IDL compressed size | `3254` bytes within the recorded `6764`-byte payload capacity |
+| Immutable treasury | `FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be` |
+| Local verification | Rust unit tests: 5 passed; SATP offline CI: green; immutable SBF rebuild reproduced exact hash |
+
+The locked SATP packet is
+`docs/escrow-v3-fee-routing-change-control-011685d4.md` in PR #160. Its rollback
+payload is the current `346856`-byte allocated runtime with SHA-256
+`4f21da13659cbe99a606b408a5f1d3523c0e41de20538028939bbb1b54c3cc0d`;
+its rollback IDL SHA-256 is
+`e8c142f27e225d8edc2f8f41e6fb698ebbb73f69d2fc078d5bf963234ebc8fa9`.
+
+## Implemented delta-only target
+
+SATP PR #160 implements the admissible delta against the certified SATP source;
+the AgentFolio-local program is not copied over it. The audited scope is:
 
 1. Add an immutable 500-basis-point platform fee and bind the recipient to
    `FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be`.
 2. Add the writable treasury account to SOL `release` and `partial_release`
    without changing their instruction discriminators.
-3. Preserve all five USDC instructions. Either apply the same 5% split to
-   `release_usdc` and `partial_release_usdc` using a writable treasury token
-   account whose owner and mint are checked, or leave USDC settlement unchanged
-   behind an explicit product gate. The decision must be stated in the Owner
-   approval; silent deletion or implicit behavior is forbidden.
+3. Preserve all five USDC instructions unchanged. This packet does not certify or
+   charge a USDC platform fee; adding one requires a separate product decision and
+   separately reviewed change.
 4. Preserve gross accounting: `platform_fee = floor(gross * 500 / 10000)`,
    `agent_amount = gross - platform_fee`, and
    `agent_amount + platform_fee == gross` for every accepted amount.
@@ -111,17 +137,17 @@ over it. Its cumulative diff is limited to the following:
    new-client account order, wrong-treasury failure, overflow, rounding, dust,
    full release, partial release, disputes, cancellation, and all USDC paths.
 
-The future implementation PR must record its immutable source commit, clean-tree
-status, source hash, Cargo lock hash, generated IDL hash, trimmed SBF hash and
-length, full test receipt, and independent brainShield verdict. This packet has
-no candidate hash to approve because the only built fee-routing artifact audited
-today failed compatibility review.
+PR #160 records the immutable source commit, source hash, Cargo lock hash,
+generated IDL hash, SBF hash and length, full local test receipt, capacity proof,
+and rollback hashes. The missing gates are its completed green GitHub check set,
+an independent brainShield verdict on exact head `6ac1f10a...`, and explicit
+Owner approval. Any new commit invalidates the review request and approval packet.
 
 ## Approval matrix and hard stops
 
 | Gate | Required evidence | Approver |
 | --- | --- | --- |
-| Delta audit | Exact diff from SATP `93fc6c0d`; no unrelated logic or interface deletions | brainShield, independent of builder |
+| Delta audit | Exact PR #160 head `6ac1f10a...`; no unrelated logic or interface deletions | brainShield, independent of builder |
 | Reproducible build | Two clean hosts produce the same trimmed SBF and IDL hashes | brainChain plus independent verifier |
 | Capacity | Candidate byte length is at most the current `346856` allocation | brainShield; otherwise abort and request a separate extension decision |
 | Authority | Finalized readback still reports ProgramData `Fg1D...` and upgrade authority `Bq1ni...` | brainChain read-only evidence |
@@ -163,9 +189,10 @@ solana-keygen pubkey "$FEE_PAYER"
 
 Required pre-write results:
 
-- rollback dump is `346841` bytes with SHA-256
-  `2f3bb05486f39d3f61a454905048b6e5732b798643405836b62a6d9795a20a6d`;
-- candidate size is no greater than `346856` bytes;
+- rollback allocated payload is `346856` bytes with SHA-256
+  `4f21da13659cbe99a606b408a5f1d3523c0e41de20538028939bbb1b54c3cc0d`;
+- candidate is exactly `345744` bytes with SHA-256
+  `31234c83c007d39616ca7002e38a087e9e5ef69c3a074d97211e501ffddae704`;
 - upgrade signer public key is exactly `Bq1ni...`;
 - fee payer is the separately approved limited operational identity and is not
   the upgrade authority or treasury;
@@ -271,5 +298,6 @@ money-movement: not performed
 production-mutation: not performed
 live-write-enablement: not performed
 roadmap-change: not performed
-current-agentfolio-candidate: NO-GO
+current-agentfolio-candidate: REJECTED-NONAUTHORITATIVE
+satp-pr-160-candidate: NO-GO-PENDING-CHECKS-REVIEW-OWNER
 ```
