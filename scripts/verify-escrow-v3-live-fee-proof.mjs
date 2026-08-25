@@ -9,6 +9,8 @@ const TREASURY = 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
 const CERTIFIED_UPGRADE_SLOT = 441423817;
 const PLATFORM_FEE_BPS = 500n;
 const BPS_DENOMINATOR = 10_000n;
+const MIN_GROSS_FOR_NON_ZERO_FEE = (BPS_DENOMINATOR + PLATFORM_FEE_BPS - 1n)
+  / PLATFORM_FEE_BPS;
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const RPC_ATTEMPTS = 4;
 const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -153,7 +155,53 @@ function balanceDelta(transaction, index) {
   return { pre: pre.toString(), post: post.toString(), delta: (post - pre).toString() };
 }
 
-function analyzeInstruction(signatureRecord, transaction, instruction) {
+function parseExpectedReleaseGross(args) {
+  const expectedBySignature = new Map();
+  for (const arg of args) {
+    if (!arg.startsWith('--expected-release-gross=')) continue;
+    const binding = arg.slice('--expected-release-gross='.length);
+    const separator = binding.lastIndexOf(':');
+    if (separator <= 0 || separator === binding.length - 1) {
+      throw new Error('--expected-release-gross must be SIGNATURE:LAMPORTS');
+    }
+    const signature = binding.slice(0, separator);
+    const lamports = binding.slice(separator + 1);
+    if (!/^[1-9][0-9]*$/.test(lamports)) {
+      throw new Error('expected release gross must be a positive integer lamport amount');
+    }
+    if (expectedBySignature.has(signature)) {
+      throw new Error(`duplicate expected release gross binding for ${signature}`);
+    }
+    expectedBySignature.set(signature, BigInt(lamports));
+  }
+  return expectedBySignature;
+}
+
+async function getAllSignatures() {
+  const signatures = [];
+  let before;
+  while (true) {
+    const options = { commitment: 'finalized', limit: 1_000 };
+    if (before) options.before = before;
+    const page = await rpc('getSignaturesForAddress', [PROGRAM_ID, options]);
+    if (!Array.isArray(page)) {
+      throw new RpcInfrastructureError('RPC getSignaturesForAddress returned a non-array result');
+    }
+    signatures.push(...page);
+    if (page.length < 1_000) return signatures;
+    before = page.at(-1)?.signature;
+    if (!before) {
+      throw new RpcInfrastructureError('RPC signature page was full but had no pagination cursor');
+    }
+  }
+}
+
+function analyzeInstruction(
+  signatureRecord,
+  transaction,
+  instruction,
+  expectedReleaseGrossLamports = null,
+) {
   const keys = accountKeys(transaction);
   if (keys[instruction.programIdIndex] !== PROGRAM_ID) return null;
 
@@ -168,30 +216,41 @@ function analyzeInstruction(signatureRecord, transaction, instruction) {
       blockTime: Number.isInteger(signatureRecord.blockTime)
         ? new Date(signatureRecord.blockTime * 1000).toISOString()
         : null,
-      instructionAccounts: instruction.accounts.map((index) => keys[index]),
+      instructionAccounts: Array.isArray(instruction.accounts)
+        ? instruction.accounts.map((index) => keys[index])
+        : [],
       structuralGap: 'certified route does not pass a writable treasury account',
       proofPassed: false,
     };
   }
 
   const [escrowIndex, clientIndex, agentIndex, treasuryIndex] = instruction.accounts;
-  const grossAmount = route === 'partial_release' && data.length >= 16
-    ? data.readBigUInt64LE(8)
-    : null;
+  const grossAmount = route === 'partial_release'
+    ? data.length >= 16 ? data.readBigUInt64LE(8) : null
+    : expectedReleaseGrossLamports === null
+      ? null
+      : BigInt(expectedReleaseGrossLamports);
   const escrow = balanceDelta(transaction, escrowIndex);
   const agent = balanceDelta(transaction, agentIndex);
   const treasury = balanceDelta(transaction, treasuryIndex);
-  const observedGross = grossAmount ?? (BigInt(agent.delta) + BigInt(treasury.delta));
-  const expectedTreasuryDelta = (observedGross * PLATFORM_FEE_BPS) / BPS_DENOMINATOR;
-  const expectedAgentDelta = observedGross - expectedTreasuryDelta;
+  const expectedTreasuryDelta = grossAmount === null
+    ? null
+    : (grossAmount * PLATFORM_FEE_BPS) / BPS_DENOMINATOR;
+  const expectedAgentDelta = grossAmount === null ? null : grossAmount - expectedTreasuryDelta;
 
   const checks = {
     transactionSucceeded: transaction.meta.err === null,
     certifiedRuntimeWasActive: signatureRecord.slot >= CERTIFIED_UPGRADE_SLOT,
     treasuryAccountMatches: keys[treasuryIndex] === TREASURY,
-    escrowDeltaMatchesGross: BigInt(escrow.delta) === -observedGross,
-    treasuryDeltaMatchesFee: BigInt(treasury.delta) === expectedTreasuryDelta,
-    agentDeltaMatchesNet: BigInt(agent.delta) === expectedAgentDelta,
+    grossBoundToIndependentSource: grossAmount !== null,
+    grossMeetsNonZeroFeeMinimum: grossAmount !== null
+      && grossAmount >= MIN_GROSS_FOR_NON_ZERO_FEE,
+    treasuryDeltaPositive: BigInt(treasury.delta) > 0n,
+    escrowDeltaMatchesGross: grossAmount !== null && BigInt(escrow.delta) === -grossAmount,
+    treasuryDeltaMatchesFee: expectedTreasuryDelta !== null
+      && BigInt(treasury.delta) === expectedTreasuryDelta,
+    agentDeltaMatchesNet: expectedAgentDelta !== null
+      && BigInt(agent.delta) === expectedAgentDelta,
   };
 
   return {
@@ -207,9 +266,14 @@ function analyzeInstruction(signatureRecord, transaction, instruction) {
       agent: keys[agentIndex],
       treasury: keys[treasuryIndex],
     },
-    grossAmountLamports: observedGross.toString(),
-    expectedAgentDeltaLamports: expectedAgentDelta.toString(),
-    expectedTreasuryDeltaLamports: expectedTreasuryDelta.toString(),
+    grossSource: route === 'partial_release'
+      ? 'instruction_data'
+      : expectedReleaseGrossLamports === null
+        ? 'missing_owner_approved_binding'
+        : 'owner_approved_signature_binding',
+    grossAmountLamports: grossAmount?.toString() ?? null,
+    expectedAgentDeltaLamports: expectedAgentDelta?.toString() ?? null,
+    expectedTreasuryDeltaLamports: expectedTreasuryDelta?.toString() ?? null,
     balances: { escrow, agent, treasury },
     checks,
     proofPassed: Object.values(checks).every(Boolean),
@@ -222,10 +286,8 @@ async function main() {
   const certifiedIdlBytes = fs.readFileSync(CERTIFIED_IDL_PATH);
   const certifiedIdl = JSON.parse(certifiedIdlBytes);
   const certifiedInterface = feeRouteInterface(certifiedIdl);
-  const signatures = await rpc('getSignaturesForAddress', [
-    PROGRAM_ID,
-    { commitment: 'finalized', limit: 1_000 },
-  ]);
+  const expectedReleaseGrossBySignature = parseExpectedReleaseGross(process.argv.slice(2));
+  const signatures = await getAllSignatures();
   const successfulSignatures = signatures.filter((record) => record.err === null);
   const relevantSignatures = includePreUpgrade
     ? successfulSignatures
@@ -252,7 +314,12 @@ async function main() {
           KNOWN_INSTRUCTIONS.get(instructionDiscriminator) || `unknown:${instructionDiscriminator}`,
         );
       }
-      const result = analyzeInstruction(signatureRecord, transaction, instruction);
+      const result = analyzeInstruction(
+        signatureRecord,
+        transaction,
+        instruction,
+        expectedReleaseGrossBySignature.get(signatureRecord.signature) ?? null,
+      );
       if (result) {
         routeTransactions.push(result);
         matchingRoutes.push(result.route);
@@ -305,13 +372,19 @@ async function main() {
       (record) => record.slot >= CERTIFIED_UPGRADE_SLOT,
     ).length,
     includedPreUpgradeTransactions: includePreUpgrade,
+    expectedReleaseGrossBindings: Object.fromEntries(
+      [...expectedReleaseGrossBySignature].map(([signature, lamports]) => [
+        signature,
+        lamports.toString(),
+      ]),
+    ),
     scannedTransactions: summaryOnly ? undefined : scannedTransactions,
     routeSummary,
     routeTransactions,
     proofSatisfied,
     ownerAction: proofSatisfied ? null : {
       action: certifiedInterface.feeRoutingSupported
-        ? 'Authorize and submit one minimal mainnet validation sequence containing both release and partial_release against the certified HXCU runtime, then rerun this read-only verifier.'
+        ? 'Authorize and submit one bounded mainnet validation transaction per route, each with gross >= 20 lamports; bind the finalized release signature to its independently approved gross with --expected-release-gross, then rerun this read-only verifier.'
         : 'Approve a separate audited mainnet change-control packet that deploys fee-routing release and partial_release instructions with a writable treasury account and then executes one bounded validation transaction for each route; this task does not perform that upgrade or money movement.',
       prohibitedHere: 'This verifier never signs or submits a transaction and this task does not authorize money movement.',
     },
@@ -327,4 +400,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   });
 }
 
-export { analyzeInstruction, decodeBase58, feeRouteInterface };
+export {
+  analyzeInstruction,
+  decodeBase58,
+  feeRouteInterface,
+  parseExpectedReleaseGross,
+};

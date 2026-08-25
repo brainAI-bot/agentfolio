@@ -76,7 +76,9 @@ The tracked source and IDL are useful implementation candidates, but neither
 hash equals the certified source/IDL packet. They cannot be cited as deployed
 fee-routing evidence.
 
-Cross-host interface and transaction-history verifier:
+Cross-host interface and transaction-history verifier (the signature scan
+paginates until the RPC returns fewer than 1,000 records, so a full page cannot
+silently masquerade as complete history):
 
 ```sh
 node scripts/verify-escrow-v3-live-fee-proof.mjs \
@@ -108,6 +110,25 @@ Approve one separately audited mainnet change-control packet that:
 3. submits one bounded validation transaction for each route, after which this
    read-only verifier records the escrow, agent, and treasury deltas.
 
+Each approved gross amount must be at least `20` lamports, the smallest gross
+that yields a strictly positive fee at 500 bps. The `release` instruction does
+not encode an amount, so its transaction signature and Owner-approved gross must
+be bound explicitly when rerunning the verifier:
+
+```sh
+node scripts/verify-escrow-v3-live-fee-proof.mjs \
+  --expected-release-gross=<FINALIZED_RELEASE_SIGNATURE>:<APPROVED_GROSS_LAMPORTS>
+```
+
+Without that independent signature-to-gross binding, `release` proof fails
+closed; it never infers gross from the agent and treasury payouts. The canary
+client must pay transaction fees, the agent and treasury must not be fee payers,
+and no account-close instruction may share either canary transaction. This keeps
+fee and rent effects outside the exact escrow, agent, and treasury settlement
+deltas. `partial_release` remains bound to its independently encoded instruction
+amount. In both routes the verifier requires a positive treasury delta as well
+as exact gross, fee, and net conservation.
+
 That approval is not implied by this evidence PR. This task does not perform
 the upgrade, enable live writes, sign a transaction, or move funds.
 
@@ -117,11 +138,14 @@ the upgrade, enable live writes, sign a transaction, or move funds.
 node --check scripts/verify-escrow-v3-live-fee-proof.mjs
 node --test tests/escrow-v3-live-fee-proof.test.js \
   tests/escrow-v3-platform-fee.test.js \
-  tests/escrow-v3-authority.test.js
+  tests/escrow-v3-authority.test.js \
+  tests/escrow-v3-dispute-recipient-binding.test.js \
+  tests/escrow-v3-selected-agent.test.js \
+  tests/escrow-usdc-support.test.js
 node scripts/verify-escrow-v3-source-idl.mjs --strict
 git diff --exit-code origin/main -- ROADMAP.md
 ```
 
-These checks passed on Node `v22.23.2`: 37 tests passed, zero failed; the
+These checks passed on Node `v22.23.2`: 57 tests passed, zero failed; the
 strict source/IDL verifier returned `status: verified`; and the roadmap diff
 was empty.
