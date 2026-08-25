@@ -31,7 +31,8 @@ const AUTHORITATIVE_SOURCE = 'satp-client-package';
 // (git blob 3d3d675926b6d4e8259adde5783a18827a7a946f, 20548 bytes).
 // The git-pinned satp-client install does not currently ship idls/, so the
 // repo-checked, hash-pinned copy is the expected consumer path in that layout.
-// The authoritative source remains the pinned brainAI-bot/satp commit.
+// It supports read-only consumers but cannot satisfy live-write provenance;
+// the authoritative package path must be present for authority verification.
 const SATP_ESCROW_IDL_FALLBACK_PATH = 'third_party/satp/93fc6c0d/idls/v3/escrow_v3.json';
 const SATP_ESCROW_IDL_FALLBACK_COMMIT = '93fc6c0d86302cfe8b0d8c798ba2817d7eeace44';
 const SATP_ESCROW_IDL_FALLBACK_BLOB_SHA = '3d3d675926b6d4e8259adde5783a18827a7a946f';
@@ -257,12 +258,15 @@ function getEscrowV3AuthorityReadback({
   const satpMainnetMatches = satpRuntime.mainnetEscrowProgramId === AUTHORITY_PROGRAM_ID;
   const satpDevnetMatches = satpRuntime.devnetEscrowProgramId === AUTHORITY_PROGRAM_ID;
   const packagedIdlMatches = packagedSatpEscrowIdl.exists && packagedIdlAddress === AUTHORITY_PROGRAM_ID;
+  const packagedIdlSourceMatches = resolvedIdl.packagedMissing === false
+    && resolvedIdl.source === AUTHORITATIVE_SOURCE;
   const packagedIdlInstructionCountMatches = packagedIdlInstructionCount === AUTHORITY_INSTRUCTION_COUNT;
   const packagedIdlHashMatches = packagedSatpEscrowIdl.sha256 === AUTHORITY_IDL_SHA256;
   // AF onchain/escrow_v3 is leftover inventory. SATP package is the authority.
   // B1Se is the separate devnet runtime and must not invalidate finalized mainnet
   // HXCU provenance. Live writes remain independently owner-gated below.
   const verified = packagedIdlMatches
+    && packagedIdlSourceMatches
     && packagedIdlInstructionCountMatches
     && packagedIdlHashMatches
     && satpMainnetMatches;
@@ -308,6 +312,7 @@ function getEscrowV3AuthorityReadback({
       address: packagedIdlAddress,
       addressField: packagedSatpEscrowIdlJson?.address ?? null,
       matchesExpectedProgramId: packagedIdlMatches,
+      matchesAuthoritativeSource: packagedIdlSourceMatches,
       instructionCount: packagedIdlInstructionCount,
       matchesExpectedInstructionCount: packagedIdlInstructionCountMatches,
       expectedSha256: AUTHORITY_IDL_SHA256,
@@ -384,6 +389,8 @@ function getEscrowV3ProvenanceReadback({
     mismatches.push('missing_packaged_idl');
   } else if (!packaged.sha256) {
     mismatches.push('missing_packaged_idl');
+  } else if (packaged.matchesAuthoritativeSource !== true) {
+    mismatches.push('packaged_idl_authoritative_source_mismatch');
   } else if (packaged.matchesExpectedProgramId !== true) {
     mismatches.push('packaged_idl_program_id_mismatch');
   } else if (packaged.matchesExpectedInstructionCount !== true) {
@@ -395,7 +402,7 @@ function getEscrowV3ProvenanceReadback({
   if (readback.satpArtifact?.mainnetMatchesExpectedProgramId !== true) {
     mismatches.push('mainnet_runtime_program_id_mismatch');
   }
-  if (readback.status && readback.status !== 'verified' && mismatches.length === 0) {
+  if (readback.status && readback.status !== 'verified') {
     mismatches.push('authority_status_not_verified');
   }
   const liveEscrowWritesAllowed = threeWayBindingVerified

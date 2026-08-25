@@ -53,6 +53,7 @@ function authorityReadbackFixture(overrides = {}) {
       address: AUTHORITY_PROGRAM_ID,
       sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       matchesExpectedProgramId: true,
+      matchesAuthoritativeSource: true,
       instructionCount: AUTHORITY_INSTRUCTION_COUNT,
       matchesExpectedInstructionCount: true,
       expectedSha256: AUTHORITY_IDL_SHA256,
@@ -168,6 +169,7 @@ test('escrow_v3 authority readback names the HQ-selected program id from SATP ma
   assert.equal(readback.packagedSatpEscrowIdl.exists, true);
   assert.equal(readback.packagedSatpEscrowIdl.address, AUTHORITY_PROGRAM_ID);
   assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedProgramId, true);
+  assert.equal(readback.packagedSatpEscrowIdl.matchesAuthoritativeSource, true);
   assert.equal(readback.packagedSatpEscrowIdl.instructionCount, 14);
   assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedInstructionCount, true);
   assert.equal(readback.status, 'verified');
@@ -520,6 +522,7 @@ test('packaged SATP escrow IDL carries mainnet HXCU and all 14 instructions', ()
   assert.equal(readback.packagedSatpEscrowIdl.addressField, AUTHORITY_PROGRAM_ID);
   assert.equal(readback.packagedSatpEscrowIdl.address, AUTHORITY_PROGRAM_ID);
   assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedProgramId, true);
+  assert.equal(readback.packagedSatpEscrowIdl.matchesAuthoritativeSource, true);
   assert.equal(readback.packagedSatpEscrowIdl.instructionCount, AUTHORITY_INSTRUCTION_COUNT);
   assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedInstructionCount, true);
   assert.equal(readback.packagedSatpEscrowIdl.sha256, AUTHORITY_IDL_SHA256);
@@ -788,6 +791,7 @@ test('repo-checked SATP escrow IDL fallback is used when packaged file is missin
   assert.equal(readback.packagedSatpEscrowIdl.addressField, AUTHORITY_PROGRAM_ID);
   assert.equal(readback.packagedSatpEscrowIdl.address, AUTHORITY_PROGRAM_ID);
   assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedProgramId, true);
+  assert.equal(readback.packagedSatpEscrowIdl.matchesAuthoritativeSource, false);
   assert.equal(readback.packagedSatpEscrowIdl.instructionCount, AUTHORITY_INSTRUCTION_COUNT);
   assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedInstructionCount, true);
   assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedSha256, true);
@@ -800,7 +804,9 @@ test('repo-checked SATP escrow IDL fallback is used when packaged file is missin
   assert.ok(!provenance.mismatches.includes('packaged_idl_program_id_mismatch'));
   assert.equal(readback.releaseGate.liveEscrowWritesAllowed, false);
   assert.equal(provenance.liveEscrowWritesAllowed, false);
-  assert.equal(readback.status, 'verified');
+  assert.equal(readback.status, 'blocked_pending_authoritative_source_idl');
+  assert.ok(provenance.mismatches.includes('packaged_idl_authoritative_source_mismatch'));
+  assert.ok(provenance.mismatches.includes('authority_status_not_verified'));
 });
 
 test('packaged SATP escrow IDL path still wins when the file exists', () => {
@@ -817,17 +823,17 @@ test('packaged SATP escrow IDL path still wins when the file exists', () => {
   assert.notEqual(readback.packagedSatpEscrowIdl.path, SATP_ESCROW_IDL_FALLBACK_PATH);
 });
 
-test('fallback IDL does not ungate fail-closed live escrow writes', () => {
+test('fallback IDL cannot satisfy provenance even when every release gate is open', () => {
   const missingPackaged = path.join(
     fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'af-g10-fallback-gate-')),
     'escrow_v3.json',
   );
   const env = {
     ...process.env,
+    AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES: 'true',
+    AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION: 'owner-approved-live-escrow-writes',
+    AGENTFOLIO_ESCROW_KILL_SWITCH: 'false',
   };
-  delete env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
-  delete env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
-  delete env.AGENTFOLIO_ESCROW_KILL_SWITCH;
 
   const readback = getEscrowV3AuthorityReadback({
     satpClient,
@@ -841,9 +847,13 @@ test('fallback IDL does not ungate fail-closed live escrow writes', () => {
 
   assert.equal(readback.packagedSatpEscrowIdl.exists, true);
   assert.equal(readback.packagedSatpEscrowIdl.source, SATP_ESCROW_IDL_FALLBACK_SOURCE);
+  assert.equal(readback.packagedSatpEscrowIdl.matchesAuthoritativeSource, false);
+  assert.equal(readback.status, 'blocked_pending_authoritative_source_idl');
   assert.equal(readback.releaseGate.liveEscrowWritesAllowed, false);
   assert.equal(readback.releaseGate.ownerAuthorizationRequired, true);
-  assert.equal(readback.releaseGate.ownerAuthorizationStatus, 'missing_owner_authorization');
+  assert.equal(readback.releaseGate.ownerAuthorizationStatus, 'owner_authorized');
+  assert.ok(provenance.mismatches.includes('packaged_idl_authoritative_source_mismatch'));
+  assert.ok(provenance.mismatches.includes('authority_status_not_verified'));
   assert.equal(provenance.liveEscrowWritesAllowed, false);
   assert.equal(provenance.authoritativeSource, 'brainAI-bot/satp');
   assert.equal(provenance.consumerInterfaceSource, 'satp-client-package');
