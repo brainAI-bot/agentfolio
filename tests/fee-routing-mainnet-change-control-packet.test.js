@@ -39,7 +39,7 @@ test('packet pins the audited candidate and certified IDL hashes', () => {
   );
 });
 
-test('packet fails closed because the tracked candidate removes live USDC surfaces', () => {
+test('packet rejects the tracked candidate because it removes live USDC surfaces', () => {
   const certified = require(certifiedIdlPath);
   const candidate = require(candidateIdlPath);
   const certifiedNames = certified.instructions.map(({ name }) => name);
@@ -58,8 +58,26 @@ test('packet fails closed because the tracked candidate removes live USDC surfac
 
   const packet = fs.readFileSync(packetPath, 'utf8');
   assert.match(packet, /Status: \*\*NO-GO for execution; audited preparation only\.\*\*/);
-  assert.match(packet, /current-agentfolio-candidate: NO-GO/);
-  assert.match(packet, /must start at SATP commit\s+`93fc6c0d86302cfe8b0d8c798ba2817d7eeace44`/);
+  assert.match(packet, /current-agentfolio-candidate: REJECTED-NONAUTHORITATIVE/);
+  assert.match(packet, /SATP PR \[#160\]/);
+  assert.match(packet, /satp-pr-160-candidate: NO-GO-PENDING-CHECKS-REVIEW-OWNER/);
+});
+
+test('packet pins the authoritative SATP PR head and deployable artifact fingerprints', () => {
+  const packet = fs.readFileSync(packetPath, 'utf8');
+
+  for (const fingerprint of [
+    '6ac1f10a354429d7f3f03098c926f103756b1b14',
+    '2930ca34bb36cc419f64b45cf2367896a93c19c5',
+    'd94957985c9fcd61cfcadbaadceaf81eb74fffddba26838726862a932e4bdd3c',
+    '31234c83c007d39616ca7002e38a087e9e5ef69c3a074d97211e501ffddae704',
+    '9bb7e2a441af653108b21360a8aa14daa9bd8d54eebbc5eef88e7f3de881ba10',
+    '5471b9fc45ed03bd9ddd468224c7002a77e664a1481d4c9bf9358283bc11a62b',
+  ]) {
+    assert.ok(packet.includes(fingerprint), `packet is missing fingerprint: ${fingerprint}`);
+  }
+  assert.match(packet, /candidate fits with `1112` zero bytes/);
+  assert.match(packet, /Any new commit invalidates the review request and approval packet/);
 });
 
 test('tracked fee reference binds both SOL routes to the immutable treasury', () => {
@@ -94,7 +112,7 @@ test('packet requires preservation, approval, rollback, and bounded proof gates'
     'Preserve all five USDC instructions',
     '--no-auto-extend',
     'independent brainShield verdict',
-    'rollback dump is `346841` bytes',
+    'rollback allocated payload is `346856` bytes',
     'treasury_delta = floor(gross * 500 / 10000)',
     'program-upgrade: not performed',
     'roadmap-change: not performed',
