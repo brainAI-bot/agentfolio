@@ -217,7 +217,7 @@ function readSatpRuntimeIds(satpClient) {
   return {
     available: true,
     mainnetEscrowProgramId: readNetwork('mainnet'),
-    network: 'mainnet',
+    devnetEscrowProgramId: readNetwork('devnet'),
   };
 }
 
@@ -250,12 +250,16 @@ function getEscrowV3AuthorityReadback({
   const leftoverSourceComplete = anchorToml.exists && programSource.exists && trackedIdl.exists;
   const trackedIdlMatches = trackedIdlAddress === AUTHORITY_PROGRAM_ID;
   const satpMainnetMatches = satpRuntime.mainnetEscrowProgramId === AUTHORITY_PROGRAM_ID;
+  const satpDevnetMatches = satpRuntime.devnetEscrowProgramId === AUTHORITY_PROGRAM_ID;
   const packagedIdlMatches = packagedSatpEscrowIdl.exists
     && resolvedIdl.packagedMissing === false
     && packagedIdlAddress === AUTHORITY_PROGRAM_ID
     && packagedIdlInstructionCount === 14;
   // AF onchain/escrow_v3 is leftover inventory. SATP package is the authority.
-  const verified = packagedIdlMatches && satpMainnetMatches;
+  // Keep the independently observed devnet runtime mismatch structural: this
+  // prevents environment flags from turning the package refresh into an
+  // implicit mainnet live-funds release.
+  const verified = packagedIdlMatches && satpMainnetMatches && satpDevnetMatches;
   const liveEscrow = liveEscrowGateStatus(env);
   const liveEscrowWritesAllowed = verified && liveEscrow.enabled;
 
@@ -275,10 +279,11 @@ function getEscrowV3AuthorityReadback({
       },
       sourceComplete: leftoverSourceComplete,
       leftoverRuntimeNetwork: liveEscrow.leftoverRuntimeNetwork || LEFTOVER_RUNTIME_NETWORK,
-      leftoverRuntimeProgramId: liveEscrow.leftoverRuntimeProgramId
+      leftoverRuntimeProgramId: normalizeRuntimeProgramId(satpRuntime.devnetEscrowProgramId)
+        || liveEscrow.leftoverRuntimeProgramId
         || LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID,
       hostEnvSplit: HOST_ENV_SPLIT_NOTE,
-      note: 'AgentFolio onchain/escrow_v3 is non-authoritative inventory; the pinned SATP package is the IDL/program source of truth and the runtime is mainnet HXCU.',
+      note: 'AgentFolio onchain/escrow_v3 is leftover non-authoritative inventory; SATP satp-client package is the IDL/program source of truth. HXCU-vs-B1Se is a host env split, not a missing IDL.',
     },
     advertisedNetwork: ADVERTISED_NETWORK,
     advertisedEscrowProgramId: ADVERTISED_ESCROW_PROGRAM_ID,
@@ -311,6 +316,7 @@ function getEscrowV3AuthorityReadback({
       commit: getSatpClientCommit(),
       runtime: satpRuntime,
       mainnetMatchesExpectedProgramId: satpMainnetMatches,
+      devnetMatchesExpectedProgramId: satpDevnetMatches,
     },
     releaseGate: {
       liveEscrowWritesAllowed,
@@ -375,6 +381,9 @@ function getEscrowV3ProvenanceReadback({
   if (readback.satpArtifact?.mainnetMatchesExpectedProgramId !== true) {
     mismatches.push('mainnet_runtime_program_id_mismatch');
   }
+  if (readback.satpArtifact?.devnetMatchesExpectedProgramId !== true) {
+    mismatches.push('devnet_runtime_program_id_mismatch');
+  }
   if (readback.status && readback.status !== 'verified') {
     mismatches.push('authority_status_not_verified');
   }
@@ -394,7 +403,9 @@ function getEscrowV3ProvenanceReadback({
     escrowProgramId,
     artifactCommit: receiptValid ? provenanceReceipt.source.commit : null,
     sourceHash,
-    idlHash: sourceIdlHash,
+    // Public consumer IDL hash follows the packaged SATP interface. The
+    // independently pinned source/published hashes remain separate below.
+    idlHash: packaged.sha256 || sourceIdlHash,
     sourceIdlHash,
     publishedIdlHash,
     rebuiltArtifactHash: receiptValid ? provenanceReceipt.rebuild.sha256 : null,
@@ -405,10 +416,12 @@ function getEscrowV3ProvenanceReadback({
     residualGate: receiptValid ? provenanceReceipt.residualGate : null,
     idlProgramId,
     runtimeProgramId,
-    leftoverRuntimeProgramId: LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID,
+    leftoverRuntimeProgramId: normalizeRuntimeProgramId(runtime.devnetEscrowProgramId)
+      || LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID,
     leftoverRuntimeNetwork: LEFTOVER_RUNTIME_NETWORK,
     runtimeProgramIds: {
       mainnet: normalizeRuntimeProgramId(runtime.mainnetEscrowProgramId),
+      devnet: normalizeRuntimeProgramId(runtime.devnetEscrowProgramId),
     },
     hostEnvSplit: HOST_ENV_SPLIT_NOTE,
     mismatchStatus: mismatches.length ? 'mismatch' : 'matched',
