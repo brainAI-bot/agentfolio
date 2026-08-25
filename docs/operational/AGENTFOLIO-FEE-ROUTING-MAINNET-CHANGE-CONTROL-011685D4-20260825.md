@@ -9,11 +9,11 @@ Prepared by: brainChain
 
 Date: 2026-08-25
 
-AgentFolio base: `814b8ed797d82cecbdad07766f5d946181105850`
+AgentFolio review base: `dce3a4994968ec942480fdc2a354120534865db5`
 
 Live proof dependency: AgentFolio PR
 [#277](https://github.com/brainAI-bot/agentfolio/pull/277), commit
-`86877254dd6959e3b357d2b1b2ba9f1c190c4bb0`
+`dce3a4994968ec942480fdc2a354120534865db5`
 
 ## Executive decision
 
@@ -40,14 +40,16 @@ from the AgentFolio tree would therefore be a broad program replacement, not a
 fee-routing patch.
 
 SATP PR [#160](https://github.com/brainAI-bot/satp/pull/160), exact head
-`6ac1f10a354429d7f3f03098c926f103756b1b14`, is now the authoritative
+`fd654ce5a33c68fee5ff8120040b607684f22246`, is now the authoritative
 delta-only candidate. It was built from the certified SATP lineage and preserves
 all 14 instruction names and discriminators, the `EscrowV3` account layout,
 existing error numbers, existing authority checks, and all five USDC routes.
-It remains **NO-GO** until exact-head GitHub checks are green, brainShield
-independently approves that same head, and Hani gives one explicit Owner approval
-in HQ containing the bounded write window. The rejected AgentFolio-local artifact
-remains reference-only and is not an upgrade candidate.
+All ten exact-head GitHub checks are green and an independent review is recorded
+as approved. It nevertheless remains **NO-GO**: the candidate is `3448` bytes
+larger than the deployed ProgramData allocation, no bounded extension decision
+or exact-command localnet receipt exists, full handler/LiteSVM coverage is not
+claimed, and Hani has not given an explicit Owner approval in HQ. The rejected
+AgentFolio-local artifact remains reference-only and is not an upgrade candidate.
 
 ## Certified live baseline
 
@@ -96,16 +98,17 @@ outputs:
 
 | Item | SATP PR #160 exact candidate |
 | --- | --- |
-| PR head | `6ac1f10a354429d7f3f03098c926f103756b1b14` |
-| Build-source commit | `2930ca34bb36cc419f64b45cf2367896a93c19c5` |
-| Source SHA-256 | `d94957985c9fcd61cfcadbaadceaf81eb74fffddba26838726862a932e4bdd3c` |
+| PR head | `fd654ce5a33c68fee5ff8120040b607684f22246` |
+| Build-source commit | `a35568bc3926bd44d73680813bda0e8d5371705f` |
+| Source SHA-256 | `380b20d36f18253a5c382ec1abc4a1147a08092a9a42cdae25e5d954f41acd0a` |
 | Cargo.lock SHA-256 | `d98db19e0d86ca3248376d4857b150b240be05c4bc3a409d7cb638ce4d5d2237` |
-| Candidate SBF | `345744` bytes / `31234c83c007d39616ca7002e38a087e9e5ef69c3a074d97211e501ffddae704` |
-| Existing allocation | `346856` bytes; candidate fits with `1112` zero bytes |
-| Padded payload SHA-256 | `5471b9fc45ed03bd9ddd468224c7002a77e664a1481d4c9bf9358283bc11a62b` |
+| Candidate SBF | `350304` bytes / `27395415b6dc3d069d8a0a974613e647af1494590cbaff0a2658945a2bc4784a` |
+| Existing allocation | `346856` bytes; candidate exceeds it by `3448` bytes |
+| Capacity status | `extension_required_before_buffer_write`; no padded candidate hash exists |
 | Generated IDL | `9bb7e2a441af653108b21360a8aa14daa9bd8d54eebbc5eef88e7f3de881ba10` |
 | Generated IDL compressed size | `3254` bytes within the recorded `6764`-byte payload capacity |
 | Immutable treasury | `FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be` |
+| Toolchain | `solana-cli 2.1.21`; `cargo-build-sbf 2.1.21`; platform tools `v1.52` |
 | Local verification | Rust unit tests: 5 passed; SATP offline CI: green; immutable SBF rebuild reproduced exact hash |
 
 The locked SATP packet is
@@ -138,18 +141,20 @@ the AgentFolio-local program is not copied over it. The audited scope is:
    full release, partial release, disputes, cancellation, and all USDC paths.
 
 PR #160 records the immutable source commit, source hash, Cargo lock hash,
-generated IDL hash, SBF hash and length, full local test receipt, capacity proof,
-and rollback hashes. The missing gates are its completed green GitHub check set,
-an independent brainShield verdict on exact head `6ac1f10a...`, and explicit
-Owner approval. Any new commit invalidates the review request and approval packet.
+generated IDL hash, SBF hash and length, local test receipt, capacity proof,
+and rollback hashes. Exact-head checks and independent review are complete for
+`fd654ce5...`. The remaining hard gates are a separate bounded ProgramData
+extension decision with an exact-command localnet receipt, full handler/LiteSVM
+coverage required by this packet, and explicit Owner approval. Any new commit
+invalidates the review request and approval packet.
 
 ## Approval matrix and hard stops
 
 | Gate | Required evidence | Approver |
 | --- | --- | --- |
-| Delta audit | Exact PR #160 head `6ac1f10a...`; no unrelated logic or interface deletions | brainShield, independent of builder |
+| Delta audit | Exact PR #160 head `fd654ce5...`; no unrelated logic or interface deletions | brainShield, independent of builder |
 | Reproducible build | Two clean hosts produce the same trimmed SBF and IDL hashes | brainChain plus independent verifier |
-| Capacity | Candidate byte length is at most the current `346856` allocation | brainShield; otherwise abort and request a separate extension decision |
+| Capacity | Candidate byte length is at most the current `346856` allocation | **FAIL:** `350304` bytes; abort and request a separate extension decision |
 | Authority | Finalized readback still reports ProgramData `Fg1D...` and upgrade authority `Bq1ni...` | brainChain read-only evidence |
 | Change window | Exact source/SBF/IDL hashes, signer public identities, fee cap, validation cap, time window, and rollback hashes | Owner/Hani in HQ |
 | App freeze | Live escrow writes disabled before the program write and kept disabled through both canaries | AgentFolio operator |
@@ -161,10 +166,12 @@ does not match the approved role, a required approval is stale or ambiguous, or
 the rollback artifact is not locally readable and hash-verified. No agent may
 discover, copy, print, generate, rotate, or take custody of an Owner key.
 
-## Pre-write runbook
+## Read-only preflight and unresolved command proof
 
-These commands are templates for the later explicitly approved window. Values
-in angle brackets are deliberate hard stops, not defaults.
+Only this read-only subset is admissible from the current packet. Values in
+angle brackets are deliberate hard stops, not defaults. The build and proposed
+deployment toolchain is pinned to `solana-cli 2.1.21`; using another version
+invalidates the command review.
 
 ```sh
 export PROGRAM_ID=HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C
@@ -174,60 +181,46 @@ export TREASURY=FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be
 export RPC_URL=https://api.mainnet-beta.solana.com
 export CANDIDATE_SO=<absolute-reviewed-candidate-so>
 export CANDIDATE_IDL=<absolute-reviewed-candidate-idl>
-export UPGRADE_AUTHORITY=<owner-approved-signer-path-or-signer-url>
-export FEE_PAYER=<owner-approved-limited-fee-payer-path-or-signer-url>
 export ROLLBACK_SO=<absolute-prechange-program-dump>
 export ROLLBACK_IDL=<absolute-certified-prechange-idl>
 
+test "$(solana --version | awk '{print $2}')" = "2.1.21"
 solana program show --url "$RPC_URL" "$PROGRAM_ID" --output json
 solana program dump --url "$RPC_URL" "$PROGRAM_ID" "$ROLLBACK_SO"
 shasum -a 256 "$ROLLBACK_SO" "$CANDIDATE_SO" "$CANDIDATE_IDL"
 wc -c "$ROLLBACK_SO" "$CANDIDATE_SO"
-solana-keygen pubkey "$UPGRADE_AUTHORITY"
-solana-keygen pubkey "$FEE_PAYER"
 ```
 
 Required pre-write results:
 
 - rollback allocated payload is `346856` bytes with SHA-256
   `4f21da13659cbe99a606b408a5f1d3523c0e41de20538028939bbb1b54c3cc0d`;
-- candidate is exactly `345744` bytes with SHA-256
-  `31234c83c007d39616ca7002e38a087e9e5ef69c3a074d97211e501ffddae704`;
-- upgrade signer public key is exactly `Bq1ni...`;
-- fee payer is the separately approved limited operational identity and is not
-  the upgrade authority or treasury;
+- candidate is exactly `350304` bytes with SHA-256
+  `27395415b6dc3d069d8a0a974613e647af1494590cbaff0a2658945a2bc4784a`;
+- the candidate is `3448` bytes larger than the current allocation, so this
+  preflight must stop before any buffer write, signer access, or fee-payer use;
 - the final candidate source/SBF/IDL hashes equal the exact HQ approval; and
 - local/LiteSVM tests cover all 14 instructions and both fee paths without RPC
   writes.
 
-## Write window template
+## No write window is admitted by this packet
 
-Do not run this section from the current task. A future HQ approval must quote
-the exact candidate and rollback hashes and explicitly authorize these writes.
+There is no deploy or IDL-write command template in this packet. The current
+candidate cannot upgrade in place without extending ProgramData, and no
+`solana-cli 2.1.21` localnet receipt exists for an exact bounded extension plus
+upgrade sequence. Keeping an unverified command beside a no-improvisation rule
+would be unsafe.
 
-```sh
-solana program deploy \
-  --url "$RPC_URL" \
-  --commitment finalized \
-  --program-id "$PROGRAM_ID" \
-  --upgrade-authority "$UPGRADE_AUTHORITY" \
-  --fee-payer "$FEE_PAYER" \
-  --no-auto-extend \
-  --max-len 346856 \
-  --output json \
-  "$CANDIDATE_SO"
+A future, separately reviewed extension packet must first define the exact new
+allocation and rent cost, pin every `solana-cli 2.1.21` argument, and attach a
+localnet dry-run receipt proving that exact sequence extends by only the
+approved amount, upgrades the existing ProgramData in place, preserves program
+and authority addresses, and produces the expected runtime/IDL readbacks. Only
+after that evidence exists may Hani consider one Owner approval covering the
+extension, buffer write, program upgrade, IDL write, two canaries, and rollback.
 
-anchor idl upgrade \
-  --provider.cluster mainnet \
-  --provider.wallet "$UPGRADE_AUTHORITY" \
-  --filepath "$CANDIDATE_IDL" \
-  "$PROGRAM_ID"
-```
-
-Live escrow writes remain disabled between the program upgrade and successful
-IDL readback. If program confirmation is uncertain, stop and obtain finalized
-ProgramData readback before issuing any rollback or retry. Never blindly repeat
-an upgrade command.
+Until then: do not load a signer, fund a fee payer, create a buffer, extend
+ProgramData, deploy, or write an IDL.
 
 ## Bounded validation plan
 
@@ -240,10 +233,16 @@ escrow may be used.
 2. Invoke `release` against one canary for its full gross amount.
 3. Invoke `partial_release` against the second canary with an amount equal to
    that canary's full gross amount, so no residual user value remains.
-4. For each finalized signature, prove:
+4. Neither canary transaction may call `close_escrow`; both escrow accounts
+   remain open, so rent closure is neither expected nor subtracted. For each
+   finalized signature, the merged PR #277 verifier must prove the raw balance
+   deltas exactly:
    `treasury_delta = floor(gross * 500 / 10000)`,
    `agent_delta = gross - treasury_delta`, and
-   `escrow_delta = -gross`, excluding rent closure from the settlement delta.
+   `escrow_delta = -gross`. The required verifier gates are
+   `grossMeetsNonZeroFeeMinimum`, `treasuryDeltaPositive`,
+   `escrowDeltaMatchesGross`, `treasuryDeltaMatchesFee`, and
+   `agentDeltaMatchesNet`; every gate must be `true`.
 5. Record instruction account order, program logs, signature, slot, block time,
    and pre/post balances in a GitHub/HQ-visible receipt.
 6. Keep writes disabled until an independent reviewer verifies both receipts
@@ -263,9 +262,10 @@ finalized evidence within the approved window.
 Containment is immediate: keep app writes disabled, stop canaries, preserve all
 signatures/logs, and read finalized state. If the upgrade is confirmed and a
 rollback trigger remains, redeploy the pre-verified rollback SBF with the same
-`--no-auto-extend` authority/fee-payer controls, republish the certified rollback
-IDL, and verify the original runtime and IDL hashes. A rollback is itself a
-mainnet write and must be included in the original Owner approval; otherwise
+bounded authority/fee-payer controls, republish the certified rollback IDL, and
+verify the original runtime and IDL hashes. The future extension packet must
+also pin and locally prove the exact rollback invocation. A rollback is itself
+a mainnet write and must be included in the original Owner approval; otherwise
 remain frozen and request emergency authority.
 
 Do not roll back an unconfirmed transaction, do not improvise a new build, do
@@ -274,9 +274,16 @@ not extend ProgramData, and do not rotate authority during this window.
 ## Post-change evidence required to close [#011685d4]
 
 - exact approved source commit and clean diff from SATP `93fc6c0d`;
-- candidate and finalized dumped runtime hashes and byte lengths;
-- published IDL account, transaction, hash, and 14-instruction compatibility
-  receipt;
+- finalized **trimmed** runtime must equal the approved candidate exactly:
+  `350304` bytes and SHA-256
+  `27395415b6dc3d069d8a0a974613e647af1494590cbaff0a2658945a2bc4784a`;
+- finalized allocated payload length and SHA-256 must equal the exact values in
+  the future approved extension packet; merely recording different values does
+  not pass and this packet intentionally cannot supply them yet;
+- published IDL must equal SHA-256
+  `9bb7e2a441af653108b21360a8aa14daa9bd8d54eebbc5eef88e7f3de881ba10`,
+  contain the same 14 instructions, and include its account, transaction, and
+  finalized readback;
 - unchanged ProgramData address and upgrade authority readback;
 - one finalized, bounded SOL `release` receipt with exact deltas;
 - one finalized, bounded SOL `partial_release` receipt with exact deltas;
@@ -299,5 +306,5 @@ production-mutation: not performed
 live-write-enablement: not performed
 roadmap-change: not performed
 current-agentfolio-candidate: REJECTED-NONAUTHORITATIVE
-satp-pr-160-candidate: NO-GO-PENDING-CHECKS-REVIEW-OWNER
+satp-pr-160-candidate: NO-GO-CAPACITY-EXTENSION-DRY-RUN-LITESVM-OWNER
 ```
