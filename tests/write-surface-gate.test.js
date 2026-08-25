@@ -90,15 +90,16 @@ test('live escrow write gate requires explicit opt-in and honors kill switch', (
       status: 'missing_owner_authorization',
     },
     verifiedRuntime: {
-      network: 'devnet',
+      network: 'mainnet-beta',
+      programId: 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C',
       pdaDerive: 'verified',
     },
-    runtimeNetwork: 'devnet',
-    leftoverRuntimeNetwork: 'devnet',
-    leftoverRuntimeProgramId: 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg',
+    runtimeNetwork: 'mainnet-beta',
+    leftoverRuntimeNetwork: 'mainnet-beta',
+    leftoverRuntimeProgramId: 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C',
     advertisedNetwork: 'mainnet-beta',
     advertisedEscrowProgramId: 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C',
-    hostEnvSplit: 'HXCU-vs-B1Se is a host env split (advertised SATP /api/satp/programs mainnet-beta HXCU vs leftover host runtime devnet B1Se), not a missing IDL',
+    hostEnvSplit: 'AgentFolio escrow runtime and advertised SATP surface both use mainnet-beta HXCU; no B1Se runtime drift remains.',
     mainnetLiveFundsCleared: false,
     readOnlyPosture: 'GET health and PDA derivation routes remain read-only HTTP 200 when program IDs resolve; live-funds POST routes fail closed.',
     publicCopy: 'Live escrow writes are disabled by the escrow kill switch.',
@@ -113,12 +114,11 @@ test('live escrow write gate requires explicit opt-in and honors kill switch', (
   try {
     const gatedPayload = liveEscrowWriteGatePayload('escrow release');
     assert.equal(gatedPayload.code, LIVE_ESCROW_READ_ONLY_CODE);
-    assert.equal(gatedPayload.liveEscrow.runtimeNetwork, 'devnet');
-    assert.equal(gatedPayload.liveEscrow.leftoverRuntimeProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
+    assert.equal(gatedPayload.liveEscrow.runtimeNetwork, 'mainnet-beta');
+    assert.equal(gatedPayload.liveEscrow.leftoverRuntimeProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
     assert.equal(gatedPayload.liveEscrow.advertisedNetwork, 'mainnet-beta');
     assert.equal(gatedPayload.liveEscrow.advertisedEscrowProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
-    assert.match(gatedPayload.liveEscrow.hostEnvSplit, /host env split/);
-    assert.match(gatedPayload.liveEscrow.hostEnvSplit, /not a missing IDL/);
+    assert.match(gatedPayload.liveEscrow.hostEnvSplit, /no B1Se runtime drift remains/);
     assert.equal(gatedPayload.liveEscrow.mainnetLiveFundsCleared, false);
     assert.throws(
       () => assertLiveEscrowWriteEnabled('escrow release'),

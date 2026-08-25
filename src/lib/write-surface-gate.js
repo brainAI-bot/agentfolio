@@ -5,12 +5,12 @@ const ENABLE_LIVE_ESCROW_ENV = 'AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES';
 const LIVE_ESCROW_OWNER_AUTHORIZATION_ENV = 'AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION';
 const LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE = 'owner-approved-live-escrow-writes';
 const ESCROW_KILL_SWITCH_ENV = 'AGENTFOLIO_ESCROW_KILL_SWITCH';
-// Advertised SATP /api/satp/programs surface. Leftover host runtime stays devnet/B1Se.
+// AgentFolio's escrow consumer runtime and advertised SATP surface are mainnet-aligned.
 const ADVERTISED_NETWORK = 'mainnet-beta';
 const ADVERTISED_ESCROW_PROGRAM_ID = 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C';
-const LEFTOVER_RUNTIME_NETWORK = 'devnet';
-const LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID = 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg';
-const HOST_ENV_SPLIT_NOTE = 'HXCU-vs-B1Se is a host env split (advertised SATP /api/satp/programs mainnet-beta HXCU vs leftover host runtime devnet B1Se), not a missing IDL';
+const LEFTOVER_RUNTIME_NETWORK = ADVERTISED_NETWORK;
+const LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID = ADVERTISED_ESCROW_PROGRAM_ID;
+const HOST_ENV_SPLIT_NOTE = 'AgentFolio escrow runtime and advertised SATP surface both use mainnet-beta HXCU; no B1Se runtime drift remains.';
 const READ_ONLY_CODE = 'SOLANA_IRYS_WRITES_READ_ONLY';
 const BOA_READ_ONLY_CODE = 'BOA_WRITES_READ_ONLY';
 const LIVE_ESCROW_READ_ONLY_CODE = 'LIVE_ESCROW_WRITES_READ_ONLY';
@@ -76,6 +76,7 @@ function liveEscrowGateStatus(env = process.env) {
     },
     verifiedRuntime: {
       network: LEFTOVER_RUNTIME_NETWORK,
+      programId: LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID,
       pdaDerive: 'verified',
     },
     runtimeNetwork: LEFTOVER_RUNTIME_NETWORK,
@@ -91,8 +92,8 @@ function liveEscrowGateStatus(env = process.env) {
       : killSwitchActive
         ? 'Live escrow writes are disabled by the escrow kill switch.'
         : requested && !ownerAuthorized
-          ? 'Devnet-safe escrow runtime smoke is verified; mainnet/live-funds escrow remains gated pending explicit Owner authorization.'
-          : 'Devnet-safe escrow runtime smoke is verified; mainnet/live-funds escrow remains gated pending security re-review.',
+          ? 'Mainnet escrow runtime identity is verified; live-funds escrow remains gated pending explicit Owner authorization.'
+          : 'Mainnet escrow runtime identity is verified; live-funds escrow remains gated pending security re-review.',
     enableWith: ENABLE_LIVE_ESCROW_ENV,
     killSwitchEnv: ESCROW_KILL_SWITCH_ENV,
   };
