@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 env:
-  SATP_SOURCE_COMMIT: "0bf088e5618f173dff7e0fba622bc2911212c52e"
+  SATP_SOURCE_COMMIT: "93fc6c0d86302cfe8b0d8c798ba2817d7eeace44"
   SOLANA_VERSION: "2.1.21"
   SBF_TOOLS_VERSION: "v1.52"
 

@@ -14,23 +14,28 @@ const EXPECTED = Object.freeze({
   programId: RECEIPT.program.programId,
   programData: RECEIPT.program.programData,
   upgradeAuthority: 'Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc',
-  upgradeTransaction: '3dKQibtuBon7f8dL9DSjsjCwLr1N9pw6pbgR1Kg69wTAnfwkA8RbKn4e7sqH39yhwwWEHkpWhhDxSG62DeBEsy1E',
-  upgradeSlot: 440327121,
-  upgradeTime: '2026-08-19T19:37:14.000Z',
+  upgradeTransaction: '21jwie1FpQGvjV5yFQ6ofgcKPzp3hrM2DKtLGeyQ4XVr2DQg5LYg7fqira9XSsUTTbfJBM9V8yY8Pe1fchDimkVx',
+  upgradeSlot: 441423817,
+  upgradeTime: '2026-08-24T15:28:18.000Z',
   allocatedBinaryLength: RECEIPT.deployedRuntime.allocatedBytes,
   allocatedBinarySha256: RECEIPT.deployedRuntime.allocatedSha256,
   trimmedBinaryLength: RECEIPT.deployedRuntime.trimmedBytes,
   trimmedBinarySha256: RECEIPT.deployedRuntime.trimmedSha256,
   publishedIdlAccount: RECEIPT.program.publishedIdlAccount,
+  publishedIdlAccountOwner: 'ProgM6JCCvbYkfKqJYHePx4xxSUSqJp7rh8Lyv7nk7S',
+  publishedIdlTransaction: '3nUp72KUkwtRbkKDjFBdg6X8qk85qJLwZLYn36xrwVmdNkbQ1RstQCaRzXHgFS58TE2nTacYimsscBTRJWbRgH1j',
+  publishedIdlTransactionSlot: 441423878,
+  publishedIdlTransactionTime: '2026-08-24T15:28:42.000Z',
   publishedIdlInflatedSha256: RECEIPT.publishedIdl.inflatedSha256,
-  sourceCommit: RECEIPT.source.commit,
+  publishedIdlInstructionCount: RECEIPT.publishedIdl.instructionCount,
+  sourceCommit: '93fc6c0d86302cfe8b0d8c798ba2817d7eeace44',
   sourceSha256: RECEIPT.source.sha256,
   sourceIdlSha256: RECEIPT.sourceIdl.sha256,
 });
 
 const LOADER = 'BPFLoaderUpgradeab1e11111111111111111111111';
 const PROGRAMDATA_HEADER_LENGTH = 45;
-const IDL_HEADER_LENGTH = 44;
+const IDL_METADATA_HEADER_LENGTH = 96;
 const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 const RPC_ATTEMPTS = 4;
 
@@ -167,6 +172,13 @@ const transaction = await rpc('getTransaction', [
   { commitment: 'confirmed', maxSupportedTransactionVersion: 0 },
 ]);
 if (!transaction) throw new Error(`upgrade transaction ${EXPECTED.upgradeTransaction} is absent`);
+const publishedIdlTransaction = await rpc('getTransaction', [
+  EXPECTED.publishedIdlTransaction,
+  { commitment: 'confirmed', maxSupportedTransactionVersion: 0 },
+]);
+if (!publishedIdlTransaction) {
+  throw new Error(`IDL transaction ${EXPECTED.publishedIdlTransaction} is absent`);
+}
 
 const derivedProgramData = encodeBase58(program.data.subarray(4, 36));
 const programDataSlot = Number(programData.data.readBigUInt64LE(4));
@@ -177,10 +189,15 @@ const allocatedPayloadChecks = allocatedPayloadInvariant(allocatedBinary, {
   length: EXPECTED.allocatedBinaryLength,
   sha256: EXPECTED.allocatedBinarySha256,
 });
-const inflatedIdlBytes = zlib.inflateSync(publishedIdlAccount.data.subarray(IDL_HEADER_LENGTH));
+const inflatedIdlBytes = zlib.inflateSync(
+  publishedIdlAccount.data.subarray(IDL_METADATA_HEADER_LENGTH),
+);
 const publishedIdl = JSON.parse(inflatedIdlBytes);
 const upgradeTransactionTime = Number.isInteger(transaction.blockTime)
   ? new Date(transaction.blockTime * 1000).toISOString()
+  : null;
+const publishedIdlTransactionTime = Number.isInteger(publishedIdlTransaction.blockTime)
+  ? new Date(publishedIdlTransaction.blockTime * 1000).toISOString()
   : null;
 
 const checks = {
@@ -199,13 +216,22 @@ const checks = {
   ...allocatedPayloadChecks,
   trimmedBinaryLengthMatches: trimmedBinary.length === EXPECTED.trimmedBinaryLength,
   trimmedBinarySha256Matches: sha256(trimmedBinary) === EXPECTED.trimmedBinarySha256,
+  publishedIdlAccountOwnerMatches:
+    publishedIdlAccount.owner === EXPECTED.publishedIdlAccountOwner,
   publishedIdlAddressMatches: publishedIdl.address === EXPECTED.programId,
   publishedIdlHashMatches: sha256(inflatedIdlBytes) === EXPECTED.publishedIdlInflatedSha256,
+  publishedIdlInstructionCountMatches:
+    (publishedIdl.instructions || []).length === EXPECTED.publishedIdlInstructionCount,
+  publishedIdlTransactionSucceeded: publishedIdlTransaction.meta?.err === null,
+  publishedIdlTransactionSlotMatches:
+    publishedIdlTransaction.slot === EXPECTED.publishedIdlTransactionSlot,
+  publishedIdlTransactionTimeMatches:
+    publishedIdlTransactionTime === EXPECTED.publishedIdlTransactionTime,
 };
 const runtimeCheckNames = Object.keys(checks);
 
 const evidence = {
-  label: 'escrow_v3_runtime_recert_ef7e4581',
+  label: 'escrow_v3_authoritative_runtime_refresh_20260824',
   observedAt: new Date().toISOString(),
   expected: EXPECTED,
   checks,
@@ -230,6 +256,11 @@ const evidence = {
   },
   publishedIdl: {
     account: EXPECTED.publishedIdlAccount,
+    accountOwner: publishedIdlAccount.owner,
+    transaction: EXPECTED.publishedIdlTransaction,
+    transactionSlot: publishedIdlTransaction.slot,
+    transactionBlockTime: publishedIdlTransactionTime,
+    transactionSucceeded: publishedIdlTransaction.meta?.err === null,
     inflatedLength: inflatedIdlBytes.length,
     inflatedSha256: sha256(inflatedIdlBytes),
     instructionNames: instructionNames(publishedIdl),

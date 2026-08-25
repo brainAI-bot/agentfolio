@@ -119,6 +119,7 @@ test('live escrow write gate requires explicit opt-in and honors kill switch', (
     assert.equal(gatedPayload.liveEscrow.advertisedNetwork, 'mainnet-beta');
     assert.equal(gatedPayload.liveEscrow.advertisedEscrowProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
     assert.match(gatedPayload.liveEscrow.hostEnvSplit, /host env split/);
+    assert.match(gatedPayload.liveEscrow.hostEnvSplit, /not a missing IDL/);
     assert.equal(gatedPayload.liveEscrow.mainnetLiveFundsCleared, false);
     assert.throws(
       () => assertLiveEscrowWriteEnabled('escrow release'),
