@@ -241,7 +241,8 @@ escrow may be used.
    `agent_delta = gross - treasury_delta`, and
    `escrow_delta = -gross`. The required verifier gates are
    `grossMeetsNonZeroFeeMinimum`, `treasuryDeltaPositive`,
-   `escrowDeltaMatchesGross`, `treasuryDeltaMatchesFee`, and
+   `escrowRemainedOpenWithoutRentClosure`, `escrowRawDeltaMatchesGross`,
+   `treasuryDeltaMatchesFee`, and
    `agentDeltaMatchesNet`; every gate must be `true`.
 5. Record instruction account order, program logs, signature, slot, block time,
    and pre/post balances in a GitHub/HQ-visible receipt.

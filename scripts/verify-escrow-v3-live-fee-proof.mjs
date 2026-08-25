@@ -246,7 +246,8 @@ function analyzeInstruction(
     grossMeetsNonZeroFeeMinimum: grossAmount !== null
       && grossAmount >= MIN_GROSS_FOR_NON_ZERO_FEE,
     treasuryDeltaPositive: BigInt(treasury.delta) > 0n,
-    escrowDeltaMatchesGross: grossAmount !== null && BigInt(escrow.delta) === -grossAmount,
+    escrowRemainedOpenWithoutRentClosure: BigInt(escrow.post) > 0n,
+    escrowRawDeltaMatchesGross: grossAmount !== null && BigInt(escrow.delta) === -grossAmount,
     treasuryDeltaMatchesFee: expectedTreasuryDelta !== null
       && BigInt(treasury.delta) === expectedTreasuryDelta,
     agentDeltaMatchesNet: expectedAgentDelta !== null
