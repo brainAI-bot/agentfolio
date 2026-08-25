@@ -414,7 +414,9 @@ function getEscrowV3ProvenanceReadback({
     escrowProgramId,
     artifactCommit: receiptValid ? provenanceReceipt.source.commit : null,
     sourceHash,
-    idlHash: sourceIdlHash,
+    // Public consumer IDL hash follows the packaged SATP interface. The
+    // independently pinned source/published hashes remain separate below.
+    idlHash: packaged.sha256 || sourceIdlHash,
     sourceIdlHash,
     publishedIdlHash,
     rebuiltArtifactHash: receiptValid ? provenanceReceipt.rebuild.sha256 : null,
