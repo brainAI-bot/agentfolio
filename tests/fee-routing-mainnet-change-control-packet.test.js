@@ -24,7 +24,7 @@ function instructionMap(idl) {
   return new Map(idl.instructions.map((instruction) => [instruction.name, instruction]));
 }
 
-test('packet pins the audited candidate and certified IDL hashes', () => {
+test('document pins the local reference candidate and certified IDL hashes', () => {
   assert.equal(
     sha256(sourcePath),
     'a713fb25815f724bde8bc0ed9eec0c104826fc0fb26bd3f608a6ed46096efd4c',
@@ -39,7 +39,7 @@ test('packet pins the audited candidate and certified IDL hashes', () => {
   );
 });
 
-test('packet rejects the tracked candidate because it removes live USDC surfaces', () => {
+test('document records why the local reference candidate cannot be deployed', () => {
   const certified = require(certifiedIdlPath);
   const candidate = require(candidateIdlPath);
   const certifiedNames = certified.instructions.map(({ name }) => name);
@@ -60,27 +60,26 @@ test('packet rejects the tracked candidate because it removes live USDC surfaces
   assert.match(packet, /Status: \*\*NO-GO for execution; audited preparation only\.\*\*/);
   assert.match(packet, /current-agentfolio-candidate: REJECTED-NONAUTHORITATIVE/);
   assert.match(packet, /SATP PR \[#160\]/);
-  assert.match(packet, /satp-pr-160-candidate: NO-GO-PENDING-CHECKS-REVIEW-OWNER/);
+  assert.match(packet, /satp-pr-160-candidate: NO-GO-ALLOCATION-EXTENSION-PACKET-OWNER/);
 });
 
-test('packet pins the authoritative SATP PR head and deployable artifact fingerprints', () => {
+test('document pins the authoritative SATP head and current blocked artifact fingerprints', () => {
   const packet = fs.readFileSync(packetPath, 'utf8');
 
   for (const fingerprint of [
-    '6ac1f10a354429d7f3f03098c926f103756b1b14',
-    '2930ca34bb36cc419f64b45cf2367896a93c19c5',
-    'd94957985c9fcd61cfcadbaadceaf81eb74fffddba26838726862a932e4bdd3c',
-    '31234c83c007d39616ca7002e38a087e9e5ef69c3a074d97211e501ffddae704',
+    'fd654ce5a33c68fee5ff8120040b607684f22246',
+    'a35568bc3926bd44d73680813bda0e8d5371705f',
+    '380b20d36f18253a5c382ec1abc4a1147a08092a9a42cdae25e5d954f41acd0a',
+    '27395415b6dc3d069d8a0a974613e647af1494590cbaff0a2658945a2bc4784a',
     '9bb7e2a441af653108b21360a8aa14daa9bd8d54eebbc5eef88e7f3de881ba10',
-    '5471b9fc45ed03bd9ddd468224c7002a77e664a1481d4c9bf9358283bc11a62b',
   ]) {
     assert.ok(packet.includes(fingerprint), `packet is missing fingerprint: ${fingerprint}`);
   }
-  assert.match(packet, /candidate fits with `1112` zero bytes/);
+  assert.match(packet, /candidate exceeds it by `3448` bytes/);
   assert.match(packet, /Any new commit invalidates the review request and approval packet/);
 });
 
-test('tracked fee reference binds both SOL routes to the immutable treasury', () => {
+test('local reference-only fee implementation binds both SOL routes to the immutable treasury', () => {
   const source = fs.readFileSync(sourcePath, 'utf8');
   const candidate = instructionMap(require(candidateIdlPath));
   const certified = instructionMap(require(certifiedIdlPath));
@@ -105,15 +104,17 @@ test('tracked fee reference binds both SOL routes to the immutable treasury', ()
   }
 });
 
-test('packet requires preservation, approval, rollback, and bounded proof gates', () => {
+test('document requires preservation, approval, rollback, and bounded proof gates', () => {
   const packet = fs.readFileSync(packetPath, 'utf8');
 
   for (const required of [
     'Preserve all five USDC instructions',
-    '--no-auto-extend',
+    'solana-cli 2.1.21',
+    'There is no valid write-window command at this revision',
     'independent brainShield verdict',
     'rollback allocated payload is `346856` bytes',
     'treasury_delta = floor(gross * 500 / 10000)',
+    'escrow_raw_delta = -gross',
     'program-upgrade: not performed',
     'roadmap-change: not performed',
   ]) {

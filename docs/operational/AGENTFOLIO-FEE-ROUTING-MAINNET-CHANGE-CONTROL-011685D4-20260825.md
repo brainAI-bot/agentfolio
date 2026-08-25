@@ -39,8 +39,8 @@ event layout, deadline enforcement, and error definitions. A mainnet upgrade
 from the AgentFolio tree would therefore be a broad program replacement, not a
 fee-routing patch.
 
-SATP PR [#160](https://github.com/brainAI-bot/satp/pull/160), exact head
-`6ac1f10a354429d7f3f03098c926f103756b1b14`, is now the authoritative
+SATP PR [#160](https://github.com/brainAI-bot/satp/pull/160), exact approved head
+`fd654ce5a33c68fee5ff8120040b607684f22246`, is now the authoritative
 delta-only candidate. It was built from the certified SATP lineage and preserves
 all 14 instruction names and discriminators, the `EscrowV3` account layout,
 existing error numbers, existing authority checks, and all five USDC routes.
@@ -96,13 +96,13 @@ outputs:
 
 | Item | SATP PR #160 exact candidate |
 | --- | --- |
-| PR head | `6ac1f10a354429d7f3f03098c926f103756b1b14` |
-| Build-source commit | `2930ca34bb36cc419f64b45cf2367896a93c19c5` |
-| Source SHA-256 | `d94957985c9fcd61cfcadbaadceaf81eb74fffddba26838726862a932e4bdd3c` |
+| PR head | `fd654ce5a33c68fee5ff8120040b607684f22246` |
+| Build-source commit | `a35568bc3926bd44d73680813bda0e8d5371705f` |
+| Source SHA-256 | `380b20d36f18253a5c382ec1abc4a1147a08092a9a42cdae25e5d954f41acd0a` |
 | Cargo.lock SHA-256 | `d98db19e0d86ca3248376d4857b150b240be05c4bc3a409d7cb638ce4d5d2237` |
-| Candidate SBF | `345744` bytes / `31234c83c007d39616ca7002e38a087e9e5ef69c3a074d97211e501ffddae704` |
-| Existing allocation | `346856` bytes; candidate fits with `1112` zero bytes |
-| Padded payload SHA-256 | `5471b9fc45ed03bd9ddd468224c7002a77e664a1481d4c9bf9358283bc11a62b` |
+| Candidate SBF | `350304` bytes / `27395415b6dc3d069d8a0a974613e647af1494590cbaff0a2658945a2bc4784a` |
+| Existing allocation | `346856` bytes; candidate exceeds it by `3448` bytes |
+| Capacity status | **NO-GO: separately reviewed bounded extension packet required before any buffer write** |
 | Generated IDL | `9bb7e2a441af653108b21360a8aa14daa9bd8d54eebbc5eef88e7f3de881ba10` |
 | Generated IDL compressed size | `3254` bytes within the recorded `6764`-byte payload capacity |
 | Immutable treasury | `FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be` |
@@ -139,17 +139,22 @@ the AgentFolio-local program is not copied over it. The audited scope is:
 
 PR #160 records the immutable source commit, source hash, Cargo lock hash,
 generated IDL hash, SBF hash and length, full local test receipt, capacity proof,
-and rollback hashes. The missing gates are its completed green GitHub check set,
-an independent brainShield verdict on exact head `6ac1f10a...`, and explicit
-Owner approval. Any new commit invalidates the review request and approval packet.
+and rollback hashes. Exact head `fd654ce5...` has green GitHub checks and an
+independent approval, but its artifact is `3448` bytes over the live allocation.
+The missing gates are a separately reviewed bounded ProgramData-extension packet,
+a dry run of that exact extension and upgrade sequence, and explicit Owner
+approval. Any new commit invalidates the review request and approval packet.
+The independent brainShield verdict must remain current for the exact artifact
+and for the later extension packet; approval of one does not imply approval of
+the other.
 
 ## Approval matrix and hard stops
 
 | Gate | Required evidence | Approver |
 | --- | --- | --- |
-| Delta audit | Exact PR #160 head `6ac1f10a...`; no unrelated logic or interface deletions | brainShield, independent of builder |
+| Delta audit | Exact PR #160 head `fd654ce5...`; no unrelated logic or interface deletions | brainShield, independent of builder |
 | Reproducible build | Two clean hosts produce the same trimmed SBF and IDL hashes | brainChain plus independent verifier |
-| Capacity | Candidate byte length is at most the current `346856` allocation | brainShield; otherwise abort and request a separate extension decision |
+| Capacity | Candidate is `350304` bytes, so a separately reviewed bounded extension plan and exact-command localnet/devnet dry run are mandatory | brainShield plus Owner; no buffer write before this gate |
 | Authority | Finalized readback still reports ProgramData `Fg1D...` and upgrade authority `Bq1ni...` | brainChain read-only evidence |
 | Change window | Exact source/SBF/IDL hashes, signer public identities, fee cap, validation cap, time window, and rollback hashes | Owner/Hani in HQ |
 | App freeze | Live escrow writes disabled before the program write and kept disabled through both canaries | AgentFolio operator |
@@ -163,8 +168,10 @@ discover, copy, print, generate, rotate, or take custody of an Owner key.
 
 ## Pre-write runbook
 
-These commands are templates for the later explicitly approved window. Values
-in angle brackets are deliberate hard stops, not defaults.
+The read-only commands below are templates for a later explicitly approved
+window. Values in angle brackets are deliberate hard stops, not defaults. The
+build and write toolchain is pinned to `solana-cli 2.1.21` (Agave source
+`8a085eeb`) and `anchor-cli 0.31.1`.
 
 ```sh
 export PROGRAM_ID=HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C
@@ -191,8 +198,10 @@ Required pre-write results:
 
 - rollback allocated payload is `346856` bytes with SHA-256
   `4f21da13659cbe99a606b408a5f1d3523c0e41de20538028939bbb1b54c3cc0d`;
-- candidate is exactly `345744` bytes with SHA-256
-  `31234c83c007d39616ca7002e38a087e9e5ef69c3a074d97211e501ffddae704`;
+- candidate is exactly `350304` bytes with SHA-256
+  `27395415b6dc3d069d8a0a974613e647af1494590cbaff0a2658945a2bc4784a`;
+- the current ProgramData allocation is exactly `346856` bytes, which is a hard
+  stop because it is `3448` bytes smaller than the candidate;
 - upgrade signer public key is exactly `Bq1ni...`;
 - fee payer is the separately approved limited operational identity and is not
   the upgrade authority or treasury;
@@ -200,34 +209,21 @@ Required pre-write results:
 - local/LiteSVM tests cover all 14 instructions and both fee paths without RPC
   writes.
 
-## Write window template
+## Write window hard stop
 
-Do not run this section from the current task. A future HQ approval must quote
-the exact candidate and rollback hashes and explicitly authorize these writes.
+There is no valid write-window command at this revision. The previously listed
+`solana program deploy --no-auto-extend --max-len 346856` invocation cannot
+accept the current `350304`-byte candidate. Solana CLI `2.1.21` exposes those
+flags, but a successful no-extension dry run for this exact artifact is
+impossible by construction; claiming one would be false evidence.
 
-```sh
-solana program deploy \
-  --url "$RPC_URL" \
-  --commitment finalized \
-  --program-id "$PROGRAM_ID" \
-  --upgrade-authority "$UPGRADE_AUTHORITY" \
-  --fee-payer "$FEE_PAYER" \
-  --no-auto-extend \
-  --max-len 346856 \
-  --output json \
-  "$CANDIDATE_SO"
-
-anchor idl upgrade \
-  --provider.cluster mainnet \
-  --provider.wallet "$UPGRADE_AUTHORITY" \
-  --filepath "$CANDIDATE_IDL" \
-  "$PROGRAM_ID"
-```
-
-Live escrow writes remain disabled between the program upgrade and successful
-IDL readback. If program confirmation is uncertain, stop and obtain finalized
-ProgramData readback before issuing any rollback or retry. Never blindly repeat
-an upgrade command.
+Do not write a buffer, extend ProgramData, deploy, or publish the IDL. A later
+packet must specify one bounded extension sequence, pin every resulting size and
+hash, and record a localnet or devnet dry run of the exact Solana CLI `2.1.21`
+commands before an Owner approval may reinstate a write template. Live escrow
+writes must remain disabled between any later program upgrade and successful IDL
+readback. If confirmation is uncertain, stop and obtain finalized ProgramData
+readback before any rollback or retry. Never blindly repeat an upgrade command.
 
 ## Bounded validation plan
 
@@ -240,10 +236,15 @@ escrow may be used.
 2. Invoke `release` against one canary for its full gross amount.
 3. Invoke `partial_release` against the second canary with an amount equal to
    that canary's full gross amount, so no residual user value remains.
-4. For each finalized signature, prove:
+4. For each finalized signature, prove the same acceptance math implemented by
+   `scripts/verify-escrow-v3-live-fee-proof.mjs`:
    `treasury_delta = floor(gross * 500 / 10000)`,
    `agent_delta = gross - treasury_delta`, and
-   `escrow_delta = -gross`, excluding rent closure from the settlement delta.
+   `escrow_raw_delta = -gross`. The audited `release` and `partial_release`
+   handlers do not close or reallocate the escrow account, so its post-balance
+   must remain non-zero and there is no rent-closure adjustment in either canary
+   transaction. Any escrow closure or rent effect fails proof instead of being
+   silently folded into the settlement delta.
 5. Record instruction account order, program logs, signature, slot, block time,
    and pre/post balances in a GitHub/HQ-visible receipt.
 6. Keep writes disabled until an independent reviewer verifies both receipts
@@ -274,7 +275,10 @@ not extend ProgramData, and do not rotate authority during this window.
 ## Post-change evidence required to close [#011685d4]
 
 - exact approved source commit and clean diff from SATP `93fc6c0d`;
-- candidate and finalized dumped runtime hashes and byte lengths;
+- candidate and finalized dumped runtime must both equal exactly `350304` bytes
+  and SHA-256 `27395415b6dc3d069d8a0a974613e647af1494590cbaff0a2658945a2bc4784a`;
+- finalized ProgramData allocation must equal the separately approved bounded
+  extension size, with unchanged ProgramData address and upgrade authority;
 - published IDL account, transaction, hash, and 14-instruction compatibility
   receipt;
 - unchanged ProgramData address and upgrade authority readback;
@@ -299,5 +303,5 @@ production-mutation: not performed
 live-write-enablement: not performed
 roadmap-change: not performed
 current-agentfolio-candidate: REJECTED-NONAUTHORITATIVE
-satp-pr-160-candidate: NO-GO-PENDING-CHECKS-REVIEW-OWNER
+satp-pr-160-candidate: NO-GO-ALLOCATION-EXTENSION-PACKET-OWNER
 ```

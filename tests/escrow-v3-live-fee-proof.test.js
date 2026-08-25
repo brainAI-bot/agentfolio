@@ -118,7 +118,7 @@ test('release proof binds gross to the Owner-approved amount and rejects a short
   assert.equal(unbound.checks.grossBoundToIndependentSource, false);
   assert.equal(unbound.proofPassed, false);
   assert.equal(shortPayout.grossAmountLamports, '100');
-  assert.equal(shortPayout.checks.escrowDeltaMatchesGross, false);
+  assert.equal(shortPayout.checks.escrowRawDeltaMatchesGross, false);
   assert.equal(shortPayout.checks.treasuryDeltaMatchesFee, false);
   assert.equal(shortPayout.checks.agentDeltaMatchesNet, false);
   assert.equal(shortPayout.proofPassed, false);
@@ -137,4 +137,20 @@ test('release proof accepts an exact non-zero split bound to the approved gross'
   assert.equal(result.proofPassed, true);
   assert.equal(result.expectedAgentDeltaLamports, '95');
   assert.equal(result.expectedTreasuryDeltaLamports, '5');
+});
+
+test('release proof rejects escrow closure instead of treating rent as settlement', async () => {
+  const { analyzeInstruction } = await import('../scripts/verify-escrow-v3-live-fee-proof.mjs');
+  const fixture = transactionFixture({ gross: 100, agentDelta: 95, treasuryDelta: 5 });
+  fixture.transaction.meta.postBalances[1] = 0;
+  const result = analyzeInstruction(
+    fixture.signatureRecord,
+    fixture.transaction,
+    fixture.instruction,
+    100n,
+  );
+
+  assert.equal(result.checks.escrowRemainedOpenWithoutRentClosure, false);
+  assert.equal(result.checks.escrowRawDeltaMatchesGross, false);
+  assert.equal(result.proofPassed, false);
 });
