@@ -225,7 +225,9 @@ test('GET /api/v3/escrow/health exposes packaged HXCU IDL next to observed B1Se 
     assert.equal(body.leftoverRuntimeNetwork, 'devnet');
     assert.equal(body.leftoverRuntimeProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
     assert.match(body.hostEnvSplit, /host env split/);
+    assert.match(body.hostEnvSplit, /not a missing IDL/);
     assert.equal(body.liveEscrow.runtimeNetwork, 'devnet');
+    assert.match(body.liveEscrow.hostEnvSplit, /not a missing IDL/);
     assert.equal(body.liveEscrow.advertisedNetwork, 'mainnet-beta');
     assert.equal(body.liveEscrow.advertisedEscrowProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
     assert.equal(body.liveEscrow.leftoverRuntimeProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');

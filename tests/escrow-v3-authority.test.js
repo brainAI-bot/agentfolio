@@ -192,6 +192,7 @@ test('escrow_v3 authority readback names the HQ-selected program id from SATP ma
   assert.match(readback.hostEnvSplit, /not a missing IDL/);
   assert.equal(readback.hostEnvSplit, HOST_ENV_SPLIT_NOTE);
   assert.match(readback.leftoverInventory.note, /host env split/);
+  assert.match(readback.leftoverInventory.note, /not a missing IDL/);
 });
 
 test('escrow_v3 source and IDL strict verifier confirms the pinned program id', () => {
@@ -531,6 +532,7 @@ test('packaged SATP escrow IDL carries mainnet HXCU and all 14 instructions', ()
   assert.equal(provenance.consumerInterfaceSource, 'satp-client-package');
   assert.notEqual(provenance.sourceHash, readback.packagedSatpEscrowIdl.sha256);
   assert.equal(provenance.idlHash, readback.packagedSatpEscrowIdl.sha256);
+  assert.equal(provenance.idlHash, AUTHORITY_IDL_SHA256);
   assert.equal(provenance.idlProgramId, AUTHORITY_PROGRAM_ID);
   assert.ok(!provenance.mismatches.includes('missing_packaged_idl'));
   assert.ok(!provenance.mismatches.includes('packaged_idl_program_id_mismatch'));
@@ -872,6 +874,7 @@ test('escrow health authority advertises mainnet HXCU next to observed leftover 
   assert.equal(readback.leftoverInventory.leftoverRuntimeNetwork, 'devnet');
   assert.equal(readback.leftoverInventory.leftoverRuntimeProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
   assert.match(readback.hostEnvSplit, /HXCU-vs-B1Se is a host env split/);
+  assert.match(readback.hostEnvSplit, /not a missing IDL/);
   assert.equal(readback.packagedSatpEscrowIdl.exists, true);
   assert.equal(typeof readback.packagedSatpEscrowIdl.fallback.used, 'boolean');
   assert.equal(readback.packagedSatpEscrowIdl.fallback.path, SATP_ESCROW_IDL_FALLBACK_PATH);
