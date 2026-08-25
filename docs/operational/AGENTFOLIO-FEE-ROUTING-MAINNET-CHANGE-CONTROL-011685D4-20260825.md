@@ -1,0 +1,275 @@
+# AgentFolio fee-routing mainnet change-control packet [#011685d4]
+
+Status: **NO-GO for execution; audited preparation only.** This packet does not
+authorize or perform a program upgrade, IDL write, transaction, keypair action,
+fee-payer funding, production mutation, live-write enablement, or roadmap flip.
+It prepares the exact gates for a later Owner-approved mainnet window.
+
+Prepared by: brainChain
+
+Date: 2026-08-25
+
+AgentFolio base: `814b8ed797d82cecbdad07766f5d946181105850`
+
+Live proof dependency: AgentFolio PR
+[#277](https://github.com/brainAI-bot/agentfolio/pull/277), commit
+`86877254dd6959e3b357d2b1b2ba9f1c190c4bb0`
+
+## Executive decision
+
+Do **not** deploy the fee-routing program currently tracked at
+`onchain/escrow_v3`. Although its SOL `release` and `partial_release` paths bind
+the fixed treasury and calculate a 5% fee, it is not a delta from the certified
+live source:
+
+| Surface | Certified live packet | AgentFolio tracked candidate | Verdict |
+| --- | --- | --- | --- |
+| Source lineage | SATP `93fc6c0d86302cfe8b0d8c798ba2817d7eeace44` | AgentFolio `814b8ed797d82cecbdad07766f5d946181105850` | Different implementations |
+| Instruction count | 14 | 9 | **NO-GO** |
+| SOL release accounts | `[escrow, client, agent]` | `[escrow, client, agent, treasury]` | Intended change, not yet deployed |
+| SOL partial-release accounts | `[escrow, client, agent]` | `[escrow, client, agent, treasury]` | Intended change, not yet deployed |
+| USDC surfaces | Five instructions present | All five absent | **Breaking deletion** |
+| Source SHA-256 | `f4696cc27c5e2ff6163a90f877fd4431efa8809d2f6ae4c792c3c7cd18193c4d` | `a713fb25815f724bde8bc0ed9eec0c104826fc0fb26bd3f608a6ed46096efd4c` | Not interchangeable |
+| IDL SHA-256 | `e8c142f27e225d8edc2f8f41e6fb698ebbb73f69d2fc078d5bf963234ebc8fa9` | `19ab1ae26b274499d1d014b69b318a49467189085c35cd51ef52b10dbece1262` | Not interchangeable |
+
+The five missing instructions are `create_usdc_escrow`, `release_usdc`,
+`partial_release_usdc`, `cancel_usdc`, and `resolve_dispute_usdc`. The two
+sources also differ in identity parsing, arbiter restrictions, account layout,
+event layout, deadline enforcement, and error definitions. A mainnet upgrade
+from the AgentFolio tree would therefore be a broad program replacement, not a
+fee-routing patch.
+
+The only admissible future target is a reviewed delta built from the exact
+certified SATP source commit. It must preserve all 14 instruction names and
+discriminators, the `EscrowV3` account layout, existing error numbers, existing
+authority checks, and all non-fee behavior.
+
+## Certified live baseline
+
+PR #277 recorded this finalized read-only baseline on 2026-08-25. The values
+must be re-read immediately before any later write; any mismatch aborts the
+window.
+
+| Item | Certified value |
+| --- | --- |
+| Cluster / genesis | `mainnet-beta` / Solana mainnet |
+| Program | `HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C` |
+| ProgramData | `Fg1DJyKX9CngiMihZxJY2zjaQ8T1PK5QuiVhNvJmeTqk` |
+| Upgrade authority | `Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc` |
+| Certified upgrade slot / transaction | `441423817` / `21jwie1FpQGvjV5yFQ6ofgcKPzp3hrM2DKtLGeyQ4XVr2DQg5LYg7fqira9XSsUTTbfJBM9V8yY8Pe1fchDimkVx` |
+| Allocated runtime | `346856` bytes / `4f21da13659cbe99a606b408a5f1d3523c0e41de20538028939bbb1b54c3cc0d` |
+| Trimmed runtime | `346841` bytes / `2f3bb05486f39d3f61a454905048b6e5732b798643405836b62a6d9795a20a6d` |
+| Published IDL account | `4zNAR5DGuWuUnEbwGb7FzEVUUCx2xKca2bmHCeVpjQCJ` |
+| Published IDL SHA-256 | `e8c142f27e225d8edc2f8f41e6fb698ebbb73f69d2fc078d5bf963234ebc8fa9` |
+| Published instruction count | 14 |
+
+The certified `release` and `partial_release` instructions have no treasury
+account and transfer the gross amount to the agent. No successful instance of
+either instruction exists in the complete 35-signature program history sampled
+by PR #277, so there is no pre-change treasury-delta evidence to preserve.
+
+## Candidate audit evidence
+
+The tracked AgentFolio candidate was assessed only as implementation reference,
+not as deployable provenance:
+
+| Check | Result |
+| --- | --- |
+| Strict source/IDL verifier | PASS: `status: verified` for repo-local program ID and IDL consistency |
+| Fee and authority test slice | PASS on Node `v22.23.2`: 44 passed, 0 failed |
+| SBF toolchain | `cargo 1.86.0`, `anchor-cli 0.31.1` |
+| Rebuilt candidate | `289216` bytes / `21dda9b5b0f95aba7f2560d58f2085de7ef8d0c9f1e3ac79f8ee506dcb9c6cf4` |
+| Source / tracked IDL | `a713fb25...efd4c` / `19ab1ae2...e1262` |
+| Compatibility audit | FAIL: 9 instructions versus 14 live; five USDC instructions removed |
+
+The local SBF build is deterministic against the previously recorded
+AgentFolio candidate hash, but reproducibility does not make the candidate
+compatible with the live program.
+
+## Required delta-only target
+
+A future implementation PR must start at SATP commit
+`93fc6c0d86302cfe8b0d8c798ba2817d7eeace44`, not copy the AgentFolio program
+over it. Its cumulative diff is limited to the following:
+
+1. Add an immutable 500-basis-point platform fee and bind the recipient to
+   `FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be`.
+2. Add the writable treasury account to SOL `release` and `partial_release`
+   without changing their instruction discriminators.
+3. Preserve all five USDC instructions. Either apply the same 5% split to
+   `release_usdc` and `partial_release_usdc` using a writable treasury token
+   account whose owner and mint are checked, or leave USDC settlement unchanged
+   behind an explicit product gate. The decision must be stated in the Owner
+   approval; silent deletion or implicit behavior is forbidden.
+4. Preserve gross accounting: `platform_fee = floor(gross * 500 / 10000)`,
+   `agent_amount = gross - platform_fee`, and
+   `agent_amount + platform_fee == gross` for every accepted amount.
+5. Preserve `EscrowV3` serialized size and field order, every existing account
+   constraint and signer requirement, all 14 instruction names and
+   discriminators, and every existing error number. New errors must be appended.
+6. Generate an IDL from that exact source tree and test old-client rejection,
+   new-client account order, wrong-treasury failure, overflow, rounding, dust,
+   full release, partial release, disputes, cancellation, and all USDC paths.
+
+The future implementation PR must record its immutable source commit, clean-tree
+status, source hash, Cargo lock hash, generated IDL hash, trimmed SBF hash and
+length, full test receipt, and independent brainShield verdict. This packet has
+no candidate hash to approve because the only built fee-routing artifact audited
+today failed compatibility review.
+
+## Approval matrix and hard stops
+
+| Gate | Required evidence | Approver |
+| --- | --- | --- |
+| Delta audit | Exact diff from SATP `93fc6c0d`; no unrelated logic or interface deletions | brainShield, independent of builder |
+| Reproducible build | Two clean hosts produce the same trimmed SBF and IDL hashes | brainChain plus independent verifier |
+| Capacity | Candidate byte length is at most the current `346856` allocation | brainShield; otherwise abort and request a separate extension decision |
+| Authority | Finalized readback still reports ProgramData `Fg1D...` and upgrade authority `Bq1ni...` | brainChain read-only evidence |
+| Change window | Exact source/SBF/IDL hashes, signer public identities, fee cap, validation cap, time window, and rollback hashes | Owner/Hani in HQ |
+| App freeze | Live escrow writes disabled before the program write and kept disabled through both canaries | AgentFolio operator |
+| Roadmap | Remains pending until both bounded routes and source/deployed/IDL equality are independently verified | Independent reviewer |
+
+Abort before signing if any field is blank, any hash differs, the working tree
+is dirty, the candidate exceeds the current allocation, the signer public key
+does not match the approved role, a required approval is stale or ambiguous, or
+the rollback artifact is not locally readable and hash-verified. No agent may
+discover, copy, print, generate, rotate, or take custody of an Owner key.
+
+## Pre-write runbook
+
+These commands are templates for the later explicitly approved window. Values
+in angle brackets are deliberate hard stops, not defaults.
+
+```sh
+export PROGRAM_ID=HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C
+export PROGRAM_DATA=Fg1DJyKX9CngiMihZxJY2zjaQ8T1PK5QuiVhNvJmeTqk
+export EXPECTED_AUTHORITY=Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc
+export TREASURY=FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be
+export RPC_URL=https://api.mainnet-beta.solana.com
+export CANDIDATE_SO=<absolute-reviewed-candidate-so>
+export CANDIDATE_IDL=<absolute-reviewed-candidate-idl>
+export UPGRADE_AUTHORITY=<owner-approved-signer-path-or-signer-url>
+export FEE_PAYER=<owner-approved-limited-fee-payer-path-or-signer-url>
+export ROLLBACK_SO=<absolute-prechange-program-dump>
+export ROLLBACK_IDL=<absolute-certified-prechange-idl>
+
+solana program show --url "$RPC_URL" "$PROGRAM_ID" --output json
+solana program dump --url "$RPC_URL" "$PROGRAM_ID" "$ROLLBACK_SO"
+shasum -a 256 "$ROLLBACK_SO" "$CANDIDATE_SO" "$CANDIDATE_IDL"
+wc -c "$ROLLBACK_SO" "$CANDIDATE_SO"
+solana-keygen pubkey "$UPGRADE_AUTHORITY"
+solana-keygen pubkey "$FEE_PAYER"
+```
+
+Required pre-write results:
+
+- rollback dump is `346841` bytes with SHA-256
+  `2f3bb05486f39d3f61a454905048b6e5732b798643405836b62a6d9795a20a6d`;
+- candidate size is no greater than `346856` bytes;
+- upgrade signer public key is exactly `Bq1ni...`;
+- fee payer is the separately approved limited operational identity and is not
+  the upgrade authority or treasury;
+- the final candidate source/SBF/IDL hashes equal the exact HQ approval; and
+- local/LiteSVM tests cover all 14 instructions and both fee paths without RPC
+  writes.
+
+## Write window template
+
+Do not run this section from the current task. A future HQ approval must quote
+the exact candidate and rollback hashes and explicitly authorize these writes.
+
+```sh
+solana program deploy \
+  --url "$RPC_URL" \
+  --commitment finalized \
+  --program-id "$PROGRAM_ID" \
+  --upgrade-authority "$UPGRADE_AUTHORITY" \
+  --fee-payer "$FEE_PAYER" \
+  --no-auto-extend \
+  --max-len 346856 \
+  --output json \
+  "$CANDIDATE_SO"
+
+anchor idl upgrade \
+  --provider.cluster mainnet \
+  --provider.wallet "$UPGRADE_AUTHORITY" \
+  --filepath "$CANDIDATE_IDL" \
+  "$PROGRAM_ID"
+```
+
+Live escrow writes remain disabled between the program upgrade and successful
+IDL readback. If program confirmation is uncertain, stop and obtain finalized
+ProgramData readback before issuing any rollback or retry. Never blindly repeat
+an upgrade command.
+
+## Bounded validation plan
+
+The Owner approval must name two dedicated canary escrows, their client signer
+owners, the agent recipient, a total lamport cap, and the exact gross amount.
+The gross amount must be large enough for a non-zero 5% fee. No existing user
+escrow may be used.
+
+1. Capture finalized pre-balances for both escrow PDAs, agent, and treasury.
+2. Invoke `release` against one canary for its full gross amount.
+3. Invoke `partial_release` against the second canary with an amount equal to
+   that canary's full gross amount, so no residual user value remains.
+4. For each finalized signature, prove:
+   `treasury_delta = floor(gross * 500 / 10000)`,
+   `agent_delta = gross - treasury_delta`, and
+   `escrow_delta = -gross`, excluding rent closure from the settlement delta.
+5. Record instruction account order, program logs, signature, slot, block time,
+   and pre/post balances in a GitHub/HQ-visible receipt.
+6. Keep writes disabled until an independent reviewer verifies both receipts
+   and the source == deployed binary == published IDL binding.
+
+If USDC fee routing is selected, repeat the same proof with dedicated token
+accounts and token deltas under a separately stated token cap. SOL canaries do
+not certify USDC behavior.
+
+## Rollback and containment
+
+Rollback triggers are: candidate runtime hash mismatch, authority drift, IDL
+publication failure, instruction/discriminator drift, either canary failure,
+any wrong recipient or delta, unexpected program error, or inability to produce
+finalized evidence within the approved window.
+
+Containment is immediate: keep app writes disabled, stop canaries, preserve all
+signatures/logs, and read finalized state. If the upgrade is confirmed and a
+rollback trigger remains, redeploy the pre-verified rollback SBF with the same
+`--no-auto-extend` authority/fee-payer controls, republish the certified rollback
+IDL, and verify the original runtime and IDL hashes. A rollback is itself a
+mainnet write and must be included in the original Owner approval; otherwise
+remain frozen and request emergency authority.
+
+Do not roll back an unconfirmed transaction, do not improvise a new build, do
+not extend ProgramData, and do not rotate authority during this window.
+
+## Post-change evidence required to close [#011685d4]
+
+- exact approved source commit and clean diff from SATP `93fc6c0d`;
+- candidate and finalized dumped runtime hashes and byte lengths;
+- published IDL account, transaction, hash, and 14-instruction compatibility
+  receipt;
+- unchanged ProgramData address and upgrade authority readback;
+- one finalized, bounded SOL `release` receipt with exact deltas;
+- one finalized, bounded SOL `partial_release` receipt with exact deltas;
+- USDC receipts if USDC fee routing is selected;
+- independent brainShield audit and independent evidence review;
+- app-write enablement decision made only after all gates pass; and
+- a later roadmap PR referencing the evidence document. No evidence means the
+  roadmap item remains pending.
+
+## Current-task safety readback
+
+```text
+program-upgrade: not performed
+idl-write: not performed
+transaction-submit: not performed
+keypair-access-or-change: not performed
+fee-payer-funding: not performed
+money-movement: not performed
+production-mutation: not performed
+live-write-enablement: not performed
+roadmap-change: not performed
+current-agentfolio-candidate: NO-GO
+```
