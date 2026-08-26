@@ -745,8 +745,6 @@ pub enum EscrowError {
     DeadlineNotExtended,
     #[msg("Amount exceeds remaining escrow balance")]
     AmountExceedsRemaining,
-    #[msg("Platform fee split does not conserve the gross release amount")]
-    FeeConservationViolation,
     #[msg("No releasable balance remains")]
     NothingToRelease,
     #[msg("Invalid trust requirement")]
@@ -761,6 +759,8 @@ pub enum EscrowError {
     AgentNotBorn,
     #[msg("Wrong platform treasury wallet")]
     WrongTreasury,
+    #[msg("Platform fee split does not conserve the gross release amount")]
+    FeeConservationViolation,
 }
 
 #[cfg(test)]
@@ -790,6 +790,8 @@ mod tests {
         assert!(calculate_platform_fee_split(0).is_err());
 
         let below_fee_boundary = calculate_platform_fee_split(19).unwrap();
+        // Accepted-for-now dust behavior, not a desired fee-routing invariant:
+        // integer division floors releases below 20 base units to a zero fee.
         assert_eq!(below_fee_boundary.agent_amount, 19);
         assert_eq!(below_fee_boundary.platform_fee, 0);
         assert_eq!(below_fee_boundary.total().unwrap(), 19);

@@ -80,6 +80,16 @@ test('escrow_v3 IDL requires treasury account for release builders', () => {
   }
 });
 
+test('escrow_v3 IDL preserves existing error codes and appends fee conservation', () => {
+  const idl = JSON.parse(fs.readFileSync(IDL_PATH, 'utf8'));
+  const errorsByCode = new Map(idl.errors.map((error) => [error.code, error.name]));
+
+  assert.equal(errorsByCode.get(6012), 'AmountExceedsRemaining');
+  assert.equal(errorsByCode.get(6013), 'NothingToRelease');
+  assert.equal(errorsByCode.get(6019), 'WrongTreasury');
+  assert.equal(errorsByCode.get(6020), 'FeeConservationViolation');
+});
+
 test('escrow_v3 HTTP release builders publish treasury and integer fee readback', () => {
   const routeSource = fs.readFileSync(ROUTE_PATH, 'utf8');
 
