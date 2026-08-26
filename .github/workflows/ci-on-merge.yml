@@ -30,6 +30,9 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.86.0
+
       - name: Install dependencies
         run: npm ci
 
@@ -40,7 +43,10 @@ jobs:
         run: npm run verify:satp-mainnet-programs
 
       - name: Run deep-audit regression ledger
-        run: node --test tests/deepaudit-af-surface-remediation.test.js tests/escrow-release-gate.test.js tests/escrow-v3-authority.test.js
+        run: node --test tests/deepaudit-af-surface-remediation.test.js tests/escrow-release-gate.test.js tests/escrow-v3-authority.test.js tests/escrow-v3-platform-fee.test.js
+
+      - name: Run AgentFolio escrow source-pin unit tests
+        run: cargo test --locked --manifest-path onchain/escrow_v3/Cargo.toml
 
       - name: Check committed diff hygiene
         run: git diff --check

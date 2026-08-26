@@ -200,6 +200,7 @@
     { "code": 6016, "name": "InvalidAgentIdentity", "msg": "Invalid SATP agent identity" },
     { "code": 6017, "name": "AgentVerificationTooLow", "msg": "Agent verification level is below escrow requirement" },
     { "code": 6018, "name": "AgentNotBorn", "msg": "Agent has not completed SATP birth requirement" },
-    { "code": 6019, "name": "WrongTreasury", "msg": "Wrong platform treasury wallet" }
+    { "code": 6019, "name": "WrongTreasury", "msg": "Wrong platform treasury wallet" },
+    { "code": 6020, "name": "FeeConservationViolation", "msg": "Platform fee split does not conserve the gross release amount" }
   ]
 }

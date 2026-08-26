@@ -48,15 +48,19 @@ test('escrow_v3 release and partial_release route platform fee on-chain to treas
   assert.match(source, /checked_mul\(PLATFORM_FEE_BPS\)/);
   assert.match(source, /\/ BPS_DENOMINATOR/);
   assert.match(source, /fn transfer_fee_split/);
+  assert.match(source, /fn validate_release_authorization\(/);
+  assert.match(source, /require_keys_eq!\(expected_client, client, EscrowError::Unauthorized\)/);
+  assert.match(source, /require_keys_eq!\(expected_agent, agent, EscrowError::WrongAgent\)/);
+  assert.match(source, /require_keys_eq!\(treasury, PLATFORM_TREASURY, EscrowError::WrongTreasury\)/);
 
   for (const fnSource of [release, partialRelease]) {
-    const treasuryBinding = fnSource.indexOf('require_keys_eq!(ctx.accounts.treasury.key(), PLATFORM_TREASURY, EscrowError::WrongTreasury)');
+    const authorization = fnSource.indexOf('validate_release_authorization(');
     const splitCalculation = fnSource.indexOf('calculate_platform_fee_split(');
     const splitTransfer = fnSource.indexOf('transfer_fee_split(');
-    assert.notEqual(treasuryBinding, -1);
+    assert.notEqual(authorization, -1);
     assert.notEqual(splitCalculation, -1);
     assert.notEqual(splitTransfer, -1);
-    assert.ok(treasuryBinding < splitTransfer);
+    assert.ok(authorization < splitTransfer);
     assert.ok(splitCalculation < splitTransfer);
   }
 });
@@ -74,6 +78,16 @@ test('escrow_v3 IDL requires treasury account for release builders', () => {
     );
     assert.equal(instruction.accounts.find((account) => account.name === 'treasury').writable, true);
   }
+});
+
+test('escrow_v3 IDL preserves existing error codes and appends fee conservation', () => {
+  const idl = JSON.parse(fs.readFileSync(IDL_PATH, 'utf8'));
+  const errorsByCode = new Map(idl.errors.map((error) => [error.code, error.name]));
+
+  assert.equal(errorsByCode.get(6012), 'AmountExceedsRemaining');
+  assert.equal(errorsByCode.get(6013), 'NothingToRelease');
+  assert.equal(errorsByCode.get(6019), 'WrongTreasury');
+  assert.equal(errorsByCode.get(6020), 'FeeConservationViolation');
 });
 
 test('escrow_v3 HTTP release builders publish treasury and integer fee readback', () => {
@@ -273,8 +287,12 @@ test('escrow_v3 release builders fail closed when treasury/config prerequisites 
   const partialRelease = sliceFunction(source, 'partial_release', 'cancel');
 
   for (const fnSource of [release, partialRelease]) {
-    assert.match(fnSource, /require_keys_eq!\(ctx\.accounts\.treasury\.key\(\), PLATFORM_TREASURY, EscrowError::WrongTreasury\)/);
+    assert.match(
+      fnSource,
+      /validate_release_authorization\([\s\S]*?escrow\.client,[\s\S]*?ctx\.accounts\.client\.key\(\),[\s\S]*?escrow\.agent,[\s\S]*?ctx\.accounts\.agent\.key\(\),[\s\S]*?ctx\.accounts\.treasury\.key\(\),[\s\S]*?\)\?;/,
+    );
   }
+  assert.match(source, /require_keys_eq!\(treasury, PLATFORM_TREASURY, EscrowError::WrongTreasury\)/);
   assert.match(routeSource, /throw satpProgramIdUnavailable\(`SATP V3 escrow program ID is not configured for \$\{network\}`\);/);
   assert.match(routeSource, /const treasury = new PublicKey\(PLATFORM_TREASURY_WALLET\);/);
   assert.match(routeSource, /\{ pubkey: treasury, isSigner: false, isWritable: true \}/);
