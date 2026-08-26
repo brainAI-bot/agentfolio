@@ -106,9 +106,13 @@ pub mod escrow_v3 {
             escrow.status == EscrowStatus::Active || escrow.status == EscrowStatus::WorkSubmitted,
             EscrowError::NotReleasable
         );
-        require_keys_eq!(escrow.client, ctx.accounts.client.key(), EscrowError::Unauthorized);
-        require_keys_eq!(escrow.agent, ctx.accounts.agent.key(), EscrowError::WrongAgent);
-        require_keys_eq!(ctx.accounts.treasury.key(), PLATFORM_TREASURY, EscrowError::WrongTreasury);
+        validate_release_authorization(
+            escrow.client,
+            ctx.accounts.client.key(),
+            escrow.agent,
+            ctx.accounts.agent.key(),
+            ctx.accounts.treasury.key(),
+        )?;
 
         let remaining = releasable_amount(escrow);
         require!(remaining > 0, EscrowError::NothingToRelease);
@@ -144,9 +148,13 @@ pub mod escrow_v3 {
             escrow.status == EscrowStatus::Active || escrow.status == EscrowStatus::WorkSubmitted,
             EscrowError::NotReleasable
         );
-        require_keys_eq!(escrow.client, ctx.accounts.client.key(), EscrowError::Unauthorized);
-        require_keys_eq!(escrow.agent, ctx.accounts.agent.key(), EscrowError::WrongAgent);
-        require_keys_eq!(ctx.accounts.treasury.key(), PLATFORM_TREASURY, EscrowError::WrongTreasury);
+        validate_release_authorization(
+            escrow.client,
+            ctx.accounts.client.key(),
+            escrow.agent,
+            ctx.accounts.agent.key(),
+            ctx.accounts.treasury.key(),
+        )?;
 
         let remaining = releasable_amount(escrow);
         require!(amount <= remaining, EscrowError::AmountExceedsRemaining);
@@ -314,10 +322,19 @@ fn releasable_amount(escrow: &Account<EscrowV3>) -> u64 {
     escrow.amount.saturating_sub(escrow.released_amount)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct FeeSplit {
+    gross_amount: u64,
     agent_amount: u64,
     platform_fee: u64,
+}
+
+impl FeeSplit {
+    fn total(self) -> Result<u64> {
+        self.agent_amount
+            .checked_add(self.platform_fee)
+            .ok_or(EscrowError::AmountExceedsRemaining.into())
+    }
 }
 
 fn calculate_platform_fee_split(amount: u64) -> Result<FeeSplit> {
@@ -330,10 +347,29 @@ fn calculate_platform_fee_split(amount: u64) -> Result<FeeSplit> {
         .checked_sub(platform_fee)
         .ok_or(EscrowError::AmountExceedsRemaining)?;
     require!(agent_amount > 0, EscrowError::NothingToRelease);
-    Ok(FeeSplit {
+    let fee_split = FeeSplit {
+        gross_amount: amount,
         agent_amount,
         platform_fee,
-    })
+    };
+    require!(
+        fee_split.total()? == amount,
+        EscrowError::AmountExceedsRemaining
+    );
+    Ok(fee_split)
+}
+
+fn validate_release_authorization(
+    expected_client: Pubkey,
+    client: Pubkey,
+    expected_agent: Pubkey,
+    agent: Pubkey,
+    treasury: Pubkey,
+) -> Result<()> {
+    require_keys_eq!(expected_client, client, EscrowError::Unauthorized);
+    require_keys_eq!(expected_agent, agent, EscrowError::WrongAgent);
+    require_keys_eq!(treasury, PLATFORM_TREASURY, EscrowError::WrongTreasury);
+    Ok(())
 }
 
 fn transfer_fee_split<'info>(
@@ -342,6 +378,10 @@ fn transfer_fee_split<'info>(
     treasury: &AccountInfo<'info>,
     fee_split: FeeSplit,
 ) -> Result<()> {
+    require!(
+        fee_split.total()? == fee_split.gross_amount,
+        EscrowError::AmountExceedsRemaining
+    );
     transfer_from_escrow(escrow, agent, fee_split.agent_amount)?;
     transfer_from_escrow(escrow, treasury, fee_split.platform_fee)?;
     Ok(())
@@ -719,4 +759,76 @@ pub enum EscrowError {
     AgentNotBorn,
     #[msg("Wrong platform treasury wallet")]
     WrongTreasury,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn full_release_fee_split_preserves_recipient_and_treasury_total() {
+        let split = calculate_platform_fee_split(1_000_000).unwrap();
+
+        assert_eq!(split.agent_amount, 950_000);
+        assert_eq!(split.platform_fee, 50_000);
+        assert_eq!(split.total().unwrap(), split.gross_amount);
+    }
+
+    #[test]
+    fn partial_release_fee_split_preserves_recipient_and_treasury_total() {
+        let split = calculate_platform_fee_split(250_000).unwrap();
+
+        assert_eq!(split.agent_amount, 237_500);
+        assert_eq!(split.platform_fee, 12_500);
+        assert_eq!(split.total().unwrap(), split.gross_amount);
+    }
+
+    #[test]
+    fn fee_split_handles_zero_and_rounding_boundaries() {
+        assert!(calculate_platform_fee_split(0).is_err());
+
+        let below_fee_boundary = calculate_platform_fee_split(19).unwrap();
+        assert_eq!(below_fee_boundary.agent_amount, 19);
+        assert_eq!(below_fee_boundary.platform_fee, 0);
+        assert_eq!(below_fee_boundary.total().unwrap(), 19);
+
+        let at_fee_boundary = calculate_platform_fee_split(20).unwrap();
+        assert_eq!(at_fee_boundary.agent_amount, 19);
+        assert_eq!(at_fee_boundary.platform_fee, 1);
+        assert_eq!(at_fee_boundary.total().unwrap(), 20);
+    }
+
+    #[test]
+    fn release_authorization_fails_closed_for_wrong_accounts() {
+        let client = Pubkey::new_from_array([1; 32]);
+        let agent = Pubkey::new_from_array([2; 32]);
+
+        assert!(
+            validate_release_authorization(client, client, agent, agent, PLATFORM_TREASURY).is_ok()
+        );
+        assert!(validate_release_authorization(
+            client,
+            Pubkey::new_from_array([3; 32]),
+            agent,
+            agent,
+            PLATFORM_TREASURY,
+        )
+        .is_err());
+        assert!(validate_release_authorization(
+            client,
+            client,
+            agent,
+            Pubkey::new_from_array([4; 32]),
+            PLATFORM_TREASURY,
+        )
+        .is_err());
+        assert!(validate_release_authorization(
+            client,
+            client,
+            agent,
+            agent,
+            Pubkey::new_from_array([5; 32]),
+        )
+        .is_err());
+    }
 }
