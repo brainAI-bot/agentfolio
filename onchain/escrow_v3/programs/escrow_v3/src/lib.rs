@@ -333,7 +333,7 @@ impl FeeSplit {
     fn total(self) -> Result<u64> {
         self.agent_amount
             .checked_add(self.platform_fee)
-            .ok_or(EscrowError::AmountExceedsRemaining.into())
+            .ok_or(EscrowError::FeeConservationViolation.into())
     }
 }
 
@@ -354,7 +354,7 @@ fn calculate_platform_fee_split(amount: u64) -> Result<FeeSplit> {
     };
     require!(
         fee_split.total()? == amount,
-        EscrowError::AmountExceedsRemaining
+        EscrowError::FeeConservationViolation
     );
     Ok(fee_split)
 }
@@ -380,7 +380,7 @@ fn transfer_fee_split<'info>(
 ) -> Result<()> {
     require!(
         fee_split.total()? == fee_split.gross_amount,
-        EscrowError::AmountExceedsRemaining
+        EscrowError::FeeConservationViolation
     );
     transfer_from_escrow(escrow, agent, fee_split.agent_amount)?;
     transfer_from_escrow(escrow, treasury, fee_split.platform_fee)?;
@@ -745,6 +745,8 @@ pub enum EscrowError {
     DeadlineNotExtended,
     #[msg("Amount exceeds remaining escrow balance")]
     AmountExceedsRemaining,
+    #[msg("Platform fee split does not conserve the gross release amount")]
+    FeeConservationViolation,
     #[msg("No releasable balance remains")]
     NothingToRelease,
     #[msg("Invalid trust requirement")]

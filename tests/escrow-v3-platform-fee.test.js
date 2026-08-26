@@ -277,8 +277,10 @@ test('escrow_v3 release builders fail closed when treasury/config prerequisites 
   const partialRelease = sliceFunction(source, 'partial_release', 'cancel');
 
   for (const fnSource of [release, partialRelease]) {
-    assert.match(fnSource, /validate_release_authorization\(/);
-    assert.match(fnSource, /ctx\.accounts\.treasury\.key\(\)/);
+    assert.match(
+      fnSource,
+      /validate_release_authorization\([\s\S]*?escrow\.client,[\s\S]*?ctx\.accounts\.client\.key\(\),[\s\S]*?escrow\.agent,[\s\S]*?ctx\.accounts\.agent\.key\(\),[\s\S]*?ctx\.accounts\.treasury\.key\(\),[\s\S]*?\)\?;/,
+    );
   }
   assert.match(source, /require_keys_eq!\(treasury, PLATFORM_TREASURY, EscrowError::WrongTreasury\)/);
   assert.match(routeSource, /throw satpProgramIdUnavailable\(`SATP V3 escrow program ID is not configured for \$\{network\}`\);/);
