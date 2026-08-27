@@ -172,6 +172,14 @@ test('escrow_v3 authority readback names the HQ-selected program id from SATP ma
   assert.equal(readback.packagedSatpEscrowIdl.matchesAuthoritativeSource, true);
   assert.equal(readback.packagedSatpEscrowIdl.instructionCount, 14);
   assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedInstructionCount, true);
+  assert.equal(readback.releaseFeeRouting.status, 'unsupported');
+  assert.equal(readback.releaseFeeRouting.supported, false);
+  assert.equal(readback.releaseFeeRouting.failClosed, true);
+  assert.equal(readback.releaseFeeRouting.requiredAccount, 'treasury');
+  assert.deepEqual(readback.releaseFeeRouting.routes.release.accounts, ['escrow', 'client', 'agent']);
+  assert.equal(readback.releaseFeeRouting.routes.release.treasuryAccountPresent, false);
+  assert.deepEqual(readback.releaseFeeRouting.routes.partial_release.accounts, ['escrow', 'client', 'agent']);
+  assert.equal(readback.releaseFeeRouting.routes.partial_release.treasuryAccountPresent, false);
   assert.equal(readback.status, 'verified');
   assert.equal(readback.releaseGate.liveEscrowWritesAllowed, false);
   assert.equal(readback.releaseGate.ownerAuthorizationRequired, true);

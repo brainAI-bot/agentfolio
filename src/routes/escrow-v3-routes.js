@@ -107,6 +107,11 @@ const ESCROW_V3_DISCRIMINATORS = {
   partialRelease: Buffer.from([20, 4, 101, 245, 53, 131, 213, 8]),
 };
 const ESCROW_V3_PROVENANCE_MISMATCH_CODE = 'ESCROW_V3_PROVENANCE_MISMATCH';
+const ESCROW_V3_FEE_ROUTING_UNSUPPORTED_CODE = 'ESCROW_V3_FEE_ROUTING_UNSUPPORTED';
+const ESCROW_V3_FEE_ROUTING_ROUTE_NAMES = new Map([
+  ['/release', 'release'],
+  ['/partial-release', 'partial_release'],
+]);
 
 function getSDK() {
   if (!sdkInstance && SATPV3SDK) {
@@ -143,6 +148,29 @@ function requireLiveEscrowWrites(req, res, next) {
     });
   }
   next();
+}
+
+function requireLiveFeeRoutingSupport(req, res, next) {
+  const instruction = ESCROW_V3_FEE_ROUTING_ROUTE_NAMES.get(req.path);
+  if (!instruction) return next();
+
+  const authorityReadback = getEscrowV3AuthorityReadback({ satpClient });
+  const feeRouting = authorityReadback.releaseFeeRouting;
+  const routeReadback = feeRouting?.routes?.[instruction];
+  if (feeRouting?.supported === true && routeReadback?.treasuryAccountWritable === true) {
+    return next();
+  }
+
+  return res.status(501).json({
+    ok: false,
+    code: ESCROW_V3_FEE_ROUTING_UNSUPPORTED_CODE,
+    error: 'The certified deployed SATP escrow runtime does not support audited on-chain platform fee routing for this release route; transaction construction is disabled.',
+    operation: `SATP V3 escrow ${req.method} ${req.path}`,
+    instruction,
+    network: NETWORK,
+    escrowProgramId: authorityReadback.expectedProgramId,
+    feeRouting,
+  });
 }
 
 function validatePublicKey(value, fieldName) {
@@ -568,7 +596,7 @@ router.get('/health', (req, res) => {
 
 router.use((req, res, next) => {
   if (req.method !== 'POST') return next();
-  return requireLiveEscrowWrites(req, res, next);
+  return requireLiveFeeRoutingSupport(req, res, () => requireLiveEscrowWrites(req, res, next));
 });
 
 // ── POST /create ───────────────────────────────────────────────────────────────
@@ -1321,6 +1349,7 @@ router.__test = {
   ESCROW_V3_ACCOUNT_DISCRIMINATOR,
   parseFullReleaseAmountReadback,
   parseFullReleaseAmountReadbackFromAccountInfo,
+  requireLiveFeeRoutingSupport,
   resolveEscrowAgentBinding,
   resolveEscrowAgentId,
   resolveProfileSolanaWallet,
