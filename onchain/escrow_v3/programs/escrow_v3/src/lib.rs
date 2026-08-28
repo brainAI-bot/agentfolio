@@ -134,6 +134,7 @@ pub mod escrow_v3 {
             amount: remaining,
             agent_amount: fee_split.agent_amount,
             platform_fee: fee_split.platform_fee,
+            platform_fee_bps: PLATFORM_FEE_BPS,
             treasury: PLATFORM_TREASURY,
         });
 
@@ -178,6 +179,7 @@ pub mod escrow_v3 {
             amount,
             agent_amount: fee_split.agent_amount,
             platform_fee: fee_split.platform_fee,
+            platform_fee_bps: PLATFORM_FEE_BPS,
             treasury: PLATFORM_TREASURY,
             remaining: escrow.amount.saturating_sub(escrow.released_amount),
         });
@@ -674,6 +676,7 @@ pub struct EscrowReleased {
     pub amount: u64,
     pub agent_amount: u64,
     pub platform_fee: u64,
+    pub platform_fee_bps: u64,
     pub treasury: Pubkey,
 }
 
@@ -684,6 +687,7 @@ pub struct EscrowPartiallyReleased {
     pub amount: u64,
     pub agent_amount: u64,
     pub platform_fee: u64,
+    pub platform_fee_bps: u64,
     pub treasury: Pubkey,
     pub remaining: u64,
 }
@@ -767,6 +771,15 @@ pub enum EscrowError {
 mod tests {
     use super::*;
 
+    fn assert_anchor_error(error: anchor_lang::error::Error, expected_name: &str) {
+        match error {
+            anchor_lang::error::Error::AnchorError(anchor_error) => {
+                assert_eq!(anchor_error.error_name, expected_name);
+            }
+            other => panic!("expected AnchorError {expected_name}, got {other:?}"),
+        }
+    }
+
     #[test]
     fn full_release_fee_split_preserves_recipient_and_treasury_total() {
         let split = calculate_platform_fee_split(1_000_000).unwrap();
@@ -787,7 +800,10 @@ mod tests {
 
     #[test]
     fn fee_split_handles_zero_and_rounding_boundaries() {
-        assert!(calculate_platform_fee_split(0).is_err());
+        assert_anchor_error(
+            calculate_platform_fee_split(0).unwrap_err(),
+            "ZeroAmount",
+        );
 
         let below_fee_boundary = calculate_platform_fee_split(19).unwrap();
         // Accepted-for-now dust behavior, not a desired fee-routing invariant:
@@ -800,6 +816,11 @@ mod tests {
         assert_eq!(at_fee_boundary.agent_amount, 19);
         assert_eq!(at_fee_boundary.platform_fee, 1);
         assert_eq!(at_fee_boundary.total().unwrap(), 20);
+
+        assert_anchor_error(
+            calculate_platform_fee_split(u64::MAX).unwrap_err(),
+            "AmountExceedsRemaining",
+        );
     }
 
     #[test]
@@ -810,29 +831,38 @@ mod tests {
         assert!(
             validate_release_authorization(client, client, agent, agent, PLATFORM_TREASURY).is_ok()
         );
-        assert!(validate_release_authorization(
-            client,
-            Pubkey::new_from_array([3; 32]),
-            agent,
-            agent,
-            PLATFORM_TREASURY,
-        )
-        .is_err());
-        assert!(validate_release_authorization(
-            client,
-            client,
-            agent,
-            Pubkey::new_from_array([4; 32]),
-            PLATFORM_TREASURY,
-        )
-        .is_err());
-        assert!(validate_release_authorization(
-            client,
-            client,
-            agent,
-            agent,
-            Pubkey::new_from_array([5; 32]),
-        )
-        .is_err());
+        assert_anchor_error(
+            validate_release_authorization(
+                client,
+                Pubkey::new_from_array([3; 32]),
+                agent,
+                agent,
+                PLATFORM_TREASURY,
+            )
+            .unwrap_err(),
+            "Unauthorized",
+        );
+        assert_anchor_error(
+            validate_release_authorization(
+                client,
+                client,
+                agent,
+                Pubkey::new_from_array([4; 32]),
+                PLATFORM_TREASURY,
+            )
+            .unwrap_err(),
+            "WrongAgent",
+        );
+        assert_anchor_error(
+            validate_release_authorization(
+                client,
+                client,
+                agent,
+                agent,
+                Pubkey::new_from_array([5; 32]),
+            )
+            .unwrap_err(),
+            "WrongTreasury",
+        );
     }
 }

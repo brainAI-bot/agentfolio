@@ -65,6 +65,33 @@ test('escrow_v3 release and partial_release route platform fee on-chain to treas
   }
 });
 
+test('escrow_v3 release events expose the configured fee rate for audit readback', () => {
+  const source = fs.readFileSync(SOURCE_PATH, 'utf8');
+  const release = sliceFunction(source, 'release', 'partial_release');
+  const partialRelease = sliceFunction(source, 'partial_release', 'cancel');
+  const releasedEvent = source.slice(
+    source.indexOf('pub struct EscrowReleased'),
+    source.indexOf('pub struct EscrowPartiallyReleased'),
+  );
+  const partiallyReleasedEvent = source.slice(
+    source.indexOf('pub struct EscrowPartiallyReleased'),
+    source.indexOf('pub struct EscrowCancelled'),
+  );
+
+  for (const eventSource of [releasedEvent, partiallyReleasedEvent]) {
+    assert.match(eventSource, /pub amount: u64,/);
+    assert.match(eventSource, /pub agent_amount: u64,/);
+    assert.match(eventSource, /pub platform_fee: u64,/);
+    assert.match(eventSource, /pub platform_fee_bps: u64,/);
+    assert.match(eventSource, /pub treasury: Pubkey,/);
+  }
+
+  for (const fnSource of [release, partialRelease]) {
+    assert.match(fnSource, /platform_fee_bps: PLATFORM_FEE_BPS,/);
+    assert.match(fnSource, /treasury: PLATFORM_TREASURY,/);
+  }
+});
+
 test('escrow_v3 IDL requires treasury account for release builders', () => {
   const idl = JSON.parse(fs.readFileSync(IDL_PATH, 'utf8'));
   const release = idl.instructions.find((ix) => ix.name === 'release');
