@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { BorshEventCoder } = require('@coral-xyz/anchor');
 const { PublicKey } = require('@solana/web3.js');
 
 const SOURCE_PATH = path.resolve(__dirname, '..', 'onchain/escrow_v3/programs/escrow_v3/src/lib.rs');
@@ -37,6 +38,37 @@ function createEscrowV3AccountData({
   return escrowAccountData;
 }
 
+function encodeIdlEvent(idl, eventName, values) {
+  const event = idl.events.find((candidate) => candidate.name === eventName);
+  const eventType = idl.types.find((candidate) => candidate.name === eventName);
+  assert.ok(event, `${eventName} event discriminator missing from IDL`);
+  assert.ok(eventType, `${eventName} field layout missing from IDL`);
+
+  const fields = eventType.type.fields.map((field) => {
+    if (field.type === 'pubkey') {
+      return new PublicKey(values[field.name]).toBuffer();
+    }
+    if (field.type === 'u64') {
+      const encoded = Buffer.alloc(8);
+      encoded.writeBigUInt64LE(BigInt(values[field.name]));
+      return encoded;
+    }
+    throw new Error(`unsupported audit event field type: ${JSON.stringify(field.type)}`);
+  });
+
+  return Buffer.concat([Buffer.from(event.discriminator), ...fields]).toString('base64');
+}
+
+function normalizeDecodedEvent(event) {
+  return {
+    name: event.name,
+    data: Object.fromEntries(Object.entries(event.data).map(([name, value]) => [
+      name,
+      value instanceof PublicKey ? value.toBase58() : value.toString(),
+    ])),
+  };
+}
+
 test('escrow_v3 release and partial_release route platform fee on-chain to treasury', () => {
   const source = fs.readFileSync(SOURCE_PATH, 'utf8');
   const release = sliceFunction(source, 'release', 'partial_release');
@@ -65,31 +97,53 @@ test('escrow_v3 release and partial_release route platform fee on-chain to treas
   }
 });
 
-test('escrow_v3 release events expose the configured fee rate for audit readback', () => {
-  const source = fs.readFileSync(SOURCE_PATH, 'utf8');
-  const release = sliceFunction(source, 'release', 'partial_release');
-  const partialRelease = sliceFunction(source, 'partial_release', 'cancel');
-  const releasedEvent = source.slice(
-    source.indexOf('pub struct EscrowReleased'),
-    source.indexOf('pub struct EscrowPartiallyReleased'),
-  );
-  const partiallyReleasedEvent = source.slice(
-    source.indexOf('pub struct EscrowPartiallyReleased'),
-    source.indexOf('pub struct EscrowCancelled'),
-  );
+test('escrow_v3 IDL decodes full and partial release audit events', () => {
+  const idl = JSON.parse(fs.readFileSync(IDL_PATH, 'utf8'));
+  const eventCoder = new BorshEventCoder(idl);
+  const common = {
+    escrow: ESCROW_PDA,
+    agent: AGENT_WALLET,
+    amount: 250_000n,
+    agent_amount: 237_500n,
+    platform_fee: 12_500n,
+    platform_fee_bps: 500n,
+    treasury: TREASURY_WALLET,
+  };
 
-  for (const eventSource of [releasedEvent, partiallyReleasedEvent]) {
-    assert.match(eventSource, /pub amount: u64,/);
-    assert.match(eventSource, /pub agent_amount: u64,/);
-    assert.match(eventSource, /pub platform_fee: u64,/);
-    assert.match(eventSource, /pub platform_fee_bps: u64,/);
-    assert.match(eventSource, /pub treasury: Pubkey,/);
-  }
-
-  for (const fnSource of [release, partialRelease]) {
-    assert.match(fnSource, /platform_fee_bps: PLATFORM_FEE_BPS,/);
-    assert.match(fnSource, /treasury: PLATFORM_TREASURY,/);
-  }
+  assert.deepEqual(
+    normalizeDecodedEvent(eventCoder.decode(encodeIdlEvent(idl, 'EscrowReleased', common))),
+    {
+      name: 'EscrowReleased',
+      data: {
+        escrow: ESCROW_PDA,
+        agent: AGENT_WALLET,
+        amount: '250000',
+        agent_amount: '237500',
+        platform_fee: '12500',
+        platform_fee_bps: '500',
+        treasury: TREASURY_WALLET,
+      },
+    },
+  );
+  assert.deepEqual(
+    normalizeDecodedEvent(eventCoder.decode(encodeIdlEvent(idl, 'EscrowPartiallyReleased', {
+      ...common,
+      remaining: 750_000n,
+    }))),
+    {
+      name: 'EscrowPartiallyReleased',
+      data: {
+        escrow: ESCROW_PDA,
+        agent: AGENT_WALLET,
+        amount: '250000',
+        agent_amount: '237500',
+        platform_fee: '12500',
+        platform_fee_bps: '500',
+        treasury: TREASURY_WALLET,
+        remaining: '750000',
+      },
+    },
+  );
 });
 
 test('escrow_v3 IDL requires treasury account for release builders', () => {
