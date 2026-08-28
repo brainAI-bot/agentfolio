@@ -390,7 +390,7 @@ test('legacy non-V3 escrow transaction builders cannot bypass identity-gated esc
   }
 });
 
-test('V3 release and refund-like POST paths stay live-funds gated before validation', async () => {
+test('V3 release builders fail closed when the certified runtime lacks treasury routing', async () => {
   const previousEnable = process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
   const previousKill = process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
   delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
@@ -403,7 +403,54 @@ test('V3 release and refund-like POST paths stay live-funds gated before validat
 
   try {
     const { port } = server.address();
-    for (const path of ['/release', '/partial-release', '/cancel', '/resolve']) {
+    for (const [path, instruction] of [
+      ['/release', 'release'],
+      ['/release/', 'release'],
+      ['/RELEASE', 'release'],
+      ['/partial-release', 'partial_release'],
+      ['/partial-release/', 'partial_release'],
+      ['/PARTIAL-RELEASE', 'partial_release'],
+    ]) {
+      const res = await fetch(`http://127.0.0.1:${port}/api/v3/escrow${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const body = await res.json();
+      assert.equal(res.status, 501);
+      assert.equal(body.code, 'ESCROW_V3_FEE_ROUTING_UNSUPPORTED');
+      assert.equal(body.instruction, instruction);
+      assert.equal(body.escrowProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
+      assert.equal(body.feeRouting.status, 'unsupported');
+      assert.equal(body.feeRouting.supported, false);
+      assert.equal(body.feeRouting.failClosed, true);
+      assert.equal(body.feeRouting.routes[instruction].treasuryAccountPresent, false);
+      assert.equal(body.transaction, undefined);
+      assert.match(body.error, /transaction construction is disabled/);
+    }
+  } finally {
+    if (previousEnable === undefined) delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
+    else process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = previousEnable;
+    if (previousKill === undefined) delete process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
+    else process.env.AGENTFOLIO_ESCROW_KILL_SWITCH = previousKill;
+    await close(server);
+  }
+});
+
+test('V3 non-release POST paths stay live-funds gated before validation', async () => {
+  const previousEnable = process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
+  const previousKill = process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
+  delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
+  delete process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
+
+  const app = express();
+  app.use(express.json());
+  app.use('/api/v3/escrow', require('../src/routes/escrow-v3-routes'));
+  const server = await listen(app);
+
+  try {
+    const { port } = server.address();
+    for (const path of ['/cancel', '/resolve']) {
       const res = await fetch(`http://127.0.0.1:${port}/api/v3/escrow${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

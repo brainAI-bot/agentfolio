@@ -37,6 +37,8 @@ const SATP_ESCROW_IDL_FALLBACK_PATH = 'third_party/satp/93fc6c0d/idls/v3/escrow_
 const SATP_ESCROW_IDL_FALLBACK_COMMIT = '93fc6c0d86302cfe8b0d8c798ba2817d7eeace44';
 const SATP_ESCROW_IDL_FALLBACK_BLOB_SHA = '3d3d675926b6d4e8259adde5783a18827a7a946f';
 const SATP_ESCROW_IDL_FALLBACK_SOURCE = 'repo-checked-fallback';
+const ESCROW_V3_FEE_ROUTING_ROUTES = ['release', 'partial_release'];
+const ESCROW_V3_FEE_ROUTING_TREASURY_ACCOUNT = 'treasury';
 
 function toPosixRelative(from, to) {
   const rel = path.relative(from, to);
@@ -114,6 +116,47 @@ function readJsonIfPresent(targetPath) {
   const fullPath = path.isAbsolute(targetPath) ? targetPath : path.join(REPO_ROOT, targetPath);
   if (!fs.existsSync(fullPath)) return null;
   return JSON.parse(fs.readFileSync(fullPath, 'utf8'));
+}
+
+function getEscrowV3ReleaseFeeRoutingReadback({
+  idl,
+  idlPath = null,
+  idlSha256 = null,
+  interfaceSource = null,
+} = {}) {
+  const instructions = Array.isArray(idl?.instructions) ? idl.instructions : [];
+  const routes = Object.fromEntries(ESCROW_V3_FEE_ROUTING_ROUTES.map((routeName) => {
+    const instruction = instructions.find(({ name }) => name === routeName);
+    const accounts = Array.isArray(instruction?.accounts)
+      ? instruction.accounts.map(({ name }) => name)
+      : [];
+    const treasury = Array.isArray(instruction?.accounts)
+      ? instruction.accounts.find(({ name }) => name === ESCROW_V3_FEE_ROUTING_TREASURY_ACCOUNT)
+      : null;
+
+    return [routeName, {
+      present: Boolean(instruction),
+      accounts,
+      treasuryAccountPresent: Boolean(treasury),
+      treasuryAccountWritable: treasury?.writable === true || treasury?.isMut === true,
+    }];
+  }));
+  const supported = ESCROW_V3_FEE_ROUTING_ROUTES.every((routeName) => (
+    routes[routeName].present
+      && routes[routeName].treasuryAccountPresent
+      && routes[routeName].treasuryAccountWritable
+  ));
+
+  return {
+    status: supported ? 'supported' : 'unsupported',
+    supported,
+    failClosed: !supported,
+    requiredAccount: ESCROW_V3_FEE_ROUTING_TREASURY_ACCOUNT,
+    interfaceSource,
+    idlPath,
+    idlSha256,
+    routes,
+  };
 }
 
 function loadEscrowV3ProvenanceReceipt() {
@@ -242,6 +285,12 @@ function getEscrowV3AuthorityReadback({
   });
   const packagedSatpEscrowIdl = fileInfo(resolvedIdl.usedPath, resolvedIdl.displayPath);
   const packagedSatpEscrowIdlJson = readJsonIfPresent(resolvedIdl.usedPath);
+  const releaseFeeRouting = getEscrowV3ReleaseFeeRoutingReadback({
+    idl: packagedSatpEscrowIdlJson,
+    idlPath: resolvedIdl.displayPath,
+    idlSha256: packagedSatpEscrowIdl.sha256 || null,
+    interfaceSource: resolvedIdl.source,
+  });
   const satpRuntime = readSatpRuntimeIds(satpClient);
 
   const trackedIdlAddress = trackedIdlJson?.address || null;
@@ -326,6 +375,7 @@ function getEscrowV3AuthorityReadback({
         used: resolvedIdl.fallbackUsed,
       },
     },
+    releaseFeeRouting,
     satpArtifact: {
       commit: getSatpClientCommit(),
       runtime: satpRuntime,
@@ -474,6 +524,7 @@ module.exports = {
   SATP_ESCROW_IDL_PACKAGE_PATH,
   SATP_ESCROW_IDL_PACKAGE_RELATIVE,
   getEscrowV3AuthorityReadback,
+  getEscrowV3ReleaseFeeRoutingReadback,
   getEscrowV3ProvenanceReadback,
   isValidEscrowV3ProvenanceReceipt,
   loadEscrowV3ProvenanceReceipt,
