@@ -151,7 +151,8 @@ function requireLiveEscrowWrites(req, res, next) {
 }
 
 function requireLiveFeeRoutingSupport(req, res, next) {
-  const instruction = ESCROW_V3_FEE_ROUTING_ROUTE_NAMES.get(req.path);
+  const routePath = String(req.path || '').toLowerCase().replace(/\/+$/, '') || '/';
+  const instruction = ESCROW_V3_FEE_ROUTING_ROUTE_NAMES.get(routePath);
   if (!instruction) return next();
 
   const authorityReadback = getEscrowV3AuthorityReadback({ satpClient });

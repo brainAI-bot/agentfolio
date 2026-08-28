@@ -405,7 +405,11 @@ test('V3 release builders fail closed when the certified runtime lacks treasury 
     const { port } = server.address();
     for (const [path, instruction] of [
       ['/release', 'release'],
+      ['/release/', 'release'],
+      ['/RELEASE', 'release'],
       ['/partial-release', 'partial_release'],
+      ['/partial-release/', 'partial_release'],
+      ['/PARTIAL-RELEASE', 'partial_release'],
     ]) {
       const res = await fetch(`http://127.0.0.1:${port}/api/v3/escrow${path}`, {
         method: 'POST',
