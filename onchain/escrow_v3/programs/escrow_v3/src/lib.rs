@@ -128,14 +128,11 @@ pub mod escrow_v3 {
         escrow.released_amount = escrow.amount;
         escrow.status = EscrowStatus::Released;
 
-        emit!(EscrowReleased {
-            escrow: escrow.key(),
-            agent: escrow.agent,
-            amount: remaining,
-            agent_amount: fee_split.agent_amount,
-            platform_fee: fee_split.platform_fee,
-            treasury: PLATFORM_TREASURY,
-        });
+        emit!(EscrowReleased::from_fee_split(
+            escrow.key(),
+            escrow.agent,
+            fee_split,
+        ));
 
         Ok(())
     }
@@ -172,15 +169,12 @@ pub mod escrow_v3 {
             escrow.status = EscrowStatus::Released;
         }
 
-        emit!(EscrowPartiallyReleased {
-            escrow: escrow.key(),
-            agent: escrow.agent,
-            amount,
-            agent_amount: fee_split.agent_amount,
-            platform_fee: fee_split.platform_fee,
-            treasury: PLATFORM_TREASURY,
-            remaining: escrow.amount.saturating_sub(escrow.released_amount),
-        });
+        emit!(EscrowPartiallyReleased::from_fee_split(
+            escrow.key(),
+            escrow.agent,
+            fee_split,
+            escrow.amount.saturating_sub(escrow.released_amount),
+        ));
 
         Ok(())
     }
@@ -674,7 +668,22 @@ pub struct EscrowReleased {
     pub amount: u64,
     pub agent_amount: u64,
     pub platform_fee: u64,
+    pub platform_fee_bps: u64,
     pub treasury: Pubkey,
+}
+
+impl EscrowReleased {
+    fn from_fee_split(escrow: Pubkey, agent: Pubkey, fee_split: FeeSplit) -> Self {
+        Self {
+            escrow,
+            agent,
+            amount: fee_split.gross_amount,
+            agent_amount: fee_split.agent_amount,
+            platform_fee: fee_split.platform_fee,
+            platform_fee_bps: PLATFORM_FEE_BPS,
+            treasury: PLATFORM_TREASURY,
+        }
+    }
 }
 
 #[event]
@@ -684,8 +693,29 @@ pub struct EscrowPartiallyReleased {
     pub amount: u64,
     pub agent_amount: u64,
     pub platform_fee: u64,
+    pub platform_fee_bps: u64,
     pub treasury: Pubkey,
     pub remaining: u64,
+}
+
+impl EscrowPartiallyReleased {
+    fn from_fee_split(
+        escrow: Pubkey,
+        agent: Pubkey,
+        fee_split: FeeSplit,
+        remaining: u64,
+    ) -> Self {
+        Self {
+            escrow,
+            agent,
+            amount: fee_split.gross_amount,
+            agent_amount: fee_split.agent_amount,
+            platform_fee: fee_split.platform_fee,
+            platform_fee_bps: PLATFORM_FEE_BPS,
+            treasury: PLATFORM_TREASURY,
+            remaining,
+        }
+    }
 }
 
 #[event]
@@ -767,6 +797,15 @@ pub enum EscrowError {
 mod tests {
     use super::*;
 
+    fn assert_anchor_error(error: anchor_lang::error::Error, expected_name: &str) {
+        match error {
+            anchor_lang::error::Error::AnchorError(anchor_error) => {
+                assert_eq!(anchor_error.error_name, expected_name);
+            }
+            other => panic!("expected AnchorError {expected_name}, got {other:?}"),
+        }
+    }
+
     #[test]
     fn full_release_fee_split_preserves_recipient_and_treasury_total() {
         let split = calculate_platform_fee_split(1_000_000).unwrap();
@@ -786,8 +825,38 @@ mod tests {
     }
 
     #[test]
+    fn release_event_builders_carry_the_configured_audit_fields() {
+        let escrow = Pubkey::new_from_array([6; 32]);
+        let agent = Pubkey::new_from_array([7; 32]);
+        let split = calculate_platform_fee_split(250_000).unwrap();
+
+        let released = EscrowReleased::from_fee_split(escrow, agent, split);
+        assert_eq!(released.escrow, escrow);
+        assert_eq!(released.agent, agent);
+        assert_eq!(released.amount, 250_000);
+        assert_eq!(released.agent_amount, 237_500);
+        assert_eq!(released.platform_fee, 12_500);
+        assert_eq!(released.platform_fee_bps, PLATFORM_FEE_BPS);
+        assert_eq!(released.treasury, PLATFORM_TREASURY);
+
+        let partially_released =
+            EscrowPartiallyReleased::from_fee_split(escrow, agent, split, 750_000);
+        assert_eq!(partially_released.escrow, escrow);
+        assert_eq!(partially_released.agent, agent);
+        assert_eq!(partially_released.amount, 250_000);
+        assert_eq!(partially_released.agent_amount, 237_500);
+        assert_eq!(partially_released.platform_fee, 12_500);
+        assert_eq!(partially_released.platform_fee_bps, PLATFORM_FEE_BPS);
+        assert_eq!(partially_released.treasury, PLATFORM_TREASURY);
+        assert_eq!(partially_released.remaining, 750_000);
+    }
+
+    #[test]
     fn fee_split_handles_zero_and_rounding_boundaries() {
-        assert!(calculate_platform_fee_split(0).is_err());
+        assert_anchor_error(
+            calculate_platform_fee_split(0).unwrap_err(),
+            "ZeroAmount",
+        );
 
         let below_fee_boundary = calculate_platform_fee_split(19).unwrap();
         // Accepted-for-now dust behavior, not a desired fee-routing invariant:
@@ -800,6 +869,11 @@ mod tests {
         assert_eq!(at_fee_boundary.agent_amount, 19);
         assert_eq!(at_fee_boundary.platform_fee, 1);
         assert_eq!(at_fee_boundary.total().unwrap(), 20);
+
+        assert_anchor_error(
+            calculate_platform_fee_split(u64::MAX).unwrap_err(),
+            "AmountExceedsRemaining",
+        );
     }
 
     #[test]
@@ -810,29 +884,38 @@ mod tests {
         assert!(
             validate_release_authorization(client, client, agent, agent, PLATFORM_TREASURY).is_ok()
         );
-        assert!(validate_release_authorization(
-            client,
-            Pubkey::new_from_array([3; 32]),
-            agent,
-            agent,
-            PLATFORM_TREASURY,
-        )
-        .is_err());
-        assert!(validate_release_authorization(
-            client,
-            client,
-            agent,
-            Pubkey::new_from_array([4; 32]),
-            PLATFORM_TREASURY,
-        )
-        .is_err());
-        assert!(validate_release_authorization(
-            client,
-            client,
-            agent,
-            agent,
-            Pubkey::new_from_array([5; 32]),
-        )
-        .is_err());
+        assert_anchor_error(
+            validate_release_authorization(
+                client,
+                Pubkey::new_from_array([3; 32]),
+                agent,
+                agent,
+                PLATFORM_TREASURY,
+            )
+            .unwrap_err(),
+            "Unauthorized",
+        );
+        assert_anchor_error(
+            validate_release_authorization(
+                client,
+                client,
+                agent,
+                Pubkey::new_from_array([4; 32]),
+                PLATFORM_TREASURY,
+            )
+            .unwrap_err(),
+            "WrongAgent",
+        );
+        assert_anchor_error(
+            validate_release_authorization(
+                client,
+                client,
+                agent,
+                agent,
+                Pubkey::new_from_array([5; 32]),
+            )
+            .unwrap_err(),
+            "WrongTreasury",
+        );
     }
 }

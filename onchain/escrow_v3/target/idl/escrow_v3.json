@@ -139,6 +139,107 @@
   ],
   "types": [
     {
+      "name": "DeadlineExtended",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "escrow", "type": "pubkey" },
+          { "name": "client", "type": "pubkey" },
+          { "name": "new_deadline", "type": "i64" }
+        ]
+      }
+    },
+    {
+      "name": "DisputeRaised",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "escrow", "type": "pubkey" },
+          { "name": "signer", "type": "pubkey" },
+          { "name": "reason_hash", "type": { "array": ["u8", 32] } }
+        ]
+      }
+    },
+    {
+      "name": "DisputeResolved",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "escrow", "type": "pubkey" },
+          { "name": "arbiter", "type": "pubkey" },
+          { "name": "agent_amount", "type": "u64" },
+          { "name": "client_amount", "type": "u64" }
+        ]
+      }
+    },
+    {
+      "name": "EscrowCancelled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "escrow", "type": "pubkey" },
+          { "name": "client", "type": "pubkey" },
+          { "name": "amount", "type": "u64" }
+        ]
+      }
+    },
+    {
+      "name": "EscrowCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "escrow", "type": "pubkey" },
+          { "name": "client", "type": "pubkey" },
+          { "name": "agent", "type": "pubkey" },
+          { "name": "agent_id_hash", "type": { "array": ["u8", 32] } },
+          { "name": "amount", "type": "u64" },
+          { "name": "nonce", "type": "u64" }
+        ]
+      }
+    },
+    {
+      "name": "EscrowPartiallyReleased",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "escrow", "type": "pubkey" },
+          { "name": "agent", "type": "pubkey" },
+          { "name": "amount", "type": "u64" },
+          { "name": "agent_amount", "type": "u64" },
+          { "name": "platform_fee", "type": "u64" },
+          { "name": "platform_fee_bps", "type": "u64" },
+          { "name": "treasury", "type": "pubkey" },
+          { "name": "remaining", "type": "u64" }
+        ]
+      }
+    },
+    {
+      "name": "EscrowReleased",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "escrow", "type": "pubkey" },
+          { "name": "agent", "type": "pubkey" },
+          { "name": "amount", "type": "u64" },
+          { "name": "agent_amount", "type": "u64" },
+          { "name": "platform_fee", "type": "u64" },
+          { "name": "platform_fee_bps", "type": "u64" },
+          { "name": "treasury", "type": "pubkey" }
+        ]
+      }
+    },
+    {
+      "name": "WorkSubmitted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "escrow", "type": "pubkey" },
+          { "name": "agent", "type": "pubkey" },
+          { "name": "work_hash", "type": { "array": ["u8", 32] } }
+        ]
+      }
+    },
+    {
       "name": "EscrowStatus",
       "type": {
         "kind": "enum",
