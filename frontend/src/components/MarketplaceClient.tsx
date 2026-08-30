@@ -53,6 +53,7 @@ interface PostJobForm {
 function timeAgo(dateStr: string): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
+  if (!Number.isFinite(then)) return "date unavailable";
   const diff = now - then;
   const mins = Math.floor(diff / 60000);
   if (mins < 60) return mins <= 1 ? "just now" : mins + "m ago";
@@ -498,6 +499,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
           const isMyJob = connected && publicKey && job.poster === publicKey.toBase58();
           const isMyAssignment = myProfileId && (job.assigneeId === myProfileId);
           const hasV3Escrow = !!job.v3EscrowPDA;
+          const poster = job.poster || "Unknown client";
 
           return (
             <div
@@ -542,7 +544,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                   <p className="text-xs mb-3 line-clamp-2" style={{ color: "var(--text-tertiary)" }}>{job.description}</p>
                   <div className="flex flex-wrap items-center gap-3 text-xs" style={{ fontFamily: "var(--font-mono)" }}>
                     <span style={{ color: "var(--text-secondary)" }}>
-                      Posted by <span style={{ color: "var(--text-primary)" }}>{job.poster.length > 20 ? `${job.poster.slice(0, 6)}...${job.poster.slice(-4)}` : job.poster}</span>
+                      Posted by <span style={{ color: "var(--text-primary)" }}>{poster.length > 20 ? `${poster.slice(0, 6)}...${poster.slice(-4)}` : poster}</span>
                     </span>
                     <span style={{ color: "var(--text-tertiary)" }}>·</span>
                     <span style={{ color: "var(--text-primary)" }}>{job.budget}</span>

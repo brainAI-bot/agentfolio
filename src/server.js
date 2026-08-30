@@ -13,6 +13,7 @@ const fs = require('fs');
 const { getDeployProvenance } = require('./lib/deploy-provenance');
 const { writeJsonAtomicSync } = require('./lib/atomic-file');
 const { sendBoaWriteGateResponse } = require('./lib/write-surface-gate');
+const { trustLoopbackProxyHop } = require('./lib/loopback-proxy');
 const {
   AGENTFOLIO_CORS_ORIGINS,
   agentFolioAliasRoutingMiddleware,
@@ -247,6 +248,17 @@ const publicBadgeLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// One limiter instance is deliberately shared by both canonical and
+// compatibility aliases so callers cannot multiply their budget by rotating
+// paths.
+const publicMarketplaceReadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many marketplace read requests, please retry later' },
+});
+
 // x402 Payment Layer
 const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
 const { HTTPFacilitatorClient } = require('@x402/core/server');
@@ -398,6 +410,11 @@ try {
 const app = express();
 const PORT = process.env.PORT || 3333;
 const NODE_ENV = process.env.NODE_ENV || 'development';
+
+// Production Caddy reaches this process over loopback. Trust only that first
+// hop so req.ip (and express-rate-limit) use the client address Caddy appends,
+// without accepting forwarded identities on direct non-loopback connections.
+app.set('trust proxy', trustLoopbackProxyHop);
 
 function sendWellKnownJson(res, filename) {
   const candidates = [
@@ -1705,6 +1722,175 @@ app.use((req, res, next) => {
 });
 
 // Marketplace (full job flow)
+function marketplaceProfileMap(d, profileIds) {
+  const ids = [...new Set(profileIds.filter(Boolean))];
+  if (!ids.length) return new Map();
+  const profiles = d.prepare(`SELECT id, name, wallet, wallets FROM profiles WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids);
+  return new Map(profiles.map(profile => {
+    let solanaWallet = profile.wallet || null;
+    try {
+      const wallets = typeof profile.wallets === 'string' ? JSON.parse(profile.wallets || '{}') : (profile.wallets || {});
+      if (wallets?.solana) solanaWallet = wallets.solana;
+    } catch {}
+    return [profile.id, profile.name || solanaWallet || profile.id];
+  }));
+}
+
+function marketplaceApplicationCounts(d, jobIds) {
+  if (!jobIds.length) return new Map();
+  const rows = d.prepare(`SELECT job_id, COUNT(*) AS count FROM applications WHERE job_id IN (${jobIds.map(() => '?').join(',')}) GROUP BY job_id`).all(...jobIds);
+  return new Map(rows.map(row => [row.job_id, Number(row.count) || 0]));
+}
+
+function mapSqliteMarketplaceJob(row, profileMap, applicationCounts) {
+  const budgetAmount = row.agreed_budget ?? row.budget_amount ?? 0;
+  const budgetCurrency = row.budget_currency || 'SOL';
+  let skills = [];
+  let attachments = [];
+  try { skills = JSON.parse(row.skills || '[]'); } catch {}
+  try { attachments = JSON.parse(row.attachments || '[]'); } catch {}
+  const applicationCount = applicationCounts.get(row.id) ?? (Number(row.application_count) || 0);
+  return {
+    ...row,
+    budget: `${budgetAmount} ${budgetCurrency}`,
+    budgetAmount,
+    budgetCurrency,
+    poster: profileMap.get(row.client_id) || row.client_id || 'Unknown client',
+    posterId: row.client_id,
+    clientId: row.client_id,
+    assignee: row.selected_agent_id ? (profileMap.get(row.selected_agent_id) || row.selected_agent_id) : null,
+    assigneeId: row.selected_agent_id || null,
+    selectedAgentId: row.selected_agent_id || null,
+    skills,
+    skills_required: skills,
+    attachments,
+    applicationCount,
+    proposals: applicationCount,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+const MARKETPLACE_LIST_DATABASE_BOUND = 1000;
+const marketplacePublicReadDatabases = new WeakSet();
+
+function ensureMarketplacePublicReadFunction(d) {
+  if (marketplacePublicReadDatabases.has(d)) return;
+  d.function(
+    'is_public_marketplace_job',
+    { deterministic: true },
+    (clientId, title, description) => (
+      isFixtureJob({ client_id: clientId, title, description }) ? 0 : 1
+    )
+  );
+  marketplacePublicReadDatabases.add(d);
+}
+
+function listSqliteMarketplaceJobs(req, res) {
+  try {
+    const d = profileStore.getDb();
+    ensureMarketplacePublicReadFunction(d);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+    const offset = (page - 1) * limit;
+    const stats = d.prepare(`
+      WITH bounded_jobs AS MATERIALIZED (
+        SELECT client_id, title, description
+        FROM jobs
+        ORDER BY datetime(created_at) DESC
+        LIMIT ?
+      )
+      SELECT
+        COUNT(*) AS scanned,
+        COALESCE(SUM(is_public_marketplace_job(client_id, title, description)), 0) AS total
+      FROM bounded_jobs
+    `).get(MARKETPLACE_LIST_DATABASE_BOUND);
+    const total = Number(stats.total) || 0;
+    const rows = offset >= MARKETPLACE_LIST_DATABASE_BOUND
+      ? []
+      : d.prepare(`
+          WITH bounded_jobs AS MATERIALIZED (
+            SELECT * FROM jobs
+            ORDER BY datetime(created_at) DESC
+            LIMIT ?
+          )
+          SELECT * FROM bounded_jobs
+          WHERE is_public_marketplace_job(client_id, title, description) = 1
+          ORDER BY datetime(created_at) DESC
+          LIMIT ? OFFSET ?
+        `).all(MARKETPLACE_LIST_DATABASE_BOUND, limit, offset);
+    const profileMap = marketplaceProfileMap(d, rows.flatMap(row => [row.client_id, row.selected_agent_id]));
+    const applicationCounts = marketplaceApplicationCounts(d, rows.map(row => row.id));
+    const jobs = rows.map(row => mapSqliteMarketplaceJob(row, profileMap, applicationCounts));
+    res.json({
+      jobs,
+      total,
+      page,
+      pages: Math.max(1, Math.ceil(total / limit)),
+      publicTraction: {
+        excludedFixtures: (Number(stats.scanned) || 0) - total,
+        databaseBound: MARKETPLACE_LIST_DATABASE_BOUND,
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}
+
+function loadSqliteMarketplaceApplications(d, jobId) {
+  const rows = d.prepare('SELECT * FROM applications WHERE job_id = ? ORDER BY datetime(created_at) DESC').all(jobId);
+  const profileMap = marketplaceProfileMap(d, rows.map(row => row.agent_id));
+  return rows.map(row => ({
+    id: row.id,
+    jobId: row.job_id,
+    applicantId: row.agent_id,
+    applicantProfileId: row.agent_id,
+    applicantName: profileMap.get(row.agent_id) || row.agent_id || 'Unknown applicant',
+    proposal: row.cover_message || '',
+    bidAmount: row.proposed_budget,
+    proposedTimeline: row.proposed_timeline,
+    status: row.status || 'pending',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+}
+
+function getSqliteMarketplaceJob(req, res) {
+  try {
+    const d = profileStore.getDb();
+    const row = d.prepare('SELECT * FROM jobs WHERE id = ?').get(req.params.id);
+    if (!row || isFixtureJob(row)) return res.status(404).json({ error: 'Job not found' });
+    const applications = loadSqliteMarketplaceApplications(d, row.id);
+    const profileMap = marketplaceProfileMap(d, [row.client_id, row.selected_agent_id]);
+    const applicationCounts = new Map([[row.id, applications.length]]);
+    res.json({ ...mapSqliteMarketplaceJob(row, profileMap, applicationCounts), applications });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}
+
+function getSqliteMarketplaceApplications(req, res) {
+  try {
+    const d = profileStore.getDb();
+    const job = d.prepare('SELECT * FROM jobs WHERE id = ?').get(req.params.id);
+    if (!job || isFixtureJob(job)) return res.status(404).json({ error: 'Job not found' });
+    const applications = loadSqliteMarketplaceApplications(d, job.id);
+    res.json({ applications, total: applications.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+}
+
+// D9 canonical reads: SQLite backs both the modern and compatibility paths.
+// The compatibility routes are registered before the legacy mutation module so
+// no public GET can fall through to the retired JSON-file read lane.
+app.get('/api/jobs', publicMarketplaceReadLimiter, listSqliteMarketplaceJobs);
+app.get('/api/jobs/:id', publicMarketplaceReadLimiter, getSqliteMarketplaceJob);
+app.get('/api/jobs/:id/applications', publicMarketplaceReadLimiter, getSqliteMarketplaceApplications);
+app.get('/api/marketplace/jobs', publicMarketplaceReadLimiter, listSqliteMarketplaceJobs);
+app.get('/api/marketplace/jobs/:id', publicMarketplaceReadLimiter, getSqliteMarketplaceJob);
+app.get('/api/marketplace/jobs/:id/applications', publicMarketplaceReadLimiter, getSqliteMarketplaceApplications);
+
 const marketplace = require('./marketplace');
 marketplace.registerRoutes(app);
 
@@ -1805,58 +1991,6 @@ app.post('/api/verify/agentmail/confirm', async (req, res) => {
 });
 
 // ===== END HARDENED VERIFICATION ENDPOINTS =====
-
-app.get('/api/jobs', (req, res) => {
-  try {
-    const d = profileStore.getDb();
-    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
-    const offset = (page - 1) * limit;
-    const total = d.prepare('SELECT COUNT(*) as c FROM jobs').get().c;
-    const rows = d.prepare('SELECT * FROM jobs ORDER BY datetime(created_at) DESC LIMIT ? OFFSET ?').all(limit, offset);
-
-    const profileIds = [...new Set(rows.flatMap(row => [row.client_id, row.selected_agent_id]).filter(Boolean))];
-    const profiles = profileIds.length
-      ? d.prepare(`SELECT id, wallet, wallets FROM profiles WHERE id IN (${profileIds.map(() => '?').join(',')})`).all(...profileIds)
-      : [];
-    const profileMap = new Map(profiles.map(profile => {
-      let solanaWallet = profile.wallet || null;
-      try {
-        const wallets = typeof profile.wallets === 'string' ? JSON.parse(profile.wallets || '{}') : (profile.wallets || {});
-        if (wallets?.solana) solanaWallet = wallets.solana;
-      } catch {}
-      return [profile.id, solanaWallet || profile.wallet || profile.id];
-    }));
-
-    const jobs = rows.map(row => {
-      const budgetAmount = row.agreed_budget ?? row.budget_amount ?? 0;
-      const budgetCurrency = row.budget_currency || 'USDC';
-      let skills = [];
-      let attachments = [];
-      try { skills = JSON.parse(row.skills || '[]'); } catch {}
-      try { attachments = JSON.parse(row.attachments || '[]'); } catch {}
-      return {
-        ...row,
-        budget: `${budgetAmount} ${budgetCurrency}`,
-        budgetAmount,
-        budgetCurrency,
-        poster: profileMap.get(row.client_id) || row.client_id,
-        posterId: row.client_id,
-        assignee: row.selected_agent_id ? (profileMap.get(row.selected_agent_id) || row.selected_agent_id) : null,
-        assigneeId: row.selected_agent_id || null,
-        skills,
-        skills_required: skills,
-        attachments,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      };
-    });
-
-    res.json({ jobs, total, page, pages: Math.max(1, Math.ceil(total / limit)) });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
 
 // Homepage
 app.get('/', (req, res) => {

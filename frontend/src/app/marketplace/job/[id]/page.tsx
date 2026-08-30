@@ -175,9 +175,6 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             escrowStatus={(job as any).escrowStatus}
           />
 
-          <div className="mt-4 text-[11px] px-3 py-2 rounded-lg" style={{ background: "var(--bg-primary)", fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-            API: POST /api/marketplace/jobs/{job.id}/apply
-          </div>
         </div>
       </div>
     </div>

@@ -44,7 +44,9 @@ const levelColors: Record<number, string> = {
 };
 
 function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
+  const createdAt = new Date(dateStr).getTime();
+  if (!Number.isFinite(createdAt)) return "date unavailable";
+  const diff = Date.now() - createdAt;
   const mins = Math.floor(diff / 60000);
   if (mins < 60) return mins <= 1 ? "just now" : `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
@@ -58,7 +60,7 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/marketplace/jobs/${jobId}`)
+    fetch(`${API_BASE}/api/jobs/${jobId}/applications`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data?.applications) {
