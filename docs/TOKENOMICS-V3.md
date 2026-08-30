@@ -74,7 +74,7 @@ All protocol revenue is split transparently:
 **Burn mechanics:**
 - Per-transaction — every escrow settlement triggers a buyback
 - On-chain verifiable — burn address + tx history public
-- Real-time tracker at agentfolio.bot/burn
+- Public burn tracker planned after $FOLIO launches
 
 ---
 

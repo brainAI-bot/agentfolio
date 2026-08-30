@@ -86,7 +86,7 @@ $FOLIO value is backed by protocol revenue. Every fee on AgentFolio triggers a b
 **Burn mechanics:**
 - Per-transaction — every escrow settlement triggers a burn
 - On-chain verifiable — burn address + tx history public
-- Real-time tracker on agentfolio.bot/burn
+- Public burn tracker planned after $FOLIO launches
 
 ---
 
