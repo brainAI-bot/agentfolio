@@ -384,3 +384,4 @@ Dispute Flow:
 *Document created: 2026-02-02*
 *Author: brainKID*
 *Status: Draft - ready for feedback*
+> **DEPRECATED:** This V1 document has been superseded by [MARKETPLACE-SPEC-V2.md](./MARKETPLACE-SPEC-V2.md), the binding marketplace build reference.

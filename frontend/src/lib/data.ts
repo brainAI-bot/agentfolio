@@ -45,8 +45,7 @@ async function preloadOnChainIdentities(profiles: RawProfile[]) {
 }
 
 const PROFILES_DIR = "/home/ubuntu/agentfolio/data/profiles";
-const JOBS_DIR = "/home/ubuntu/agentfolio/data/marketplace/jobs";
-const DELIVERABLES_DIR = "/home/ubuntu/agentfolio/data/marketplace/deliverables";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
 // Pre-warm V3 cache on module load (runs once at server startup)
 if (typeof (globalThis as any).__v3WarmupDone === 'undefined') {
   (globalThis as any).__v3WarmupDone = true;
@@ -87,48 +86,9 @@ interface RawProfile {
   unclaimed?: boolean;
 }
 
-interface RawJob {
-  id: string;
-  clientId: string;
-  title: string;
-  description: string;
-  category: string;
-  skills: string[];
-  budgetType: string;
-  budgetAmount: number;
-  budgetCurrency: string;
-  budgetMax: number | null;
-  timeline: string | null;
-  deadline?: string | null;
-  status: string;
-  attachments: any[];
-  requirements: string;
-  createdAt: string;
-  updatedAt: string;
-  expiresAt: string | null;
-  selectedAgentId: string | null;
-  applicationCount: number;
-  viewCount: number;
-  escrowId: string | null;
-  escrowRequired: boolean;
-  escrowFunded: boolean;
-  depositConfirmedAt?: string | null;
-  selectedAt?: string | null;
-  agreedBudget?: number | null;
-  agreedTimeline?: string | null;
-  fundsLocked?: boolean;
-  completedAt?: string | null;
-  completionNote?: string | null;
-  fundsReleased?: boolean;
-  deliverableId?: string;
-  acceptedApplicant?: string;
-}
-
 // Cache for performance (revalidates every 60 seconds)
 let _agentsCache: Agent[] | null = null;
 let _agentsCacheTime = 0;
-let _jobsCache: Job[] | null = null;
-let _jobsCacheTime = 0;
 const CACHE_TTL_MS = 5_000; // Reduced from 60s for faster profile availability // 60 seconds
 
 function calcTrustScore(p: RawProfile): number {
@@ -299,77 +259,41 @@ function loadAllProfiles(): Agent[] {
   }
 }
 
-function loadAllJobs(): Job[] {
-  if (_jobsCache && (Date.now() - _jobsCacheTime < CACHE_TTL_MS)) return _jobsCache;
-  try {
-    const files = fs.readdirSync(JOBS_DIR).filter(f => f.endsWith(".json"));
-    const jobs: Job[] = [];
-    // Load agent names for poster lookup
-    const agents = loadAllProfiles();
-    const agentMap = new Map(agents.map(a => [a.id, a.name]));
-
-    for (const file of files) {
-      try {
-        const raw = JSON.parse(fs.readFileSync(path.join(JOBS_DIR, file), "utf-8")) as RawJob;
-        const posterName = agentMap.get(raw.clientId) || raw.clientId;
-        const assigneeName = raw.selectedAgentId ? (agentMap.get(raw.selectedAgentId) || raw.selectedAgentId) : undefined;
-
-        const statusMap: Record<string, Job["status"]> = {
-          open: "open",
-          draft: "open",
-          agent_accepted: "in_progress",
-          work_submitted: "in_progress",
-          in_progress: "in_progress",
-          completed: "completed",
-          disputed: "disputed",
-          cancelled: "open",
-        };
-
-        const escrowStatus: Job["escrowStatus"] = raw.fundsReleased ? "released" :
-          raw.fundsLocked ? "locked" :
-          raw.escrowFunded ? "locked" :
-          "ready";
-
-        jobs.push({
-          id: raw.id,
-          title: raw.title,
-          description: raw.description,
-          poster: posterName,
-          posterAvatar: "",
-          budget: `${raw.budgetAmount} ${raw.budgetCurrency}`,
-          skills: Array.isArray(raw.skills) ? raw.skills.filter((skill): skill is string => typeof skill === "string" && skill.length > 0) : [],
-          status: statusMap[raw.status] || "open",
-          escrowStatus,
-          proposals: raw.applicationCount,
-          deadline: (raw.timeline || raw.deadline || "Flexible").replace(/_/g, " "),
-          assignee: assigneeName,
-          assigneeId: raw.selectedAgentId || raw.acceptedApplicant || undefined,
-          clientId: raw.clientId,
-          ...(() => {
-            if (raw.deliverableId) {
-              try {
-                const dlv = JSON.parse(fs.readFileSync(path.join(DELIVERABLES_DIR, raw.deliverableId + ".json"), "utf-8"));
-                return {
-                  deliverableId: dlv.id,
-                  deliverableDescription: dlv.description,
-                  deliverableStatus: dlv.status,
-                  deliverableSubmittedAt: dlv.submittedAt,
-                };
-              } catch { return {}; }
-            }
-            return {};
-          })(),
-          createdAt: raw.createdAt,
-        });
-      } catch { /* skip */ }
-    }
-    jobs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    _jobsCache = jobs;
-    _jobsCacheTime = Date.now();
-    return jobs;
-  } catch {
-    return [];
-  }
+function mapApiJob(raw: any): Job {
+  const statusMap: Record<string, Job["status"]> = {
+    open: "open",
+    draft: "open",
+    awarded: "in_progress",
+    agent_accepted: "in_progress",
+    submitted: "in_progress",
+    work_submitted: "in_progress",
+    in_progress: "in_progress",
+    approved: "completed",
+    released: "completed",
+    closed: "completed",
+    completed: "completed",
+    disputed: "disputed",
+  };
+  const amount = Number(raw.budgetAmount ?? raw.budget_amount ?? raw.agreed_budget ?? 0);
+  const createdAt = raw.createdAt || raw.created_at;
+  const applicationCount = Number(raw.applicationCount ?? raw.application_count ?? raw.proposals ?? 0);
+  return {
+    id: String(raw.id || "unknown-job"),
+    title: String(raw.title || "Untitled job"),
+    description: String(raw.description || "No description provided."),
+    poster: String(raw.poster || raw.clientId || raw.client_id || "Unknown client"),
+    posterAvatar: "",
+    budget: `${Number.isFinite(amount) ? amount : 0} SOL`,
+    skills: Array.isArray(raw.skills) ? raw.skills.filter((skill: unknown): skill is string => typeof skill === "string" && skill.length > 0) : [],
+    status: statusMap[raw.status] || "open",
+    escrowStatus: raw.funds_released || raw.fundsReleased ? "released" : raw.funds_locked || raw.escrow_funded || raw.escrowFunded ? "locked" : "ready",
+    proposals: Number.isFinite(applicationCount) ? applicationCount : 0,
+    deadline: String(raw.timeline || raw.deadline || "Flexible").replace(/_/g, " "),
+    assignee: raw.assignee || raw.selectedAgentId || raw.selected_agent_id || undefined,
+    assigneeId: raw.assigneeId || raw.selectedAgentId || raw.selected_agent_id || undefined,
+    clientId: raw.clientId || raw.client_id || undefined,
+    createdAt: createdAt && Number.isFinite(new Date(createdAt).getTime()) ? createdAt : new Date(0).toISOString(),
+  };
 }
 
 export function getAllAgents(): Agent[] {
@@ -429,12 +353,26 @@ export function getTopVerifiedAgents(limit = 6): Agent[] {
     .slice(0, limit);
 }
 
-export function getAllJobs(): Job[] {
-  return loadAllJobs();
+export async function getAllJobs(): Promise<Job[]> {
+  try {
+    const response = await fetch(`${API_BASE}/api/jobs?limit=100`, { cache: "no-store" });
+    if (!response.ok) return [];
+    const payload = await response.json();
+    const rows = Array.isArray(payload?.jobs) ? payload.jobs : [];
+    return rows.map(mapApiJob);
+  } catch {
+    return [];
+  }
 }
 
-export function getJob(id: string): Job | undefined {
-  return loadAllJobs().find(j => j.id === id);
+export async function getJob(id: string): Promise<Job | undefined> {
+  try {
+    const response = await fetch(`${API_BASE}/api/jobs/${encodeURIComponent(id)}`, { cache: "no-store" });
+    if (!response.ok) return undefined;
+    return mapApiJob(await response.json());
+  } catch {
+    return undefined;
+  }
 }
 
 export function getActivityFeed() {
