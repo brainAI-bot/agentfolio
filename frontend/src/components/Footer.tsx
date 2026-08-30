@@ -29,6 +29,7 @@ export function Footer() {
                 { href: "/", label: "Directory" },
                 { href: "/marketplace", label: "Marketplace" },
                 { href: "/leaderboard", label: "Leaderboard" },
+                { href: "/gallery", label: "Gallery" },
                 { href: "/stats", label: "Stats" },
               ].map((link) => (
                 <li key={link.href}>
