@@ -24,6 +24,7 @@ try { addActivity = require('./profile-store').addActivity; } catch { addActivit
 const bs58 = bs58Module.default || bs58Module;
 const DATA_DIR = process.env.MARKETPLACE_DATA_DIR || path.join(__dirname, '..', 'data', 'marketplace');
 const SAFE_JOB_ID_RE = /^job_[A-Za-z0-9_-]{1,80}$/;
+const SAFE_APPLICATION_ID_RE = /^app_[A-Za-z0-9_-]{1,80}$/;
 const SATP_IDENTITY_PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq');
 const marketplaceMutationLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -35,6 +36,10 @@ const marketplaceMutationLimiter = rateLimit({
 
 function validateJobId(jobId) {
   return typeof jobId === 'string' && SAFE_JOB_ID_RE.test(jobId);
+}
+
+function validateApplicationId(applicationId) {
+  return typeof applicationId === 'string' && SAFE_APPLICATION_ID_RE.test(applicationId);
 }
 
 function safeMarketplacePath(kind, id) {
@@ -59,6 +64,56 @@ function safeJobReviewPath(jobId) {
     throw new Error('Invalid job id');
   }
   return safeMarketplacePath('reviews', jobId);
+}
+
+function safeApplicationPath(applicationId) {
+  if (!validateApplicationId(applicationId)) {
+    throw new Error('Invalid application id');
+  }
+  return safeMarketplacePath('applications', applicationId);
+}
+
+function normalizeStringList(value, maxItems = 10) {
+  if (value === undefined || value === null || value === '') return [];
+  if (!Array.isArray(value)) return null;
+  const normalized = value.map((item) => typeof item === 'string' ? item.trim() : null);
+  if (normalized.some((item) => !item) || normalized.length > maxItems) return null;
+  return [...new Set(normalized)];
+}
+
+function parseApplicationPayload(body = {}, job = {}) {
+  const coverMessage = typeof (body.coverMessage ?? body.proposal) === 'string'
+    ? (body.coverMessage ?? body.proposal).trim()
+    : '';
+  const proposedTimeline = typeof body.proposedTimeline === 'string'
+    ? body.proposedTimeline.trim()
+    : (job.timeline || 'flexible');
+  const rawBudget = body.proposedBudget ?? body.bidAmount ?? job.budgetAmount ?? job.budget;
+  const proposedBudget = Number(rawBudget);
+  const portfolioItems = normalizeStringList(body.portfolioItems);
+
+  if (coverMessage.length < 10 || coverMessage.length > 5000) {
+    return { error: 'coverMessage must be between 10 and 5000 characters' };
+  }
+  if (!proposedTimeline || proposedTimeline.length > 80) {
+    return { error: 'proposedTimeline must be between 1 and 80 characters' };
+  }
+  if (!Number.isFinite(proposedBudget) || proposedBudget <= 0) {
+    return { error: 'proposedBudget must be a positive number' };
+  }
+  if (portfolioItems === null) {
+    return { error: 'portfolioItems must be an array of at most 10 non-empty strings' };
+  }
+
+  return { coverMessage, proposedTimeline, proposedBudget, portfolioItems };
+}
+
+function applicationPayloadMatches(application, payload) {
+  const storedPortfolio = Array.isArray(application.portfolioItems) ? application.portfolioItems : [];
+  return (application.coverMessage || application.proposal) === payload.coverMessage
+    && Number(application.proposedBudget ?? application.bidAmount) === payload.proposedBudget
+    && (application.proposedTimeline || 'flexible') === payload.proposedTimeline
+    && JSON.stringify(storedPortfolio) === JSON.stringify(payload.portfolioItems);
 }
 
 function parseMaybeJSON(value) {
@@ -482,38 +537,66 @@ function registerRoutes(app) {
 
   // 2. POST /api/marketplace/jobs/:id/apply (or /applications) — Apply to a job
   const applyHandler = (req, res) => {
-    const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
+    if (!validateJobId(req.params.id)) return res.status(400).json({ error: 'Invalid job id' });
+    const jobPath = safeJobPath(req.params.id);
     const job = readJob(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
-    if (job.status !== 'open') return res.status(400).json({ error: 'Job is not open for applications' });
+    if (job.status !== 'open') return res.status(409).json({ error: 'Job is not open for applications' });
 
-    let { applicantId, proposal, bidAmount } = req.body;
-    if (!applicantId || !proposal) return res.status(400).json({ error: 'applicantId and proposal required' });
+    let { applicantId } = req.body || {};
+    if (!applicantId) return res.status(400).json({ error: 'applicantId required' });
     applicantId = resolveApplicantId(applicantId);  // resolve wallet -> profile ID
     if (applicantId === job.postedBy || applicantId === job.clientId) return res.status(400).json({ error: 'Cannot apply to your own job' });
 
-    // Bug fix: Prevent duplicate applications from same agent
-    const existingApps = job.applications.map(appId => readJSON(path.join(DATA_DIR, 'applications', `${appId}.json`))).filter(Boolean);
-    const alreadyApplied = existingApps.some(a => a.applicantId === applicantId);
-    if (alreadyApplied) return res.status(409).json({ error: 'Already applied to this job' });
+    const authResult = verifyMarketplaceMutationSignature({
+      action: 'apply',
+      resourceId: job.id,
+      actorId: applicantId,
+      body: req.body,
+    });
+    if (!authResult.ok) return sendMarketplaceAuthFailure(res, authResult);
+
+    const payload = parseApplicationPayload(req.body, job);
+    if (payload.error) return res.status(400).json({ error: payload.error });
+
+    // Retried identical requests are safe; a conflicting duplicate remains closed.
+    if (job.applications.some((applicationId) => !validateApplicationId(applicationId))) {
+      return res.status(409).json({ error: 'Job application index is invalid; refusing marketplace write' });
+    }
+    const existingApps = job.applications
+      .map(appId => readJSON(safeApplicationPath(appId)))
+      .filter(Boolean);
+    const existingApplication = existingApps.find(a => a.applicantId === applicantId);
+    if (existingApplication) {
+      if (applicationPayloadMatches(existingApplication, payload)) {
+        return res.status(200).json({ ...existingApplication, idempotent: true });
+      }
+      return res.status(409).json({ error: 'Already applied to this job with different terms' });
+    }
 
     const application = {
       id: genId('app'),
       jobId: job.id,
       applicantId,
-      proposal,
-      bidAmount: bidAmount ? parseFloat(bidAmount) : job.budget,
+      agentId: applicantId,
+      coverMessage: payload.coverMessage,
+      proposal: payload.coverMessage,
+      proposedBudget: payload.proposedBudget,
+      bidAmount: payload.proposedBudget,
+      proposedTimeline: payload.proposedTimeline,
+      portfolioItems: payload.portfolioItems,
       status: 'pending', // pending → accepted → rejected
       createdAt: new Date().toISOString()
     };
-    writeJSON(path.join(DATA_DIR, 'applications', `${application.id}.json`), application);
+    writeJSON(safeApplicationPath(application.id), application);
     job.applications.push(application.id);
+    job.applicationCount = job.applications.length;
     job.updatedAt = new Date().toISOString();
     writeJSON(jobPath, job);
     res.status(201).json(application);
   };
-  app.post('/api/marketplace/jobs/:id/apply', applyHandler);
-  app.post('/api/marketplace/jobs/:id/applications', applyHandler);
+  app.post('/api/marketplace/jobs/:id/apply', marketplaceMutationLimiter, applyHandler);
+  app.post('/api/marketplace/jobs/:id/applications', marketplaceMutationLimiter, applyHandler);
 
   // GET /api/marketplace/jobs/:id/applications — List applications for a job
   app.get('/api/marketplace/jobs/:id/applications', (req, res) => {
@@ -521,6 +604,39 @@ function registerRoutes(app) {
     if (!job) return res.status(404).json({ error: 'Job not found' });
     const apps = job.applications.map(appId => readJSON(path.join(DATA_DIR, 'applications', `${appId}.json`))).filter(Boolean);
     res.json({ applications: apps, total: apps.length });
+  });
+
+  // POST /api/marketplace/applications/:id/withdraw — Agent withdraws a pending application
+  app.post('/api/marketplace/applications/:id/withdraw', marketplaceMutationLimiter, (req, res) => {
+    if (!validateApplicationId(req.params.id)) return res.status(400).json({ error: 'Invalid application id' });
+    const appPath = safeApplicationPath(req.params.id);
+    const application = readJSON(appPath);
+    if (!application) return res.status(404).json({ error: 'Application not found' });
+
+    const withdrawnBy = req.body?.withdrawnBy || req.body?.applicantId || req.body?.agentId;
+    if (!withdrawnBy) return res.status(400).json({ error: 'withdrawnBy required' });
+    const actorId = resolveApplicantId(withdrawnBy);
+    const authResult = verifyMarketplaceMutationSignature({
+      action: 'withdraw',
+      resourceId: application.id,
+      actorId,
+      body: req.body,
+    });
+    if (!authResult.ok) return sendMarketplaceAuthFailure(res, authResult);
+    if (actorId !== application.applicantId && actorId !== application.agentId) {
+      return res.status(403).json({ error: 'Only the applicant can withdraw this application' });
+    }
+    if (application.status === 'withdrawn') {
+      return res.json({ ...application, idempotent: true });
+    }
+    if (application.status !== 'pending') {
+      return res.status(409).json({ error: `Cannot withdraw an application in ${application.status} status` });
+    }
+
+    application.status = 'withdrawn';
+    application.withdrawnAt = new Date().toISOString();
+    writeJSON(appPath, application);
+    res.json(application);
   });
 
   // 3. POST /api/marketplace/applications/:id/accept — Accept an application

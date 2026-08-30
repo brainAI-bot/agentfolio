@@ -193,6 +193,198 @@ test('marketplace accept requires a wallet challenge bound to the client SATP id
   }
 });
 
+test('marketplace application lifecycle is authenticated, spec-shaped, and idempotent', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-marketplace-wallet-'));
+  const client = Keypair.generate();
+  const worker = Keypair.generate();
+  const other = Keypair.generate();
+  const bootstrap = freshMarketplace(dataDir, []);
+  const identities = {
+    client: bootstrap.marketplace.deriveSatpIdentityPDA(client.publicKey.toBase58()),
+    worker: bootstrap.marketplace.deriveSatpIdentityPDA(worker.publicKey.toBase58()),
+    other: bootstrap.marketplace.deriveSatpIdentityPDA(other.publicKey.toBase58()),
+  };
+  bootstrap.restore();
+
+  const profile = (id, name, keypair, identityPDA) => ({
+    id,
+    name,
+    wallet: keypair.publicKey.toBase58(),
+    wallets: JSON.stringify({ solana: keypair.publicKey.toBase58() }),
+    verification_data: JSON.stringify({
+      solana: { verified: true, address: keypair.publicKey.toBase58() },
+      satp: { identityPDA },
+    }),
+  });
+  const loaded = freshMarketplace(dataDir, [
+    profile('client_agent', 'Client Agent', client, identities.client),
+    profile('worker_agent', 'Worker Agent', worker, identities.worker),
+    profile('other_agent', 'Other Agent', other, identities.other),
+  ]);
+
+  writeJSON(dataDir, 'jobs', 'job_application_flow', {
+    id: 'job_application_flow',
+    status: 'open',
+    postedBy: 'client_agent',
+    clientId: 'client_agent',
+    budget: 500,
+    budgetAmount: 500,
+    timeline: '1_week',
+    applications: [],
+  });
+
+  const app = express();
+  app.use(express.json());
+  loaded.marketplace.registerRoutes(app);
+  const server = await listen(app);
+
+  try {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    const terms = {
+      applicantId: 'worker_agent',
+      coverMessage: 'I have shipped three production trading agents.',
+      proposedBudget: 450,
+      proposedTimeline: '5_days',
+      portfolioItems: ['project_1', 'project_2'],
+    };
+    const unsigned = await postJSON(baseUrl, '/api/marketplace/jobs/job_application_flow/apply', terms);
+    assert.equal(unsigned.status, 401);
+
+    const walletChallenge = signedChallenge(loaded.marketplace, worker, {
+      action: 'apply',
+      resourceId: 'job_application_flow',
+      actorId: 'worker_agent',
+      identityPDA: identities.worker,
+    });
+    const created = await postJSON(baseUrl, '/api/marketplace/jobs/job_application_flow/apply', {
+      ...terms,
+      walletChallenge,
+    });
+    assert.equal(created.status, 201);
+    assert.equal(created.body.agentId, 'worker_agent');
+    assert.equal(created.body.coverMessage, terms.coverMessage);
+    assert.equal(created.body.proposedBudget, 450);
+    assert.equal(created.body.proposedTimeline, '5_days');
+    assert.deepEqual(created.body.portfolioItems, ['project_1', 'project_2']);
+    assert.equal(readJSON(dataDir, 'jobs', 'job_application_flow').applicationCount, 1);
+
+    const retried = await postJSON(baseUrl, '/api/marketplace/jobs/job_application_flow/apply', {
+      ...terms,
+      walletChallenge,
+    });
+    assert.equal(retried.status, 200);
+    assert.equal(retried.body.id, created.body.id);
+    assert.equal(retried.body.idempotent, true);
+
+    const conflicting = await postJSON(baseUrl, '/api/marketplace/jobs/job_application_flow/apply', {
+      ...terms,
+      proposedBudget: 400,
+      walletChallenge,
+    });
+    assert.equal(conflicting.status, 409);
+
+    const wrongActor = await postJSON(baseUrl, `/api/marketplace/applications/${created.body.id}/withdraw`, {
+      withdrawnBy: 'other_agent',
+      walletChallenge: signedChallenge(loaded.marketplace, other, {
+        action: 'withdraw',
+        resourceId: created.body.id,
+        actorId: 'other_agent',
+        identityPDA: identities.other,
+      }),
+    });
+    assert.equal(wrongActor.status, 403);
+
+    const withdrawalBody = {
+      withdrawnBy: 'worker_agent',
+      walletChallenge: signedChallenge(loaded.marketplace, worker, {
+        action: 'withdraw',
+        resourceId: created.body.id,
+        actorId: 'worker_agent',
+        identityPDA: identities.worker,
+      }),
+    };
+    const withdrawn = await postJSON(baseUrl, `/api/marketplace/applications/${created.body.id}/withdraw`, withdrawalBody);
+    assert.equal(withdrawn.status, 200);
+    assert.equal(withdrawn.body.status, 'withdrawn');
+
+    const withdrawalRetry = await postJSON(baseUrl, `/api/marketplace/applications/${created.body.id}/withdraw`, withdrawalBody);
+    assert.equal(withdrawalRetry.status, 200);
+    assert.equal(withdrawalRetry.body.idempotent, true);
+  } finally {
+    await close(server);
+    loaded.restore();
+  }
+});
+
+test('marketplace application rejects invalid payloads and invalid withdraw transitions', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-marketplace-wallet-'));
+  const worker = Keypair.generate();
+  const bootstrap = freshMarketplace(dataDir, []);
+  const workerIdentity = bootstrap.marketplace.deriveSatpIdentityPDA(worker.publicKey.toBase58());
+  bootstrap.restore();
+  const loaded = freshMarketplace(dataDir, [{
+    id: 'worker_agent',
+    name: 'Worker Agent',
+    wallet: worker.publicKey.toBase58(),
+    wallets: JSON.stringify({ solana: worker.publicKey.toBase58() }),
+    verification_data: JSON.stringify({ solana: { verified: true }, satp: { identityPDA: workerIdentity } }),
+  }]);
+  writeJSON(dataDir, 'jobs', 'job_invalid_application', {
+    id: 'job_invalid_application', status: 'open', postedBy: 'client_agent', clientId: 'client_agent',
+    budget: 500, timeline: '1_week', applications: [],
+  });
+  writeJSON(dataDir, 'applications', 'app_already_accepted', {
+    id: 'app_already_accepted', jobId: 'job_invalid_application', applicantId: 'worker_agent', status: 'accepted',
+  });
+  writeJSON(dataDir, 'jobs', 'job_corrupt_application_index', {
+    id: 'job_corrupt_application_index', status: 'open', postedBy: 'client_agent', clientId: 'client_agent',
+    budget: 500, timeline: '1_week', applications: [{ id: 'legacy_embedded_record' }],
+  });
+
+  const app = express();
+  app.use(express.json());
+  loaded.marketplace.registerRoutes(app);
+  const server = await listen(app);
+  try {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    const applyChallenge = signedChallenge(loaded.marketplace, worker, {
+      action: 'apply', resourceId: 'job_invalid_application', actorId: 'worker_agent', identityPDA: workerIdentity,
+    });
+    const invalid = await postJSON(baseUrl, '/api/marketplace/jobs/job_invalid_application/apply', {
+      applicantId: 'worker_agent', coverMessage: 'short', proposedBudget: -1,
+      portfolioItems: 'not-an-array', walletChallenge: applyChallenge,
+    });
+    assert.equal(invalid.status, 400);
+    assert.match(invalid.body.error, /coverMessage/);
+
+    const corruptIndex = await postJSON(baseUrl, '/api/marketplace/jobs/job_corrupt_application_index/apply', {
+      applicantId: 'worker_agent',
+      coverMessage: 'A valid proposal must not write through corrupt state.',
+      proposedBudget: 450,
+      proposedTimeline: '1_week',
+      portfolioItems: [],
+      walletChallenge: signedChallenge(loaded.marketplace, worker, {
+        action: 'apply', resourceId: 'job_corrupt_application_index', actorId: 'worker_agent', identityPDA: workerIdentity,
+      }),
+    });
+    assert.equal(corruptIndex.status, 409);
+    assert.match(corruptIndex.body.error, /index is invalid/);
+    assert.equal(readJSON(dataDir, 'jobs', 'job_corrupt_application_index').applications.length, 1);
+
+    const invalidTransition = await postJSON(baseUrl, '/api/marketplace/applications/app_already_accepted/withdraw', {
+      withdrawnBy: 'worker_agent',
+      walletChallenge: signedChallenge(loaded.marketplace, worker, {
+        action: 'withdraw', resourceId: 'app_already_accepted', actorId: 'worker_agent', identityPDA: workerIdentity,
+      }),
+    });
+    assert.equal(invalidTransition.status, 409);
+    assert.match(invalidTransition.body.error, /accepted/);
+  } finally {
+    await close(server);
+    loaded.restore();
+  }
+});
+
 test('marketplace deliver and release reject body-claimed identities and accept signed actors', async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-marketplace-wallet-'));
   const client = Keypair.generate();
