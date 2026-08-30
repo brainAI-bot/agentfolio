@@ -262,10 +262,18 @@ function countSignedReviewEvidence(input = {}) {
   ];
 
   if (reviews.length > 0) {
-    return reviews.filter((review) => hasSignedEvidence(review) || hasSignedEvidence(parseJsonish(review?.proof, {}))).length;
+    return reviews.filter((review) => {
+      const canonicalReleasedEscrowReview = review?.canonicalReleasedEscrowReview === true;
+      const reviewerIdentityBound = review?.reviewerIdentityBound === true;
+      const signatureVerified = review?.signatureVerified === true;
+      const signed = hasSignedEvidence(review) || hasSignedEvidence(parseJsonish(review?.proof, {}));
+      return canonicalReleasedEscrowReview && reviewerIdentityBound && signatureVerified && signed;
+    }).length;
   }
 
-  return Number(input.signedReviewEvidenceCount ?? activity.signedReviewEvidenceCount ?? 0);
+  // Aggregate counts cannot prove escrow linkage or reviewer binding. Callers must
+  // provide the canonical review records so each item can pass the evidence gate.
+  return 0;
 }
 
 function computeSignedReviewEvidenceScore(input = {}) {

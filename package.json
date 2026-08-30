@@ -11,6 +11,7 @@
     "verify:satp-mainnet-programs": "node scripts/verify-satp-mainnet-programs.mjs --strict",
     "lint:roadmap": "node scripts/lint-roadmap.js",
     "check:public-routes": "node scripts/check-public-routes.mjs",
+    "migrate:canonical-review-trust": "node scripts/migrate-canonical-review-trust.js --expect-quarantined=5",
     "test": "node --test tests"
   },
   "keywords": [],

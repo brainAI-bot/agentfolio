@@ -5,6 +5,7 @@
 
 const Database = require('better-sqlite3');
 const path = require('path');
+const { listCanonicalJobReviews } = require('../lib/canonical-review-evidence');
 
 const DEFAULT_DB_PATH = path.join(__dirname, '..', '..', 'data', 'agentfolio.db');
 
@@ -89,7 +90,8 @@ function registerReviewsV2Routes(app, options = {}) {
     
     try {
       const db = getDb(true, dbPath);
-      const reviews = db.prepare('SELECT * FROM reviews WHERE reviewee_id = ? ORDER BY created_at DESC').all(agent);
+      const reviews = listCanonicalJobReviews(db, { revieweeId: agent })
+        .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
       db.close();
       
       // Calculate weighted average

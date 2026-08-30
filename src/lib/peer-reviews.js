@@ -10,6 +10,7 @@ const {
   getReviewWeightForTrustScore,
   resolveTrustScoreFromDb,
 } = require('./trust-score-gates');
+const { listCanonicalPeerReviews } = require('./canonical-review-evidence');
 const db = database.db;
 
 // Ensure peer_reviews table exists
@@ -109,7 +110,7 @@ function getGivenReviews(profileId, { limit = 50, offset = 0 } = {}) {
  * Calculate aggregate review score for a profile
  */
 function getReviewScore(profileId) {
-  const reviews = db.prepare('SELECT * FROM peer_reviews WHERE reviewee_id = ?').all(profileId);
+  const reviews = listCanonicalPeerReviews(db, { revieweeId: profileId });
   let weightedTotal = 0;
   let totalWeight = 0;
   let positive = 0;
@@ -163,17 +164,16 @@ function deleteReview(reviewId, requesterId) {
  * Get global review stats
  */
 function getReviewStats() {
-  const row = db.prepare(`
-    SELECT COUNT(*) as total, AVG(rating) as avgRating,
-           COUNT(DISTINCT reviewer_id) as uniqueReviewers,
-           COUNT(DISTINCT reviewee_id) as uniqueReviewees
-    FROM peer_reviews
-  `).get();
+  const reviews = listCanonicalPeerReviews(db);
+  const total = reviews.length;
+  const avgRating = total
+    ? reviews.reduce((sum, review) => sum + Number(review.rating || 0), 0) / total
+    : 0;
   return {
-    totalReviews: row.total || 0,
-    averageRating: row.avgRating ? Math.round(row.avgRating * 10) / 10 : 0,
-    uniqueReviewers: row.uniqueReviewers || 0,
-    uniqueReviewees: row.uniqueReviewees || 0
+    totalReviews: total,
+    averageRating: avgRating ? Math.round(avgRating * 10) / 10 : 0,
+    uniqueReviewers: new Set(reviews.map((review) => review.reviewer_id)).size,
+    uniqueReviewees: new Set(reviews.map((review) => review.reviewee_id)).size,
   };
 }
 
@@ -181,15 +181,25 @@ function getReviewStats() {
  * Get top-rated agents
  */
 function getTopRated(limit = 10) {
-  return db.prepare(`
-    SELECT reviewee_id as profileId, COUNT(*) as reviewCount, 
-           AVG(rating) as avgRating, MIN(created_at) as firstReview
-    FROM peer_reviews
-    GROUP BY reviewee_id
-    HAVING reviewCount >= 2
-    ORDER BY avgRating DESC, reviewCount DESC
-    LIMIT ?
-  `).all(limit);
+  const grouped = new Map();
+  for (const review of listCanonicalPeerReviews(db)) {
+    const item = grouped.get(review.reviewee_id) || {
+      profileId: review.reviewee_id,
+      reviewCount: 0,
+      ratingTotal: 0,
+      firstReview: review.created_at,
+    };
+    item.reviewCount += 1;
+    item.ratingTotal += Number(review.rating || 0);
+    if (String(review.created_at || '') < String(item.firstReview || '')) item.firstReview = review.created_at;
+    grouped.set(review.reviewee_id, item);
+  }
+  return [...grouped.values()]
+    .filter((item) => item.reviewCount >= 2)
+    .map((item) => ({ ...item, avgRating: item.ratingTotal / item.reviewCount }))
+    .sort((a, b) => b.avgRating - a.avgRating || b.reviewCount - a.reviewCount)
+    .slice(0, Math.max(0, Number(limit) || 0))
+    .map(({ ratingTotal, ...item }) => item);
 }
 
 function formatReview(row) {

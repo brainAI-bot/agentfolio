@@ -12,6 +12,7 @@ try { profileStore = require("../profile-store"); } catch(e) { profileStore = nu
 const { computeUnifiedTrustScore } = require('../lib/unified-trust-score');
 const { isFixtureIdentity } = require('../lib/public-traction');
 const { buildReputationSurface, normalizeTrustScoreValue } = require('../lib/reputation-surface');
+const { summarizeCanonicalReviews } = require('../lib/canonical-review-evidence');
 function resolveSatpMainnetRpcUrl() {
   const rpc = String(process.env.SOLANA_RPC_URL || '').trim();
   if (rpc && !/devnet/i.test(rpc)) return rpc;
@@ -188,14 +189,14 @@ async function getSatpAgents() {
     }
     const _db = profileStore.getDb();
     const profileRows = _db.prepare('SELECT * FROM profiles').all();
-    const reviewStatsRows = _db.prepare(`
-      SELECT
-        reviewee_id AS profile_id,
-        COUNT(*) AS total,
-        ROUND(AVG(COALESCE(rating, 0)), 2) AS avg_rating
-      FROM reviews
-      GROUP BY reviewee_id
-    `).all();
+    const reviewStatsRows = profileRows.map((profile) => {
+      const summary = summarizeCanonicalReviews(_db, { revieweeId: profile.id });
+      return {
+        profile_id: profile.id,
+        total: summary.count,
+        avg_rating: summary.averageRating,
+      };
+    });
     const reviewStatsByProfileId = new Map(reviewStatsRows.map((row) => [row.profile_id, row]));
 
     const parseJsonField = (value, fallback) => {

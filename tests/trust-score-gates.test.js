@@ -53,7 +53,13 @@ test('trust score counts only canonical verifications and signed/released eviden
         { status: 'released' },
       ],
       reviewsReceived: [
-        { rating: 5, memoTx: 'memo-tx' },
+        {
+          rating: 5,
+          memoTx: 'memo-tx',
+          canonicalReleasedEscrowReview: true,
+          reviewerIdentityBound: true,
+          signatureVerified: true,
+        },
         { rating: 5 },
       ],
     },
@@ -64,6 +70,20 @@ test('trust score counts only canonical verifications and signed/released eviden
   assert.equal(result.breakdown.releasedEscrowEvidence, 40);
   assert.equal(result.breakdown.signedReviewEvidence, 20);
   assert.equal(result.trustScore, 420);
+});
+
+test('tx signature alone grants zero signed review evidence', () => {
+  const result = computeTrustScore({
+    signedReviewEvidenceCount: 99,
+    reviewsReceived: [
+      { rating: 5, tx_signature: 'unlinked-transaction' },
+      { rating: 5, memoTx: 'unlinked-memo' },
+    ],
+  });
+
+  assert.equal(result.breakdown.signedReviewEvidence, 0);
+  assert.equal(result.details.signedReviewEvidence.evidenceCount, 0);
+  assert.equal(result.trustScore, 0);
 });
 
 test('unified trust score feeds persisted canonical verifications into shared trust calculator', () => {

@@ -6,6 +6,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const crypto = require('crypto');
+const { listCanonicalReviews, summarizeCanonicalReviews } = require('./canonical-review-evidence');
 
 const DB_PATH = path.join(__dirname, '../../data/agentfolio.db');
 const db = new Database(DB_PATH);
@@ -670,16 +671,13 @@ function checkAchievements(profileId, profileData = null) {
   if (highValueJob) tryUnlock('high_roller');
 
   // Five star rating
-  const fiveStarCount = db.prepare(`
-    SELECT COUNT(*) as cnt FROM reviews WHERE reviewee_id = ? AND rating = 5
-  `).get(profileId)?.cnt || 0;
+  const canonicalReviews = listCanonicalReviews(db, { revieweeId: profileId });
+  const fiveStarCount = canonicalReviews.filter((review) => Number(review.rating) === 5).length;
   if (fiveStarCount >= 1) tryUnlock('five_star');
 
   // Average rating
-  const ratingStats = db.prepare(`
-    SELECT AVG(rating) as avg, COUNT(*) as cnt FROM reviews WHERE reviewee_id = ?
-  `).get(profileId);
-  if (ratingStats?.cnt >= 5 && ratingStats?.avg >= 4.5) {
+  const ratingStats = summarizeCanonicalReviews(db, { revieweeId: profileId });
+  if (ratingStats.count >= 5 && ratingStats.averageRating >= 4.5) {
     tryUnlock('consistent_quality');
   }
 
