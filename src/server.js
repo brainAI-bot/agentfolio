@@ -247,6 +247,17 @@ const publicBadgeLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// One limiter instance is deliberately shared by both canonical and
+// compatibility aliases so callers cannot multiply their budget by rotating
+// paths.
+const publicMarketplaceReadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many marketplace read requests, please retry later' },
+});
+
 // x402 Payment Layer
 const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
 const { HTTPFacilitatorClient } = require('@x402/core/server');
@@ -1754,15 +1765,54 @@ function mapSqliteMarketplaceJob(row, profileMap, applicationCounts) {
   };
 }
 
+const MARKETPLACE_LIST_DATABASE_BOUND = 1000;
+const marketplacePublicReadDatabases = new WeakSet();
+
+function ensureMarketplacePublicReadFunction(d) {
+  if (marketplacePublicReadDatabases.has(d)) return;
+  d.function(
+    'is_public_marketplace_job',
+    { deterministic: true },
+    (clientId, title, description) => (
+      isFixtureJob({ client_id: clientId, title, description }) ? 0 : 1
+    )
+  );
+  marketplacePublicReadDatabases.add(d);
+}
+
 function listSqliteMarketplaceJobs(req, res) {
   try {
     const d = profileStore.getDb();
+    ensureMarketplacePublicReadFunction(d);
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
-    const allRows = d.prepare('SELECT * FROM jobs ORDER BY datetime(created_at) DESC').all();
-    const publicRows = allRows.filter(row => !isFixtureJob(row));
-    const total = publicRows.length;
-    const rows = publicRows.slice((page - 1) * limit, page * limit);
+    const offset = (page - 1) * limit;
+    const stats = d.prepare(`
+      WITH bounded_jobs AS MATERIALIZED (
+        SELECT client_id, title, description
+        FROM jobs
+        ORDER BY datetime(created_at) DESC
+        LIMIT ?
+      )
+      SELECT
+        COUNT(*) AS scanned,
+        COALESCE(SUM(is_public_marketplace_job(client_id, title, description)), 0) AS total
+      FROM bounded_jobs
+    `).get(MARKETPLACE_LIST_DATABASE_BOUND);
+    const total = Number(stats.total) || 0;
+    const rows = offset >= MARKETPLACE_LIST_DATABASE_BOUND
+      ? []
+      : d.prepare(`
+          WITH bounded_jobs AS MATERIALIZED (
+            SELECT * FROM jobs
+            ORDER BY datetime(created_at) DESC
+            LIMIT ?
+          )
+          SELECT * FROM bounded_jobs
+          WHERE is_public_marketplace_job(client_id, title, description) = 1
+          ORDER BY datetime(created_at) DESC
+          LIMIT ? OFFSET ?
+        `).all(MARKETPLACE_LIST_DATABASE_BOUND, limit, offset);
     const profileMap = marketplaceProfileMap(d, rows.flatMap(row => [row.client_id, row.selected_agent_id]));
     const applicationCounts = marketplaceApplicationCounts(d, rows.map(row => row.id));
     const jobs = rows.map(row => mapSqliteMarketplaceJob(row, profileMap, applicationCounts));
@@ -1771,7 +1821,10 @@ function listSqliteMarketplaceJobs(req, res) {
       total,
       page,
       pages: Math.max(1, Math.ceil(total / limit)),
-      publicTraction: { excludedFixtures: allRows.length - publicRows.length },
+      publicTraction: {
+        excludedFixtures: (Number(stats.scanned) || 0) - total,
+        databaseBound: MARKETPLACE_LIST_DATABASE_BOUND,
+      },
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1825,12 +1878,12 @@ function getSqliteMarketplaceApplications(req, res) {
 // D9 canonical reads: SQLite backs both the modern and compatibility paths.
 // The compatibility routes are registered before the legacy mutation module so
 // no public GET can fall through to the retired JSON-file read lane.
-app.get('/api/jobs', listSqliteMarketplaceJobs);
-app.get('/api/jobs/:id', getSqliteMarketplaceJob);
-app.get('/api/jobs/:id/applications', getSqliteMarketplaceApplications);
-app.get('/api/marketplace/jobs', listSqliteMarketplaceJobs);
-app.get('/api/marketplace/jobs/:id', getSqliteMarketplaceJob);
-app.get('/api/marketplace/jobs/:id/applications', getSqliteMarketplaceApplications);
+app.get('/api/jobs', publicMarketplaceReadLimiter, listSqliteMarketplaceJobs);
+app.get('/api/jobs/:id', publicMarketplaceReadLimiter, getSqliteMarketplaceJob);
+app.get('/api/jobs/:id/applications', publicMarketplaceReadLimiter, getSqliteMarketplaceApplications);
+app.get('/api/marketplace/jobs', publicMarketplaceReadLimiter, listSqliteMarketplaceJobs);
+app.get('/api/marketplace/jobs/:id', publicMarketplaceReadLimiter, getSqliteMarketplaceJob);
+app.get('/api/marketplace/jobs/:id/applications', publicMarketplaceReadLimiter, getSqliteMarketplaceApplications);
 
 const marketplace = require('./marketplace');
 marketplace.registerRoutes(app);
