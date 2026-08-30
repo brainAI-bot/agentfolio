@@ -243,7 +243,7 @@ This creates a $FOLIO sink: every new agent token costs $FOLIO permanently.
 2. 40% allocated to burn wallet
 3. Market buy $FOLIO (via Jupiter/Uniswap, routed for best execution)
 4. Tokens sent to burn address: `0x000000000000000000000000000000000000dEaD` (Base) or equivalent Solana burn
-5. On-chain verifiable, real-time burn tracker on agentfolio.bot/burn
+5. Publish an on-chain verifiable burn tracker after $FOLIO launches
 
 **Frequency:** Per-transaction (real-time). No batching delays.
 
