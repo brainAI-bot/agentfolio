@@ -13,6 +13,7 @@ const fs = require('fs');
 const { getDeployProvenance } = require('./lib/deploy-provenance');
 const { writeJsonAtomicSync } = require('./lib/atomic-file');
 const { sendBoaWriteGateResponse } = require('./lib/write-surface-gate');
+const { trustLoopbackProxyHop } = require('./lib/loopback-proxy');
 const {
   AGENTFOLIO_CORS_ORIGINS,
   agentFolioAliasRoutingMiddleware,
@@ -409,6 +410,11 @@ try {
 const app = express();
 const PORT = process.env.PORT || 3333;
 const NODE_ENV = process.env.NODE_ENV || 'development';
+
+// Production Caddy reaches this process over loopback. Trust only that first
+// hop so req.ip (and express-rate-limit) use the client address Caddy appends,
+// without accepting forwarded identities on direct non-loopback connections.
+app.set('trust proxy', trustLoopbackProxyHop);
 
 function sendWellKnownJson(res, filename) {
   const candidates = [

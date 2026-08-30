@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
+const { trustLoopbackProxyHop } = require('../src/lib/loopback-proxy');
 
 const serverSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
 const dataSource = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'src', 'lib', 'data.ts'), 'utf8');
@@ -51,28 +52,67 @@ test('marketplace surface regression guard', async (t) => {
     assert.equal((serverSource.match(/const publicMarketplaceReadLimiter = rateLimit\(/g) || []).length, 1);
   });
 
-  await t.test('shared limiter aggregates alternating aliases and enforces the budget', async () => {
+  await t.test('loopback proxy trust is limited to exactly one hop', () => {
+    assert.equal(trustLoopbackProxyHop('127.0.0.1', 0), true);
+    assert.equal(trustLoopbackProxyHop('::1', 0), true);
+    assert.equal(trustLoopbackProxyHop('::ffff:127.0.0.1', 0), true);
+    assert.equal(trustLoopbackProxyHop('203.0.113.10', 0), false);
+    assert.equal(trustLoopbackProxyHop('127.0.0.1', 1), false);
+    assert.match(serverSource, /app\.set\('trust proxy', trustLoopbackProxyHop\)/);
+  });
+
+  await t.test('proxy-aware limiter separates clients while sharing one budget across all six aliases', async () => {
     const app = express();
+    app.set('trust proxy', trustLoopbackProxyHop);
     const sharedLimiter = rateLimit({
       windowMs: 60 * 1000,
-      max: 2,
+      max: 6,
       standardHeaders: true,
       legacyHeaders: false,
     });
-    app.get('/api/jobs', sharedLimiter, (_req, res) => res.json({ ok: true }));
-    app.get('/api/marketplace/jobs', sharedLimiter, (_req, res) => res.json({ ok: true }));
+    const routes = [
+      '/api/jobs',
+      '/api/jobs/:id',
+      '/api/jobs/:id/applications',
+      '/api/marketplace/jobs',
+      '/api/marketplace/jobs/:id',
+      '/api/marketplace/jobs/:id/applications',
+    ];
+    for (const route of routes) {
+      app.get(route, sharedLimiter, (req, res) => res.json({ ok: true, ip: req.ip }));
+    }
 
     const server = await new Promise((resolve) => {
       const listener = app.listen(0, () => resolve(listener));
     });
     try {
       const { port } = server.address();
-      const statuses = [];
-      for (const route of ['/api/jobs', '/api/marketplace/jobs', '/api/jobs']) {
-        const response = await fetch(`http://127.0.0.1:${port}${route}`);
-        statuses.push(response.status);
+      const concreteRoutes = [
+        '/api/jobs',
+        '/api/jobs/job-1',
+        '/api/jobs/job-1/applications',
+        '/api/marketplace/jobs',
+        '/api/marketplace/jobs/job-1',
+        '/api/marketplace/jobs/job-1/applications',
+      ];
+      const firstClientStatuses = [];
+      for (const route of concreteRoutes) {
+        const response = await fetch(`http://127.0.0.1:${port}${route}`, {
+          headers: { 'X-Forwarded-For': '198.51.100.10' },
+        });
+        firstClientStatuses.push(response.status);
       }
-      assert.deepEqual(statuses, [200, 200, 429]);
+      const exhaustedResponse = await fetch(`http://127.0.0.1:${port}/api/jobs`, {
+        headers: { 'X-Forwarded-For': '198.51.100.10' },
+      });
+      const distinctClientResponse = await fetch(`http://127.0.0.1:${port}/api/jobs`, {
+        headers: { 'X-Forwarded-For': '198.51.100.11' },
+      });
+
+      assert.deepEqual(firstClientStatuses, [200, 200, 200, 200, 200, 200]);
+      assert.equal(exhaustedResponse.status, 429);
+      assert.equal(distinctClientResponse.status, 200);
+      assert.equal((await distinctClientResponse.json()).ip, '198.51.100.11');
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
