@@ -1,0 +1,16 @@
+# Production compatibility hostname for AgentFolio.
+#
+# Install this site block in the authoritative production Caddy configuration
+# only through the approved production-config workflow. Validate the complete
+# configuration before reload.
+agentfolio.brainai.bot {
+    encode zstd gzip
+
+    handle /api/* {
+        reverse_proxy localhost:3333
+    }
+
+    handle {
+        reverse_proxy localhost:3000
+    }
+}
