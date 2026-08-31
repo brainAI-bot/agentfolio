@@ -21,7 +21,7 @@ function ensureClassificationColumns(db, table) {
   if (!columns.has('trust_classified_at')) db.exec(`ALTER TABLE ${table} ADD COLUMN trust_classified_at TEXT`);
 }
 
-function classifyTable(db, table, classifier) {
+function classifyTable(db, table, classifier, evaluation) {
   if (!tableExists(db, table)) return { table, eligible: 0, quarantined: 0 };
   ensureClassificationColumns(db, table);
   const rows = db.prepare(`SELECT * FROM ${table}`).all();
@@ -33,28 +33,37 @@ function classifyTable(db, table, classifier) {
   let eligible = 0;
   let quarantined = 0;
   const now = new Date().toISOString();
-  const transaction = db.transaction(() => {
-    for (const review of rows) {
-      const result = classifier(db, review);
-      if (result.eligible) eligible += 1;
-      else quarantined += 1;
-      update.run(result.eligible ? 'canonical' : 'quarantined', result.reason || null, now, review.id);
-    }
-  });
-  transaction();
+  for (const review of rows) {
+    const result = classifier(db, review, evaluation);
+    if (result.eligible) eligible += 1;
+    else quarantined += 1;
+    update.run(result.eligible ? 'canonical' : 'quarantined', result.reason || null, now, review.id);
+  }
   return { table, eligible, quarantined };
 }
 
-function migrate(db) {
-  const tables = [
-    classifyTable(db, 'reviews', classifyJobReview),
-    classifyTable(db, 'peer_reviews', classifyPeerReview),
-  ];
-  return {
-    tables,
-    eligible: tables.reduce((sum, item) => sum + item.eligible, 0),
-    quarantined: tables.reduce((sum, item) => sum + item.quarantined, 0),
-  };
+function migrate(db, { expectedQuarantined = null } = {}) {
+  const transaction = db.transaction(() => {
+    const evaluation = { evaluable: true, errors: [] };
+    const tables = [
+      classifyTable(db, 'reviews', classifyJobReview, evaluation),
+      classifyTable(db, 'peer_reviews', classifyPeerReview, evaluation),
+    ];
+    const result = {
+      tables,
+      eligible: tables.reduce((sum, item) => sum + item.eligible, 0),
+      quarantined: tables.reduce((sum, item) => sum + item.quarantined, 0),
+    };
+    if (!evaluation.evaluable) {
+      const detail = evaluation.errors.map((item) => `${item.operation}: ${item.message}`).join('; ');
+      throw new Error(`Cannot evaluate canonical reviews: ${detail}`);
+    }
+    if (Number.isFinite(expectedQuarantined) && result.quarantined !== expectedQuarantined) {
+      throw new Error(`Expected ${expectedQuarantined} quarantined reviews, found ${result.quarantined}`);
+    }
+    return result;
+  });
+  return transaction();
 }
 
 if (require.main === module) {
@@ -64,12 +73,11 @@ if (require.main === module) {
   const expected = expectedArg ? Number(expectedArg.slice('--expect-quarantined='.length)) : null;
   const db = new Database(dbPath);
   try {
-    const result = migrate(db);
+    const result = migrate(db, { expectedQuarantined: expected });
     process.stdout.write(`${JSON.stringify(result)}\n`);
-    if (Number.isFinite(expected) && result.quarantined !== expected) {
-      process.stderr.write(`Expected ${expected} quarantined reviews, found ${result.quarantined}\n`);
-      process.exitCode = 1;
-    }
+  } catch (error) {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
   } finally {
     db.close();
   }

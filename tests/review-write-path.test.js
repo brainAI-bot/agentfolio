@@ -186,6 +186,18 @@ test('legacy profile review writes are hard-disabled', () => {
   assert.doesNotMatch(route, /resolvedEmail/, 'review POST must not reference registration-only email variables');
 });
 
+test('legacy profile review reads expose only canonical review items and matching stats', () => {
+  const source = fs.readFileSync(path.join(ROOT, 'src', 'profile-store.js'), 'utf8');
+  const routeStart = source.indexOf("app.get('/api/profile/:id/reviews'");
+  const routeEnd = source.indexOf("app.get('/api/wallet/lookup/:addr'", routeStart);
+  const route = source.slice(routeStart, routeEnd);
+
+  assert.notEqual(routeStart, -1, 'missing profile review read route');
+  assert.match(route, /summarizeCanonicalReviews/);
+  assert.match(route, /canonicalStats\.reviews/);
+  assert.doesNotMatch(route, /SELECT \* FROM reviews/);
+});
+
 test('marketplace exposes only the read route and disables job-scoped review writes', () => {
   const source = fs.readFileSync(path.join(ROOT, 'src', 'marketplace.js'), 'utf8');
   const postStart = source.indexOf("app.post('/api/marketplace/jobs/:id/review'");

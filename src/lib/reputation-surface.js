@@ -91,7 +91,7 @@ function summarizeJobHistory(input = {}) {
 
 function loadReviewSummary(db, profileId, fallback = {}) {
   const summary = summarizeCanonicalReviews(db, { revieweeId: profileId });
-  if (summary.count === 0 && fallback && Object.keys(fallback).length > 0) {
+  if (!summary.evaluable && fallback && Object.keys(fallback).length > 0) {
     return summarizeReviews(fallback);
   }
   return summarizeReviews(summary);

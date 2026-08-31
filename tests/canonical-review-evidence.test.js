@@ -84,6 +84,8 @@ test('canonical aggregates exclude unlinked, unreleased, and participant-mismatc
 
   const reviews = listCanonicalJobReviews(db, { revieweeId: 'agent-1' });
   assert.deepEqual(reviews.map((review) => review.id), ['canonical-job']);
+  assert.equal(reviews[0].escrowParticipantMatch, true);
+  assert.equal(reviews[0].reviewerIdentityBound, false);
   assert.equal(summarizeCanonicalReviews(db, { revieweeId: 'agent-1' }).count, 1);
   db.close();
 });
@@ -135,4 +137,53 @@ test('migration quarantines five unproven rows and records exact reasons', () =>
     'reviewer_wallet_not_bound_to_identity'
   );
   db.close();
+});
+
+test('migration expectation mismatch rolls back schema and row mutations', () => {
+  const db = createDb();
+  insertReleasedEscrow(db);
+  db.exec("INSERT INTO reviews VALUES ('q1', 'missing', 'client-1', 'agent-1', 5, 'tx-only')");
+
+  assert.throws(
+    () => migrate(db, { expectedQuarantined: 5 }),
+    /Expected 5 quarantined reviews, found 1/
+  );
+  const columns = db.prepare('PRAGMA table_info(reviews)').all().map((row) => row.name);
+  assert.equal(columns.includes('trust_status'), false);
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM reviews WHERE id = 'q1'").get().c, 1);
+  db.close();
+});
+
+test('migration evaluator failure rolls back instead of quarantining blind', () => {
+  const db = createDb();
+  db.exec(`
+    INSERT INTO reviews VALUES ('review-1', 'job-1', 'client-1', 'agent-1', 5, NULL);
+    DROP TABLE escrows;
+  `);
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    assert.throws(() => migrate(db), /Cannot evaluate canonical reviews: released escrow lookup/);
+    const columns = db.prepare('PRAGMA table_info(reviews)').all().map((row) => row.name);
+    assert.equal(columns.includes('trust_status'), false);
+  } finally {
+    console.error = originalError;
+    db.close();
+  }
+});
+
+test('summary exposes evaluator failures instead of silently reporting an honest zero', () => {
+  const db = new Database(':memory:');
+  const messages = [];
+  const originalError = console.error;
+  console.error = (message) => messages.push(message);
+  try {
+    const summary = summarizeCanonicalReviews(db, { revieweeId: 'agent-1' });
+    assert.equal(summary.evaluable, false);
+    assert.ok(summary.evaluationErrors.length >= 1);
+    assert.ok(messages.some((message) => message.includes('[CanonicalReviewEvidence] Cannot evaluate')));
+  } finally {
+    console.error = originalError;
+    db.close();
+  }
 });

@@ -1,11 +1,23 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const Database = require('better-sqlite3');
 
 const {
   buildReputationSurface,
+  loadReviewSummary,
   summarizeJobHistory,
   summarizeReviews,
 } = require('../src/lib/reputation-surface');
+
+function createCanonicalReviewDb() {
+  const db = new Database(':memory:');
+  db.exec(`
+    CREATE TABLE reviews (id TEXT, job_id TEXT, reviewer_id TEXT, reviewee_id TEXT, rating INTEGER);
+    CREATE TABLE peer_reviews (id TEXT, job_id TEXT, reviewer_id TEXT, reviewee_id TEXT, rating INTEGER);
+    CREATE TABLE escrows (id TEXT, job_id TEXT, client_id TEXT, agent_id TEXT, status TEXT, release_tx_hash TEXT);
+  `);
+  return db;
+}
 
 test('buildReputationSurface normalizes score, tier, reviews, and job history', () => {
   const surface = buildReputationSurface({
@@ -66,4 +78,26 @@ test('buildReputationSurface uses V3 reputation when supplied separately', () =>
   assert.equal(surface.tier, 'Sovereign');
   assert.equal(surface.source, 'v3-onchain');
   assert.equal(surface.isBorn, true);
+});
+
+test('loadReviewSummary keeps an evaluated canonical zero instead of legacy fallback counts', () => {
+  const db = createCanonicalReviewDb();
+  const summary = loadReviewSummary(db, 'agent_empty', { total: 9, avg_rating: 5 });
+  assert.equal(summary.count, 0);
+  assert.equal(summary.averageRating, 0);
+  db.close();
+});
+
+test('loadReviewSummary uses fallback only when canonical evidence cannot be evaluated', () => {
+  const db = new Database(':memory:');
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    const summary = loadReviewSummary(db, 'agent_unknown', { total: 2, avg_rating: 4.5 });
+    assert.equal(summary.count, 2);
+    assert.equal(summary.averageRating, 4.5);
+  } finally {
+    console.error = originalError;
+    db.close();
+  }
 });

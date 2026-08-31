@@ -1494,9 +1494,9 @@ function registerRoutes(app) {
   // ── GET /api/profile/:id/reviews ───────────────────────────────
   app.get('/api/profile/:id/reviews', (req, res) => {
     const d = getDb();
-    const rfk = module.exports._reviewFk || 'profile_id';
-    const items = d.prepare(`SELECT * FROM reviews WHERE ${rfk} = ? ORDER BY created_at DESC`).all(req.params.id);
     const canonicalStats = summarizeCanonicalReviews(d, { revieweeId: req.params.id });
+    const items = canonicalStats.reviews
+      .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
     const stats = {
       total: canonicalStats.count,
       avg_rating: canonicalStats.averageRating,
