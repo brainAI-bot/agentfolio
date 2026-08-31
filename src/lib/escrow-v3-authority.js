@@ -23,6 +23,9 @@ const AUTHORITY_ANCHOR_TOML = 'onchain/escrow_v3/Anchor.toml';
 const AUTHORITY_IDL_PATH = 'onchain/escrow_v3/target/idl/escrow_v3.json';
 const AUTHORITY_PROGRAM_SOURCE = 'onchain/escrow_v3/programs/escrow_v3/src/lib.rs';
 const PROVENANCE_RECEIPT_PATH = 'config/escrow-v3-provenance-ef7e4581.json';
+const PROVENANCE_SOURCE_COMMIT = '3f8188bec89db0d4a081931f35272e10185d1c0d';
+const CURRENT_ALLOCATED_RUNTIME_SHA256 = '7672bd30bf01134bc56e088013a5cafd65ff850c402a56e532be3e28a3d5b4c9';
+const CURRENT_TRIMMED_RUNTIME_SHA256 = '85e71adf087b268b199c933918a1b8bb2b0a5f67f9e71b1467b3ca8357b8458a';
 const SATP_ESCROW_IDL_PACKAGE_RELATIVE = 'idls/v3/escrow_v3.json';
 const SATP_ESCROW_IDL_PACKAGE_PATH = 'node_modules/@brainai/satp-client/idls/v3/escrow_v3.json';
 const AUTHORITATIVE_SOURCE = 'satp-client-package';
@@ -168,30 +171,72 @@ function isSha256(value) {
 }
 
 function isValidEscrowV3ProvenanceReceipt(receipt) {
-  const rebuiltMatchesAllocated = receipt?.rebuild?.sha256 === receipt?.deployedRuntime?.allocatedSha256;
-  const rebuiltMatchesTrimmed = receipt?.rebuild?.sha256 === receipt?.deployedRuntime?.trimmedSha256;
-  const sourceIdlMatchesPublished = receipt?.sourceIdl?.sha256 === receipt?.publishedIdl?.inflatedSha256;
-  const threeWayBindingVerified = (rebuiltMatchesAllocated || rebuiltMatchesTrimmed)
+  const runtime = receipt?.deployedRuntime || {};
+  const rebuild = receipt?.rebuild || {};
+  const programMetadataIdl = receipt?.publishedIdl?.programMetadata || {};
+  const legacyAnchorIdl = receipt?.publishedIdl?.legacyAnchor || {};
+  const rebuiltMatchesAllocated = rebuild.sha256 === runtime.allocatedSha256
+    && rebuild.bytes === runtime.allocatedBytes;
+  const rebuiltMatchesTrimmed = rebuild.sha256 === runtime.trimmedSha256
+    && rebuild.bytes === runtime.trimmedBytes;
+  const rebuiltMatchesAllocatedPrefix = rebuild.sha256 === runtime.sourceArtifactPrefixSha256
+    && rebuild.bytes === runtime.sourceArtifactPrefixBytes;
+  const allocationPaddingIsAllZero = Number.isInteger(runtime.allocationPaddingBytes)
+    && runtime.allocationPaddingBytes >= 0
+    && runtime.allocationPaddingSha256 === crypto
+      .createHash('sha256')
+      .update(Buffer.alloc(runtime.allocationPaddingBytes))
+      .digest('hex')
+    && runtime.allocatedBytes
+      === runtime.sourceArtifactPrefixBytes + runtime.allocationPaddingBytes;
+  const sourceBuildMatchesDeployedRuntime = rebuiltMatchesAllocatedPrefix
+    && allocationPaddingIsAllZero;
+  const programMetadataMatchesSource = programMetadataIdl.matchesCanonicalSource === true
+    && programMetadataIdl.canonicalJsonSha256 === receipt?.sourceIdl?.sha256
+    && programMetadataIdl.instructionCount === receipt?.sourceIdl?.instructionCount;
+  const legacyAnchorMatchesSource = legacyAnchorIdl.matchesCanonicalSource === true
+    && legacyAnchorIdl.inflatedSha256 === receipt?.sourceIdl?.sha256
+    && legacyAnchorIdl.instructionCount === receipt?.sourceIdl?.instructionCount;
+  const sourceIdlMatchesPublished = programMetadataMatchesSource && legacyAnchorMatchesSource;
+  const threeWayBindingVerified = sourceBuildMatchesDeployedRuntime
     && sourceIdlMatchesPublished;
+  const expectedStatus = threeWayBindingVerified
+    ? 'verified'
+    : sourceBuildMatchesDeployedRuntime
+      ? 'source_build_verified_published_idl_mismatch'
+      : 'provenance_gap';
 
-  return receipt?.schemaVersion === 1
+  return receipt?.schemaVersion === 2
     && receipt.marker === '[#ef7e4581]'
     && receipt.program?.programId === AUTHORITY_PROGRAM_ID
+    && receipt.program?.upgradeSlot === 442907465
+    && receipt.source?.commit === PROVENANCE_SOURCE_COMMIT
     && isSha256(receipt.source?.sha256)
     && isSha256(receipt.rebuild?.sha256)
     && isSha256(receipt.deployedRuntime?.allocatedSha256)
     && isSha256(receipt.deployedRuntime?.trimmedSha256)
+    && isSha256(receipt.deployedRuntime?.sourceArtifactPrefixSha256)
+    && isSha256(receipt.deployedRuntime?.allocationPaddingSha256)
     && isSha256(receipt.sourceIdl?.sha256)
-    && isSha256(receipt.publishedIdl?.inflatedSha256)
+    && isSha256(programMetadataIdl.canonicalJsonSha256)
+    && isSha256(legacyAnchorIdl.inflatedSha256)
+    && receipt.deployedRuntime.allocatedSha256 === CURRENT_ALLOCATED_RUNTIME_SHA256
+    && receipt.deployedRuntime.trimmedSha256 === CURRENT_TRIMMED_RUNTIME_SHA256
     && typeof receipt.bindings?.rebuiltArtifactMatchesAllocatedRuntime === 'boolean'
     && typeof receipt.bindings?.rebuiltArtifactMatchesTrimmedRuntime === 'boolean'
+    && typeof receipt.bindings?.rebuiltArtifactMatchesAllocatedPrefix === 'boolean'
+    && typeof receipt.bindings?.allocationPaddingIsAllZero === 'boolean'
+    && typeof receipt.bindings?.sourceBuildMatchesDeployedRuntime === 'boolean'
     && typeof receipt.bindings?.sourceIdlMatchesPublishedIdl === 'boolean'
     && typeof receipt.bindings?.sourceEqualsDeployedEqualsPublishedIdl === 'boolean'
     && receipt.bindings.rebuiltArtifactMatchesAllocatedRuntime === rebuiltMatchesAllocated
     && receipt.bindings.rebuiltArtifactMatchesTrimmedRuntime === rebuiltMatchesTrimmed
+    && receipt.bindings.rebuiltArtifactMatchesAllocatedPrefix === rebuiltMatchesAllocatedPrefix
+    && receipt.bindings.allocationPaddingIsAllZero === allocationPaddingIsAllZero
+    && receipt.bindings.sourceBuildMatchesDeployedRuntime === sourceBuildMatchesDeployedRuntime
     && receipt.bindings.sourceIdlMatchesPublishedIdl === sourceIdlMatchesPublished
     && receipt.bindings.sourceEqualsDeployedEqualsPublishedIdl === threeWayBindingVerified
-    && receipt.status === (threeWayBindingVerified ? 'verified' : 'provenance_gap');
+    && receipt.status === expectedStatus;
 }
 
 function fileInfo(targetPath, displayPath = null) {
@@ -409,10 +454,13 @@ function getEscrowV3ProvenanceReadback({
   const packaged = readback.packagedSatpEscrowIdl || {};
   const receiptValid = isValidEscrowV3ProvenanceReceipt(provenanceReceipt);
   const bindings = receiptValid ? provenanceReceipt.bindings : null;
+  const sourceBuildVerified = bindings?.sourceBuildMatchesDeployedRuntime === true;
   const threeWayBindingVerified = bindings?.sourceEqualsDeployedEqualsPublishedIdl === true;
   const sourceHash = receiptValid ? provenanceReceipt.source.sha256 : null;
   const sourceIdlHash = receiptValid ? provenanceReceipt.sourceIdl.sha256 : null;
-  const publishedIdlHash = receiptValid ? provenanceReceipt.publishedIdl.inflatedSha256 : null;
+  const publishedIdlHash = receiptValid
+    ? provenanceReceipt.publishedIdl.programMetadata.canonicalJsonSha256
+    : null;
   const idlProgramId = packaged.address || null;
   const idlInstructionCount = packaged.instructionCount ?? null;
   const escrowProgramId = readback.expectedProgramId || null;
@@ -423,8 +471,7 @@ function getEscrowV3ProvenanceReadback({
   } else if (!receiptValid) {
     mismatches.push('invalid_provenance_receipt');
   } else {
-    if (bindings.rebuiltArtifactMatchesAllocatedRuntime !== true
-      && bindings.rebuiltArtifactMatchesTrimmedRuntime !== true) {
+    if (bindings.sourceBuildMatchesDeployedRuntime !== true) {
       mismatches.push('source_build_deployed_runtime_mismatch');
     }
     if (bindings.sourceIdlMatchesPublishedIdl !== true) {
@@ -461,7 +508,7 @@ function getEscrowV3ProvenanceReadback({
 
   return {
     label: readback.label || AUTHORITY_LABEL,
-    authoritativeSource: threeWayBindingVerified ? provenanceReceipt.source.repository : null,
+    authoritativeSource: sourceBuildVerified ? provenanceReceipt.source.repository : null,
     consumerInterfaceSource: AUTHORITATIVE_SOURCE,
     provenanceReceiptPath: PROVENANCE_RECEIPT_PATH,
     provenanceStatus: receiptValid ? provenanceReceipt.status : 'unverified',
@@ -476,6 +523,7 @@ function getEscrowV3ProvenanceReadback({
     idlHash: packaged.sha256 || sourceIdlHash,
     sourceIdlHash,
     publishedIdlHash,
+    publishedIdls: receiptValid ? provenanceReceipt.publishedIdl : null,
     rebuiltArtifactHash: receiptValid ? provenanceReceipt.rebuild.sha256 : null,
     deployedRuntime: receiptValid ? provenanceReceipt.deployedRuntime : null,
     buildInputs: receiptValid ? provenanceReceipt.buildInputs : null,

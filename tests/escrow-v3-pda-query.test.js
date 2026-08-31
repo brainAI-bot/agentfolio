@@ -129,7 +129,7 @@ test('GET /api/v3/health stays cheap and leaves escrow provenance on escrow heal
     const escrowHealth = await escrowHealthRes.json();
     assert.equal(escrowHealthRes.status, 200);
     assert.equal(escrowHealth.escrowAuthority.expectedProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
-    assert.equal(escrowHealth.escrowProvenance.failClosed, false);
+    assert.equal(escrowHealth.escrowProvenance.failClosed, true);
     assert.equal(escrowHealth.escrowProvenance.idlInstructionCount, 14);
     assert.equal(escrowHealth.escrowProvenance.liveEscrowWritesAllowed, false);
   } finally {
@@ -179,7 +179,7 @@ test('GET /api/v3/escrow/health exposes live escrow gate status', async () => {
     assert.match(body.escrowProvenance.sourceHash, /^[0-9a-f]{64}$/);
     assert.match(body.escrowProvenance.idlHash, /^[0-9a-f]{64}$/);
     assert.match(body.escrowProvenance.runtimeProgramId, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
-    assert.equal(body.escrowProvenance.mismatchStatus, 'matched');
+    assert.equal(body.escrowProvenance.mismatchStatus, 'mismatch');
     assert.equal(body.escrowProvenance.authoritativeSource, 'brainAI-bot/satp');
     assert.equal(body.escrowProvenance.consumerInterfaceSource, 'satp-client-package');
     assert.equal(body.escrowAuthority.packagedSatpEscrowIdl.exists, true);
@@ -187,9 +187,9 @@ test('GET /api/v3/escrow/health exposes live escrow gate status', async () => {
     assert.equal(body.escrowAuthority.packagedSatpEscrowIdl.instructionCount, 14);
     assert.equal(body.escrowAuthority.packagedSatpEscrowIdl.matchesExpectedInstructionCount, true);
     assert.match(body.escrowAuthority.packagedSatpEscrowIdl.path, /idls\/v3\/escrow_v3\.json$/);
-    assert.deepEqual(body.escrowProvenance.mismatches, []);
+    assert.deepEqual(body.escrowProvenance.mismatches, ['source_idl_published_idl_mismatch']);
     assert.equal(body.escrowProvenance.idlInstructionCount, 14);
-    assert.equal(body.escrowProvenance.failClosed, false);
+    assert.equal(body.escrowProvenance.failClosed, true);
     assert.equal(body.escrowProvenance.liveEscrowWritesAllowed, false);
   } finally {
     if (previousEnable === undefined) delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
@@ -244,8 +244,8 @@ test('GET /api/v3/escrow/health exposes packaged HXCU IDL next to observed B1Se 
     assert.equal(body.escrowProvenance.advertisedEscrowProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
     assert.equal(body.escrowProvenance.escrowProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
     assert.equal(body.escrowProvenance.leftoverRuntimeProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
-    assert.equal(body.escrowProvenance.mismatchStatus, 'matched');
-    assert.deepEqual(body.escrowProvenance.mismatches, []);
+    assert.equal(body.escrowProvenance.mismatchStatus, 'mismatch');
+    assert.deepEqual(body.escrowProvenance.mismatches, ['source_idl_published_idl_mismatch']);
     assert.ok(!body.escrowProvenance.mismatches.includes('missing_packaged_idl'));
     assert.equal(body.escrowProvenance.authoritativeSource, 'brainAI-bot/satp');
     assert.equal(body.escrowProvenance.consumerInterfaceSource, 'satp-client-package');
@@ -263,7 +263,7 @@ test('GET /api/v3/escrow/health exposes packaged HXCU IDL next to observed B1Se 
   }
 });
 
-test('POST /api/v3/escrow/create reaches input validation after verified provenance and release gates clear', async () => {
+test('POST /api/v3/escrow/create remains blocked when environment gates clear but published IDLs are stale', async () => {
   const previousEnable = process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
   const previousOwnerAuthorization = process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
   const previousKill = process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
@@ -285,10 +285,11 @@ test('POST /api/v3/escrow/create reaches input validation after verified provena
     });
     const body = await res.json();
 
-    assert.equal(res.status, 400);
-    assert.equal(body.error, 'Missing required fields');
-    assert.equal(body.code, undefined);
-    assert.equal(body.escrowProvenance, undefined);
+    assert.equal(res.status, 423);
+    assert.equal(body.error, 'Live escrow writes remain blocked by the pinned source/deployed/published-IDL provenance gap.');
+    assert.equal(body.code, 'ESCROW_V3_PROVENANCE_MISMATCH');
+    assert.equal(body.escrowProvenance.failClosed, true);
+    assert.deepEqual(body.escrowProvenance.mismatches, ['source_idl_published_idl_mismatch']);
     assert.equal(body.transaction, undefined);
   } finally {
     if (previousEnable === undefined) delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
