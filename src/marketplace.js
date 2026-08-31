@@ -566,7 +566,9 @@ function registerRoutes(app) {
     const existingApps = job.applications
       .map(appId => readJSON(safeApplicationPath(appId)))
       .filter(Boolean);
-    const existingApplication = existingApps.find(a => a.applicantId === applicantId);
+    const existingApplication = existingApps.find(
+      a => a.applicantId === applicantId && a.status !== 'withdrawn'
+    );
     if (existingApplication) {
       if (applicationPayloadMatches(existingApplication, payload)) {
         return res.status(200).json({ ...existingApplication, idempotent: true });
@@ -589,6 +591,10 @@ function registerRoutes(app) {
       createdAt: new Date().toISOString()
     };
     writeJSON(safeApplicationPath(application.id), application);
+    const withdrawnApplicationIds = new Set(
+      existingApps.filter(a => a.status === 'withdrawn').map(a => a.id)
+    );
+    job.applications = job.applications.filter(appId => !withdrawnApplicationIds.has(appId));
     job.applications.push(application.id);
     job.applicationCount = job.applications.length;
     job.updatedAt = new Date().toISOString();
@@ -633,20 +639,36 @@ function registerRoutes(app) {
       return res.status(409).json({ error: `Cannot withdraw an application in ${application.status} status` });
     }
 
+    if (!validateJobId(application.jobId)) {
+      return res.status(409).json({ error: 'Application job id is invalid; refusing marketplace write' });
+    }
+    const jobPath = safeJobPath(application.jobId);
+    const job = readJob(jobPath);
+    if (!job) return res.status(409).json({ error: 'Application job not found; refusing marketplace write' });
+    if (!Array.isArray(job.applications) || job.applications.some(applicationId => !validateApplicationId(applicationId))) {
+      return res.status(409).json({ error: 'Job application index is invalid; refusing marketplace write' });
+    }
+
     application.status = 'withdrawn';
     application.withdrawnAt = new Date().toISOString();
     writeJSON(appPath, application);
+    job.applications = job.applications.filter(applicationId => applicationId !== application.id);
+    job.applicationCount = job.applications.length;
+    job.updatedAt = new Date().toISOString();
+    writeJSON(jobPath, job);
     res.json(application);
   });
 
   // 3. POST /api/marketplace/applications/:id/accept — Accept an application
   app.post('/api/marketplace/applications/:id/accept', marketplaceMutationLimiter, (req, res) => {
-    const appPath = path.join(DATA_DIR, 'applications', `${req.params.id}.json`);
+    if (!validateApplicationId(req.params.id)) return res.status(400).json({ error: 'Invalid application id' });
+    const appPath = safeApplicationPath(req.params.id);
     const application = readJSON(appPath);
     if (!application) return res.status(404).json({ error: 'Application not found' });
     if (application.status !== 'pending') return res.status(400).json({ error: 'Application already processed' });
 
-    const jobPath = path.join(DATA_DIR, 'jobs', `${application.jobId}.json`);
+    if (!validateJobId(application.jobId)) return res.status(409).json({ error: 'Application job id is invalid' });
+    const jobPath = safeJobPath(application.jobId);
     const job = readJob(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
 

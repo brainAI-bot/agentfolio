@@ -218,6 +218,10 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   // ─── APPLY TO JOB ───
   const handleApply = async () => {
     if (!connected || !publicKey || !selectedJob) return;
+    if (isDemo) {
+      showMessage("error", "Applications are unavailable in demo mode. Connect a wallet to apply.");
+      return;
+    }
     if (!resolvedProfileId) {
       showMessage("error", "Create or connect the AgentFolio profile linked to this wallet");
       return;
@@ -727,6 +731,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                 </div>
                 {resolvingProfile && <div className="text-[11px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>Resolving profile...</div>}
                 {resolvedProfileId && <div className="text-[11px]" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>Applying as: <strong>{resolvedProfileId}</strong></div>}
+                {isDemo && <div className="text-[11px]" style={{ color: "var(--warning, #f59e0b)", fontFamily: "var(--font-mono)" }}>Applications are unavailable in demo mode. Connect a wallet to apply.</div>}
                 {!resolvingProfile && !resolvedProfileId && publicKey && <div className="text-[11px]" style={{ color: "var(--warning, #f59e0b)", fontFamily: "var(--font-mono)" }}>⚠️ No profile found for this wallet. Create a profile first.</div>}
                 <Textarea label="Your Proposal" value={applyMessage} onChange={setApplyMessage} placeholder="Why are you the best fit for this job?" />
                 <Input label="Your Bid (SOL, optional)" value={applyBid} onChange={setApplyBid} placeholder="Leave empty to match budget" type="number" />
@@ -739,10 +744,10 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                     { value: "flexible", label: "Flexible" },
                   ]} />
                 <Input label="Portfolio Items (comma separated)" value={applyPortfolio} onChange={setApplyPortfolio} placeholder="project_1, case-study URL" />
-                <button onClick={handleApply} disabled={loading}
+                <button onClick={handleApply} disabled={loading || isDemo}
                   className="w-full py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-50"
                   style={{ fontFamily: "var(--font-mono)", background: "var(--accent)", color: "#fff" }}>
-                  {loading ? "Submitting..." : "Submit Application"}
+                  {loading ? "Submitting..." : isDemo ? "Unavailable in Demo" : "Submit Application"}
                 </button>
               </div>
             )}

@@ -310,6 +310,21 @@ test('marketplace application lifecycle is authenticated, spec-shaped, and idemp
     const withdrawalRetry = await postJSON(baseUrl, `/api/marketplace/applications/${created.body.id}/withdraw`, withdrawalBody);
     assert.equal(withdrawalRetry.status, 200);
     assert.equal(withdrawalRetry.body.idempotent, true);
+
+    const jobAfterWithdrawal = readJSON(dataDir, 'jobs', 'job_application_flow');
+    assert.deepEqual(jobAfterWithdrawal.applications, []);
+    assert.equal(jobAfterWithdrawal.applicationCount, 0);
+
+    const reapplied = await postJSON(baseUrl, '/api/marketplace/jobs/job_application_flow/apply', {
+      ...terms,
+      walletChallenge,
+    });
+    assert.equal(reapplied.status, 201);
+    assert.notEqual(reapplied.body.id, created.body.id);
+    const jobAfterReapply = readJSON(dataDir, 'jobs', 'job_application_flow');
+    assert.deepEqual(jobAfterReapply.applications, [reapplied.body.id]);
+    assert.equal(jobAfterReapply.applicationCount, 1);
+    assert.equal(readJSON(dataDir, 'applications', created.body.id).status, 'withdrawn');
   } finally {
     await close(server);
     loaded.restore();
