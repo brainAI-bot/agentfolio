@@ -1,63 +1,107 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "marker": "[#ef7e4581]",
-  "status": "verified",
+  "status": "source_build_verified_published_idl_mismatch",
   "baseline": {
-    "agentfolioPullRequest": 270,
-    "mergeCommit": "b4f3b0c020ee06743245db6e756270f3777d85e4",
-    "authoritativeRefreshPullRequest": 273,
-    "authoritativeRefreshHead": "3ca68c17e4a653d0dee6ccd99e56ef0d5f84dbd9",
-    "receiptObservedAt": "2026-08-24T21:22:40.126Z"
+    "runtimeTruthAgentfolioPullRequest": 296,
+    "runtimeTruthMergeCommit": "5d0f028e182a273b55938696d3b85fb45350d3fc",
+    "sourceBuildTruthSatpPullRequest": 169,
+    "sourceBuildTruthHead": "06327cefd7aafb5adba720e1fb9c6a6299f4799e",
+    "receiptObservedAt": "2026-08-31T17:31:46.888Z",
+    "supersededAgentfolioPullRequest": 273,
+    "supersededAllocatedSha256": "4f21da13659cbe99a606b408a5f1d3523c0e41de20538028939bbb1b54c3cc0d"
   },
   "program": {
     "cluster": "mainnet-beta",
     "programId": "HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C",
     "programData": "Fg1DJyKX9CngiMihZxJY2zjaQ8T1PK5QuiVhNvJmeTqk",
-    "publishedIdlAccount": "4zNAR5DGuWuUnEbwGb7FzEVUUCx2xKca2bmHCeVpjQCJ"
+    "upgradeTransaction": "3RBnKDDQuMv3VkUTSC4FHT8Qyk87xBJXUebkYCDenc1ApfTZP5PeFS32rRBsCLgQQLitBX9tYHhXprNw1C5KZd7y",
+    "upgradeSlot": 442907465,
+    "upgradeTime": "2026-08-30T14:57:41.000Z",
+    "upgradeAuthority": "Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc",
+    "programMetadataIdlAccount": "4zNAR5DGuWuUnEbwGb7FzEVUUCx2xKca2bmHCeVpjQCJ",
+    "legacyAnchorIdlAccount": "D2TVCWarEDQ3w3YFMpackzymm9MGQKeWd1p1pCeZmBcn"
   },
   "source": {
     "repository": "brainAI-bot/satp",
-    "commit": "93fc6c0d86302cfe8b0d8c798ba2817d7eeace44",
+    "commit": "3f8188bec89db0d4a081931f35272e10185d1c0d",
     "path": "programs/escrow_v3/src/lib.rs",
-    "sha256": "f4696cc27c5e2ff6163a90f877fd4431efa8809d2f6ae4c792c3c7cd18193c4d"
+    "sha256": "380b20d36f18253a5c382ec1abc4a1147a08092a9a42cdae25e5d954f41acd0a"
   },
   "buildInputs": {
     "cargoLockSha256": "d98db19e0d86ca3248376d4857b150b240be05c4bc3a409d7cb638ce4d5d2237",
+    "programCargoTomlSha256": "74f99640be90d76a6d1c78bc217e0178c62fa6c80a10455b4c650eef8c18d464",
     "rustToolchainTomlSha256": "615e131a336708d73f4b69a4a4a5a6f96b10f4399a1a075408e0616cda21544b",
-    "anchorTomlSha256": "785c886cbd5a583171293a268319f76e462f6c05b13d354f245dd853cf34e45c"
+    "anchorTomlSha256": "785c886cbd5a583171293a268319f76e462f6c05b13d354f245dd853cf34e45c",
+    "features": ["mainnet"]
   },
   "toolchain": {
     "rust": "1.86.0",
     "solanaCli": "2.1.21",
     "sbfPlatformTools": "v1.52",
-    "runner": "github-actions-macos-latest"
+    "runner": "github-actions-macos-26"
   },
   "rebuild": {
-    "command": "cargo build-sbf --force-tools-install --tools-version v1.52 --manifest-path programs/escrow_v3/Cargo.toml --features mainnet",
-    "bytes": 346856,
-    "sha256": "4f21da13659cbe99a606b408a5f1d3523c0e41de20538028939bbb1b54c3cc0d"
+    "command": "cargo build-sbf --tools-version v1.52 --manifest-path programs/escrow_v3/Cargo.toml --features mainnet",
+    "bytes": 350304,
+    "sha256": "27395415b6dc3d069d8a0a974613e647af1494590cbaff0a2658945a2bc4784a",
+    "intrinsicTrailingZeroBytes": 15
   },
   "deployedRuntime": {
-    "allocatedBytes": 346856,
-    "allocatedSha256": "4f21da13659cbe99a606b408a5f1d3523c0e41de20538028939bbb1b54c3cc0d",
-    "trimmedBytes": 346841,
-    "trimmedSha256": "2f3bb05486f39d3f61a454905048b6e5732b798643405836b62a6d9795a20a6d"
+    "programDataAccountBytes": 357141,
+    "loaderHeaderBytes": 45,
+    "allocatedBytes": 357096,
+    "allocatedSha256": "7672bd30bf01134bc56e088013a5cafd65ff850c402a56e532be3e28a3d5b4c9",
+    "sourceArtifactPrefixBytes": 350304,
+    "sourceArtifactPrefixSha256": "27395415b6dc3d069d8a0a974613e647af1494590cbaff0a2658945a2bc4784a",
+    "allocationPaddingBytes": 6792,
+    "allocationPaddingSha256": "04f30102940f974daa462466fc5aa08ecb36622da73eb8162834e768c984b61f",
+    "trimmedBytes": 350289,
+    "trimmedSha256": "85e71adf087b268b199c933918a1b8bb2b0a5f67f9e71b1467b3ca8357b8458a"
   },
   "sourceIdl": {
     "path": "idls/v3/escrow_v3.json",
-    "sha256": "e8c142f27e225d8edc2f8f41e6fb698ebbb73f69d2fc078d5bf963234ebc8fa9",
-    "instructionCount": 14
+    "sha256": "9bb7e2a441af653108b21360a8aa14daa9bd8d54eebbc5eef88e7f3de881ba10",
+    "bytes": 20704,
+    "instructionCount": 14,
+    "requiredFeeRoutingAccounts": {
+      "release": ["escrow", "client", "agent", "treasury"],
+      "partial_release": ["escrow", "client", "agent", "treasury"]
+    }
   },
   "publishedIdl": {
-    "inflatedBytes": 20548,
-    "inflatedSha256": "e8c142f27e225d8edc2f8f41e6fb698ebbb73f69d2fc078d5bf963234ebc8fa9",
-    "instructionCount": 14
+    "programMetadata": {
+      "account": "4zNAR5DGuWuUnEbwGb7FzEVUUCx2xKca2bmHCeVpjQCJ",
+      "owner": "ProgM6JCCvbYkfKqJYHePx4xxSUSqJp7rh8Lyv7nk7S",
+      "accountBytes": 3345,
+      "accountDataSha256": "99f0e57bb32d6fa8661052ed2297923ac2cf7e5924e705922bba9827aad23fff",
+      "canonicalJsonBytes": 10653,
+      "canonicalJsonSha256": "d4d00143fdb5e755c68b484a428fc02bdf5d0a0000c7a8d7ea2712bff2da92ce",
+      "instructionCount": 14,
+      "missingRequiredFeeRoutingAccounts": {
+        "release": ["treasury"],
+        "partial_release": ["treasury"]
+      },
+      "matchesCanonicalSource": false
+    },
+    "legacyAnchor": {
+      "account": "D2TVCWarEDQ3w3YFMpackzymm9MGQKeWd1p1pCeZmBcn",
+      "accountBytes": 6808,
+      "inflatedJsonBytes": 12172,
+      "inflatedSha256": "864e8af057c1b196156222ecda5853936bf4c6e0f3ae9f5c1e2ca2e53ed6c768",
+      "instructionCount": 9,
+      "matchesCanonicalSource": false
+    }
   },
   "bindings": {
-    "rebuiltArtifactMatchesAllocatedRuntime": true,
+    "rebuiltArtifactMatchesAllocatedRuntime": false,
     "rebuiltArtifactMatchesTrimmedRuntime": false,
-    "sourceIdlMatchesPublishedIdl": true,
-    "sourceEqualsDeployedEqualsPublishedIdl": true
+    "rebuiltArtifactMatchesAllocatedPrefix": true,
+    "allocationPaddingIsAllZero": true,
+    "sourceBuildMatchesDeployedRuntime": true,
+    "sourceIdlMatchesPublishedIdl": false,
+    "sourceEqualsDeployedEqualsPublishedIdl": false
   },
-  "residualGate": "Live mainnet escrow writes require the release flag, inactive kill switch, and explicit Owner authorization. The former structurally-false devnet-program equality term is no longer a mainnet provenance gate."
+  "verdict": "The SATP source commit and locked build reproduce the exact deployed ProgramData prefix, and the remaining allocation suffix is proven zero loader padding. Both published IDL surfaces remain stale, so source == deployed binary is certified while source == deployed binary == published IDL is not certified.",
+  "residualGate": "Consumers and live escrow writes remain fail-closed until a separately authorized canonical IDL publication is completed and independently verified. This receipt performs no chain write, deploy, signer/keypair action, IDL/package publication, production mutation, or public launch action."
 }

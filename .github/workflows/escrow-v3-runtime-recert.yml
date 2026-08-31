@@ -6,6 +6,9 @@ on:
       - ".github/workflows/escrow-v3-runtime-recert.yml"
       - "config/escrow-v3-provenance-ef7e4581.json"
       - "scripts/verify-escrow-v3-runtime-recert.mjs"
+      - "src/lib/escrow-v3-authority.js"
+      - "tests/escrow-v3-authority.test.js"
+      - "docs/operational/ESCROW-V3-RUNTIME-PROVENANCE-RECERT-20260831.md"
       - "docs/operational/ESCROW-V3-RUNTIME-RECERT-EF7E4581.md"
       - "docs/operational/ESCROW-V3-RUNTIME-PROVENANCE-RECERT-20260824.md"
   schedule:
@@ -16,7 +19,7 @@ permissions:
   contents: read
 
 env:
-  SATP_SOURCE_COMMIT: "93fc6c0d86302cfe8b0d8c798ba2817d7eeace44"
+  SATP_SOURCE_COMMIT: "3f8188bec89db0d4a081931f35272e10185d1c0d"
   SOLANA_VERSION: "2.1.21"
   SBF_TOOLS_VERSION: "v1.52"
 
@@ -38,7 +41,7 @@ jobs:
   provenance-reproduction:
     name: Source, deployed binary, and IDL readback
     if: github.event_name != 'schedule'
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 45
 
     steps:
@@ -96,7 +99,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$HOME/.cache/solana"
           cargo clean --manifest-path programs/escrow_v3/Cargo.toml
-          cargo build-sbf --force-tools-install --tools-version "${SBF_TOOLS_VERSION}" --manifest-path programs/escrow_v3/Cargo.toml --features mainnet
+          cargo build-sbf --tools-version "${SBF_TOOLS_VERSION}" --manifest-path programs/escrow_v3/Cargo.toml --features mainnet
           shasum -a 256 target/deploy/escrow_v3.so
           wc -c target/deploy/escrow_v3.so
 

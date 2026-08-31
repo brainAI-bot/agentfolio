@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 import zlib from 'node:zlib';
 
 import { allocatedPayloadInvariant } from './lib/allocated-payload-invariant.mjs';
@@ -13,29 +14,21 @@ const RECEIPT = JSON.parse(fs.readFileSync(
 const EXPECTED = Object.freeze({
   programId: RECEIPT.program.programId,
   programData: RECEIPT.program.programData,
-  upgradeAuthority: 'Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc',
-  upgradeTransaction: '21jwie1FpQGvjV5yFQ6ofgcKPzp3hrM2DKtLGeyQ4XVr2DQg5LYg7fqira9XSsUTTbfJBM9V8yY8Pe1fchDimkVx',
-  upgradeSlot: 441423817,
-  upgradeTime: '2026-08-24T15:28:18.000Z',
-  allocatedBinaryLength: RECEIPT.deployedRuntime.allocatedBytes,
-  allocatedBinarySha256: RECEIPT.deployedRuntime.allocatedSha256,
-  trimmedBinaryLength: RECEIPT.deployedRuntime.trimmedBytes,
-  trimmedBinarySha256: RECEIPT.deployedRuntime.trimmedSha256,
-  publishedIdlAccount: RECEIPT.program.publishedIdlAccount,
-  publishedIdlAccountOwner: 'ProgM6JCCvbYkfKqJYHePx4xxSUSqJp7rh8Lyv7nk7S',
-  publishedIdlTransaction: '3nUp72KUkwtRbkKDjFBdg6X8qk85qJLwZLYn36xrwVmdNkbQ1RstQCaRzXHgFS58TE2nTacYimsscBTRJWbRgH1j',
-  publishedIdlTransactionSlot: 441423878,
-  publishedIdlTransactionTime: '2026-08-24T15:28:42.000Z',
-  publishedIdlInflatedSha256: RECEIPT.publishedIdl.inflatedSha256,
-  publishedIdlInstructionCount: RECEIPT.publishedIdl.instructionCount,
-  sourceCommit: '93fc6c0d86302cfe8b0d8c798ba2817d7eeace44',
+  upgradeAuthority: RECEIPT.program.upgradeAuthority,
+  upgradeTransaction: RECEIPT.program.upgradeTransaction,
+  upgradeSlot: RECEIPT.program.upgradeSlot,
+  upgradeTime: RECEIPT.program.upgradeTime,
+  programMetadataIdl: RECEIPT.publishedIdl.programMetadata,
+  legacyAnchorIdl: RECEIPT.publishedIdl.legacyAnchor,
+  sourceCommit: RECEIPT.source.commit,
   sourceSha256: RECEIPT.source.sha256,
   sourceIdlSha256: RECEIPT.sourceIdl.sha256,
 });
 
 const LOADER = 'BPFLoaderUpgradeab1e11111111111111111111111';
 const PROGRAMDATA_HEADER_LENGTH = 45;
-const IDL_METADATA_HEADER_LENGTH = 96;
+const PROGRAM_METADATA_IDL_HEADER_LENGTH = 96;
+const LEGACY_ANCHOR_IDL_HEADER_LENGTH = 44;
 const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 const RPC_ATTEMPTS = 4;
 
@@ -80,6 +73,19 @@ function trimTrailingZeroes(bytes) {
   return bytes.subarray(0, end);
 }
 
+function instructionNames(idl) {
+  return (idl.instructions || []).map((instruction) => instruction.name).sort();
+}
+
+function instructionAccountNames(idl, instructionName) {
+  const instruction = (idl.instructions || []).find(({ name }) => name === instructionName);
+  return (instruction?.accounts || []).map(({ name }) => name);
+}
+
+function equalJson(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -121,236 +127,277 @@ async function rpc(method, params) {
       await sleep(500 * (2 ** (attempt - 1)));
       continue;
     }
-    if (body.error) {
-      throw new RpcInfrastructureError(`RPC ${method} failed: ${JSON.stringify(body.error)}`);
-    }
+    if (body.error) throw new RpcInfrastructureError(`RPC ${method} failed: ${JSON.stringify(body.error)}`);
     return body.result;
   }
-
   throw new RpcInfrastructureError(`RPC ${method} exhausted retries`);
 }
 
 async function account(address) {
-  const result = await rpc('getAccountInfo', [address, { commitment: 'confirmed', encoding: 'base64' }]);
+  const result = await rpc('getAccountInfo', [address, { commitment: 'finalized', encoding: 'base64' }]);
   if (!result.value) throw new Error(`account ${address} is absent`);
-  return {
-    ...result.value,
-    data: Buffer.from(result.value.data[0], 'base64'),
-  };
+  return { ...result.value, data: Buffer.from(result.value.data[0], 'base64') };
 }
 
-function instructionNames(idl) {
-  return (idl.instructions || []).map((instruction) => instruction.name).sort();
-}
-
-function equalJson(left, right) {
-  return JSON.stringify(left) === JSON.stringify(right);
+function compareRequiredAccounts(publishedIdl) {
+  const result = {};
+  for (const [instruction, required] of Object.entries(RECEIPT.sourceIdl.requiredFeeRoutingAccounts)) {
+    const actual = instructionAccountNames(publishedIdl, instruction);
+    result[instruction] = required.filter((name) => !actual.includes(name));
+  }
+  return result;
 }
 
 async function main() {
-const artifactPath = arg('--artifact');
-const sourcePath = arg('--source');
-const sourceIdlPath = arg('--source-idl');
-const sourceCommit = arg('--source-commit');
-const packetArguments = [artifactPath, sourcePath, sourceIdlPath, sourceCommit];
-const anyPacketArgumentProvided = packetArguments.some(Boolean);
-const fullPacketProvided = packetArguments.every(Boolean);
-if (anyPacketArgumentProvided && !fullPacketProvided) {
-  throw new InputError(
-    '--artifact, --source, --source-idl, and --source-commit must be supplied together',
+  const artifactPath = arg('--artifact');
+  const sourcePath = arg('--source');
+  const sourceIdlPath = arg('--source-idl');
+  const sourceCommit = arg('--source-commit');
+  const packetArguments = [artifactPath, sourcePath, sourceIdlPath, sourceCommit];
+  const anyPacketArgumentProvided = packetArguments.some(Boolean);
+  const fullPacketProvided = packetArguments.every(Boolean);
+  if (anyPacketArgumentProvided && !fullPacketProvided) {
+    throw new InputError('--artifact, --source, --source-idl, and --source-commit must be supplied together');
+  }
+  for (const packetPath of [artifactPath, sourcePath, sourceIdlPath].filter(Boolean)) {
+    if (!fs.existsSync(packetPath)) throw new InputError(`packet file is absent: ${packetPath}`);
+  }
+
+  const program = await account(EXPECTED.programId);
+  const programData = await account(EXPECTED.programData);
+  const programMetadataIdlAccount = await account(EXPECTED.programMetadataIdl.account);
+  const legacyAnchorIdlAccount = await account(EXPECTED.legacyAnchorIdl.account);
+  const transaction = await rpc('getTransaction', [
+    EXPECTED.upgradeTransaction,
+    { commitment: 'finalized', maxSupportedTransactionVersion: 0 },
+  ]);
+  if (!transaction) throw new Error(`upgrade transaction ${EXPECTED.upgradeTransaction} is absent`);
+
+  const derivedProgramData = encodeBase58(program.data.subarray(4, 36));
+  const programDataSlot = Number(programData.data.readBigUInt64LE(4));
+  const upgradeAuthority = encodeBase58(programData.data.subarray(13, 45));
+  const allocatedBinary = programData.data.subarray(PROGRAMDATA_HEADER_LENGTH);
+  const sourceArtifactPrefix = allocatedBinary.subarray(0, RECEIPT.deployedRuntime.sourceArtifactPrefixBytes);
+  const allocationPadding = allocatedBinary.subarray(RECEIPT.deployedRuntime.sourceArtifactPrefixBytes);
+  const trimmedBinary = trimTrailingZeroes(allocatedBinary);
+  const programMetadataIdlBytes = zlib.inflateSync(
+    programMetadataIdlAccount.data.subarray(PROGRAM_METADATA_IDL_HEADER_LENGTH),
   );
-}
-for (const packetPath of [artifactPath, sourcePath, sourceIdlPath].filter(Boolean)) {
-  if (!fs.existsSync(packetPath)) throw new InputError(`packet file is absent: ${packetPath}`);
-}
-
-const program = await account(EXPECTED.programId);
-const programData = await account(EXPECTED.programData);
-const publishedIdlAccount = await account(EXPECTED.publishedIdlAccount);
-const transaction = await rpc('getTransaction', [
-  EXPECTED.upgradeTransaction,
-  { commitment: 'confirmed', maxSupportedTransactionVersion: 0 },
-]);
-if (!transaction) throw new Error(`upgrade transaction ${EXPECTED.upgradeTransaction} is absent`);
-const publishedIdlTransaction = await rpc('getTransaction', [
-  EXPECTED.publishedIdlTransaction,
-  { commitment: 'confirmed', maxSupportedTransactionVersion: 0 },
-]);
-if (!publishedIdlTransaction) {
-  throw new Error(`IDL transaction ${EXPECTED.publishedIdlTransaction} is absent`);
-}
-
-const derivedProgramData = encodeBase58(program.data.subarray(4, 36));
-const programDataSlot = Number(programData.data.readBigUInt64LE(4));
-const upgradeAuthority = encodeBase58(programData.data.subarray(13, 45));
-const allocatedBinary = programData.data.subarray(PROGRAMDATA_HEADER_LENGTH);
-const trimmedBinary = trimTrailingZeroes(allocatedBinary);
-const allocatedPayloadChecks = allocatedPayloadInvariant(allocatedBinary, {
-  length: EXPECTED.allocatedBinaryLength,
-  sha256: EXPECTED.allocatedBinarySha256,
-});
-const inflatedIdlBytes = zlib.inflateSync(
-  publishedIdlAccount.data.subarray(IDL_METADATA_HEADER_LENGTH),
-);
-const publishedIdl = JSON.parse(inflatedIdlBytes);
-const upgradeTransactionTime = Number.isInteger(transaction.blockTime)
-  ? new Date(transaction.blockTime * 1000).toISOString()
-  : null;
-const publishedIdlTransactionTime = Number.isInteger(publishedIdlTransaction.blockTime)
-  ? new Date(publishedIdlTransaction.blockTime * 1000).toISOString()
-  : null;
-
-const checks = {
-  programOwnerMatches: program.owner === LOADER,
-  programIsExecutable: program.executable === true,
-  programDataAddressMatches: derivedProgramData === EXPECTED.programData,
-  programDataOwnerMatches: programData.owner === LOADER,
-  programDataSlotMatchesUpgrade: programDataSlot === EXPECTED.upgradeSlot,
-  upgradeAuthorityMatches: upgradeAuthority === EXPECTED.upgradeAuthority,
-  upgradeTransactionSucceeded: transaction.meta?.err === null,
-  upgradeTransactionSlotMatches: transaction.slot === EXPECTED.upgradeSlot,
-  upgradeTransactionTimeMatches: upgradeTransactionTime === EXPECTED.upgradeTime,
-  upgradeTransactionLogMatches: transaction.meta?.logMessages?.some(
-    (line) => line.includes(`Upgraded program ${EXPECTED.programId}`),
-  ) === true,
-  ...allocatedPayloadChecks,
-  trimmedBinaryLengthMatches: trimmedBinary.length === EXPECTED.trimmedBinaryLength,
-  trimmedBinarySha256Matches: sha256(trimmedBinary) === EXPECTED.trimmedBinarySha256,
-  publishedIdlAccountOwnerMatches:
-    publishedIdlAccount.owner === EXPECTED.publishedIdlAccountOwner,
-  publishedIdlAddressMatches: publishedIdl.address === EXPECTED.programId,
-  publishedIdlHashMatches: sha256(inflatedIdlBytes) === EXPECTED.publishedIdlInflatedSha256,
-  publishedIdlInstructionCountMatches:
-    (publishedIdl.instructions || []).length === EXPECTED.publishedIdlInstructionCount,
-  publishedIdlTransactionSucceeded: publishedIdlTransaction.meta?.err === null,
-  publishedIdlTransactionSlotMatches:
-    publishedIdlTransaction.slot === EXPECTED.publishedIdlTransactionSlot,
-  publishedIdlTransactionTimeMatches:
-    publishedIdlTransactionTime === EXPECTED.publishedIdlTransactionTime,
-};
-const runtimeCheckNames = Object.keys(checks);
-
-const evidence = {
-  label: 'escrow_v3_authoritative_runtime_refresh_20260824',
-  observedAt: new Date().toISOString(),
-  expected: EXPECTED,
-  checks,
-  runtime: {
-    programOwner: program.owner,
-    programExecutable: program.executable,
-    programData: derivedProgramData,
-    programDataOwner: programData.owner,
-    programDataSlot,
-    upgradeAuthority,
-    allocatedBinaryLength: allocatedBinary.length,
-    allocatedBinarySha256: sha256(allocatedBinary),
-    trailingZeroBytes: allocatedBinary.length - trimmedBinary.length,
-    trimmedBinaryLength: trimmedBinary.length,
-    trimmedBinarySha256: sha256(trimmedBinary),
-  },
-  upgradeTransaction: {
-    signature: EXPECTED.upgradeTransaction,
-    slot: transaction.slot,
-    blockTime: upgradeTransactionTime,
-    succeeded: transaction.meta?.err === null,
-  },
-  publishedIdl: {
-    account: EXPECTED.publishedIdlAccount,
-    accountOwner: publishedIdlAccount.owner,
-    transaction: EXPECTED.publishedIdlTransaction,
-    transactionSlot: publishedIdlTransaction.slot,
-    transactionBlockTime: publishedIdlTransactionTime,
-    transactionSucceeded: publishedIdlTransaction.meta?.err === null,
-    inflatedLength: inflatedIdlBytes.length,
-    inflatedSha256: sha256(inflatedIdlBytes),
-    instructionNames: instructionNames(publishedIdl),
-  },
-};
-
-if (artifactPath) {
-  const artifact = fs.readFileSync(artifactPath);
-  const trimmedArtifact = trimTrailingZeroes(artifact);
-  checks.reproducibleBuildMatchesAllocatedBinary = artifact.equals(allocatedBinary);
-  checks.reproducibleBuildMatchesTrimmedBinary = trimmedArtifact.equals(trimmedBinary);
-  checks.reproducibleBuildMatchesDeployedBinary =
-    checks.reproducibleBuildMatchesAllocatedBinary
-    || checks.reproducibleBuildMatchesTrimmedBinary;
-  evidence.reproducibleBuild = {
-    path: artifactPath,
-    length: artifact.length,
-    sha256: sha256(artifact),
-    trailingZeroBytes: artifact.length - trimmedArtifact.length,
-    trimmedLength: trimmedArtifact.length,
-    trimmedSha256: sha256(trimmedArtifact),
-    matchesAllocatedBinary: checks.reproducibleBuildMatchesAllocatedBinary,
-    matchesTrimmedBinary: checks.reproducibleBuildMatchesTrimmedBinary,
-  };
-}
-
-if (sourcePath) {
-  const source = fs.readFileSync(sourcePath);
-  checks.sourceSha256Matches = sha256(source) === EXPECTED.sourceSha256;
-  checks.sourceDeclaresMainnetProgram = source.includes(
-    `declare_id!("${EXPECTED.programId}")`,
+  const programMetadataIdl = JSON.parse(programMetadataIdlBytes);
+  const legacyCompressedLength = legacyAnchorIdlAccount.data.readUInt32LE(40);
+  const legacyAnchorIdlBytes = zlib.inflateSync(
+    legacyAnchorIdlAccount.data.subarray(
+      LEGACY_ANCHOR_IDL_HEADER_LENGTH,
+      LEGACY_ANCHOR_IDL_HEADER_LENGTH + legacyCompressedLength,
+    ),
   );
-  evidence.source = {
-    commit: sourceCommit,
-    path: sourcePath,
-    sha256: sha256(source),
+  const legacyAnchorIdl = JSON.parse(legacyAnchorIdlBytes);
+  const upgradeTransactionTime = Number.isInteger(transaction.blockTime)
+    ? new Date(transaction.blockTime * 1000).toISOString()
+    : null;
+  const programMetadataMissing = compareRequiredAccounts(programMetadataIdl);
+
+  const checks = {
+    programOwnerMatches: program.owner === LOADER,
+    programIsExecutable: program.executable === true,
+    programDataAddressMatches: derivedProgramData === EXPECTED.programData,
+    programDataOwnerMatches: programData.owner === LOADER,
+    programDataAccountLengthMatches:
+      programData.data.length === RECEIPT.deployedRuntime.programDataAccountBytes,
+    programDataSlotMatchesUpgrade: programDataSlot === EXPECTED.upgradeSlot,
+    upgradeAuthorityMatches: upgradeAuthority === EXPECTED.upgradeAuthority,
+    upgradeTransactionSucceeded: transaction.meta?.err === null,
+    upgradeTransactionSlotMatches: transaction.slot === EXPECTED.upgradeSlot,
+    upgradeTransactionTimeMatches: upgradeTransactionTime === EXPECTED.upgradeTime,
+    upgradeTransactionLogMatches: transaction.meta?.logMessages?.some(
+      (line) => line.includes(`Upgraded program ${EXPECTED.programId}`),
+    ) === true,
+    ...allocatedPayloadInvariant(allocatedBinary, {
+      length: RECEIPT.deployedRuntime.allocatedBytes,
+      sha256: RECEIPT.deployedRuntime.allocatedSha256,
+    }),
+    sourceArtifactPrefixLengthMatches:
+      sourceArtifactPrefix.length === RECEIPT.deployedRuntime.sourceArtifactPrefixBytes,
+    sourceArtifactPrefixSha256Matches:
+      sha256(sourceArtifactPrefix) === RECEIPT.deployedRuntime.sourceArtifactPrefixSha256,
+    allocationPaddingLengthMatches:
+      allocationPadding.length === RECEIPT.deployedRuntime.allocationPaddingBytes,
+    allocationPaddingIsAllZero: allocationPadding.every((byte) => byte === 0),
+    allocationPaddingSha256Matches:
+      sha256(allocationPadding) === RECEIPT.deployedRuntime.allocationPaddingSha256,
+    trimmedBinaryLengthMatches: trimmedBinary.length === RECEIPT.deployedRuntime.trimmedBytes,
+    trimmedBinarySha256Matches: sha256(trimmedBinary) === RECEIPT.deployedRuntime.trimmedSha256,
+    programMetadataIdlOwnerMatches:
+      programMetadataIdlAccount.owner === EXPECTED.programMetadataIdl.owner,
+    programMetadataIdlAccountLengthMatches:
+      programMetadataIdlAccount.data.length === EXPECTED.programMetadataIdl.accountBytes,
+    programMetadataIdlAccountSha256Matches:
+      sha256(programMetadataIdlAccount.data) === EXPECTED.programMetadataIdl.accountDataSha256,
+    programMetadataIdlCanonicalJsonLengthMatches:
+      Buffer.from(JSON.stringify(programMetadataIdl)).length
+        === EXPECTED.programMetadataIdl.canonicalJsonBytes,
+    programMetadataIdlCanonicalJsonSha256Matches:
+      sha256(Buffer.from(JSON.stringify(programMetadataIdl)))
+        === EXPECTED.programMetadataIdl.canonicalJsonSha256,
+    programMetadataIdlInstructionCountMatches:
+      instructionNames(programMetadataIdl).length === EXPECTED.programMetadataIdl.instructionCount,
+    programMetadataIdlMissingAccountsMatch:
+      equalJson(programMetadataMissing, EXPECTED.programMetadataIdl.missingRequiredFeeRoutingAccounts),
+    legacyAnchorIdlAccountLengthMatches:
+      legacyAnchorIdlAccount.data.length === EXPECTED.legacyAnchorIdl.accountBytes,
+    legacyAnchorIdlInflatedLengthMatches:
+      legacyAnchorIdlBytes.length === EXPECTED.legacyAnchorIdl.inflatedJsonBytes,
+    legacyAnchorIdlSha256Matches:
+      sha256(legacyAnchorIdlBytes) === EXPECTED.legacyAnchorIdl.inflatedSha256,
+    legacyAnchorIdlInstructionCountMatches:
+      instructionNames(legacyAnchorIdl).length === EXPECTED.legacyAnchorIdl.instructionCount,
   };
-  checks.sourceCommitMatches = evidence.source.commit === EXPECTED.sourceCommit;
-}
+  const runtimeCheckNames = Object.keys(checks);
 
-if (sourceIdlPath) {
-  const sourceIdlBytes = fs.readFileSync(sourceIdlPath);
-  const sourceIdl = JSON.parse(sourceIdlBytes);
-  const sourceNames = instructionNames(sourceIdl);
-  const publishedNames = instructionNames(publishedIdl);
-  checks.sourceIdlSha256Matches = sha256(sourceIdlBytes) === EXPECTED.sourceIdlSha256;
-  checks.sourceIdlMatchesPublishedIdl = equalJson(sourceNames, publishedNames);
-  evidence.sourceIdl = {
-    path: sourceIdlPath,
-    sha256: sha256(sourceIdlBytes),
-    instructionNames: sourceNames,
-    missingFromPublishedIdl: sourceNames.filter((name) => !publishedNames.includes(name)),
-    extraInPublishedIdl: publishedNames.filter((name) => !sourceNames.includes(name)),
+  const evidence = {
+    label: 'escrow_v3_runtime_provenance_recert_ef7e4581_20260831',
+    observedAt: new Date().toISOString(),
+    expected: EXPECTED,
+    checks,
+    runtime: {
+      programData: derivedProgramData,
+      programDataSlot,
+      upgradeAuthority,
+      programDataAccountBytes: programData.data.length,
+      allocatedBinaryLength: allocatedBinary.length,
+      allocatedBinarySha256: sha256(allocatedBinary),
+      sourceArtifactPrefixBytes: sourceArtifactPrefix.length,
+      sourceArtifactPrefixSha256: sha256(sourceArtifactPrefix),
+      allocationPaddingBytes: allocationPadding.length,
+      allocationPaddingSha256: sha256(allocationPadding),
+      trailingZeroBytes: allocatedBinary.length - trimmedBinary.length,
+      trimmedBinaryLength: trimmedBinary.length,
+      trimmedBinarySha256: sha256(trimmedBinary),
+    },
+    upgradeTransaction: {
+      signature: EXPECTED.upgradeTransaction,
+      slot: transaction.slot,
+      blockTime: upgradeTransactionTime,
+      succeeded: transaction.meta?.err === null,
+    },
+    publishedIdl: {
+      programMetadata: {
+        account: EXPECTED.programMetadataIdl.account,
+        accountDataSha256: sha256(programMetadataIdlAccount.data),
+        canonicalJsonSha256: sha256(Buffer.from(JSON.stringify(programMetadataIdl))),
+        instructionNames: instructionNames(programMetadataIdl),
+        missingRequiredFeeRoutingAccounts: programMetadataMissing,
+      },
+      legacyAnchor: {
+        account: EXPECTED.legacyAnchorIdl.account,
+        inflatedSha256: sha256(legacyAnchorIdlBytes),
+        instructionNames: instructionNames(legacyAnchorIdl),
+      },
+    },
   };
-}
 
-const runtimeVerified = runtimeCheckNames.every((name) => checks[name] === true);
-const sourcePacketVerified = fullPacketProvided && [
-  'sourceSha256Matches',
-  'sourceDeclaresMainnetProgram',
-  'sourceCommitMatches',
-  'sourceIdlSha256Matches',
-].every((name) => checks[name] === true);
-const sourceBuildVerified = sourcePacketVerified
-  && checks.reproducibleBuildMatchesDeployedBinary === true;
-const sourceDeployedIdlEqual = sourceBuildVerified && checks.sourceIdlMatchesPublishedIdl === true;
-evidence.status = !runtimeVerified
-  ? 'verification_failed'
-  : !fullPacketProvided
-    ? 'runtime_verified'
-    : !sourcePacketVerified
-      ? 'runtime_verified_source_packet_verification_failed'
-      : !sourceBuildVerified
-        ? 'runtime_verified_source_build_mismatch'
-        : !sourceDeployedIdlEqual
-          ? 'runtime_and_source_build_verified_published_idl_mismatch'
-          : 'source_deployed_idl_equal';
-evidence.fullPacketProvided = fullPacketProvided;
-evidence.runtimeVerified = runtimeVerified;
-evidence.sourcePacketVerified = sourcePacketVerified;
-evidence.sourceBuildVerified = sourceBuildVerified;
-evidence.sourceDeployedIdlEqual = sourceDeployedIdlEqual;
+  let sourceIdl;
+  if (fullPacketProvided) {
+    const artifact = fs.readFileSync(artifactPath);
+    const source = fs.readFileSync(sourcePath);
+    const sourceIdlBytes = fs.readFileSync(sourceIdlPath);
+    sourceIdl = JSON.parse(sourceIdlBytes);
+    const sourceRoot = path.resolve(path.dirname(sourcePath), '../../..');
+    const inputPaths = {
+      cargoLockSha256: path.join(sourceRoot, 'Cargo.lock'),
+      programCargoTomlSha256: path.join(sourceRoot, 'programs/escrow_v3/Cargo.toml'),
+      rustToolchainTomlSha256: path.join(sourceRoot, 'rust-toolchain.toml'),
+      anchorTomlSha256: path.join(sourceRoot, 'Anchor.toml'),
+    };
+    for (const inputPath of Object.values(inputPaths)) {
+      if (!fs.existsSync(inputPath)) throw new InputError(`build input is absent: ${inputPath}`);
+    }
 
-console.log(JSON.stringify(evidence, null, 2));
+    checks.reproducibleBuildLengthMatches = artifact.length === RECEIPT.rebuild.bytes;
+    checks.reproducibleBuildSha256Matches = sha256(artifact) === RECEIPT.rebuild.sha256;
+    checks.reproducibleBuildMatchesAllocatedPrefix = artifact.equals(sourceArtifactPrefix);
+    checks.sourceSha256Matches = sha256(source) === EXPECTED.sourceSha256;
+    checks.sourceDeclaresMainnetProgram = source.includes(`declare_id!("${EXPECTED.programId}")`);
+    checks.sourceCommitMatches = sourceCommit === EXPECTED.sourceCommit;
+    checks.sourceIdlSha256Matches = sha256(sourceIdlBytes) === EXPECTED.sourceIdlSha256;
+    checks.sourceIdlLengthMatches = sourceIdlBytes.length === RECEIPT.sourceIdl.bytes;
+    checks.sourceIdlInstructionCountMatches =
+      instructionNames(sourceIdl).length === RECEIPT.sourceIdl.instructionCount;
+    for (const [hashField, inputPath] of Object.entries(inputPaths)) {
+      checks[`${hashField}Matches`] = sha256(fs.readFileSync(inputPath))
+        === RECEIPT.buildInputs[hashField];
+    }
 
-if (!runtimeVerified) process.exitCode = 1;
-if (fullPacketProvided && !sourcePacketVerified) process.exitCode = 1;
-if (process.argv.includes('--strict-source') && fullPacketProvided && !sourceDeployedIdlEqual) {
-  process.exitCode = 3;
-}
+    const programMetadataMissingFromSource = compareRequiredAccounts(programMetadataIdl);
+    const legacyMissingFromSource = instructionNames(sourceIdl)
+      .filter((name) => !instructionNames(legacyAnchorIdl).includes(name));
+    checks.sourceIdlMatchesProgramMetadataIdl =
+      equalJson(instructionNames(sourceIdl), instructionNames(programMetadataIdl))
+      && Object.values(programMetadataMissingFromSource).every((missing) => missing.length === 0);
+    checks.sourceIdlMatchesLegacyAnchorIdl =
+      equalJson(instructionNames(sourceIdl), instructionNames(legacyAnchorIdl));
+
+    evidence.reproducibleBuild = {
+      path: artifactPath,
+      length: artifact.length,
+      sha256: sha256(artifact),
+      matchesAllocatedPrefix: checks.reproducibleBuildMatchesAllocatedPrefix,
+    };
+    evidence.source = { commit: sourceCommit, path: sourcePath, sha256: sha256(source) };
+    evidence.sourceIdl = {
+      path: sourceIdlPath,
+      sha256: sha256(sourceIdlBytes),
+      instructionNames: instructionNames(sourceIdl),
+      programMetadataMissingRequiredAccounts: programMetadataMissingFromSource,
+      missingFromLegacyAnchorIdl: legacyMissingFromSource,
+    };
+  }
+
+  const runtimeVerified = runtimeCheckNames.every((name) => checks[name] === true);
+  const sourcePacketVerified = fullPacketProvided && [
+    'sourceSha256Matches',
+    'sourceDeclaresMainnetProgram',
+    'sourceCommitMatches',
+    'sourceIdlSha256Matches',
+    'sourceIdlLengthMatches',
+    'sourceIdlInstructionCountMatches',
+    'cargoLockSha256Matches',
+    'programCargoTomlSha256Matches',
+    'rustToolchainTomlSha256Matches',
+    'anchorTomlSha256Matches',
+  ].every((name) => checks[name] === true);
+  const sourceBuildVerified = sourcePacketVerified
+    && checks.reproducibleBuildLengthMatches === true
+    && checks.reproducibleBuildSha256Matches === true
+    && checks.reproducibleBuildMatchesAllocatedPrefix === true;
+  const publishedIdlMatchesSource = sourceBuildVerified
+    && checks.sourceIdlMatchesProgramMetadataIdl === true
+    && checks.sourceIdlMatchesLegacyAnchorIdl === true;
+
+  evidence.status = !runtimeVerified
+    ? 'verification_failed'
+    : !fullPacketProvided
+      ? 'runtime_verified_published_idls_stale'
+      : !sourcePacketVerified
+        ? 'runtime_verified_source_packet_verification_failed'
+        : !sourceBuildVerified
+          ? 'runtime_verified_source_build_mismatch'
+          : !publishedIdlMatchesSource
+            ? 'runtime_and_source_build_verified_published_idl_mismatch'
+            : 'source_deployed_idl_equal';
+  evidence.fullPacketProvided = fullPacketProvided;
+  evidence.runtimeVerified = runtimeVerified;
+  evidence.sourcePacketVerified = sourcePacketVerified;
+  evidence.sourceBuildVerified = sourceBuildVerified;
+  evidence.publishedIdlMatchesSource = publishedIdlMatchesSource;
+
+  console.log(JSON.stringify(evidence, null, 2));
+
+  if (!runtimeVerified) process.exitCode = 1;
+  if (fullPacketProvided && !sourcePacketVerified) process.exitCode = 1;
+  if (process.argv.includes('--strict-source') && fullPacketProvided && !publishedIdlMatchesSource) {
+    process.exitCode = 3;
+  }
 }
 
 main().catch((error) => {
@@ -360,13 +407,10 @@ main().catch((error) => {
       ? 'infrastructure_error'
       : 'verification_failed';
   console.error(JSON.stringify({
-    label: 'escrow_v3_runtime_recert_ef7e4581',
+    label: 'escrow_v3_runtime_provenance_recert_ef7e4581_20260831',
     observedAt: new Date().toISOString(),
     status,
-    error: {
-      name: error.name,
-      message: error.message,
-    },
+    error: { name: error.name, message: error.message },
   }, null, 2));
   process.exitCode = status === 'verification_failed' ? 1 : 2;
 });
