@@ -13,6 +13,7 @@ const { computeUnifiedTrustScore } = require('../lib/unified-trust-score');
 const { isFixtureIdentity } = require('../lib/public-traction');
 const { buildReputationSurface, normalizeTrustScoreValue } = require('../lib/reputation-surface');
 const { summarizeCanonicalReviews } = require('../lib/canonical-review-evidence');
+const { buildPublishedReviewStats } = require('../lib/published-review-stats');
 function resolveSatpMainnetRpcUrl() {
   const rpc = String(process.env.SOLANA_RPC_URL || '').trim();
   if (rpc && !/devnet/i.test(rpc)) return rpc;
@@ -189,13 +190,10 @@ async function getSatpAgents() {
     }
     const _db = profileStore.getDb();
     const profileRows = _db.prepare('SELECT * FROM profiles').all();
-    const reviewStatsRows = profileRows.map((profile) => {
+    const reviewStatsRows = profileRows.flatMap((profile) => {
       const summary = summarizeCanonicalReviews(_db, { revieweeId: profile.id });
-      return {
-        profile_id: profile.id,
-        total: summary.count,
-        avg_rating: summary.averageRating,
-      };
+      const stats = buildPublishedReviewStats(summary);
+      return stats.total > 0 ? [{ profile_id: profile.id, ...stats }] : [];
     });
     const reviewStatsByProfileId = new Map(reviewStatsRows.map((row) => [row.profile_id, row]));
 
@@ -457,7 +455,7 @@ for (const agent of filteredAgents) {
 
   const profileNFTAvatar = profile.nft_avatar || null;
   const profileAvatar = profileNFTAvatar?.image || profileNFTAvatar?.arweaveUrl || profile.avatar || null;
-  const reviewStats = reviewStatsByProfileId.get(profile.id) || { total: 0, avg_rating: 0 };
+  const reviewStats = reviewStatsByProfileId.get(profile.id) || { total: 0, avg_rating: null };
   const canonicalExplorerV3 = matchedExplorerV3ByProfileId.get(profile.id) || null;
   const canonicalV3 = canonicalExplorerV3 || canonicalV3ByProfileId.get(profile.id) || null;
   const canonicalTrustScore = Number(canonicalV3?.reputationScore || 0);

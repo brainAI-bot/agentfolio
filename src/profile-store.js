@@ -26,6 +26,7 @@ const {
   listCanonicalReviews,
   summarizeCanonicalReviews,
 } = require('./lib/canonical-review-evidence');
+const { buildPublishedReviewStats } = require('./lib/published-review-stats');
 const {
   CANONICAL_TRUST_PROVIDERS,
   isCanonicalTrustProvider,
@@ -518,8 +519,7 @@ function enrichProfile(row) {
   const activity = d.prepare('SELECT * FROM activity_feed WHERE profile_id = ? ORDER BY created_at DESC LIMIT 20').all(row.id);
   const canonicalReviewStats = summarizeCanonicalReviews(d, { revieweeId: row.id });
   const reviewStats = {
-    total: canonicalReviewStats.count,
-    avg_rating: canonicalReviewStats.averageRating,
+    ...buildPublishedReviewStats(canonicalReviewStats),
     positive: canonicalReviewStats.positive,
     negative: canonicalReviewStats.negative,
   };
@@ -1497,10 +1497,7 @@ function registerRoutes(app) {
     const canonicalStats = summarizeCanonicalReviews(d, { revieweeId: req.params.id });
     const items = canonicalStats.reviews
       .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
-    const stats = {
-      total: canonicalStats.count,
-      avg_rating: canonicalStats.averageRating,
-    };
+    const stats = buildPublishedReviewStats(canonicalStats);
     res.json({ reviews: items, ...stats });
   });
 

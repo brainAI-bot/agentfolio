@@ -8,6 +8,7 @@ const {
   summarizeCanonicalReviews,
 } = require('../src/lib/canonical-review-evidence');
 const { computeUnifiedTrustScore } = require('../src/lib/unified-trust-score');
+const { buildPublishedReviewStats } = require('../src/lib/published-review-stats');
 const { migrate } = require('../scripts/migrate-canonical-review-trust');
 
 function createDb() {
@@ -87,6 +88,26 @@ test('canonical aggregates exclude unlinked, unreleased, and participant-mismatc
   assert.equal(reviews[0].escrowParticipantMatch, true);
   assert.equal(reviews[0].reviewerIdentityBound, false);
   assert.equal(summarizeCanonicalReviews(db, { revieweeId: 'agent-1' }).count, 1);
+  db.close();
+});
+
+test('published profile stats keep quarantined-only agents unrated and round canonical averages', () => {
+  const db = createDb();
+  insertReleasedEscrow(db);
+  db.exec(`
+    INSERT INTO reviews VALUES ('quarantined-only', 'missing-job', 'client-1', 'agent-1', 1, 'unproven');
+  `);
+
+  let summary = summarizeCanonicalReviews(db, { revieweeId: 'agent-1' });
+  assert.deepEqual(buildPublishedReviewStats(summary), { total: 0, avg_rating: null });
+
+  db.exec(`
+    INSERT INTO reviews VALUES ('canonical-1', 'job-1', 'client-1', 'agent-1', 4, NULL);
+    INSERT INTO reviews VALUES ('canonical-2', 'job-1', 'client-1', 'agent-1', 4, NULL);
+    INSERT INTO reviews VALUES ('canonical-3', 'job-1', 'client-1', 'agent-1', 5, NULL);
+  `);
+  summary = summarizeCanonicalReviews(db, { revieweeId: 'agent-1' });
+  assert.deepEqual(buildPublishedReviewStats(summary), { total: 3, avg_rating: 4.33 });
   db.close();
 });
 
