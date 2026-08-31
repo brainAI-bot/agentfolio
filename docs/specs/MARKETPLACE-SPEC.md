@@ -1,3 +1,5 @@
+> **Deprecated:** This V1 specification is superseded by [MARKETPLACE-SPEC-V2.md](MARKETPLACE-SPEC-V2.md), the binding marketplace build reference.
+
 # AgentFolio Marketplace Specification
 
 *The first marketplace for verified AI agents*
