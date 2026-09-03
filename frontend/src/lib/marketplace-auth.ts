@@ -9,6 +9,18 @@ export interface MarketplaceWalletChallenge {
   signature: string;
 }
 
+export async function fetchMarketplaceApplyResourceId(apiBase: string, jobId: string): Promise<string> {
+  const response = await fetch(`${apiBase}/api/marketplace/jobs/${jobId}`);
+  if (!response.ok) throw new Error("Unable to load the current application authorization state");
+
+  const job = await response.json();
+  const revision = Number(job.applyChallengeRevision ?? 0);
+  if (!Number.isSafeInteger(revision) || revision < 0) {
+    throw new Error("Invalid application authorization state");
+  }
+  return `${jobId}#${revision}`;
+}
+
 export function buildMarketplaceWalletChallenge(params: {
   action: string;
   resourceId: string;

@@ -230,6 +230,15 @@ function buildMarketplaceWalletChallenge({ action, resourceId, actorId, walletAd
   ].join('\n');
 }
 
+function getApplyChallengeRevision(job = {}) {
+  const revision = Number(job.applyChallengeRevision ?? 0);
+  return Number.isSafeInteger(revision) && revision >= 0 ? revision : 0;
+}
+
+function buildApplyChallengeResourceId(job) {
+  return `${job.id}#${getApplyChallengeRevision(job)}`;
+}
+
 function getMarketplaceWalletChallenge(body = {}) {
   return body.walletChallenge || body.walletAuthorization || body.satpWalletChallenge || {};
 }
@@ -489,6 +498,7 @@ function registerRoutes(app) {
       expiresAt: expiresAt || null,
       status: 'open',
       applications: [],
+      applyChallengeRevision: 0,
       acceptedApplicant: null,
       selectedAgentId: null,
       escrowId: null,
@@ -550,7 +560,7 @@ function registerRoutes(app) {
 
     const authResult = verifyMarketplaceMutationSignature({
       action: 'apply',
-      resourceId: job.id,
+      resourceId: buildApplyChallengeResourceId(job),
       actorId: applicantId,
       body: req.body,
     });
@@ -654,6 +664,7 @@ function registerRoutes(app) {
     writeJSON(appPath, application);
     job.applications = job.applications.filter(applicationId => applicationId !== application.id);
     job.applicationCount = job.applications.length;
+    job.applyChallengeRevision = getApplyChallengeRevision(job) + 1;
     job.updatedAt = new Date().toISOString();
     writeJSON(jobPath, job);
     res.json(application);

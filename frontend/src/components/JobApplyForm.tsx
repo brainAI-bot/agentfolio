@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { Briefcase, Send, Share2, Check } from "lucide-react";
-import { signMarketplaceAction } from "@/lib/marketplace-auth";
+import { fetchMarketplaceApplyResourceId, signMarketplaceAction } from "@/lib/marketplace-auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
 
@@ -52,9 +52,10 @@ export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: s
     setResult(null);
     try {
       if (!publicKey) throw new Error("Connect the wallet linked to this AgentFolio profile");
+      const applyResourceId = await fetchMarketplaceApplyResourceId(API_BASE, jobId);
       const walletChallenge = await signMarketplaceAction({
         action: "apply",
-        resourceId: jobId,
+        resourceId: applyResourceId,
         actorId: effectiveId,
         walletAddress: publicKey.toBase58(),
         signMessage,

@@ -19,7 +19,7 @@ import {
   resolveAgentWallet,
   getV3EscrowState,
 } from "@/lib/v3-escrow";
-import { signMarketplaceAction } from "@/lib/marketplace-auth";
+import { fetchMarketplaceApplyResourceId, signMarketplaceAction } from "@/lib/marketplace-auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
 
@@ -228,9 +228,10 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     }
     setLoading(true);
     try {
+      const applyResourceId = await fetchMarketplaceApplyResourceId(API_BASE, selectedJob.id);
       const walletChallenge = await signMarketplaceAction({
         action: "apply",
-        resourceId: selectedJob.id,
+        resourceId: applyResourceId,
         actorId: resolvedProfileId,
         walletAddress: publicKey.toBase58(),
         signMessage,

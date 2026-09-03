@@ -252,7 +252,7 @@ test('marketplace application lifecycle is authenticated, spec-shaped, and idemp
 
     const walletChallenge = signedChallenge(loaded.marketplace, worker, {
       action: 'apply',
-      resourceId: 'job_application_flow',
+      resourceId: 'job_application_flow#0',
       actorId: 'worker_agent',
       identityPDA: identities.worker,
     });
@@ -314,10 +314,25 @@ test('marketplace application lifecycle is authenticated, spec-shaped, and idemp
     const jobAfterWithdrawal = readJSON(dataDir, 'jobs', 'job_application_flow');
     assert.deepEqual(jobAfterWithdrawal.applications, []);
     assert.equal(jobAfterWithdrawal.applicationCount, 0);
+    assert.equal(jobAfterWithdrawal.applyChallengeRevision, 1);
 
-    const reapplied = await postJSON(baseUrl, '/api/marketplace/jobs/job_application_flow/apply', {
+    const staleReplay = await postJSON(baseUrl, '/api/marketplace/jobs/job_application_flow/apply', {
       ...terms,
       walletChallenge,
+    });
+    assert.equal(staleReplay.status, 401);
+    assert.match(staleReplay.body.error, /message mismatch/);
+    assert.deepEqual(readJSON(dataDir, 'jobs', 'job_application_flow').applications, []);
+
+    const freshWalletChallenge = signedChallenge(loaded.marketplace, worker, {
+      action: 'apply',
+      resourceId: 'job_application_flow#1',
+      actorId: 'worker_agent',
+      identityPDA: identities.worker,
+    });
+    const reapplied = await postJSON(baseUrl, '/api/marketplace/jobs/job_application_flow/apply', {
+      ...terms,
+      walletChallenge: freshWalletChallenge,
     });
     assert.equal(reapplied.status, 201);
     assert.notEqual(reapplied.body.id, created.body.id);
@@ -363,7 +378,7 @@ test('marketplace application rejects invalid payloads and invalid withdraw tran
   try {
     const baseUrl = `http://127.0.0.1:${server.address().port}`;
     const applyChallenge = signedChallenge(loaded.marketplace, worker, {
-      action: 'apply', resourceId: 'job_invalid_application', actorId: 'worker_agent', identityPDA: workerIdentity,
+      action: 'apply', resourceId: 'job_invalid_application#0', actorId: 'worker_agent', identityPDA: workerIdentity,
     });
     const invalid = await postJSON(baseUrl, '/api/marketplace/jobs/job_invalid_application/apply', {
       applicantId: 'worker_agent', coverMessage: 'short', proposedBudget: -1,
@@ -379,7 +394,7 @@ test('marketplace application rejects invalid payloads and invalid withdraw tran
       proposedTimeline: '1_week',
       portfolioItems: [],
       walletChallenge: signedChallenge(loaded.marketplace, worker, {
-        action: 'apply', resourceId: 'job_corrupt_application_index', actorId: 'worker_agent', identityPDA: workerIdentity,
+        action: 'apply', resourceId: 'job_corrupt_application_index#0', actorId: 'worker_agent', identityPDA: workerIdentity,
       }),
     });
     assert.equal(corruptIndex.status, 409);
