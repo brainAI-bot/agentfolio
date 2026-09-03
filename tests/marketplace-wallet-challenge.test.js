@@ -53,12 +53,14 @@ function makeProfileStoreStub(rows) {
   };
 }
 
-function freshMarketplace(dataDir, profiles) {
+function freshMarketplace(dataDir, profiles, overrides = {}) {
   const marketplacePath = require.resolve('../src/marketplace');
   const profileStorePath = require.resolve('../src/profile-store');
+  const atomicFilePath = require.resolve('../src/lib/atomic-file');
   const previousDataDir = process.env.MARKETPLACE_DATA_DIR;
   const previousMarketplace = require.cache[marketplacePath];
   const previousProfileStore = require.cache[profileStorePath];
+  const previousAtomicFile = require.cache[atomicFilePath];
 
   process.env.MARKETPLACE_DATA_DIR = dataDir;
   delete require.cache[marketplacePath];
@@ -68,6 +70,13 @@ function freshMarketplace(dataDir, profiles) {
     loaded: true,
     exports: makeProfileStoreStub(profiles),
   };
+  if (overrides.writeJsonAtomicSync) {
+    const atomicFile = require(atomicFilePath);
+    require.cache[atomicFilePath] = {
+      ...require.cache[atomicFilePath],
+      exports: { ...atomicFile, writeJsonAtomicSync: overrides.writeJsonAtomicSync },
+    };
+  }
 
   const marketplace = require('../src/marketplace');
 
@@ -76,6 +85,8 @@ function freshMarketplace(dataDir, profiles) {
     if (previousMarketplace) require.cache[marketplacePath] = previousMarketplace;
     if (previousProfileStore) require.cache[profileStorePath] = previousProfileStore;
     else delete require.cache[profileStorePath];
+    if (previousAtomicFile) require.cache[atomicFilePath] = previousAtomicFile;
+    else delete require.cache[atomicFilePath];
     if (previousDataDir === undefined) delete process.env.MARKETPLACE_DATA_DIR;
     else process.env.MARKETPLACE_DATA_DIR = previousDataDir;
   }
@@ -314,7 +325,7 @@ test('marketplace application lifecycle is authenticated, spec-shaped, and idemp
     const jobAfterWithdrawal = readJSON(dataDir, 'jobs', 'job_application_flow');
     assert.deepEqual(jobAfterWithdrawal.applications, []);
     assert.equal(jobAfterWithdrawal.applicationCount, 0);
-    assert.equal(jobAfterWithdrawal.applyChallengeRevision, 1);
+    assert.equal(jobAfterWithdrawal.applyChallengeRevisions.worker_agent, 1);
 
     const staleReplay = await postJSON(baseUrl, '/api/marketplace/jobs/job_application_flow/apply', {
       ...terms,
@@ -340,6 +351,164 @@ test('marketplace application lifecycle is authenticated, spec-shaped, and idemp
     assert.deepEqual(jobAfterReapply.applications, [reapplied.body.id]);
     assert.equal(jobAfterReapply.applicationCount, 1);
     assert.equal(readJSON(dataDir, 'applications', created.body.id).status, 'withdrawn');
+  } finally {
+    await close(server);
+    loaded.restore();
+  }
+});
+
+test('withdrawal revocation survives a second-write failure and remains actor-scoped', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-marketplace-wallet-'));
+  const client = Keypair.generate();
+  const worker = Keypair.generate();
+  const other = Keypair.generate();
+  const bootstrap = freshMarketplace(dataDir, []);
+  const identities = {
+    client: bootstrap.marketplace.deriveSatpIdentityPDA(client.publicKey.toBase58()),
+    worker: bootstrap.marketplace.deriveSatpIdentityPDA(worker.publicKey.toBase58()),
+    other: bootstrap.marketplace.deriveSatpIdentityPDA(other.publicKey.toBase58()),
+  };
+  bootstrap.restore();
+
+  const profile = (id, name, keypair, identityPDA) => ({
+    id,
+    name,
+    wallet: keypair.publicKey.toBase58(),
+    wallets: JSON.stringify({ solana: keypair.publicKey.toBase58() }),
+    verification_data: JSON.stringify({
+      solana: { verified: true, address: keypair.publicKey.toBase58() },
+      satp: { identityPDA },
+    }),
+  });
+  const atomicFile = require('../src/lib/atomic-file');
+  let failPath = null;
+  let failNextWrite = false;
+  const loaded = freshMarketplace(dataDir, [
+    profile('client_agent', 'Client Agent', client, identities.client),
+    profile('worker_agent', 'Worker Agent', worker, identities.worker),
+    profile('other_agent', 'Other Agent', other, identities.other),
+  ], {
+    writeJsonAtomicSync(filePath, value, options) {
+      if (failNextWrite && filePath === failPath) {
+        failNextWrite = false;
+        throw new Error('injected application write failure');
+      }
+      return atomicFile.writeJsonAtomicSync(filePath, value, options);
+    },
+  });
+
+  writeJSON(dataDir, 'jobs', 'job_failure_atomic', {
+    id: 'job_failure_atomic',
+    status: 'open',
+    postedBy: 'client_agent',
+    clientId: 'client_agent',
+    budget: 500,
+    applications: [],
+  });
+
+  const app = express();
+  app.use(express.json());
+  loaded.marketplace.registerRoutes(app);
+  app.use((err, _req, res, _next) => res.status(500).json({ error: err.message }));
+  const server = await listen(app);
+
+  try {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    const workerTerms = {
+      applicantId: 'worker_agent',
+      coverMessage: 'I can deliver the requested production integration.',
+      proposedBudget: 450,
+      proposedTimeline: '5_days',
+      portfolioItems: ['project_1'],
+    };
+    const workerApplyChallenge = signedChallenge(loaded.marketplace, worker, {
+      action: 'apply',
+      resourceId: 'job_failure_atomic#0',
+      actorId: 'worker_agent',
+      identityPDA: identities.worker,
+    });
+    const otherApplyChallenge = signedChallenge(loaded.marketplace, other, {
+      action: 'apply',
+      resourceId: 'job_failure_atomic#0',
+      actorId: 'other_agent',
+      identityPDA: identities.other,
+    });
+    const created = await postJSON(baseUrl, '/api/marketplace/jobs/job_failure_atomic/apply', {
+      ...workerTerms,
+      walletChallenge: workerApplyChallenge,
+    });
+    assert.equal(created.status, 201);
+
+    const withdrawalBody = {
+      withdrawnBy: 'worker_agent',
+      walletChallenge: signedChallenge(loaded.marketplace, worker, {
+        action: 'withdraw',
+        resourceId: created.body.id,
+        actorId: 'worker_agent',
+        identityPDA: identities.worker,
+      }),
+    };
+    failPath = path.join(dataDir, 'applications', `${created.body.id}.json`);
+    failNextWrite = true;
+    const failedWithdrawal = await postJSON(
+      baseUrl,
+      `/api/marketplace/applications/${created.body.id}/withdraw`,
+      withdrawalBody,
+    );
+    assert.equal(failedWithdrawal.status, 500);
+
+    const jobAfterFailure = readJSON(dataDir, 'jobs', 'job_failure_atomic');
+    assert.deepEqual(jobAfterFailure.applications, []);
+    assert.equal(jobAfterFailure.applicationCount, 0);
+    assert.equal(jobAfterFailure.applyChallengeRevisions.worker_agent, 1);
+    assert.equal(jobAfterFailure.applyChallengeRevisions.other_agent, undefined);
+    assert.equal(jobAfterFailure.withdrawalTombstones[created.body.id].applicantId, 'worker_agent');
+    assert.equal(readJSON(dataDir, 'applications', created.body.id).status, 'pending');
+
+    const staleReplay = await postJSON(baseUrl, '/api/marketplace/jobs/job_failure_atomic/apply', {
+      ...workerTerms,
+      walletChallenge: workerApplyChallenge,
+    });
+    assert.equal(staleReplay.status, 401);
+    assert.match(staleReplay.body.error, /message mismatch/);
+
+    const acceptAfterPartialWithdrawal = await postJSON(
+      baseUrl,
+      `/api/marketplace/applications/${created.body.id}/accept`,
+      { acceptedBy: 'client_agent' },
+    );
+    assert.equal(acceptAfterPartialWithdrawal.status, 409);
+    assert.match(acceptAfterPartialWithdrawal.body.error, /withdrawn/);
+
+    const otherApplied = await postJSON(baseUrl, '/api/marketplace/jobs/job_failure_atomic/apply', {
+      ...workerTerms,
+      applicantId: 'other_agent',
+      walletChallenge: otherApplyChallenge,
+    });
+    assert.equal(otherApplied.status, 201);
+
+    const repairedWithdrawal = await postJSON(
+      baseUrl,
+      `/api/marketplace/applications/${created.body.id}/withdraw`,
+      withdrawalBody,
+    );
+    assert.equal(repairedWithdrawal.status, 200);
+    assert.equal(repairedWithdrawal.body.status, 'withdrawn');
+    assert.equal(repairedWithdrawal.body.idempotent, true);
+    assert.equal(readJSON(dataDir, 'jobs', 'job_failure_atomic').applyChallengeRevisions.worker_agent, 1);
+
+    const freshWorkerChallenge = signedChallenge(loaded.marketplace, worker, {
+      action: 'apply',
+      resourceId: 'job_failure_atomic#1',
+      actorId: 'worker_agent',
+      identityPDA: identities.worker,
+    });
+    const reapplied = await postJSON(baseUrl, '/api/marketplace/jobs/job_failure_atomic/apply', {
+      ...workerTerms,
+      walletChallenge: freshWorkerChallenge,
+    });
+    assert.equal(reapplied.status, 201);
+    assert.notEqual(reapplied.body.id, created.body.id);
   } finally {
     await close(server);
     loaded.restore();

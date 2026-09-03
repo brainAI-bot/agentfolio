@@ -52,7 +52,7 @@ export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: s
     setResult(null);
     try {
       if (!publicKey) throw new Error("Connect the wallet linked to this AgentFolio profile");
-      const applyResourceId = await fetchMarketplaceApplyResourceId(API_BASE, jobId);
+      const applyResourceId = await fetchMarketplaceApplyResourceId(API_BASE, jobId, effectiveId);
       const walletChallenge = await signMarketplaceAction({
         action: "apply",
         resourceId: applyResourceId,

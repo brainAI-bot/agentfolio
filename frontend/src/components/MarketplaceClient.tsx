@@ -228,7 +228,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     }
     setLoading(true);
     try {
-      const applyResourceId = await fetchMarketplaceApplyResourceId(API_BASE, selectedJob.id);
+      const applyResourceId = await fetchMarketplaceApplyResourceId(API_BASE, selectedJob.id, resolvedProfileId);
       const walletChallenge = await signMarketplaceAction({
         action: "apply",
         resourceId: applyResourceId,

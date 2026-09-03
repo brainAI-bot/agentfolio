@@ -230,13 +230,28 @@ function buildMarketplaceWalletChallenge({ action, resourceId, actorId, walletAd
   ].join('\n');
 }
 
-function getApplyChallengeRevision(job = {}) {
-  const revision = Number(job.applyChallengeRevision ?? 0);
+function getApplyChallengeRevision(job = {}, actorId) {
+  const actorRevisions = job.applyChallengeRevisions;
+  const actorRevision = actorId
+    && actorRevisions
+    && typeof actorRevisions === 'object'
+    && !Array.isArray(actorRevisions)
+    && Object.prototype.hasOwnProperty.call(actorRevisions, actorId)
+    ? actorRevisions[actorId]
+    : undefined;
+  const revision = Number(actorRevision ?? job.applyChallengeRevision ?? 0);
   return Number.isSafeInteger(revision) && revision >= 0 ? revision : 0;
 }
 
-function buildApplyChallengeResourceId(job) {
-  return `${job.id}#${getApplyChallengeRevision(job)}`;
+function buildApplyChallengeResourceId(job, actorId) {
+  return `${job.id}#${getApplyChallengeRevision(job, actorId)}`;
+}
+
+function getWithdrawalTombstones(job = {}) {
+  const tombstones = job.withdrawalTombstones;
+  return tombstones && typeof tombstones === 'object' && !Array.isArray(tombstones)
+    ? tombstones
+    : {};
 }
 
 function getMarketplaceWalletChallenge(body = {}) {
@@ -499,6 +514,8 @@ function registerRoutes(app) {
       status: 'open',
       applications: [],
       applyChallengeRevision: 0,
+      applyChallengeRevisions: {},
+      withdrawalTombstones: {},
       acceptedApplicant: null,
       selectedAgentId: null,
       escrowId: null,
@@ -560,7 +577,7 @@ function registerRoutes(app) {
 
     const authResult = verifyMarketplaceMutationSignature({
       action: 'apply',
-      resourceId: buildApplyChallengeResourceId(job),
+      resourceId: buildApplyChallengeResourceId(job, applicantId),
       actorId: applicantId,
       body: req.body,
     });
@@ -642,10 +659,7 @@ function registerRoutes(app) {
     if (actorId !== application.applicantId && actorId !== application.agentId) {
       return res.status(403).json({ error: 'Only the applicant can withdraw this application' });
     }
-    if (application.status === 'withdrawn') {
-      return res.json({ ...application, idempotent: true });
-    }
-    if (application.status !== 'pending') {
+    if (application.status !== 'pending' && application.status !== 'withdrawn') {
       return res.status(409).json({ error: `Cannot withdraw an application in ${application.status} status` });
     }
 
@@ -659,15 +673,55 @@ function registerRoutes(app) {
       return res.status(409).json({ error: 'Job application index is invalid; refusing marketplace write' });
     }
 
-    application.status = 'withdrawn';
-    application.withdrawnAt = new Date().toISOString();
-    writeJSON(appPath, application);
-    job.applications = job.applications.filter(applicationId => applicationId !== application.id);
-    job.applicationCount = job.applications.length;
-    job.applyChallengeRevision = getApplyChallengeRevision(job) + 1;
-    job.updatedAt = new Date().toISOString();
-    writeJSON(jobPath, job);
-    res.json(application);
+    const tombstones = getWithdrawalTombstones(job);
+    let tombstone = tombstones[application.id];
+    if (tombstone && tombstone.applicantId !== application.applicantId) {
+      return res.status(409).json({ error: 'Withdrawal authorization state is invalid; refusing marketplace write' });
+    }
+
+    const wasAlreadyRecorded = Boolean(tombstone);
+    const wasAlreadyWithdrawn = application.status === 'withdrawn';
+    let jobChanged = false;
+    if (!tombstone) {
+      const nextRevision = getApplyChallengeRevision(job, application.applicantId) + 1;
+      tombstone = {
+        applicationId: application.id,
+        applicantId: application.applicantId,
+        withdrawnAt: application.withdrawnAt || new Date().toISOString(),
+        applyChallengeRevision: nextRevision,
+      };
+      job.applyChallengeRevisions = {
+        ...(job.applyChallengeRevisions && typeof job.applyChallengeRevisions === 'object'
+          ? job.applyChallengeRevisions
+          : {}),
+        [application.applicantId]: nextRevision,
+      };
+      job.withdrawalTombstones = { ...tombstones, [application.id]: tombstone };
+      jobChanged = true;
+    }
+    if (job.applications.includes(application.id)) {
+      job.applications = job.applications.filter(applicationId => applicationId !== application.id);
+      jobChanged = true;
+    }
+    if (job.applicationCount !== job.applications.length) {
+      job.applicationCount = job.applications.length;
+      jobChanged = true;
+    }
+    if (jobChanged) {
+      job.updatedAt = new Date().toISOString();
+      // The job is the authoritative revocation record. Persist its actor-scoped
+      // revision and tombstone before exposing the withdrawn application state.
+      writeJSON(jobPath, job);
+    }
+
+    if (application.status !== 'withdrawn') {
+      application.status = 'withdrawn';
+      application.withdrawnAt = tombstone.withdrawnAt;
+      writeJSON(appPath, application);
+    }
+    res.json(wasAlreadyRecorded || wasAlreadyWithdrawn
+      ? { ...application, idempotent: true }
+      : application);
   });
 
   // 3. POST /api/marketplace/applications/:id/accept — Accept an application
@@ -682,6 +736,9 @@ function registerRoutes(app) {
     const jobPath = safeJobPath(application.jobId);
     const job = readJob(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (getWithdrawalTombstones(job)[application.id]) {
+      return res.status(409).json({ error: 'Application has been withdrawn' });
+    }
 
     // Bug fix: Only job poster can accept applications
     const { acceptedBy } = req.body || {};
