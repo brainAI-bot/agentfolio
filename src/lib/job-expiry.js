@@ -103,19 +103,29 @@ function expireJob(jobId, reason = 'auto_expired') {
     }
   }
   
-  // Update job status to expired
-  job.status = JOB_STATUS_EXPIRED;
-  job.expiredAt = new Date().toISOString();
-  job.expiryReason = reason;
-  job.updatedAt = new Date().toISOString();
-  job.fundsRefunded = refunded;
-  
-  db.saveJob(job);
+  // Update job status to expired through the canonical transition guard.
+  const now = new Date().toISOString();
+  const transition = db.transitionJobStatus(job.id, JOB_STATUS_EXPIRED, {
+    actorId: 'job-expiry',
+    reason,
+    source: 'job-expiry',
+    idempotencyKey: `job-expiry:${job.id}:${reason}:${now}`,
+    metadata: { refunded },
+    now,
+  });
+  const expiredJob = {
+    ...transition.job,
+    expiredAt: now,
+    expiryReason: reason,
+    updatedAt: now,
+    fundsRefunded: refunded,
+  };
+  db.saveJob(expiredJob);
   
   console.log(`[JobExpiry] Job ${jobId} expired. Reason: ${reason}. Escrow refunded: ${refunded}`);
   
   return { 
-    job, 
+    job: expiredJob,
     escrow: escrowResult,
     refunded,
     reason 

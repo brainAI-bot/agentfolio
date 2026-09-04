@@ -14,20 +14,7 @@ const crypto = require('crypto');
 const db = require('./database');
 const { isVerifiedOnChain } = require('./satp-onchain-verify');
 const escrow = require('./escrow');
-
-// Job statuses
-const JOB_STATUS = {
-  DRAFT: 'draft',
-  OPEN: 'open',
-  AGENT_ACCEPTED: 'agent_accepted',              // NEW
-  IN_PROGRESS: 'in_progress',
-  WORK_SUBMITTED: 'work_submitted',              // NEW
-  COMPLETED: 'completed',
-  AUTO_RELEASED: 'auto_released',                // NEW
-  CANCELLED: 'cancelled',
-  CANCELLED_WITH_COMPENSATION: 'cancelled_with_compensation', // NEW
-  DISPUTED: 'disputed'
-};
+const { JOB_STATUS } = require('./marketplace-state-machine');
 
 // Application statuses
 const APP_STATUS = {
@@ -67,6 +54,31 @@ const TIMELINES = {
 // Generate unique ID
 function generateId(prefix = 'job') {
   return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
+}
+
+function transitionJobStatus(job, toStatus, updates = {}, options = {}) {
+  const now = updates.updatedAt || new Date().toISOString();
+  const actorId = options.actorId || job.clientId || job.selectedAgentId || 'marketplace';
+  const result = db.transitionJobStatus(job.id, toStatus, {
+    actorId,
+    reason: options.reason || '',
+    source: options.source || 'marketplace',
+    idempotencyKey: options.idempotencyKey
+      || `marketplace:${job.id}:${job.status}:${toStatus}:${crypto.randomUUID()}`,
+    metadata: {
+      from: options.source || 'marketplace',
+      ...(options.metadata || {}),
+    },
+    now,
+    env: options.env,
+  });
+  const nextJob = {
+    ...result.job,
+    ...updates,
+    status: toStatus,
+    updatedAt: now,
+  };
+  return db.saveJob(nextJob);
 }
 
 // Verify profile exists
@@ -166,12 +178,16 @@ function confirmJobDeposit(jobId, txHash) {
   if (escrowResult.error) return escrowResult;
   
   // Open the job
-  job.status = JOB_STATUS.OPEN;
-  job.escrowFunded = true;
-  job.depositConfirmedAt = new Date().toISOString();
-  job.updatedAt = new Date().toISOString();
-  
-  return db.saveJob(job);
+  const now = new Date().toISOString();
+  return transitionJobStatus(job, JOB_STATUS.OPEN, {
+    escrowFunded: true,
+    depositConfirmedAt: now,
+    updatedAt: now,
+  }, {
+    actorId: job.clientId,
+    reason: 'escrow deposit confirmed',
+    metadata: { txHash },
+  });
 }
 
 // Load single job
@@ -210,31 +226,48 @@ function cancelJob(jobId, reason = '') {
   
   // Tier 1: Draft/Open — agent never responded, full refund
   if ([JOB_STATUS.DRAFT, JOB_STATUS.OPEN].includes(job.status)) {
+    const now = new Date().toISOString();
+    let savedJob = transitionJobStatus(job, JOB_STATUS.CANCELLED, {
+      cancelledAt: now,
+      cancelReason: reason,
+      cancellationType: 'no_response',
+      updatedAt: now,
+      fundsRefunded: false,
+    }, {
+      actorId: job.clientId,
+      reason: reason || 'Agent never responded',
+      metadata: { cancellationType: 'no_response' },
+    });
     if (job.escrowId && job.escrowFunded) {
       escrowResult = escrow.refundClient(job.escrowId, reason || 'Agent never responded');
-      if (escrowResult.error) return escrowResult;
+      if (escrowResult.error) return { ...escrowResult, job: savedJob };
+      savedJob = db.saveJob({
+        ...savedJob,
+        fundsRefunded: true,
+        updatedAt: new Date().toISOString(),
+      });
     }
-    job.status = JOB_STATUS.CANCELLED;
-    job.cancelledAt = new Date().toISOString();
-    job.cancelReason = reason;
-    job.cancellationType = 'no_response';
-    job.updatedAt = new Date().toISOString();
-    job.fundsRefunded = !!(escrowResult && !escrowResult.error);
-    return { job: db.saveJob(job), escrow: escrowResult };
+    return { job: savedJob, escrow: escrowResult };
   }
   
   // Tier 2: Agent accepted but not started → 10% compensation
   if (job.status === JOB_STATUS.AGENT_ACCEPTED) {
+    const now = new Date().toISOString();
+    const savedJob = transitionJobStatus(job, JOB_STATUS.CANCELLED_WITH_COMPENSATION, {
+      cancelledAt: now,
+      cancelReason: reason,
+      cancellationType: 'pre_start',
+      updatedAt: now,
+    }, {
+      actorId: job.clientId,
+      reason: reason || 'Client cancelled after agent accepted',
+      metadata: { cancellationType: 'pre_start' },
+    });
     if (job.escrowId) {
       escrowResult = escrow.cancelWithCompensation(job.escrowId, reason || 'Client cancelled after agent accepted');
-      if (escrowResult.error) return escrowResult;
+      if (escrowResult.error) return { ...escrowResult, job: savedJob };
     }
-    job.status = JOB_STATUS.CANCELLED_WITH_COMPENSATION;
-    job.cancelledAt = new Date().toISOString();
-    job.cancelReason = reason;
-    job.cancellationType = 'pre_start';
-    job.updatedAt = new Date().toISOString();
-    return { job: db.saveJob(job), escrow: escrowResult };
+    return { job: savedJob, escrow: escrowResult };
   }
   
   // Cannot cancel jobs that are in progress or submitted
@@ -321,10 +354,14 @@ function startJobWork(jobId) {
     if (result.error) return result;
   }
   
-  job.status = JOB_STATUS.IN_PROGRESS;
-  job.workStartedAt = new Date().toISOString();
-  job.updatedAt = new Date().toISOString();
-  return db.saveJob(job);
+  const now = new Date().toISOString();
+  return transitionJobStatus(job, JOB_STATUS.IN_PROGRESS, {
+    workStartedAt: now,
+    updatedAt: now,
+  }, {
+    actorId: job.selectedAgentId,
+    reason: 'agent started work',
+  });
 }
 
 // Submit work (triggers 24h auto-release timer)
@@ -341,13 +378,17 @@ function submitJobWork(jobId, data = {}) {
     if (escrowResult.error) return escrowResult;
   }
   
-  job.status = JOB_STATUS.WORK_SUBMITTED;
-  job.workSubmittedAt = new Date().toISOString();
-  job.submissionNote = data.note || '';
-  job.submissionUrl = data.url || null;
-  job.updatedAt = new Date().toISOString();
-  
-  const savedJob = db.saveJob(job);
+  const now = new Date().toISOString();
+  const savedJob = transitionJobStatus(job, JOB_STATUS.WORK_SUBMITTED, {
+    workSubmittedAt: now,
+    submissionNote: data.note || '',
+    submissionUrl: data.url || null,
+    updatedAt: now,
+  }, {
+    actorId: job.selectedAgentId,
+    reason: 'agent submitted work',
+    metadata: { hasSubmissionUrl: Boolean(data.url) },
+  });
   return { job: savedJob, escrow: escrowResult };
 }
 
@@ -366,14 +407,18 @@ async function completeJob(jobId, data = {}) {
     if (escrowResult.error) return escrowResult;
   }
   
-  job.status = JOB_STATUS.COMPLETED;
-  job.completedAt = new Date().toISOString();
-  job.completionNote = data.note || '';
-  job.updatedAt = new Date().toISOString();
-  job.fundsReleased = !!job.escrowId;
-  job.releaseTxHash = escrowResult?.releaseTxHash || null;
-  
-  const savedJob = db.saveJob(job);
+  const now = new Date().toISOString();
+  const savedJob = transitionJobStatus(job, JOB_STATUS.COMPLETED, {
+    completedAt: now,
+    completionNote: data.note || '',
+    updatedAt: now,
+    fundsReleased: !!job.escrowId,
+    releaseTxHash: escrowResult?.releaseTxHash || null,
+  }, {
+    actorId: job.clientId,
+    reason: 'client completed job',
+    metadata: { hasReleaseTxHash: Boolean(escrowResult?.releaseTxHash) },
+  });
   return { job: savedJob, escrow: escrowResult };
 }
 
@@ -392,12 +437,16 @@ function disputeJob(jobId, disputeData) {
   const result = escrow.openDispute(job.escrowId, disputeData);
   if (result.error) return result;
   
-  job.status = JOB_STATUS.DISPUTED;
-  job.disputedAt = new Date().toISOString();
-  job.disputeId = result.dispute.id;
-  job.updatedAt = new Date().toISOString();
-  
-  const savedJob = db.saveJob(job);
+  const now = new Date().toISOString();
+  const savedJob = transitionJobStatus(job, JOB_STATUS.DISPUTED, {
+    disputedAt: now,
+    disputeId: result.dispute.id,
+    updatedAt: now,
+  }, {
+    actorId: disputeData.openedBy || job.clientId || job.selectedAgentId,
+    reason: disputeData.reason || 'job disputed',
+    metadata: { disputeId: result.dispute.id },
+  });
   return { job: savedJob, dispute: result.dispute, escrow: result.escrow };
 }
 
@@ -554,16 +603,21 @@ function selectWinner(jobId, appId, agentWallet = null) {
   }
   
   // Update job status — agent_accepted (new) or in_progress (backward compat)
-  job.status = JOB_STATUS.AGENT_ACCEPTED;
-  job.selectedAgentId = winningApp.agentId;
-  job.selectedAt = new Date().toISOString();
-  job.agreedBudget = winningApp.proposedBudget;
-  job.agreedTimeline = winningApp.proposedTimeline;
-  job.updatedAt = new Date().toISOString();
-  job.fundsLocked = !!job.escrowId;
-  db.saveJob(job);
+  const now = new Date().toISOString();
+  const savedJob = transitionJobStatus(job, JOB_STATUS.AGENT_ACCEPTED, {
+    selectedAgentId: winningApp.agentId,
+    selectedAt: now,
+    agreedBudget: winningApp.proposedBudget,
+    agreedTimeline: winningApp.proposedTimeline,
+    updatedAt: now,
+    fundsLocked: !!job.escrowId,
+  }, {
+    actorId: job.clientId,
+    reason: 'client selected winning application',
+    metadata: { applicationId: appId, agentId: winningApp.agentId },
+  });
   
-  return { job, application: winningApp };
+  return { job: savedJob, application: winningApp };
 }
 
 // Get applications by agent
@@ -781,14 +835,18 @@ async function selectBountyWinner(jobId, submissionId, data = {}) {
   }
   
   // Complete the job
-  job.status = JOB_STATUS.COMPLETED;
-  job.selectedAgentId = sub.agentId;
-  job.completedAt = new Date().toISOString();
-  job.completionNote = `Bounty winner: ${sub.title}`;
-  job.updatedAt = new Date().toISOString();
-  job.fundsReleased = !!escrowResult;
-  
-  const savedJob = db.saveJob(job);
+  const now = new Date().toISOString();
+  const savedJob = transitionJobStatus(job, JOB_STATUS.COMPLETED, {
+    selectedAgentId: sub.agentId,
+    completedAt: now,
+    completionNote: `Bounty winner: ${sub.title}`,
+    updatedAt: now,
+    fundsReleased: !!escrowResult,
+  }, {
+    actorId: job.clientId,
+    reason: 'client selected bounty winner',
+    metadata: { submissionId, agentId: sub.agentId },
+  });
   return { job: savedJob, submission: sub, escrow: escrowResult };
 }
 

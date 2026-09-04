@@ -2,30 +2,60 @@ const crypto = require('crypto');
 const { liveEscrowGateStatus } = require('./write-surface-gate');
 
 const JOB_STATUS = Object.freeze({
+  DRAFT: 'draft',
   OPEN: 'open',
+  ASSIGNED: 'assigned',
   AWARDED: 'awarded',
+  AGENT_ACCEPTED: 'agent_accepted',
   IN_PROGRESS: 'in_progress',
   SUBMITTED: 'submitted',
+  WORK_SUBMITTED: 'work_submitted',
   APPROVED: 'approved',
   RELEASED: 'released',
+  COMPLETED: 'completed',
+  AUTO_RELEASED: 'auto_released',
   CLOSED: 'closed',
   CANCELLED: 'cancelled',
+  CANCELLED_WITH_COMPENSATION: 'cancelled_with_compensation',
   EXPIRED: 'expired',
   DISPUTED: 'disputed',
 });
 
 const ALLOWED_TRANSITIONS = Object.freeze({
-  [JOB_STATUS.OPEN]: Object.freeze([
-    JOB_STATUS.AWARDED,
+  [JOB_STATUS.DRAFT]: Object.freeze([
+    JOB_STATUS.OPEN,
     JOB_STATUS.CANCELLED,
     JOB_STATUS.EXPIRED,
+  ]),
+  [JOB_STATUS.OPEN]: Object.freeze([
+    JOB_STATUS.AWARDED,
+    JOB_STATUS.ASSIGNED,
+    JOB_STATUS.AGENT_ACCEPTED,
+    JOB_STATUS.IN_PROGRESS,
+    JOB_STATUS.COMPLETED,
+    JOB_STATUS.CANCELLED,
+    JOB_STATUS.EXPIRED,
+  ]),
+  [JOB_STATUS.ASSIGNED]: Object.freeze([
+    JOB_STATUS.IN_PROGRESS,
+    JOB_STATUS.COMPLETED,
+    JOB_STATUS.CANCELLED,
   ]),
   [JOB_STATUS.AWARDED]: Object.freeze([
     JOB_STATUS.IN_PROGRESS,
     JOB_STATUS.OPEN,
   ]),
+  [JOB_STATUS.AGENT_ACCEPTED]: Object.freeze([
+    JOB_STATUS.IN_PROGRESS,
+    JOB_STATUS.WORK_SUBMITTED,
+    JOB_STATUS.COMPLETED,
+    JOB_STATUS.CANCELLED_WITH_COMPENSATION,
+    JOB_STATUS.DISPUTED,
+  ]),
   [JOB_STATUS.IN_PROGRESS]: Object.freeze([
     JOB_STATUS.SUBMITTED,
+    JOB_STATUS.WORK_SUBMITTED,
+    JOB_STATUS.COMPLETED,
     JOB_STATUS.DISPUTED,
   ]),
   [JOB_STATUS.SUBMITTED]: Object.freeze([
@@ -33,11 +63,28 @@ const ALLOWED_TRANSITIONS = Object.freeze({
     JOB_STATUS.IN_PROGRESS,
     JOB_STATUS.DISPUTED,
   ]),
+  [JOB_STATUS.WORK_SUBMITTED]: Object.freeze([
+    JOB_STATUS.IN_PROGRESS,
+    JOB_STATUS.COMPLETED,
+    JOB_STATUS.AUTO_RELEASED,
+    JOB_STATUS.DISPUTED,
+  ]),
   [JOB_STATUS.APPROVED]: Object.freeze([JOB_STATUS.RELEASED]),
-  [JOB_STATUS.DISPUTED]: Object.freeze([JOB_STATUS.RELEASED]),
+  [JOB_STATUS.DISPUTED]: Object.freeze([
+    JOB_STATUS.RELEASED,
+    JOB_STATUS.COMPLETED,
+    JOB_STATUS.CANCELLED,
+    JOB_STATUS.CANCELLED_WITH_COMPENSATION,
+  ]),
   [JOB_STATUS.RELEASED]: Object.freeze([JOB_STATUS.CLOSED]),
+  [JOB_STATUS.COMPLETED]: Object.freeze([JOB_STATUS.CLOSED]),
+  [JOB_STATUS.AUTO_RELEASED]: Object.freeze([
+    JOB_STATUS.COMPLETED,
+    JOB_STATUS.CLOSED,
+  ]),
   [JOB_STATUS.CLOSED]: Object.freeze([]),
   [JOB_STATUS.CANCELLED]: Object.freeze([]),
+  [JOB_STATUS.CANCELLED_WITH_COMPENSATION]: Object.freeze([]),
   [JOB_STATUS.EXPIRED]: Object.freeze([]),
 });
 
@@ -53,13 +100,8 @@ class MarketplaceTransitionError extends Error {
 }
 
 function initializeMarketplaceState(db) {
-  if (!transitionContexts.has(db)) {
-    const context = { authorizedDepth: 0 };
-    transitionContexts.set(db, context);
-    db.function('marketplace_transition_authorized', () => (
-      context.authorizedDepth > 0 ? 1 : 0
-    ));
-  }
+  const context = ensureMarketplaceStateConnection(db);
+  if (context.schemaInitialized) return;
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS job_transition_audit (
@@ -131,6 +173,18 @@ function initializeMarketplaceState(db) {
       SELECT RAISE(ABORT, 'MARKETPLACE_ESCROW_EFFECT_IMMUTABLE');
     END;
   `);
+  context.schemaInitialized = true;
+}
+
+function ensureMarketplaceStateConnection(db) {
+  if (!transitionContexts.has(db)) {
+    const context = { authorizedDepth: 0, schemaInitialized: false };
+    transitionContexts.set(db, context);
+    db.function('marketplace_transition_authorized', () => (
+      context.authorizedDepth > 0 ? 1 : 0
+    ));
+  }
+  return transitionContexts.get(db);
 }
 
 function assertTransitionAllowed(fromStatus, toStatus) {
@@ -165,12 +219,19 @@ function assertTransitionAllowed(fromStatus, toStatus) {
 }
 
 function escrowEffectFor(job, fromStatus, toStatus) {
-  if (toStatus === JOB_STATUS.DISPUTED) return 'dispute';
-  if (toStatus === JOB_STATUS.RELEASED) return 'release';
-  if (
-    fromStatus === JOB_STATUS.OPEN
-    && [JOB_STATUS.CANCELLED, JOB_STATUS.EXPIRED].includes(toStatus)
+  const hasFundedEscrow = Boolean(
+    job.escrow_id
     && (job.escrow_funded === 1 || job.escrow_funded === true)
+  );
+  if (!hasFundedEscrow) return null;
+
+  if (toStatus === JOB_STATUS.DISPUTED) return 'dispute';
+  if ([JOB_STATUS.RELEASED, JOB_STATUS.COMPLETED, JOB_STATUS.AUTO_RELEASED].includes(toStatus)) {
+    return 'release';
+  }
+  if (
+    [JOB_STATUS.DRAFT, JOB_STATUS.OPEN, JOB_STATUS.DISPUTED].includes(fromStatus)
+    && [JOB_STATUS.CANCELLED, JOB_STATUS.EXPIRED].includes(toStatus)
   ) {
     return 'refund';
   }
@@ -340,7 +401,7 @@ function transitionJobState(db, jobId, toStatus, options = {}) {
 }
 
 function listJobTransitionAudit(db, jobId) {
-  initializeMarketplaceState(db);
+  ensureMarketplaceStateConnection(db);
   return db.prepare(`
     SELECT * FROM job_transition_audit
     WHERE job_id = ?
@@ -360,7 +421,7 @@ function listJobTransitionAudit(db, jobId) {
 }
 
 function listMarketplaceEscrowEffects(db, jobId) {
-  initializeMarketplaceState(db);
+  ensureMarketplaceStateConnection(db);
   return db.prepare(`
     SELECT * FROM marketplace_escrow_effects
     WHERE job_id = ?
@@ -384,6 +445,7 @@ module.exports = {
   ALLOWED_TRANSITIONS,
   MarketplaceTransitionError,
   initializeMarketplaceState,
+  ensureMarketplaceStateConnection,
   transitionJobState,
   listJobTransitionAudit,
   listMarketplaceEscrowEffects,

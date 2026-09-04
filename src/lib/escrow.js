@@ -477,7 +477,7 @@ function refundClient(escrowId, reason = '', txHash = null) {
  * Cancel with compensation — agent accepted but not started
  * Client gets 90%, agent gets 10% compensation
  */
-async function cancelWithCompensation(escrowId, reason = '') {
+function cancelWithCompensation(escrowId, reason = '') {
   return custodialEscrowBlocked('custodial escrow cancel with compensation');
   const escrow = loadEscrow(escrowId);
   if (!escrow) return { error: 'Escrow not found' };
