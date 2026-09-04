@@ -1,6 +1,5 @@
 export const revalidate = 120;
 import { getAllAgents, getAllJobs } from "@/lib/data";
-import { SATP_MAINNET_PROGRAMS } from "@/lib/satp-mainnet-programs";
 import { getTrustSurface } from "@/lib/trust-surface";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
@@ -10,8 +9,8 @@ const SOLANA_RPC_URL = `${API_BASE || SITE_URL}/solana-rpc`;
 import { BarChart3, Users, ShieldCheck, Fingerprint, Briefcase, DollarSign, ExternalLink, Wallet, TrendingUp, ArrowDownToLine, ArrowUpFromLine, AlertTriangle, Percent } from "lucide-react";
 import ProtocolActivity from "./ProtocolActivity";
 
-const IDENTITY_REGISTRY = SATP_MAINNET_PROGRAMS.IDENTITY;
-const ESCROW_PROGRAM = SATP_MAINNET_PROGRAMS.ESCROW;
+const IDENTITY_REGISTRY = "CV5Wd9YGFX5A4dvuaFuEDuKQWp14NfnLrSdxY7EHFyeB";
+const ESCROW_PROGRAM = "HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C";
 const TREASURY_WALLET = "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be";
 const DEPLOYER_WALLET = "Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";

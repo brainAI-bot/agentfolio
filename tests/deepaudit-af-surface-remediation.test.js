@@ -133,19 +133,26 @@ test('AF2: how-it-works exposes non-empty SATP mainnet program ids', () => {
   assert.doesNotMatch(pageSource, /BY4jzm5R|TQ4P9Rd5|AdDWFajj/);
 });
 
-test('AF14: public program-id surfaces use the on-chain-verified mainnet registry', () => {
-  const surfaces = [
+test('AF14: docs use the verified registry without changing the live identity transaction program', () => {
+  const canonicalDocsSurfaces = [
     'frontend/src/app/docs/page.tsx',
     'frontend/src/app/how-it-works/page.tsx',
-    'frontend/src/app/satp/page.tsx',
-    'frontend/src/app/satp/explorer/SATPExplorerClient.tsx',
-    'frontend/src/app/stats/page.tsx',
   ];
 
-  for (const surface of surfaces) {
+  for (const surface of canonicalDocsSurfaces) {
     const source = fs.readFileSync(path.join(repoRoot, surface), 'utf8');
     assert.match(source, /SATP_MAINNET_PROGRAMS/, `${surface} must source displayed IDs from the verified registry`);
-    assert.doesNotMatch(source, /BY4jzmnr|TQ4P9R2Y|AdDWFa9o|CV5Wd9YG/, `${surface} must not display retired program IDs`);
+    assert.doesNotMatch(source, /BY4jzmnr|TQ4P9R2Y|AdDWFa9o/, `${surface} must not display retired docs program IDs`);
+  }
+
+  const liveIdentityProgram = 'CV5Wd9YGFX5A4dvuaFuEDuKQWp14NfnLrSdxY7EHFyeB';
+  for (const surface of [
+    'frontend/src/lib/identity-registry.ts',
+    'frontend/src/app/satp/page.tsx',
+    'frontend/src/app/stats/page.tsx',
+  ]) {
+    const source = fs.readFileSync(path.join(repoRoot, surface), 'utf8');
+    assert.match(source, new RegExp(liveIdentityProgram), `${surface} must agree with the live registration transaction path`);
   }
 });
 

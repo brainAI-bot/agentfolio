@@ -1,16 +1,18 @@
 import { getAllAgents } from "@/lib/data";
-import { SATP_MAINNET_PROGRAMS } from "@/lib/satp-mainnet-programs";
 import { Shield, Database, FileCheck, Lock, ExternalLink } from "lucide-react";
+
+const IDENTITY_REGISTRY = "CV5Wd9YGFX5A4dvuaFuEDuKQWp14NfnLrSdxY7EHFyeB";
+const ESCROW_PROGRAM = "HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C";
 
 const programs = [
   {
     name: "Identity Registry",
-    id: SATP_MAINNET_PROGRAMS.IDENTITY,
+    id: IDENTITY_REGISTRY,
     desc: "Agent DID registration and profile management on-chain",
   },
   {
     name: "Escrow Program (gated)",
-    id: SATP_MAINNET_PROGRAMS.ESCROW,
+    id: ESCROW_PROGRAM,
     desc: "Devnet-safe runtime smoke verified; mainnet/live-funds escrow remains pending security re-review",
   },
 ];
