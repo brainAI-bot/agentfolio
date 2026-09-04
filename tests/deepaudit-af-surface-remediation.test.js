@@ -133,7 +133,7 @@ test('AF2: how-it-works exposes non-empty SATP mainnet program ids', () => {
   assert.doesNotMatch(pageSource, /BY4jzm5R|TQ4P9Rd5|AdDWFajj/);
 });
 
-test('AF14: docs use the verified registry without changing the live identity transaction program', () => {
+test('AF14: displayed identity program matches the live registration transaction program', () => {
   const canonicalDocsSurfaces = [
     'frontend/src/app/docs/page.tsx',
     'frontend/src/app/how-it-works/page.tsx',
@@ -145,9 +145,25 @@ test('AF14: docs use the verified registry without changing the live identity tr
     assert.doesNotMatch(source, /BY4jzmnr|TQ4P9R2Y|AdDWFa9o/, `${surface} must not display retired docs program IDs`);
   }
 
-  const liveIdentityProgram = 'CV5Wd9YGFX5A4dvuaFuEDuKQWp14NfnLrSdxY7EHFyeB';
+  const registrySource = fs.readFileSync(
+    path.join(repoRoot, 'frontend/src/lib/satp-mainnet-programs.ts'),
+    'utf8'
+  );
+  const identityRegistrySource = fs.readFileSync(
+    path.join(repoRoot, 'frontend/src/lib/identity-registry.ts'),
+    'utf8'
+  );
+  const displayedIdentityProgram = registrySource.match(/IDENTITY:\s*"([^"]+)"/)?.[1];
+
+  assert.equal(displayedIdentityProgram, 'CV5Wd9YGFX5A4dvuaFuEDuKQWp14NfnLrSdxY7EHFyeB');
+  assert.match(
+    identityRegistrySource,
+    /new PublicKey\(\s*SATP_MAINNET_PROGRAMS\.IDENTITY\s*\)/,
+    'the registration transaction must source the identity program displayed by docs'
+  );
+
+  const liveIdentityProgram = displayedIdentityProgram;
   for (const surface of [
-    'frontend/src/lib/identity-registry.ts',
     'frontend/src/app/satp/page.tsx',
     'frontend/src/app/stats/page.tsx',
   ]) {

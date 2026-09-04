@@ -6,9 +6,10 @@ import {
   SystemProgram,
   Transaction,
 } from "@solana/web3.js";
+import { SATP_MAINNET_PROGRAMS } from "./satp-mainnet-programs";
 
 export const IDENTITY_REGISTRY_PROGRAM_ID = new PublicKey(
-  "CV5Wd9YGFX5A4dvuaFuEDuKQWp14NfnLrSdxY7EHFyeB"
+  SATP_MAINNET_PROGRAMS.IDENTITY
 );
 export const ESCROW_PROGRAM_ID = new PublicKey(
   "HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C"

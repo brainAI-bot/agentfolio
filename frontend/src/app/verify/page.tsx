@@ -15,7 +15,7 @@ import {
   explorerUrl,
 } from "@/lib/identity-registry";
 import { autoCreateSatpV3Identity, checkSatpV3Identity } from "@/lib/satp-identity-v3";
-import { SATP_MAINNET_PROGRAMS } from "@/lib/satp-mainnet-programs";
+import { SATP_V3_IDENTITY_EXPLORER_PROGRAM_ID } from "@/lib/satp-mainnet-programs";
 import { assertFrontendSolanaIrysWriteEnabled } from "@/lib/write-surface-gate";
 
 interface VerificationState {
@@ -513,7 +513,7 @@ export default function VerifyPage() {
           result: {
             genesisPDA: existing.v3.genesisPDA,
             alreadyExists: true,
-            program: SATP_MAINNET_PROGRAMS.IDENTITY,
+            program: SATP_V3_IDENTITY_EXPLORER_PROGRAM_ID,
           },
         });
         setSatpAutoStatus("SATP V3 identity already exists ✅");

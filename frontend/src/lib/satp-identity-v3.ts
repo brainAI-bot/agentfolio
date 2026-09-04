@@ -9,9 +9,9 @@ import {
   PublicKey,
   Transaction,
 } from "@solana/web3.js";
-import { SATP_MAINNET_PROGRAMS } from "./satp-mainnet-programs";
+import { SATP_V3_IDENTITY_EXPLORER_PROGRAM_ID } from "./satp-mainnet-programs";
 
-export const SATP_V3_IDENTITY_PROGRAM = new PublicKey(SATP_MAINNET_PROGRAMS.IDENTITY);
+export const SATP_V3_IDENTITY_PROGRAM = new PublicKey(SATP_V3_IDENTITY_EXPLORER_PROGRAM_ID);
 
 export type SatpV3IdentityResult = {
   transaction?: string | null;
