@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Shield, CheckCircle, Star, ExternalLink } from "lucide-react";
+import { Shield } from "lucide-react";
 import Link from "next/link";
 import { getTrustSurface } from "@/lib/trust-surface";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { signMarketplaceAction } from "@/lib/marketplace-auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
 
@@ -14,7 +16,11 @@ interface Application {
   applicantAvatar?: string;
   applicantProfileId?: string;
   proposal: string;
+  coverMessage?: string;
   bidAmount?: number;
+  proposedBudget?: number;
+  proposedTimeline?: string;
+  portfolioItems?: string[];
   status: string;
   createdAt: string;
   trustScore?: number;
@@ -56,8 +62,11 @@ function timeAgo(dateStr: string): string {
 }
 
 export function ApplicationsList({ jobId }: { jobId: string }) {
+  const { connected, publicKey, signMessage } = useWallet();
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewerProfileId, setViewerProfileId] = useState<string | null>(null);
+  const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/jobs/${jobId}/applications`)
@@ -70,6 +79,43 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [jobId]);
+
+  useEffect(() => {
+    if (!connected || !publicKey) {
+      setViewerProfileId(null);
+      return;
+    }
+    fetch(`${API_BASE}/api/profile-by-wallet?wallet=${publicKey.toBase58()}`)
+      .then((response) => response.ok ? response.json() : null)
+      .then((profile) => setViewerProfileId(profile?.id || null))
+      .catch(() => setViewerProfileId(null));
+  }, [connected, publicKey]);
+
+  const withdrawApplication = async (application: Application) => {
+    if (!viewerProfileId || !publicKey) return;
+    setWithdrawingId(application.id);
+    try {
+      const walletChallenge = await signMarketplaceAction({
+        action: "withdraw",
+        resourceId: application.id,
+        actorId: viewerProfileId,
+        walletAddress: publicKey.toBase58(),
+        signMessage,
+      });
+      const response = await fetch(`${API_BASE}/api/marketplace/applications/${application.id}/withdraw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ withdrawnBy: viewerProfileId, walletChallenge }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to withdraw application");
+      setApps((current) => current.map((item) => item.id === application.id ? { ...item, status: "withdrawn" } : item));
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Unable to withdraw application");
+    } finally {
+      setWithdrawingId(null);
+    }
+  };
 
   if (loading) return (
     <div className="text-xs py-4 text-center" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
@@ -158,6 +204,11 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
                       ✓ ACCEPTED
                     </span>
                   )}
+                  {app.status !== "pending" && app.status !== "accepted" && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase" style={{ color: "var(--text-tertiary)", background: "var(--bg-secondary)", fontFamily: "var(--font-mono)" }}>
+                      {app.status}
+                    </span>
+                  )}
                 </div>
 
                 {/* Trust score + badges */}
@@ -184,11 +235,16 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
               </div>
 
               {/* Bid amount */}
-              {app.bidAmount != null && app.bidAmount > 0 && (
+              {(app.proposedBudget ?? app.bidAmount) != null && (app.proposedBudget ?? app.bidAmount ?? 0) > 0 && (
                 <div className="text-right">
                   <span className="text-sm font-bold" style={{ color: "var(--solana, #9945ff)", fontFamily: "var(--font-mono)" }}>
-                    {app.bidAmount} USDC
+                    {app.proposedBudget ?? app.bidAmount} USDC
                   </span>
+                  {app.proposedTimeline && (
+                    <div className="text-[10px] mt-0.5" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
+                      {app.proposedTimeline.replaceAll("_", " ")}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -198,8 +254,30 @@ export function ApplicationsList({ jobId }: { jobId: string }) {
               className="text-xs mt-2 leading-relaxed"
               style={{ color: "var(--text-secondary)", paddingLeft: "44px" }}
             >
-              {app.proposal}
+              {app.coverMessage || app.proposal}
             </div>
+            {app.portfolioItems && app.portfolioItems.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-3" style={{ paddingLeft: "44px" }}>
+                {app.portfolioItems.map((item) => (
+                  <span key={item} className="text-[10px] px-2 py-1 rounded" style={{ background: "var(--bg-secondary)", color: "var(--text-tertiary)", border: "1px solid var(--border)", fontFamily: "var(--font-mono)" }}>
+                    {item}
+                  </span>
+                ))}
+              </div>
+            )}
+            {app.status === "pending" && viewerProfileId === app.applicantId && (
+              <div className="mt-3 text-right">
+                <button
+                  type="button"
+                  onClick={() => withdrawApplication(app)}
+                  disabled={withdrawingId === app.id}
+                  className="text-[10px] px-3 py-1.5 rounded disabled:opacity-50"
+                  style={{ color: "var(--text-tertiary)", border: "1px solid var(--border)", fontFamily: "var(--font-mono)" }}
+                >
+                  {withdrawingId === app.id ? "Signing..." : "Withdraw application"}
+                </button>
+              </div>
+            )}
           </div>
         );
       })}

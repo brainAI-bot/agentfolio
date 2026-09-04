@@ -19,6 +19,7 @@ import {
   resolveAgentWallet,
   getV3EscrowState,
 } from "@/lib/v3-escrow";
+import { fetchMarketplaceApplyResourceId, signMarketplaceAction } from "@/lib/marketplace-auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
 
@@ -74,6 +75,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   const connected = isDemo ? true : wallet.connected;
   const publicKey = isDemo ? demoPublicKey : wallet.publicKey;
   const signTransaction = wallet.signTransaction;
+  const signMessage = wallet.signMessage;
   const sendTransaction = wallet.sendTransaction;
   const [filter, setFilter] = useState<string>("all");
   const [skillFilter, setSkillFilter] = useState<string>("");
@@ -92,6 +94,8 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   // Apply form
   const [applyMessage, setApplyMessage] = useState("");
   const [applyBid, setApplyBid] = useState("");
+  const [applyTimeline, setApplyTimeline] = useState("flexible");
+  const [applyPortfolio, setApplyPortfolio] = useState("");
   const [resolvedProfileId, setResolvedProfileId] = useState<string | null>(null);
   const [resolvingProfile, setResolvingProfile] = useState(false);
   const [myProfileId, setMyProfileId] = useState<string | null>(null);
@@ -214,15 +218,34 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   // ─── APPLY TO JOB ───
   const handleApply = async () => {
     if (!connected || !publicKey || !selectedJob) return;
+    if (isDemo) {
+      showMessage("error", "Applications are unavailable in demo mode. Connect a wallet to apply.");
+      return;
+    }
+    if (!resolvedProfileId) {
+      showMessage("error", "Create or connect the AgentFolio profile linked to this wallet");
+      return;
+    }
     setLoading(true);
     try {
+      const applyResourceId = await fetchMarketplaceApplyResourceId(API_BASE, selectedJob.id, resolvedProfileId);
+      const walletChallenge = await signMarketplaceAction({
+        action: "apply",
+        resourceId: applyResourceId,
+        actorId: resolvedProfileId,
+        walletAddress: publicKey.toBase58(),
+        signMessage,
+      });
       const res = await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          applicantId: resolvedProfileId || publicKey.toBase58(),
-          proposal: applyMessage,
-          bidAmount: applyBid ? parseFloat(applyBid) : undefined,
+          applicantId: resolvedProfileId,
+          coverMessage: applyMessage,
+          proposedBudget: applyBid ? parseFloat(applyBid) : undefined,
+          proposedTimeline: applyTimeline,
+          portfolioItems: applyPortfolio.split(",").map((item) => item.trim()).filter(Boolean),
+          walletChallenge,
         }),
       });
       const data = await res.json();
@@ -231,6 +254,8 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
       setModal(null);
       setApplyMessage("");
       setApplyBid("");
+      setApplyTimeline("flexible");
+      setApplyPortfolio("");
       await refreshJobs();
     } catch (e: any) {
       showMessage("error", e.message || "Failed to apply");
@@ -707,13 +732,23 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
                 </div>
                 {resolvingProfile && <div className="text-[11px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>Resolving profile...</div>}
                 {resolvedProfileId && <div className="text-[11px]" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>Applying as: <strong>{resolvedProfileId}</strong></div>}
+                {isDemo && <div className="text-[11px]" style={{ color: "var(--warning, #f59e0b)", fontFamily: "var(--font-mono)" }}>Applications are unavailable in demo mode. Connect a wallet to apply.</div>}
                 {!resolvingProfile && !resolvedProfileId && publicKey && <div className="text-[11px]" style={{ color: "var(--warning, #f59e0b)", fontFamily: "var(--font-mono)" }}>⚠️ No profile found for this wallet. Create a profile first.</div>}
                 <Textarea label="Your Proposal" value={applyMessage} onChange={setApplyMessage} placeholder="Why are you the best fit for this job?" />
                 <Input label="Your Bid (SOL, optional)" value={applyBid} onChange={setApplyBid} placeholder="Leave empty to match budget" type="number" />
-                <button onClick={handleApply} disabled={loading}
+                <Select label="Proposed Timeline" value={applyTimeline} onChange={setApplyTimeline}
+                  options={[
+                    { value: "asap", label: "ASAP" },
+                    { value: "5_days", label: "5 Days" },
+                    { value: "1_week", label: "1 Week" },
+                    { value: "2_weeks", label: "2 Weeks" },
+                    { value: "flexible", label: "Flexible" },
+                  ]} />
+                <Input label="Portfolio Items (comma separated)" value={applyPortfolio} onChange={setApplyPortfolio} placeholder="project_1, case-study URL" />
+                <button onClick={handleApply} disabled={loading || isDemo}
                   className="w-full py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-50"
                   style={{ fontFamily: "var(--font-mono)", background: "var(--accent)", color: "#fff" }}>
-                  {loading ? "Submitting..." : "Submit Application"}
+                  {loading ? "Submitting..." : isDemo ? "Unavailable in Demo" : "Submit Application"}
                 </button>
               </div>
             )}

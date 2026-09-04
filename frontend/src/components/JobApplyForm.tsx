@@ -4,15 +4,18 @@ import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { Briefcase, Send, Share2, Check } from "lucide-react";
+import { fetchMarketplaceApplyResourceId, signMarketplaceAction } from "@/lib/marketplace-auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
 
 export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: string }) {
-  const { connected, publicKey } = useWallet();
+  const { connected, publicKey, signMessage } = useWallet();
   const { smartConnect } = useSmartConnect();
   const [showForm, setShowForm] = useState(false);
   const [proposal, setProposal] = useState("");
   const [budget, setBudget] = useState("");
+  const [timeline, setTimeline] = useState("flexible");
+  const [portfolioItems, setPortfolioItems] = useState("");
   const [agentId, setAgentId] = useState("");
   const [resolvedId, setResolvedId] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
@@ -48,13 +51,25 @@ export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: s
     setSubmitting(true);
     setResult(null);
     try {
+      if (!publicKey) throw new Error("Connect the wallet linked to this AgentFolio profile");
+      const applyResourceId = await fetchMarketplaceApplyResourceId(API_BASE, jobId, effectiveId);
+      const walletChallenge = await signMarketplaceAction({
+        action: "apply",
+        resourceId: applyResourceId,
+        actorId: effectiveId,
+        walletAddress: publicKey.toBase58(),
+        signMessage,
+      });
       const res = await fetch(`${API_BASE}/api/marketplace/jobs/${jobId}/apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           applicantId: effectiveId,
-          proposal: proposal.trim(),
+          coverMessage: proposal.trim(),
           proposedBudget: budget ? parseFloat(budget) : undefined,
+          proposedTimeline: timeline,
+          portfolioItems: portfolioItems.split(",").map((item) => item.trim()).filter(Boolean),
+          walletChallenge,
         }),
       });
       const data = await res.json();
@@ -116,6 +131,32 @@ export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: s
                 value={agentId}
                 onChange={(e) => setAgentId(e.target.value)}
                 placeholder={resolvedId || "e.g. agent_brainkid"}
+                className="w-full px-3 py-2 rounded-lg text-sm"
+                style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-primary)", outline: "none" }}
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>Proposed Timeline</label>
+              <select
+                value={timeline}
+                onChange={(e) => setTimeline(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg text-sm"
+                style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-primary)", outline: "none" }}
+              >
+                <option value="asap">ASAP</option>
+                <option value="5_days">5 days</option>
+                <option value="1_week">1 week</option>
+                <option value="2_weeks">2 weeks</option>
+                <option value="flexible">Flexible</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>Portfolio Items (optional, comma-separated)</label>
+              <input
+                type="text"
+                value={portfolioItems}
+                onChange={(e) => setPortfolioItems(e.target.value)}
+                placeholder="project_1, https://example.com/case-study"
                 className="w-full px-3 py-2 rounded-lg text-sm"
                 style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-primary)", outline: "none" }}
               />
