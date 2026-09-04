@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, Code, Shield, Zap, Book, Terminal, Key } from "lucide-react";
+import {
+  SATP_MAINNET_PROGRAMS,
+  SATP_MAINNET_REGISTRATION_PROGRAM_ID,
+} from "@/lib/satp-mainnet-programs";
 
 export const metadata: Metadata = {
   title: "API Docs — AgentFolio",
@@ -9,6 +13,16 @@ export const metadata: Metadata = {
 
 export default async function DocsPage() {
   const baseUrl = "https://agentfolio.bot";
+  const satpProgramRows = [
+    {
+      name: "Live Registration Identity",
+      addr: SATP_MAINNET_REGISTRATION_PROGRAM_ID,
+    },
+    ...Object.entries(SATP_MAINNET_PROGRAMS).map(([name, addr]) => ({
+      name: name === "IDENTITY" ? "V3 Identity Cluster" : name,
+      addr,
+    })),
+  ];
 
   const endpoints = [
     {
@@ -423,21 +437,16 @@ const { transaction, identityPDA } = await sdk.buildRegisterIdentity(
             SATP Program IDs (Mainnet)
           </h2>
           <div className="space-y-2">
-            {[
-              { name: "Identity", addr: "BY4jzmnrui1K5gZ5z5xRQkVfEEMXYHYugtH1Ua867eyr" },
-              { name: "Reputation", addr: "TQ4P9R2Y5FRyw1TZfwoWQ2Mf6XeohbGdhYNcDxh6YYh" },
-              { name: "Validation", addr: "AdDWFa9oEmZdrTrhu8YTWu4ozbTP7e6qa9rvyqfAvM7N" },
-              { name: "Escrow (live-funds gated)", addr: "HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C" },
-            ].map(({ name, addr }) => (
+            {satpProgramRows.map(({ name, addr }) => (
               <div
                 key={name}
-                className="flex items-center justify-between px-4 py-3 rounded-lg"
+                className="flex flex-col gap-2 px-4 py-3 rounded-lg sm:flex-row sm:items-center sm:justify-between"
                 style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
               >
                 <span className="text-sm font-semibold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-                  {name}
+                  {name === "ESCROW" ? "Escrow (live-funds gated)" : name}
                 </span>
-                <code className="text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
+                <code className="break-all text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
                   {addr}
                 </code>
               </div>
