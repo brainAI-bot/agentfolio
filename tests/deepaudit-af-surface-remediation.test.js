@@ -130,10 +130,10 @@ test('AF2: how-it-works exposes non-empty SATP mainnet program ids', () => {
   }
   assert.match(pageSource, /SATP_MAINNET_PROGRAMS/);
   assert.match(pageSource, /explorer\.solana\.com\/address/);
-  assert.doesNotMatch(pageSource, /BY4jzm5R|TQ4P9Rd5|AdDWFajj/);
+  assert.doesNotMatch(pageSource, /BY4jzmnr|TQ4P9R2Y|AdDWFa9o/);
 });
 
-test('AF14: displayed identity program matches the live registration transaction program', () => {
+test('AF14: displayed SATP IDs preserve V3 and registration program provenance', () => {
   const canonicalDocsSurfaces = [
     'frontend/src/app/docs/page.tsx',
     'frontend/src/app/how-it-works/page.tsx',
@@ -142,6 +142,8 @@ test('AF14: displayed identity program matches the live registration transaction
   for (const surface of canonicalDocsSurfaces) {
     const source = fs.readFileSync(path.join(repoRoot, surface), 'utf8');
     assert.match(source, /SATP_MAINNET_PROGRAMS/, `${surface} must source displayed IDs from the verified registry`);
+    assert.match(source, /SATP_MAINNET_REGISTRATION_PROGRAM_ID/, `${surface} must label the live registration program separately`);
+    assert.match(source, /V3 (Identity Cluster|IDENTITY CLUSTER)/, `${surface} must distinguish the V3 identity cluster from registration`);
     assert.doesNotMatch(source, /BY4jzmnr|TQ4P9R2Y|AdDWFa9o/, `${surface} must not display retired docs program IDs`);
   }
 
@@ -153,22 +155,30 @@ test('AF14: displayed identity program matches the live registration transaction
     path.join(repoRoot, 'frontend/src/lib/identity-registry.ts'),
     'utf8'
   );
-  const displayedIdentityProgram = registrySource.match(/IDENTITY:\s*"([^"]+)"/)?.[1];
+  const backendRegistrySource = fs.readFileSync(
+    path.join(repoRoot, 'src/lib/satp-mainnet-programs.js'),
+    'utf8'
+  );
+  const displayedV3IdentityProgram = registrySource.match(/IDENTITY:\s*"([^"]+)"/)?.[1];
+  const backendV3IdentityProgram = backendRegistrySource.match(/IDENTITY:\s*'([^']+)'/)?.[1];
+  const registrationProgram = registrySource.match(/SATP_MAINNET_REGISTRATION_PROGRAM_ID\s*=\s*"([^"]+)"/)?.[1];
 
-  assert.equal(displayedIdentityProgram, 'CV5Wd9YGFX5A4dvuaFuEDuKQWp14NfnLrSdxY7EHFyeB');
+  assert.equal(displayedV3IdentityProgram, 'GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG');
+  assert.equal(backendV3IdentityProgram, displayedV3IdentityProgram);
+  assert.equal(registrationProgram, 'CV5Wd9YGFX5A4dvuaFuEDuKQWp14NfnLrSdxY7EHFyeB');
+  assert.notEqual(registrationProgram, displayedV3IdentityProgram);
   assert.match(
     identityRegistrySource,
-    /new PublicKey\(\s*SATP_MAINNET_PROGRAMS\.IDENTITY\s*\)/,
-    'the registration transaction must source the identity program displayed by docs'
+    /new PublicKey\(\s*SATP_MAINNET_REGISTRATION_PROGRAM_ID\s*\)/,
+    'the registration transaction must source the explicitly labeled live registration program'
   );
 
-  const liveIdentityProgram = displayedIdentityProgram;
   for (const surface of [
     'frontend/src/app/satp/page.tsx',
     'frontend/src/app/stats/page.tsx',
   ]) {
     const source = fs.readFileSync(path.join(repoRoot, surface), 'utf8');
-    assert.match(source, new RegExp(liveIdentityProgram), `${surface} must agree with the live registration transaction path`);
+    assert.match(source, new RegExp(registrationProgram), `${surface} must agree with the live registration transaction path`);
   }
 });
 
@@ -342,6 +352,6 @@ test('AF6 and AF10: CI-on-merge workflow runs explicit PR and main-branch merge 
   assert.match(workflow, /npm ci/);
   assert.match(workflow, /npm run lint:roadmap/);
   assert.match(workflow, /npm run verify:satp-mainnet-programs/);
-  assert.match(workflow, /node --test tests\/deepaudit-af-surface-remediation\.test\.js tests\/escrow-release-gate\.test\.js tests\/escrow-v3-authority\.test\.js/);
+  assert.match(workflow, /node --test tests\/deepaudit-af-surface-remediation\.test\.js tests\/satp-programs-v3-truth\.test\.js tests\/escrow-release-gate\.test\.js tests\/escrow-v3-authority\.test\.js/);
   assert.match(workflow, /git diff --check/);
 });

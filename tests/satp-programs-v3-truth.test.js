@@ -139,6 +139,10 @@ describe('backend and frontend V3 registries stay aligned', () => {
     for (const [name, id] of Object.entries(js.SATP_MAINNET_PROGRAMS)) {
       assert.match(ts, new RegExp(`${name}:\\s*"${id}"`));
     }
+    assert.match(
+      ts,
+      new RegExp(`SATP_MAINNET_REGISTRATION_PROGRAM_ID\\s*=\\s*"${js.SATP_MAINNET_REGISTRATION_PROGRAM_ID}"`)
+    );
     assert.equal(js.SATP_MAINNET_PROGRAMS.ESCROW, V3.ESCROW);
     assert.equal(Object.values(js.SATP_MAINNET_PROGRAMS).filter((id) => id === V3.ESCROW).length, 1);
   });
