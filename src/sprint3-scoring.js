@@ -6,6 +6,7 @@
 
 const Database = require('better-sqlite3');
 const path = require('path');
+const { listCanonicalJobReviews, listCanonicalPeerReviews } = require('./lib/canonical-review-evidence');
 
 function getDb() {
   return new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'), { readonly: true });
@@ -68,9 +69,11 @@ function calculateLevel(profile, db) {
 
   // Level 5: L4 + burn-to-become + 3+ reviews + human verification
   const hasHuman = HUMAN_VERIFICATIONS.some(p => vd[p]?.verified);
-  const reviewCount = db.prepare('SELECT COUNT(*) as c FROM peer_reviews WHERE reviewee_id = ?').get(profile.id).c;
+  const peerReviews = listCanonicalPeerReviews(db, { revieweeId: profile.id });
+  const jobReviews = listCanonicalJobReviews(db, { revieweeId: profile.id });
+  const reviewCount = peerReviews.length;
   const completedJobs = db.prepare("SELECT COUNT(*) as c FROM jobs WHERE selected_agent_id = ? AND status = 'completed'").get(profile.id).c;
-  const hasReview = reviewCount > 0 || db.prepare('SELECT COUNT(*) as c FROM reviews WHERE reviewee_id = ?').get(profile.id).c > 0;
+  const hasReview = reviewCount > 0 || jobReviews.length > 0;
   // burn-to-become: check if avatar is from BOA collection
   const hasBOA = (profile.avatar || '').includes('burned-out') || (profile.avatar || '').includes('boa-');
 
@@ -91,8 +94,8 @@ function calculateReputation(profile, db) {
   score += level * 20;
 
   // 2. Reviews (0-500)
-  const peerReviews = db.prepare('SELECT rating FROM peer_reviews WHERE reviewee_id = ?').all(profile.id);
-  const jobReviews = db.prepare('SELECT rating FROM reviews WHERE reviewee_id = ?').all(profile.id);
+  const peerReviews = listCanonicalPeerReviews(db, { revieweeId: profile.id });
+  const jobReviews = listCanonicalJobReviews(db, { revieweeId: profile.id });
   const allReviews = [...peerReviews, ...jobReviews];
   if (allReviews.length > 0) {
     const avg = allReviews.reduce((s, r) => s + r.rating, 0) / allReviews.length;
@@ -116,8 +119,10 @@ function calculateReputation(profile, db) {
     const rate = jobStats.completed / jobStats.total;
     score += Math.floor(rate * 100);
     // Add average rating from job reviews
-    const avgJobRating = db.prepare('SELECT AVG(rating) as avg FROM reviews WHERE reviewee_id = ?').get(profile.id);
-    if (avgJobRating.avg) score += Math.floor((avgJobRating.avg / 5) * 100);
+    const avgJobRating = jobReviews.length
+      ? jobReviews.reduce((sum, review) => sum + Number(review.rating || 0), 0) / jobReviews.length
+      : 0;
+    if (avgJobRating) score += Math.floor((avgJobRating / 5) * 100);
   }
 
   // 5. Activity decay

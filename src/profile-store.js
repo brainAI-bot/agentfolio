@@ -23,6 +23,11 @@ const { sendWelcomeEmail } = require('./lib/welcome-email');
 const { assertSolanaIrysWriteEnabled, sendSolanaIrysWriteGateResponse } = require('./lib/write-surface-gate');
 const { buildReputationSurface, normalizeTrustScoreValue } = require('./lib/reputation-surface');
 const {
+  listCanonicalReviews,
+  summarizeCanonicalReviews,
+} = require('./lib/canonical-review-evidence');
+const { buildPublishedReviewStats } = require('./lib/published-review-stats');
+const {
   CANONICAL_TRUST_PROVIDERS,
   isCanonicalTrustProvider,
   filterCanonicalTrustVerifications,
@@ -333,8 +338,7 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
           // Build profile object for v2 engine from DB data
           const profileRow = d.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
           const endorsements = d.prepare('SELECT * FROM endorsements WHERE profile_id = ?').all(profileId);
-          const rfk = module.exports._reviewFk || 'profile_id';
-          const reviews = d.prepare(`SELECT * FROM reviews WHERE ${rfk} = ?`).all(profileId);
+          const reviews = listCanonicalReviews(d, { revieweeId: profileId });
           const jobCount = (() => { try { return d.prepare("SELECT COUNT(*) as c FROM jobs WHERE selected_agent_id = ? AND status = 'completed'").get(profileId)?.c || 0; } catch { return 0; } })();
           
           // Build verificationData from DB verifications table
@@ -513,13 +517,12 @@ function enrichProfile(row) {
     d.prepare('SELECT * FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id)
   );
   const activity = d.prepare('SELECT * FROM activity_feed WHERE profile_id = ? ORDER BY created_at DESC LIMIT 20').all(row.id);
-  const rfk = module.exports._reviewFk || 'profile_id';
-  const reviewStats = d.prepare(`
-    SELECT COUNT(*) as total, ROUND(AVG(rating),2) as avg_rating,
-      SUM(CASE WHEN rating >= 4 THEN 1 ELSE 0 END) as positive,
-      SUM(CASE WHEN rating <= 2 THEN 1 ELSE 0 END) as negative
-    FROM reviews WHERE ${rfk} = ?
-  `).get(row.id);
+  const canonicalReviewStats = summarizeCanonicalReviews(d, { revieweeId: row.id });
+  const reviewStats = {
+    ...buildPublishedReviewStats(canonicalReviewStats),
+    positive: canonicalReviewStats.positive,
+    negative: canonicalReviewStats.negative,
+  };
   let jobStats = { completed: 0, posted: 0, total: 0 };
   try {
     jobStats = d.prepare(`
@@ -1491,11 +1494,10 @@ function registerRoutes(app) {
   // ── GET /api/profile/:id/reviews ───────────────────────────────
   app.get('/api/profile/:id/reviews', (req, res) => {
     const d = getDb();
-    const rfk = module.exports._reviewFk || 'profile_id';
-    const items = d.prepare(`SELECT * FROM reviews WHERE ${rfk} = ? ORDER BY created_at DESC`).all(req.params.id);
-    const stats = d.prepare(`
-      SELECT COUNT(*) as total, ROUND(AVG(rating),2) as avg_rating FROM reviews WHERE ${rfk} = ?
-    `).get(req.params.id);
+    const canonicalStats = summarizeCanonicalReviews(d, { revieweeId: req.params.id });
+    const items = canonicalStats.reviews
+      .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+    const stats = buildPublishedReviewStats(canonicalStats);
     res.json({ reviews: items, ...stats });
   });
 

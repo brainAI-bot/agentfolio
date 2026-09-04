@@ -186,6 +186,30 @@ test('legacy profile review writes are hard-disabled', () => {
   assert.doesNotMatch(route, /resolvedEmail/, 'review POST must not reference registration-only email variables');
 });
 
+test('legacy profile review reads expose only canonical review items and matching stats', () => {
+  const source = fs.readFileSync(path.join(ROOT, 'src', 'profile-store.js'), 'utf8');
+  const routeStart = source.indexOf("app.get('/api/profile/:id/reviews'");
+  const routeEnd = source.indexOf("app.get('/api/wallet/lookup/:addr'", routeStart);
+  const route = source.slice(routeStart, routeEnd);
+
+  assert.notEqual(routeStart, -1, 'missing profile review read route');
+  assert.match(route, /summarizeCanonicalReviews/);
+  assert.match(route, /canonicalStats\.reviews/);
+  assert.match(route, /buildPublishedReviewStats\(canonicalStats\)/);
+  assert.doesNotMatch(route, /SELECT \* FROM reviews/);
+});
+
+test('public profile surfaces preserve null for unrated agents and two-decimal averages', () => {
+  const profileSource = fs.readFileSync(path.join(ROOT, 'src', 'profile-store.js'), 'utf8');
+  const explorerSource = fs.readFileSync(path.join(ROOT, 'src', 'routes', 'satp-explorer-api.js'), 'utf8');
+
+  assert.match(profileSource, /buildPublishedReviewStats\(canonicalReviewStats\)/);
+  assert.match(profileSource, /buildPublishedReviewStats\(canonicalStats\)/);
+  assert.match(explorerSource, /profileRows\.flatMap/);
+  assert.match(explorerSource, /stats\.total > 0/);
+  assert.match(explorerSource, /\{ total: 0, avg_rating: null \}/);
+});
+
 test('marketplace exposes only the read route and disables job-scoped review writes', () => {
   const source = fs.readFileSync(path.join(ROOT, 'src', 'marketplace.js'), 'utf8');
   const postStart = source.indexOf("app.post('/api/marketplace/jobs/:id/review'");

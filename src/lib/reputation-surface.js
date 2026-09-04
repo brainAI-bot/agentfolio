@@ -1,6 +1,7 @@
 const LEVEL_LABELS = ['Unverified', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
 const TRUST_LEVEL_LABELS = ['Unclaimed', 'Registered', 'Verified', 'Established', 'Trusted', 'Sovereign'];
 const LEVEL_BADGES = ['\u26aa', '\ud83d\udfe1', '\ud83d\udd35', '\ud83d\udfe2', '\ud83d\udfe0', '\ud83d\udfe3'];
+const { summarizeCanonicalReviews } = require('./canonical-review-evidence');
 
 const LEVEL_MAP = {
   NEW: 0,
@@ -89,13 +90,11 @@ function summarizeJobHistory(input = {}) {
 }
 
 function loadReviewSummary(db, profileId, fallback = {}) {
-  const row = queryOne(
-    db,
-    'SELECT COUNT(*) AS count, AVG(rating) AS averageRating FROM reviews WHERE reviewee_id = ?',
-    [profileId],
-    fallback
-  );
-  return summarizeReviews(row || fallback);
+  const summary = summarizeCanonicalReviews(db, { revieweeId: profileId });
+  if (!summary.evaluable && fallback && Object.keys(fallback).length > 0) {
+    return summarizeReviews(fallback);
+  }
+  return summarizeReviews(summary);
 }
 
 function loadJobHistory(db, profileId, fallback = {}) {

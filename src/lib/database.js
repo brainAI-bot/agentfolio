@@ -6,6 +6,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const { summarizeCanonicalReviews } = require('./canonical-review-evidence');
 
 const DB_PATH = path.join(__dirname, '../../data/agentfolio.db');
 
@@ -1250,10 +1251,10 @@ function reviewExists(jobId, reviewerId, revieweeId) {
 }
 
 function getAverageRating(revieweeId) {
-  const result = reviewStmts.getAverage.get(revieweeId);
+  const result = summarizeCanonicalReviews(db, { revieweeId });
   return {
-    average: result.avg ? Math.round(result.avg * 10) / 10 : null,
-    count: result.count
+    average: result.count ? Math.round(result.averageRating * 10) / 10 : null,
+    count: result.count,
   };
 }
 

@@ -6,6 +6,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const crypto = require('crypto');
+const { listCanonicalReviews } = require('./canonical-review-evidence');
 
 const DB_PATH = path.join(__dirname, '../../data/agentfolio.db');
 const db = new Database(DB_PATH);
@@ -246,10 +247,15 @@ function calculateTeamStats(teamId) {
   `).get(...profileIds)?.count || 0;
   
   // Average rating across all members
-  const ratingResult = db.prepare(`
-    SELECT AVG(rating) as avg, COUNT(*) as count FROM reviews 
-    WHERE reviewee_id IN (${placeholders})
-  `).get(...profileIds);
+  const canonicalRatings = profileIds.flatMap((profileId) =>
+    listCanonicalReviews(db, { revieweeId: profileId }).map((review) => Number(review.rating))
+  ).filter(Number.isFinite);
+  const ratingResult = {
+    avg: canonicalRatings.length
+      ? canonicalRatings.reduce((sum, rating) => sum + rating, 0) / canonicalRatings.length
+      : 0,
+    count: canonicalRatings.length,
+  };
   
   // Total earnings
   const earnings = db.prepare(`

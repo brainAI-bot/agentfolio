@@ -6,6 +6,10 @@ const {
   normalizeVerifications,
 } = require('./verification-categories');
 const { CANONICAL_TRUST_PROVIDERS } = require('./canonical-verification-providers');
+const {
+  listCanonicalJobReviews,
+  listCanonicalPeerReviews,
+} = require('./canonical-review-evidence');
 
 function queryAll(db, sql, params = []) {
   try {
@@ -74,14 +78,9 @@ function getStats(db, profileId) {
     escrowPda: escrow.id,
   }));
   const totalEscrows = queryOne(db, 'SELECT COUNT(*) AS c FROM escrows WHERE agent_id = ? OR client_id = ?', [profileId, profileId], { c: 0 }).c || 0;
-  const reviewsReceived = queryAll(db, 'SELECT * FROM reviews WHERE reviewee_id = ?', [profileId]);
-  const signedReviewsReceived = queryAll(
-    db,
-    `SELECT id, rating, verified, signature, memo_tx, chain, reviewer_wallet, created_at
-     FROM peer_reviews
-     WHERE reviewee_id = ? AND (memo_tx IS NOT NULL OR signature IS NOT NULL)`,
-    [profileId]
-  ).map((review) => ({
+  const reviewsReceived = listCanonicalJobReviews(db, { revieweeId: profileId });
+  const signedReviewsReceived = listCanonicalPeerReviews(db, { revieweeId: profileId }).map((review) => ({
+    ...review,
     rating: review.rating,
     verified: Number(review.verified || 0) === 1,
     signature: review.signature || null,

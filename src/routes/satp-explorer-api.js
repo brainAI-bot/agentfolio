@@ -12,6 +12,8 @@ try { profileStore = require("../profile-store"); } catch(e) { profileStore = nu
 const { computeUnifiedTrustScore } = require('../lib/unified-trust-score');
 const { isFixtureIdentity } = require('../lib/public-traction');
 const { buildReputationSurface, normalizeTrustScoreValue } = require('../lib/reputation-surface');
+const { summarizeCanonicalReviews } = require('../lib/canonical-review-evidence');
+const { buildPublishedReviewStats } = require('../lib/published-review-stats');
 function resolveSatpMainnetRpcUrl() {
   const rpc = String(process.env.SOLANA_RPC_URL || '').trim();
   if (rpc && !/devnet/i.test(rpc)) return rpc;
@@ -188,14 +190,11 @@ async function getSatpAgents() {
     }
     const _db = profileStore.getDb();
     const profileRows = _db.prepare('SELECT * FROM profiles').all();
-    const reviewStatsRows = _db.prepare(`
-      SELECT
-        reviewee_id AS profile_id,
-        COUNT(*) AS total,
-        ROUND(AVG(COALESCE(rating, 0)), 2) AS avg_rating
-      FROM reviews
-      GROUP BY reviewee_id
-    `).all();
+    const reviewStatsRows = profileRows.flatMap((profile) => {
+      const summary = summarizeCanonicalReviews(_db, { revieweeId: profile.id });
+      const stats = buildPublishedReviewStats(summary);
+      return stats.total > 0 ? [{ profile_id: profile.id, ...stats }] : [];
+    });
     const reviewStatsByProfileId = new Map(reviewStatsRows.map((row) => [row.profile_id, row]));
 
     const parseJsonField = (value, fallback) => {
@@ -456,7 +455,7 @@ for (const agent of filteredAgents) {
 
   const profileNFTAvatar = profile.nft_avatar || null;
   const profileAvatar = profileNFTAvatar?.image || profileNFTAvatar?.arweaveUrl || profile.avatar || null;
-  const reviewStats = reviewStatsByProfileId.get(profile.id) || { total: 0, avg_rating: 0 };
+  const reviewStats = reviewStatsByProfileId.get(profile.id) || { total: 0, avg_rating: null };
   const canonicalExplorerV3 = matchedExplorerV3ByProfileId.get(profile.id) || null;
   const canonicalV3 = canonicalExplorerV3 || canonicalV3ByProfileId.get(profile.id) || null;
   const canonicalTrustScore = Number(canonicalV3?.reputationScore || 0);
