@@ -5,11 +5,25 @@
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const rateLimit = require('express-rate-limit');
+const marketplaceState = require('./lib/marketplace-state-machine');
 
-function registerWriteEndpoints(app) {
+const writeEndpointMarketplaceMutationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many marketplace mutation requests, please retry later' },
+});
+
+function registerWriteEndpoints(app, options = {}) {
   const Database = require('better-sqlite3');
-  function getDb() {
-    return new Database(path.join(__dirname, '..', 'data', 'agentfolio.db'));
+  const dbPath = options.dbPath || path.join(__dirname, '..', 'data', 'agentfolio.db');
+  function getDb({ marketplace = false } = {}) {
+    const db = new Database(dbPath);
+    db.pragma('foreign_keys = ON');
+    if (marketplace) marketplaceState.initializeMarketplaceState(db);
+    return db;
   }
 
   // === MIGRATION: add api_key column if missing ===
@@ -143,10 +157,10 @@ function registerWriteEndpoints(app) {
   });
 
   // 5. POST /api/jobs/:id/complete — mark job done (auth required, only client can complete)
-  app.post('/api/jobs/:id/complete', requireAuth, (req, res) => {
+  app.post('/api/jobs/:id/complete', writeEndpointMarketplaceMutationLimiter, requireAuth, (req, res) => {
     const jobId = req.params.id;
     const { completion_note } = req.body;
-    const db = getDb();
+    const db = getDb({ marketplace: true });
     try {
       const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId);
       if (!job) { db.close(); return res.status(404).json({ error: 'Job not found' }); }
@@ -154,8 +168,16 @@ function registerWriteEndpoints(app) {
       if (job.status === 'completed') { db.close(); return res.status(400).json({ error: 'Job is already completed' }); }
       if (!['open', 'in_progress', 'assigned'].includes(job.status)) { db.close(); return res.status(400).json({ error: `Cannot complete a job with status: ${job.status}` }); }
       const now = new Date().toISOString();
-      db.prepare('UPDATE jobs SET status = ?, completed_at = ?, completion_note = ?, funds_released = 1, updated_at = ? WHERE id = ?').run(
-        'completed', now, completion_note || '', now, jobId
+      marketplaceState.transitionJobState(db, jobId, marketplaceState.JOB_STATUS.COMPLETED, {
+        actorId: req.authProfileId,
+        reason: 'client completed job via write endpoint',
+        source: 'write-endpoints',
+        idempotencyKey: req.headers['idempotency-key'] || `write-endpoints:${jobId}:complete:${now}`,
+        metadata: { route: '/api/jobs/:id/complete' },
+        now,
+      });
+      db.prepare('UPDATE jobs SET completed_at = ?, completion_note = ?, funds_released = 1, updated_at = ? WHERE id = ?').run(
+        now, completion_note || '', now, jobId
       );
       db.close();
       res.json({

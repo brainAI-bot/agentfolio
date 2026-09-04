@@ -7,6 +7,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const { summarizeCanonicalReviews } = require('./canonical-review-evidence');
+const marketplaceState = require('./marketplace-state-machine');
 
 const DB_PATH = path.join(__dirname, '../../data/agentfolio.db');
 
@@ -126,6 +127,8 @@ function initializeSchema() {
   // Add expired_at and expiry_reason columns if not present (job expiry feature)
   try { db.exec(`ALTER TABLE jobs ADD COLUMN expired_at TEXT`); } catch (e) { /* column already exists */ }
   try { db.exec(`ALTER TABLE jobs ADD COLUMN expiry_reason TEXT`); } catch (e) { /* column already exists */ }
+
+  marketplaceState.initializeMarketplaceState(db);
 
   // Applications table
   db.exec(`
@@ -939,6 +942,13 @@ function saveJob(job) {
   const existing = jobStmts.getById.get(job.id);
   
   if (existing) {
+    if (existing.status !== data.status) {
+      throw new marketplaceState.MarketplaceTransitionError(
+        'JOB_STATUS_TRANSITION_REQUIRES_GUARD',
+        'Use transitionJobStatus() to change jobs.status',
+        { jobId: job.id, fromStatus: existing.status, toStatus: data.status },
+      );
+    }
     jobStmts.update.run(data);
   } else {
     jobStmts.insert.run(data);
@@ -978,6 +988,22 @@ function loadJobs(filters = {}) {
 
 function incrementJobViews(jobId) {
   jobStmts.incrementViews.run(jobId);
+}
+
+function transitionJobStatus(jobId, toStatus, options) {
+  const result = marketplaceState.transitionJobState(db, jobId, toStatus, options);
+  return {
+    ...result,
+    job: deserializeJob(jobStmts.getById.get(jobId)),
+  };
+}
+
+function getJobTransitionAudit(jobId) {
+  return marketplaceState.listJobTransitionAudit(db, jobId);
+}
+
+function getMarketplaceEscrowEffects(jobId) {
+  return marketplaceState.listMarketplaceEscrowEffects(db, jobId);
 }
 
 // ===== APPLICATION OPERATIONS =====
@@ -1827,6 +1853,9 @@ module.exports = {
   loadJob,
   loadJobs,
   incrementJobViews,
+  transitionJobStatus,
+  getJobTransitionAudit,
+  getMarketplaceEscrowEffects,
   
   // Applications
   saveApplication,
