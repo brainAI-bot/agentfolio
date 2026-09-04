@@ -252,6 +252,13 @@ test('does not stage escrow effects for release or dispute transitions without a
 });
 
 test('write complete route uses the transition guard on the real jobs table', async () => {
+  const writeEndpointsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'write-endpoints.js'), 'utf8');
+  assert.match(writeEndpointsSource, /const writeEndpointMarketplaceMutationLimiter = rateLimit\(/);
+  assert.match(
+    writeEndpointsSource,
+    /app\.post\('\/api\/jobs\/:id\/complete', writeEndpointMarketplaceMutationLimiter, requireAuth,/,
+  );
+
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-state-route-'));
   const dbPath = path.join(tmpDir, 'agentfolio.db');
   const setupDb = new Database(dbPath);

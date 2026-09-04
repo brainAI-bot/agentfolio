@@ -5,7 +5,16 @@
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const rateLimit = require('express-rate-limit');
 const marketplaceState = require('./lib/marketplace-state-machine');
+
+const writeEndpointMarketplaceMutationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many marketplace mutation requests, please retry later' },
+});
 
 function registerWriteEndpoints(app, options = {}) {
   const Database = require('better-sqlite3');
@@ -148,7 +157,7 @@ function registerWriteEndpoints(app, options = {}) {
   });
 
   // 5. POST /api/jobs/:id/complete — mark job done (auth required, only client can complete)
-  app.post('/api/jobs/:id/complete', requireAuth, (req, res) => {
+  app.post('/api/jobs/:id/complete', writeEndpointMarketplaceMutationLimiter, requireAuth, (req, res) => {
     const jobId = req.params.id;
     const { completion_note } = req.body;
     const db = getDb({ marketplace: true });
