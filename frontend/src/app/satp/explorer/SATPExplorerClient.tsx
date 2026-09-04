@@ -2,6 +2,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { Shield, ExternalLink, Search, Star, ChevronDown, ChevronUp, Wallet, Globe, Github, X as XIcon } from "lucide-react";
 import Link from "next/link";
+import { SATP_MAINNET_PROGRAMS } from "@/lib/satp-mainnet-programs";
 
 interface AgentCard {
   id: string;
@@ -55,7 +56,7 @@ const PLATFORM_ICONS: Record<string, string> = {
   telegram: "✈️", mcp: "🔌", a2a: "🤖",
 };
 
-const SATP_V3_PROGRAM_ID = "GTppU4E44BqXTQgbqMZ68ozFzhP1TLty3EGnzzjtNZfG";
+const SATP_V3_PROGRAM_ID = SATP_MAINNET_PROGRAMS.IDENTITY;
 
 type SortKey = "score" | "level" | "date" | "reviews";
 
