@@ -17,6 +17,7 @@ import {
   JobCreate,
   JobApplication,
   JobApplicationCreate,
+  MarketplaceAward,
   JobSearchParams,
   Escrow,
   EscrowCreate,
@@ -451,9 +452,44 @@ class JobsAPI {
     });
   }
 
-  /** Accept an application (client only) */
-  async acceptApplication(jobId: string, applicationId: string): Promise<void> {
-    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${applicationId}/accept`, {
+  /** Withdraw the authenticated agent's pending application. */
+  async withdrawApplication(jobId: string, applicationId: string): Promise<JobApplication> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/withdraw`, {
+      requireAuth: true,
+    });
+  }
+
+  /** Reject a pending application (job client only). */
+  async rejectApplication(jobId: string, applicationId: string): Promise<JobApplication> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/reject`, {
+      requireAuth: true,
+    });
+  }
+
+  /** Select a funded application and open its 48 hour award window. */
+  async selectApplication(jobId: string, applicationId: string): Promise<MarketplaceAward> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/select`, {
+      requireAuth: true,
+    });
+  }
+
+  /** Accept an active award (selected agent only). */
+  async acceptAward(jobId: string, applicationId: string): Promise<MarketplaceAward> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/accept`, {
+      requireAuth: true,
+    });
+  }
+
+  /** Decline an active award and reopen the job. */
+  async declineAward(jobId: string, applicationId: string): Promise<MarketplaceAward> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/decline`, {
+      requireAuth: true,
+    });
+  }
+
+  /** Process an expired 48 hour award window (job client only). */
+  async processAwardTimeout(jobId: string): Promise<MarketplaceAward> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/award-timeout`, {
       requireAuth: true,
     });
   }

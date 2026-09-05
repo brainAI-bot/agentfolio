@@ -79,8 +79,37 @@ export class MarketplaceClient {
   job(id: string): Promise<any>;
   createJob(data: any): Promise<any>;
   apply(jobId: string, data: any): Promise<any>;
+  withdrawApplication(jobId: string, applicationId: string): Promise<MarketplaceApplication>;
+  rejectApplication(jobId: string, applicationId: string): Promise<MarketplaceApplication>;
+  selectApplication(jobId: string, applicationId: string): Promise<MarketplaceAward>;
+  acceptAward(jobId: string, applicationId: string): Promise<MarketplaceAward>;
+  declineAward(jobId: string, applicationId: string): Promise<MarketplaceAward>;
+  processAwardTimeout(jobId: string): Promise<MarketplaceAward>;
   recommendations(jobId: string): Promise<any>;
   myJobs(): Promise<any>;
+}
+
+export interface MarketplaceApplication {
+  id: string;
+  jobId: string;
+  agentId: string;
+  coverMessage: string;
+  proposedBudget: number;
+  proposedTimeline?: string;
+  status: 'pending' | 'withdrawn' | 'rejected' | 'selected' | 'accepted';
+  statusNote?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MarketplaceAward {
+  jobId: string;
+  applicationId?: string;
+  application?: MarketplaceApplication;
+  status: 'awarded' | 'in_progress' | 'open';
+  awardExpiresAt?: string;
+  agreedBudget?: number;
+  reason?: 'agent_declined' | 'award_timed_out';
 }
 
 export class EscrowClient {

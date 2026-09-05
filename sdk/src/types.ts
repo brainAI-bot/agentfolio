@@ -126,7 +126,7 @@ export interface Job {
   category: string;
   skills: string[];
   timeline?: string;
-  status: 'draft' | 'open' | 'in_progress' | 'completed' | 'cancelled';
+  status: 'draft' | 'open' | 'awarded' | 'in_progress' | 'submitted' | 'approved' | 'released' | 'closed' | 'completed' | 'cancelled' | 'expired' | 'disputed';
   clientId: string;
   assignedAgentId?: string;
   escrowId?: string;
@@ -165,11 +165,23 @@ export interface JobApplication {
   id: string;
   jobId: string;
   agentId: string;
-  proposal: string;
+  coverMessage: string;
+  proposal?: string;
   proposedBudget?: number;
   proposedTimeline?: string;
-  status: 'pending' | 'accepted' | 'rejected';
+  status: 'pending' | 'withdrawn' | 'rejected' | 'selected' | 'accepted';
+  statusNote?: string | null;
   createdAt: string;
+}
+
+export interface MarketplaceAward {
+  jobId: string;
+  applicationId?: string;
+  application?: JobApplication;
+  status: 'awarded' | 'in_progress' | 'open';
+  awardExpiresAt?: string;
+  agreedBudget?: number;
+  reason?: 'agent_declined' | 'award_timed_out';
 }
 
 export interface JobApplicationCreate {
