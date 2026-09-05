@@ -1,0 +1,281 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const express = require('express');
+const Database = require('better-sqlite3');
+const {
+  AUTO_APPROVAL_MS,
+  MarketplaceDeliveryError,
+  initializeMarketplaceDeliverySchema,
+  submitDeliverable,
+  requestRevision,
+  approveDeliverable,
+  autoApproveDueDeliverables,
+  addJobComment,
+  listJobThread,
+  registerMarketplaceDeliveryRoutes,
+} = require('../src/routes/marketplace-delivery-routes');
+const { listJobTransitionAudit, listMarketplaceEscrowEffects } = require('../src/lib/marketplace-state-machine');
+
+function createDb() {
+  const db = new Database(':memory:');
+  db.pragma('foreign_keys = ON');
+  db.exec(`
+    CREATE TABLE profiles (
+      id TEXT PRIMARY KEY,
+      api_key TEXT
+    );
+    CREATE TABLE jobs (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      budget_type TEXT DEFAULT 'fixed',
+      status TEXT NOT NULL,
+      selected_agent_id TEXT,
+      escrow_id TEXT,
+      escrow_funded INTEGER DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  initializeMarketplaceDeliverySchema(db);
+  db.prepare('INSERT INTO profiles (id, api_key) VALUES (?, ?)').run('client', 'client-key');
+  db.prepare('INSERT INTO profiles (id, api_key) VALUES (?, ?)').run('worker', 'worker-key');
+  db.prepare('INSERT INTO profiles (id, api_key) VALUES (?, ?)').run('outsider', 'outsider-key');
+  return db;
+}
+
+function insertJob(db, id = 'job_delivery', overrides = {}) {
+  db.prepare(`
+    INSERT INTO jobs (
+      id, client_id, budget_type, status, selected_agent_id,
+      escrow_id, escrow_funded, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    overrides.clientId || 'client',
+    overrides.budgetType || 'fixed',
+    overrides.status || 'in_progress',
+    overrides.selectedAgentId === undefined ? 'worker' : overrides.selectedAgentId,
+    overrides.escrowId || null,
+    overrides.escrowFunded ? 1 : 0,
+    overrides.updatedAt || '2026-09-01T00:00:00.000Z',
+  );
+}
+
+function submit(db, jobId = 'job_delivery', now = '2026-09-01T00:00:00.000Z', text = 'Finished work') {
+  return submitDeliverable(db, {
+    jobId,
+    actorId: 'worker',
+    body: { text, links: ['https://example.com/artifact'] },
+    now,
+    idempotencyKey: `submit-${text}`,
+  });
+}
+
+test('stores immutable hashed deliverables and only allows the awarded worker to submit', () => {
+  const db = createDb();
+  try {
+    insertJob(db);
+    assert.throws(
+      () => submitDeliverable(db, { jobId: 'job_delivery', actorId: 'outsider', body: { text: 'not allowed' } }),
+      (error) => error instanceof MarketplaceDeliveryError && error.code === 'WORKER_ACTION_FORBIDDEN',
+    );
+
+    const result = submit(db);
+    assert.equal(result.status, 'submitted');
+    assert.equal(result.deliverable.submittedBy, 'worker');
+    assert.equal(result.deliverable.submissionNumber, 1);
+    assert.deepEqual(result.deliverable.links, ['https://example.com/artifact']);
+    assert.equal(
+      result.deliverable.contentHash,
+      crypto.createHash('sha256').update(JSON.stringify({
+        text: 'Finished work',
+        links: ['https://example.com/artifact'],
+      })).digest('hex'),
+    );
+    assert.equal(
+      new Date(result.deliverable.autoApproveAt).getTime() - new Date(result.deliverable.submittedAt).getTime(),
+      AUTO_APPROVAL_MS,
+    );
+    assert.equal(db.prepare('SELECT status FROM jobs WHERE id = ?').get('job_delivery').status, 'submitted');
+    assert.throws(
+      () => db.prepare('UPDATE marketplace_deliverables SET text = ? WHERE id = ?').run('rewritten', result.deliverable.id),
+      /MARKETPLACE_DELIVERABLE_IMMUTABLE/,
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('only the client can request revisions and the two-revision maximum is enforced', () => {
+  const db = createDb();
+  try {
+    insertJob(db);
+    const first = submit(db);
+    assert.throws(
+      () => requestRevision(db, {
+        jobId: 'job_delivery',
+        deliverableId: first.deliverable.id,
+        actorId: 'worker',
+        body: { reason: 'self revision' },
+      }),
+      (error) => error instanceof MarketplaceDeliveryError && error.code === 'CLIENT_ACTION_FORBIDDEN',
+    );
+
+    const firstRevision = requestRevision(db, {
+      jobId: 'job_delivery',
+      deliverableId: first.deliverable.id,
+      actorId: 'client',
+      body: { reason: 'Add the test receipt' },
+      now: '2026-09-02T00:00:00.000Z',
+      idempotencyKey: 'revision-1',
+    });
+    assert.equal(firstRevision.revision.revisionNumber, 1);
+    const second = submit(db, 'job_delivery', '2026-09-03T00:00:00.000Z', 'Finished work v2');
+    const secondRevision = requestRevision(db, {
+      jobId: 'job_delivery',
+      deliverableId: second.deliverable.id,
+      actorId: 'client',
+      body: { reason: 'Link the final receipt' },
+      now: '2026-09-04T00:00:00.000Z',
+      idempotencyKey: 'revision-2',
+    });
+    assert.equal(secondRevision.revision.revisionNumber, 2);
+    const third = submit(db, 'job_delivery', '2026-09-05T00:00:00.000Z', 'Finished work v3');
+    assert.throws(
+      () => requestRevision(db, {
+        jobId: 'job_delivery',
+        deliverableId: third.deliverable.id,
+        actorId: 'client',
+        body: { reason: 'A third request is forbidden' },
+      }),
+      (error) => error instanceof MarketplaceDeliveryError && error.code === 'REVISION_LIMIT_REACHED',
+    );
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM marketplace_revision_requests').get().count, 2);
+  } finally {
+    db.close();
+  }
+});
+
+test('client approval is audited without triggering a live escrow effect', () => {
+  const db = createDb();
+  try {
+    insertJob(db, 'job_approve', { escrowId: 'esc_staged', escrowFunded: true });
+    const delivery = submit(db, 'job_approve');
+    assert.throws(
+      () => approveDeliverable(db, { jobId: 'job_approve', deliverableId: delivery.deliverable.id, actorId: 'worker' }),
+      (error) => error instanceof MarketplaceDeliveryError && error.code === 'CLIENT_ACTION_FORBIDDEN',
+    );
+    const result = approveDeliverable(db, {
+      jobId: 'job_approve',
+      deliverableId: delivery.deliverable.id,
+      actorId: 'client',
+      now: '2026-09-02T00:00:00.000Z',
+      idempotencyKey: 'client-approval',
+    });
+    assert.equal(result.status, 'approved');
+    const audit = listJobTransitionAudit(db, 'job_approve');
+    assert.equal(audit.at(-1).toStatus, 'approved');
+    assert.equal(audit.at(-1).actorId, 'client');
+    assert.equal(listMarketplaceEscrowEffects(db, 'job_approve').length, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('seven-day silence auto-approves once through an auditable idempotent timer seam', () => {
+  const db = createDb();
+  try {
+    insertJob(db, 'job_timer');
+    const delivery = submit(db, 'job_timer', '2026-09-01T00:00:00.000Z');
+    assert.deepEqual(autoApproveDueDeliverables(db, { now: '2026-09-07T23:59:59.999Z' }), []);
+    const [approved] = autoApproveDueDeliverables(db, { now: '2026-09-08T00:00:00.000Z' });
+    assert.equal(approved.deliverableId, delivery.deliverable.id);
+    assert.equal(approved.status, 'approved');
+    assert.deepEqual(autoApproveDueDeliverables(db, { now: '2026-09-09T00:00:00.000Z' }), []);
+    const audit = listJobTransitionAudit(db, 'job_timer');
+    const autoAudit = audit.find((entry) => entry.idempotencyKey === `deliverable-auto-approve:${delivery.deliverable.id}`);
+    assert.equal(autoAudit.actorId, 'system:marketplace-auto-approval');
+    assert.equal(autoAudit.source, 'marketplace-delivery-timer');
+    assert.equal(audit.filter((entry) => entry.toStatus === 'approved').length, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('structured comments are immutable attachment-link-only evidence limited to parties/admin', () => {
+  const db = createDb();
+  try {
+    insertJob(db, 'job_thread');
+    assert.throws(
+      () => addJobComment(db, { jobId: 'job_thread', actorId: 'outsider', body: { text: 'no access' } }),
+      (error) => error instanceof MarketplaceDeliveryError && error.code === 'JOB_PARTY_REQUIRED',
+    );
+    assert.throws(
+      () => addJobComment(db, { jobId: 'job_thread', actorId: 'client', body: { text: 'binary', files: ['proof.zip'] } }),
+      (error) => error instanceof MarketplaceDeliveryError && error.code === 'ATTACHMENT_LINKS_ONLY',
+    );
+    const { comment } = addJobComment(db, {
+      jobId: 'job_thread',
+      actorId: 'client',
+      body: { text: 'Revision context', attachmentLinks: ['https://example.com/evidence'] },
+      idempotencyKey: 'comment-1',
+    });
+    addJobComment(db, {
+      jobId: 'job_thread',
+      actorId: 'admin',
+      adminIds: new Set(['admin']),
+      body: { text: 'Administrative evidence note' },
+    });
+    const thread = listJobThread(db, { jobId: 'job_thread', actorId: 'worker' });
+    assert.equal(thread.comments.length, 2);
+    assert.deepEqual(thread.comments[0].attachmentLinks, ['https://example.com/evidence']);
+    assert.throws(
+      () => db.prepare('DELETE FROM marketplace_job_comments WHERE id = ?').run(comment.id),
+      /MARKETPLACE_JOB_COMMENT_IMMUTABLE/,
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('HTTP aliases authenticate actors and expose the SQLite job thread', async () => {
+  const db = createDb();
+  insertJob(db, 'job_route');
+  const app = express();
+  app.use(express.json());
+  registerMarketplaceDeliveryRoutes(app, { getDb: () => db });
+  const server = await new Promise((resolve) => {
+    const listener = app.listen(0, () => resolve(listener));
+  });
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const submitted = await fetch(`${base}/api/marketplace/jobs/job_route/deliverables`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Api-Key': 'worker-key', 'Idempotency-Key': 'route-submit' },
+      body: JSON.stringify({ text: 'Route delivery', links: ['https://example.com/route'] }),
+    });
+    assert.equal(submitted.status, 201);
+    const submittedBody = await submitted.json();
+    assert.equal(submittedBody.status, 'submitted');
+
+    const commented = await fetch(`${base}/api/jobs/job_route/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer client-key' },
+      body: JSON.stringify({ text: 'Received for review' }),
+    });
+    assert.equal(commented.status, 201);
+
+    const thread = await fetch(`${base}/api/marketplace/jobs/job_route/thread`, {
+      headers: { 'X-Api-Key': 'client-key' },
+    });
+    assert.equal(thread.status, 200);
+    const threadBody = await thread.json();
+    assert.equal(threadBody.deliverables.length, 1);
+    assert.equal(threadBody.comments.length, 1);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    db.close();
+  }
+});

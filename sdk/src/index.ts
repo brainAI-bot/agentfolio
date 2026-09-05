@@ -17,6 +17,12 @@ import {
   JobCreate,
   JobApplication,
   JobApplicationCreate,
+  MarketplaceDeliverable,
+  MarketplaceDeliverableCreate,
+  MarketplaceRevisionRequest,
+  MarketplaceJobComment,
+  MarketplaceJobCommentCreate,
+  MarketplaceJobThread,
   JobSearchParams,
   Escrow,
   EscrowCreate,
@@ -447,6 +453,44 @@ class JobsAPI {
   async apply(jobId: string, agentId: string, application: JobApplicationCreate): Promise<JobApplication> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/apply`, {
       body: { agentId, ...application },
+      requireAuth: true,
+    });
+  }
+
+  /** Submit immutable deliverable content (awarded worker only). */
+  async submitDeliverable(jobId: string, deliverable: MarketplaceDeliverableCreate): Promise<{ deliverable: MarketplaceDeliverable; status: 'submitted' }> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables`, {
+      body: deliverable,
+      requireAuth: true,
+    });
+  }
+
+  /** Request one of at most two revisions (job client only). */
+  async requestRevision(jobId: string, deliverableId: string, reason: string): Promise<{ revision: MarketplaceRevisionRequest; status: 'in_progress' }> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables/${encodeURIComponent(deliverableId)}/revisions`, {
+      body: { reason },
+      requireAuth: true,
+    });
+  }
+
+  /** Approve the current deliverable (job client only). */
+  async approveDeliverable(jobId: string, deliverableId: string): Promise<{ deliverable: MarketplaceDeliverable; status: 'approved' }> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables/${encodeURIComponent(deliverableId)}/approve`, {
+      requireAuth: true,
+    });
+  }
+
+  /** Add an immutable structured job comment (job parties/admin only). */
+  async addComment(jobId: string, comment: MarketplaceJobCommentCreate): Promise<{ comment: MarketplaceJobComment }> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/comments`, {
+      body: comment,
+      requireAuth: true,
+    });
+  }
+
+  /** Read the structured delivery/revision/comment evidence thread. */
+  async getThread(jobId: string): Promise<MarketplaceJobThread> {
+    return this.client.request('GET', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/thread`, {
       requireAuth: true,
     });
   }

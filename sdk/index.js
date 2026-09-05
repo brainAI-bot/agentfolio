@@ -275,6 +275,31 @@ class MarketplaceClient {
     return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/apply`, { body: data });
   }
 
+  /** Submit immutable deliverable content (awarded worker only). */
+  async submitDeliverable(jobId, data) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables`, { body: data });
+  }
+
+  /** Request one of at most two revisions (job client only). */
+  async requestRevision(jobId, deliverableId, reason) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables/${encodeURIComponent(deliverableId)}/revisions`, { body: { reason } });
+  }
+
+  /** Approve the current deliverable (job client only). */
+  async approveDeliverable(jobId, deliverableId) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables/${encodeURIComponent(deliverableId)}/approve`);
+  }
+
+  /** Add an immutable structured comment to the job evidence thread. */
+  async addComment(jobId, data) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/comments`, { body: data });
+  }
+
+  /** Read the structured delivery/revision/comment evidence thread. */
+  async thread(jobId) {
+    return this._c._request('GET', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/thread`);
+  }
+
   /** Get job recommendations for agents */
   async recommendations(jobId) {
     return this._c._request('GET', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/agent-recommendations`);
