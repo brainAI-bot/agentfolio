@@ -32,17 +32,112 @@ function parseJson(value, fallback = {}) {
 }
 
 function initializeMarketplaceApplicationSchema(db) {
-  marketplaceState.initializeMarketplaceState(db);
+  // This route module is registered during server startup against profileStore's
+  // connection. On a clean database, profileStore has only created profile data
+  // at that point, so create the marketplace prerequisites before installing the
+  // state-machine triggers that reference jobs.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS jobs (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      category TEXT DEFAULT 'other',
+      skills TEXT DEFAULT '[]',
+      budget_type TEXT DEFAULT 'fixed',
+      budget_amount REAL DEFAULT 0,
+      budget_currency TEXT DEFAULT 'SOL',
+      budget_max REAL,
+      timeline TEXT DEFAULT 'flexible',
+      status TEXT DEFAULT 'open',
+      attachments TEXT DEFAULT '[]',
+      requirements TEXT DEFAULT '',
+      expires_at TEXT,
+      selected_agent_id TEXT,
+      selected_at TEXT,
+      agreed_budget REAL,
+      agreed_timeline TEXT,
+      application_count INTEGER DEFAULT 0,
+      view_count INTEGER DEFAULT 0,
+      escrow_id TEXT,
+      escrow_required INTEGER DEFAULT 0,
+      escrow_funded INTEGER DEFAULT 0,
+      deposit_confirmed_at TEXT,
+      funds_locked INTEGER DEFAULT 0,
+      completed_at TEXT,
+      completion_note TEXT,
+      funds_released INTEGER DEFAULT 0,
+      cancelled_at TEXT,
+      cancel_reason TEXT,
+      funds_refunded INTEGER DEFAULT 0,
+      disputed_at TEXT,
+      dispute_id TEXT,
+      expired_at TEXT,
+      expiry_reason TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS applications (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      cover_message TEXT DEFAULT '',
+      proposed_budget REAL,
+      proposed_timeline TEXT,
+      portfolio_items TEXT DEFAULT '[]',
+      status TEXT DEFAULT 'pending',
+      status_note TEXT,
+      accepted_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (job_id) REFERENCES jobs(id),
+      UNIQUE(job_id, agent_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS escrows (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      client_wallet TEXT,
+      agent_id TEXT,
+      agent_wallet TEXT,
+      amount REAL NOT NULL,
+      currency TEXT DEFAULT 'SOL',
+      platform_fee REAL,
+      agent_payout REAL,
+      status TEXT DEFAULT 'pending',
+      deposit_address TEXT,
+      deposit_tx_hash TEXT,
+      deposit_confirmed_at TEXT,
+      release_tx_hash TEXT,
+      released_at TEXT,
+      refund_tx_hash TEXT,
+      refunded_at TEXT,
+      locked_at TEXT,
+      expires_at TEXT,
+      notes TEXT DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (job_id) REFERENCES jobs(id)
+    );
+  `);
+
   const addColumn = (table, definition) => {
-    try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`); } catch (_) {}
+    const column = definition.trim().split(/\s+/, 1)[0];
+    const exists = db.prepare(`PRAGMA table_info(${table})`).all().some((entry) => entry.name === column);
+    if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
   };
 
   addColumn('profiles', 'api_key TEXT');
+  addColumn('profiles', "verification_data TEXT DEFAULT '{}'");
   addColumn('jobs', 'selected_application_id TEXT');
   addColumn('jobs', 'award_expires_at TEXT');
   addColumn('applications', 'withdrawn_at TEXT');
   addColumn('applications', 'rejected_at TEXT');
   addColumn('applications', 'declined_at TEXT');
+
+  marketplaceState.initializeMarketplaceState(db);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS application_transition_audit (
@@ -190,6 +285,10 @@ function requiredAwardAmount(job, application) {
   return amount;
 }
 
+function normalizeCurrency(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
 function assertFundingMatches(db, job, application, now) {
   const escrow = fundedEscrowForJob(db, job);
   const requiredAmount = requiredAwardAmount(job, application);
@@ -199,6 +298,23 @@ function assertFundingMatches(db, job, application, now) {
       'ESCROW_FUNDING_REQUIRED',
       'Verified staged escrow funding is required before award',
       { requiredAmount, currency: job.budget_currency },
+    );
+  }
+
+  const fundedCurrency = normalizeCurrency(escrow.currency);
+  const requiredCurrency = normalizeCurrency(job.budget_currency);
+  if (!fundedCurrency || !requiredCurrency || fundedCurrency !== requiredCurrency) {
+    throw new MarketplaceApplicationError(
+      409,
+      'ESCROW_CURRENCY_MISMATCH',
+      'Escrow currency must match the job budget currency',
+      {
+        escrowId: escrow.id,
+        jobId: job.id,
+        applicationId: application.id,
+        fundedCurrency: fundedCurrency || null,
+        requiredCurrency: requiredCurrency || null,
+      },
     );
   }
 
@@ -218,7 +334,7 @@ function assertFundingMatches(db, job, application, now) {
       adjustmentType,
       fundedAmount,
       requiredAmount,
-      escrow.currency || job.budget_currency || 'SOL',
+      fundedCurrency,
       now,
     );
     throw new MarketplaceApplicationError(
@@ -232,7 +348,7 @@ function assertFundingMatches(db, job, application, now) {
         escrowId: escrow.id,
         jobId: job.id,
         applicationId: application.id,
-        currency: escrow.currency || job.budget_currency || 'SOL',
+        currency: fundedCurrency,
       },
     );
   }

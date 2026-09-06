@@ -92,13 +92,14 @@ function insertJob(db, id, options = {}) {
     INSERT INTO jobs (
       id, client_id, title, budget_type, budget_amount, budget_currency,
       timeline, status, escrow_id, escrow_funded, deposit_confirmed_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, 'SOL', '1w', ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, '1w', ?, ?, ?, ?, ?)
   `).run(
     id,
     options.clientId || 'client',
     id,
     options.budgetType || 'fixed',
     options.budget ?? 100,
+    options.currency || 'SOL',
     options.status || 'open',
     options.escrowId || null,
     options.escrowFunded ? 1 : 0,
@@ -107,11 +108,11 @@ function insertJob(db, id, options = {}) {
   );
 }
 
-function insertEscrow(db, id, jobId, amount) {
+function insertEscrow(db, id, jobId, amount, currency = 'SOL') {
   db.prepare(`
     INSERT INTO escrows (id, job_id, amount, currency, status, deposit_confirmed_at)
-    VALUES (?, ?, ?, 'SOL', 'funded', '2026-09-05T00:00:00.000Z')
-  `).run(id, jobId, amount);
+    VALUES (?, ?, ?, ?, 'funded', '2026-09-05T00:00:00.000Z')
+  `).run(id, jobId, amount, currency);
 }
 
 function insertApplication(db, id, jobId, agentId, budget = 100, createdAt = '2026-09-05T01:00:00.000Z') {
@@ -217,6 +218,61 @@ test('selection requires exact verified funding and records counter-offer top-up
   assert.ok(awardWindowMs > (48 * 60 * 60 * 1000) - 5000);
   assert.ok(awardWindowMs <= 48 * 60 * 60 * 1000);
   assert.equal(db.prepare('SELECT status FROM jobs WHERE id = ?').get('job_counter').status, 'awarded');
+});
+
+test('selection and acceptance require normalized escrow and job currency equality', async (t) => {
+  const { db, server, baseUrl } = createHarness();
+  t.after(() => { server.close(); db.close(); });
+  insertJob(db, 'job_currency', {
+    currency: 'USDC',
+    escrowId: 'esc_currency',
+    escrowFunded: true,
+  });
+  insertEscrow(db, 'esc_currency', 'job_currency', 100, 'SOL');
+  insertApplication(db, 'app_currency', 'job_currency', 'verified-agent');
+
+  const wrongSelectionCurrency = await post(baseUrl, '/api/applications/app_currency/select', 'key-client');
+  assert.equal(wrongSelectionCurrency.status, 409);
+  assert.equal(wrongSelectionCurrency.body.code, 'ESCROW_CURRENCY_MISMATCH');
+  assert.equal(wrongSelectionCurrency.body.fundedCurrency, 'SOL');
+  assert.equal(wrongSelectionCurrency.body.requiredCurrency, 'USDC');
+  assert.equal(db.prepare('SELECT status FROM jobs WHERE id = ?').get('job_currency').status, 'open');
+
+  db.prepare("UPDATE escrows SET currency = ' usdc ' WHERE id = ?").run('esc_currency');
+  const selected = await post(baseUrl, '/api/applications/app_currency/select', 'key-client');
+  assert.equal(selected.status, 200);
+  assert.equal(selected.body.status, 'awarded');
+
+  db.prepare("UPDATE escrows SET currency = 'SOL' WHERE id = ?").run('esc_currency');
+  const wrongAcceptanceCurrency = await post(baseUrl, '/api/applications/app_currency/accept', 'key-agent');
+  assert.equal(wrongAcceptanceCurrency.status, 409);
+  assert.equal(wrongAcceptanceCurrency.body.code, 'ESCROW_CURRENCY_MISMATCH');
+  assert.equal(db.prepare('SELECT status FROM jobs WHERE id = ?').get('job_currency').status, 'awarded');
+  assert.equal(db.prepare('SELECT status FROM applications WHERE id = ?').get('app_currency').status, 'selected');
+});
+
+test('server marketplace registration initializes clean-database prerequisites before state triggers', () => {
+  const db = new Database(':memory:');
+  db.pragma('foreign_keys = ON');
+  db.exec(`
+    CREATE TABLE profiles (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      api_key TEXT UNIQUE
+    );
+  `);
+  const app = express();
+
+  assert.doesNotThrow(() => registerMarketplaceApplicationRoutes(app, { getDb: () => db }));
+  assert.deepEqual(
+    db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('jobs', 'applications', 'escrows') ORDER BY name").all(),
+    [{ name: 'applications' }, { name: 'escrows' }, { name: 'jobs' }],
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = 'guard_jobs_status_transition'").get().count,
+    1,
+  );
+  db.close();
 });
 
 test('selected agent can accept; decline and 48h timeout reject the selection and reopen the job', async (t) => {
