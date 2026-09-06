@@ -3,10 +3,13 @@
 const crypto = require('node:crypto');
 const rateLimit = require('express-rate-limit');
 const marketplaceState = require('../lib/marketplace-state-machine');
+const { initializeMarketplaceCoreSchema } = require('../lib/marketplace-schema');
 const { hasVerifiedCanonicalTrustData } = require('../lib/canonical-verification-providers');
+const { createRequireAuth } = require('../middleware/auth');
 
 const AWARD_TTL_MS = 48 * 60 * 60 * 1000;
 const DAILY_APPLICATION_LIMIT = 10;
+const CURRENCY_DECIMALS = Object.freeze({ SOL: 9, USDC: 6 });
 const marketplaceMutationLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 60,
@@ -32,96 +35,7 @@ function parseJson(value, fallback = {}) {
 }
 
 function initializeMarketplaceApplicationSchema(db) {
-  // This route module is registered during server startup against profileStore's
-  // connection. On a clean database, profileStore has only created profile data
-  // at that point, so create the marketplace prerequisites before installing the
-  // state-machine triggers that reference jobs.
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS jobs (
-      id TEXT PRIMARY KEY,
-      client_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT,
-      category TEXT DEFAULT 'other',
-      skills TEXT DEFAULT '[]',
-      budget_type TEXT DEFAULT 'fixed',
-      budget_amount REAL DEFAULT 0,
-      budget_currency TEXT DEFAULT 'SOL',
-      budget_max REAL,
-      timeline TEXT DEFAULT 'flexible',
-      status TEXT DEFAULT 'open',
-      attachments TEXT DEFAULT '[]',
-      requirements TEXT DEFAULT '',
-      expires_at TEXT,
-      selected_agent_id TEXT,
-      selected_at TEXT,
-      agreed_budget REAL,
-      agreed_timeline TEXT,
-      application_count INTEGER DEFAULT 0,
-      view_count INTEGER DEFAULT 0,
-      escrow_id TEXT,
-      escrow_required INTEGER DEFAULT 0,
-      escrow_funded INTEGER DEFAULT 0,
-      deposit_confirmed_at TEXT,
-      funds_locked INTEGER DEFAULT 0,
-      completed_at TEXT,
-      completion_note TEXT,
-      funds_released INTEGER DEFAULT 0,
-      cancelled_at TEXT,
-      cancel_reason TEXT,
-      funds_refunded INTEGER DEFAULT 0,
-      disputed_at TEXT,
-      dispute_id TEXT,
-      expired_at TEXT,
-      expiry_reason TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS applications (
-      id TEXT PRIMARY KEY,
-      job_id TEXT NOT NULL,
-      agent_id TEXT NOT NULL,
-      cover_message TEXT DEFAULT '',
-      proposed_budget REAL,
-      proposed_timeline TEXT,
-      portfolio_items TEXT DEFAULT '[]',
-      status TEXT DEFAULT 'pending',
-      status_note TEXT,
-      accepted_at TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (job_id) REFERENCES jobs(id),
-      UNIQUE(job_id, agent_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS escrows (
-      id TEXT PRIMARY KEY,
-      job_id TEXT NOT NULL,
-      client_id TEXT NOT NULL,
-      client_wallet TEXT,
-      agent_id TEXT,
-      agent_wallet TEXT,
-      amount REAL NOT NULL,
-      currency TEXT DEFAULT 'SOL',
-      platform_fee REAL,
-      agent_payout REAL,
-      status TEXT DEFAULT 'pending',
-      deposit_address TEXT,
-      deposit_tx_hash TEXT,
-      deposit_confirmed_at TEXT,
-      release_tx_hash TEXT,
-      released_at TEXT,
-      refund_tx_hash TEXT,
-      refunded_at TEXT,
-      locked_at TEXT,
-      expires_at TEXT,
-      notes TEXT DEFAULT '[]',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (job_id) REFERENCES jobs(id)
-    );
-  `);
+  initializeMarketplaceCoreSchema(db);
 
   const addColumn = (table, definition) => {
     const column = definition.trim().split(/\s+/, 1)[0];
@@ -131,11 +45,6 @@ function initializeMarketplaceApplicationSchema(db) {
 
   addColumn('profiles', 'api_key TEXT');
   addColumn('profiles', "verification_data TEXT DEFAULT '{}'");
-  addColumn('jobs', 'selected_application_id TEXT');
-  addColumn('jobs', 'award_expires_at TEXT');
-  addColumn('applications', 'withdrawn_at TEXT');
-  addColumn('applications', 'rejected_at TEXT');
-  addColumn('applications', 'declined_at TEXT');
 
   marketplaceState.initializeMarketplaceState(db);
 
@@ -171,6 +80,17 @@ function initializeMarketplaceApplicationSchema(db) {
       UNIQUE (job_id, application_id, escrow_id, funded_amount, required_amount)
     );
 
+    CREATE TABLE IF NOT EXISTS marketplace_escrow_adjustment_resolutions (
+      id TEXT PRIMARY KEY,
+      adjustment_id TEXT NOT NULL UNIQUE,
+      funded_amount REAL NOT NULL,
+      required_amount REAL NOT NULL,
+      currency TEXT NOT NULL,
+      resolution TEXT NOT NULL CHECK(resolution IN ('funding_matched')),
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (adjustment_id) REFERENCES marketplace_escrow_adjustments(id)
+    );
+
     CREATE TRIGGER IF NOT EXISTS immutable_application_transition_audit_update
     BEFORE UPDATE ON application_transition_audit
     BEGIN
@@ -193,6 +113,18 @@ function initializeMarketplaceApplicationSchema(db) {
     BEFORE DELETE ON marketplace_escrow_adjustments
     BEGIN
       SELECT RAISE(ABORT, 'MARKETPLACE_ESCROW_ADJUSTMENT_IMMUTABLE');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS immutable_marketplace_escrow_adjustment_resolutions_update
+    BEFORE UPDATE ON marketplace_escrow_adjustment_resolutions
+    BEGIN
+      SELECT RAISE(ABORT, 'MARKETPLACE_ESCROW_ADJUSTMENT_RESOLUTION_IMMUTABLE');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS immutable_marketplace_escrow_adjustment_resolutions_delete
+    BEFORE DELETE ON marketplace_escrow_adjustment_resolutions
+    BEGIN
+      SELECT RAISE(ABORT, 'MARKETPLACE_ESCROW_ADJUSTMENT_RESOLUTION_IMMUTABLE');
     END;
   `);
 }
@@ -289,6 +221,41 @@ function normalizeCurrency(value) {
   return String(value || '').trim().toUpperCase();
 }
 
+function toMinorUnits(value, currency) {
+  const decimals = CURRENCY_DECIMALS[currency];
+  const amount = Number(value);
+  if (!Number.isInteger(decimals) || !Number.isFinite(amount)) return null;
+  const minorUnits = Math.round(amount * (10 ** decimals));
+  return Number.isSafeInteger(minorUnits) ? minorUnits : null;
+}
+
+function resolveOutstandingAdjustments(db, job, application, escrow, fundedAmount, requiredAmount, currency, now) {
+  const unresolved = db.prepare(`
+    SELECT adjustment.id
+    FROM marketplace_escrow_adjustments AS adjustment
+    LEFT JOIN marketplace_escrow_adjustment_resolutions AS resolution
+      ON resolution.adjustment_id = adjustment.id
+    WHERE adjustment.job_id = ? AND adjustment.application_id = ?
+      AND adjustment.escrow_id = ? AND resolution.id IS NULL
+    ORDER BY adjustment.created_at ASC, adjustment.id ASC
+  `).all(job.id, application.id, escrow.id);
+  const insertResolution = db.prepare(`
+    INSERT OR IGNORE INTO marketplace_escrow_adjustment_resolutions (
+      id, adjustment_id, funded_amount, required_amount, currency, resolution, created_at
+    ) VALUES (?, ?, ?, ?, ?, 'funding_matched', ?)
+  `);
+  for (const adjustment of unresolved) {
+    insertResolution.run(
+      `mer_${crypto.randomUUID()}`,
+      adjustment.id,
+      fundedAmount,
+      requiredAmount,
+      currency,
+      now,
+    );
+  }
+}
+
 function assertFundingMatches(db, job, application, now) {
   const escrow = fundedEscrowForJob(db, job);
   const requiredAmount = requiredAwardAmount(job, application);
@@ -319,7 +286,18 @@ function assertFundingMatches(db, job, application, now) {
   }
 
   const fundedAmount = Number(escrow.amount);
-  if (!Number.isFinite(fundedAmount) || fundedAmount !== requiredAmount) {
+  const fundedMinorUnits = toMinorUnits(fundedAmount, fundedCurrency);
+  const requiredMinorUnits = toMinorUnits(requiredAmount, requiredCurrency);
+  if (fundedMinorUnits === null || requiredMinorUnits === null
+    || fundedMinorUnits <= 0 || requiredMinorUnits <= 0) {
+    throw new MarketplaceApplicationError(
+      409,
+      'ESCROW_AMOUNT_INVALID',
+      'Escrow and award amounts must fit the supported currency minor-unit range',
+      { fundedAmount, requiredAmount, currency: fundedCurrency },
+    );
+  }
+  if (fundedMinorUnits !== requiredMinorUnits) {
     const adjustmentType = fundedAmount > requiredAmount ? 'refund' : 'top_up';
     db.prepare(`
       INSERT OR IGNORE INTO marketplace_escrow_adjustments (
@@ -352,11 +330,20 @@ function assertFundingMatches(db, job, application, now) {
       },
     );
   }
+  resolveOutstandingAdjustments(
+    db,
+    job,
+    application,
+    escrow,
+    fundedAmount,
+    requiredAmount,
+    fundedCurrency,
+    now,
+  );
   return { escrow, requiredAmount };
 }
 
 function applyToJob(db, { jobId, actorId, body = {}, now = new Date().toISOString() }) {
-  initializeMarketplaceApplicationSchema(db);
   const execute = db.transaction(() => {
     const job = requireJob(db, jobId);
     requireFixedPrice(job);
@@ -414,7 +401,20 @@ function applyToJob(db, { jobId, actorId, body = {}, now = new Date().toISOStrin
         id, job_id, agent_id, cover_message, proposed_budget, proposed_timeline,
         portfolio_items, status, status_note, accepted_at, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(...Object.values(application));
+    `).run(
+      application.id,
+      application.job_id,
+      application.agent_id,
+      application.cover_message,
+      application.proposed_budget,
+      application.proposed_timeline,
+      application.portfolio_items,
+      application.status,
+      application.status_note,
+      application.accepted_at,
+      application.created_at,
+      application.updated_at,
+    );
     db.prepare('UPDATE jobs SET application_count = COALESCE(application_count, 0) + 1, updated_at = ? WHERE id = ?')
       .run(now, jobId);
     transitionApplication(db, { ...application, status: null }, 'pending', actorId, 'agent_applied', now, `apply:${application.id}`);
@@ -424,7 +424,6 @@ function applyToJob(db, { jobId, actorId, body = {}, now = new Date().toISOStrin
 }
 
 function withdrawApplication(db, { applicationId, jobId = null, actorId, now = new Date().toISOString() }) {
-  initializeMarketplaceApplicationSchema(db);
   return db.transaction(() => {
     const application = requireApplication(db, applicationId, jobId);
     if (application.agent_id !== actorId) {
@@ -441,7 +440,6 @@ function withdrawApplication(db, { applicationId, jobId = null, actorId, now = n
 }
 
 function rejectApplication(db, { applicationId, jobId = null, actorId, now = new Date().toISOString() }) {
-  initializeMarketplaceApplicationSchema(db);
   return db.transaction(() => {
     const application = requireApplication(db, applicationId, jobId);
     const job = requireJob(db, application.job_id);
@@ -457,7 +455,6 @@ function rejectApplication(db, { applicationId, jobId = null, actorId, now = new
 }
 
 function selectApplication(db, { applicationId, jobId = null, actorId, now = new Date().toISOString() }) {
-  initializeMarketplaceApplicationSchema(db);
   const execute = db.transaction(() => {
     const application = requireApplication(db, applicationId, jobId);
     const job = requireJob(db, application.job_id);
@@ -550,7 +547,6 @@ function reopenAward(db, job, application, actorId, reason, now) {
 }
 
 function acceptAward(db, { applicationId, jobId = null, actorId, now = new Date().toISOString() }) {
-  initializeMarketplaceApplicationSchema(db);
   const execute = db.transaction(() => {
     const application = requireApplication(db, applicationId, jobId);
     const job = requireJob(db, application.job_id);
@@ -594,7 +590,6 @@ function acceptAward(db, { applicationId, jobId = null, actorId, now = new Date(
 }
 
 function declineAward(db, { applicationId, jobId = null, actorId, now = new Date().toISOString() }) {
-  initializeMarketplaceApplicationSchema(db);
   return db.transaction(() => {
     const application = requireApplication(db, applicationId, jobId);
     const job = requireJob(db, application.job_id);
@@ -609,7 +604,6 @@ function declineAward(db, { applicationId, jobId = null, actorId, now = new Date
 }
 
 function expireAward(db, { jobId, actorId, now = new Date().toISOString() }) {
-  initializeMarketplaceApplicationSchema(db);
   return db.transaction(() => {
     const job = requireJob(db, jobId);
     if (job.client_id !== actorId) {
@@ -627,7 +621,6 @@ function expireAward(db, { jobId, actorId, now = new Date().toISOString() }) {
 }
 
 function expireTimedOutAwards(db, { now = new Date().toISOString() } = {}) {
-  initializeMarketplaceApplicationSchema(db);
   const expiredJobs = db.prepare(`
     SELECT id, selected_application_id
     FROM jobs
@@ -656,22 +649,15 @@ function registerMarketplaceApplicationRoutes(app, { getDb, closeDb = false, tim
   initializeMarketplaceApplicationSchema(schemaDb);
   if (closeDb) schemaDb.close();
 
-  function requireAuth(req, res, next) {
-    const key = req.headers['x-api-key'] || String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-    if (!key) return res.status(401).json({ code: 'AUTH_REQUIRED', error: 'Missing API key' });
-    const db = getDb();
-    try {
-      initializeMarketplaceApplicationSchema(db);
-      const profile = db.prepare('SELECT id FROM profiles WHERE api_key = ?').get(key);
-      if (!profile) return res.status(403).json({ code: 'AUTH_INVALID', error: 'Invalid API key' });
-      req.marketplaceActorId = profile.id;
-      return next();
-    } catch (error) {
-      return res.status(500).json({ code: 'AUTH_FAILURE', error: error.message });
-    } finally {
-      if (closeDb) db.close();
-    }
-  }
+  const requireAuth = createRequireAuth({
+    getDb,
+    closeDb,
+    actorProperty: 'marketplaceActorId',
+    invalidStatus: 403,
+    missingBody: { code: 'AUTH_REQUIRED', error: 'Missing API key' },
+    invalidBody: { code: 'AUTH_INVALID', error: 'Invalid API key' },
+    failureBody: (error) => ({ code: 'AUTH_FAILURE', error: error.message }),
+  });
 
   const invoke = (operation, successStatus = 200) => (req, res) => {
     const db = getDb();

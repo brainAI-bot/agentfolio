@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
 const express = require('express');
+const { initializeMarketplaceCoreSchema } = require('../src/lib/marketplace-schema');
 const {
   expireTimedOutAwards,
   registerMarketplaceApplicationRoutes,
@@ -18,51 +19,8 @@ function createHarness() {
       verification_data TEXT DEFAULT '{}',
       api_key TEXT
     );
-    CREATE TABLE jobs (
-      id TEXT PRIMARY KEY,
-      client_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      budget_type TEXT DEFAULT 'fixed',
-      budget_amount REAL NOT NULL,
-      budget_currency TEXT DEFAULT 'SOL',
-      timeline TEXT DEFAULT 'flexible',
-      status TEXT DEFAULT 'open',
-      selected_agent_id TEXT,
-      selected_at TEXT,
-      agreed_budget REAL,
-      agreed_timeline TEXT,
-      application_count INTEGER DEFAULT 0,
-      escrow_id TEXT,
-      escrow_funded INTEGER DEFAULT 0,
-      deposit_confirmed_at TEXT,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE applications (
-      id TEXT PRIMARY KEY,
-      job_id TEXT NOT NULL,
-      agent_id TEXT NOT NULL,
-      cover_message TEXT DEFAULT '',
-      proposed_budget REAL,
-      proposed_timeline TEXT,
-      portfolio_items TEXT DEFAULT '[]',
-      status TEXT DEFAULT 'pending',
-      status_note TEXT,
-      accepted_at TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (job_id) REFERENCES jobs(id),
-      UNIQUE(job_id, agent_id)
-    );
-    CREATE TABLE escrows (
-      id TEXT PRIMARY KEY,
-      job_id TEXT NOT NULL,
-      amount REAL NOT NULL,
-      currency TEXT DEFAULT 'SOL',
-      status TEXT DEFAULT 'pending',
-      deposit_confirmed_at TEXT,
-      FOREIGN KEY (job_id) REFERENCES jobs(id)
-    );
   `);
+  initializeMarketplaceCoreSchema(db);
   const profile = db.prepare('INSERT INTO profiles (id, verification_data, api_key) VALUES (?, ?, ?)');
   profile.run('client', '{}', 'key-client');
   profile.run('other-client', '{}', 'key-other-client');
@@ -91,8 +49,8 @@ function insertJob(db, id, options = {}) {
   db.prepare(`
     INSERT INTO jobs (
       id, client_id, title, budget_type, budget_amount, budget_currency,
-      timeline, status, escrow_id, escrow_funded, deposit_confirmed_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, '1w', ?, ?, ?, ?, ?)
+      timeline, status, escrow_id, escrow_funded, deposit_confirmed_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, '1w', ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     options.clientId || 'client',
@@ -105,14 +63,25 @@ function insertJob(db, id, options = {}) {
     options.escrowFunded ? 1 : 0,
     options.depositConfirmedAt || null,
     options.now || '2026-09-05T00:00:00.000Z',
+    options.now || '2026-09-05T00:00:00.000Z',
   );
 }
 
 function insertEscrow(db, id, jobId, amount, currency = 'SOL') {
   db.prepare(`
-    INSERT INTO escrows (id, job_id, amount, currency, status, deposit_confirmed_at)
-    VALUES (?, ?, ?, ?, 'funded', '2026-09-05T00:00:00.000Z')
-  `).run(id, jobId, amount, currency);
+    INSERT INTO escrows (
+      id, job_id, client_id, amount, currency, status,
+      deposit_confirmed_at, created_at, updated_at
+    ) VALUES (?, ?, 'client', ?, ?, 'funded', ?, ?, ?)
+  `).run(
+    id,
+    jobId,
+    amount,
+    currency,
+    '2026-09-05T00:00:00.000Z',
+    '2026-09-05T00:00:00.000Z',
+    '2026-09-05T00:00:00.000Z',
+  );
 }
 
 function insertApplication(db, id, jobId, agentId, budget = 100, createdAt = '2026-09-05T01:00:00.000Z') {
@@ -218,6 +187,33 @@ test('selection requires exact verified funding and records counter-offer top-up
   assert.ok(awardWindowMs > (48 * 60 * 60 * 1000) - 5000);
   assert.ok(awardWindowMs <= 48 * 60 * 60 * 1000);
   assert.equal(db.prepare('SELECT status FROM jobs WHERE id = ?').get('job_counter').status, 'awarded');
+  assert.deepEqual(
+    db.prepare(`
+      SELECT resolution, funded_amount, required_amount, currency
+      FROM marketplace_escrow_adjustment_resolutions
+    `).get(),
+    { resolution: 'funding_matched', funded_amount: 100, required_amount: 100, currency: 'SOL' },
+  );
+});
+
+test('minor-unit funding comparison accepts a representation artifact without recording an adjustment', async (t) => {
+  const { db, server, baseUrl } = createHarness();
+  t.after(() => { server.close(); db.close(); });
+  insertJob(db, 'job_float_artifact', {
+    budget: 0.3,
+    escrowId: 'esc_float_artifact',
+    escrowFunded: true,
+  });
+  insertEscrow(db, 'esc_float_artifact', 'job_float_artifact', 0.1 + 0.2);
+  insertApplication(db, 'app_float_artifact', 'job_float_artifact', 'verified-agent', 0.3);
+
+  const selected = await post(baseUrl, '/api/applications/app_float_artifact/select', 'key-client');
+  assert.equal(selected.status, 200);
+  assert.equal(selected.body.status, 'awarded');
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM marketplace_escrow_adjustments').get().count,
+    0,
+  );
 });
 
 test('selection and acceptance require normalized escrow and job currency equality', async (t) => {
