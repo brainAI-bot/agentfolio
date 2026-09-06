@@ -353,6 +353,7 @@ describe('deploy provenance', () => {
       'utf8'
     ));
     const app = pm2Config.apps.find((entry) => entry.name === 'agentfolio-deploy-drift-check');
+    const hqWrapper = path.resolve(repoRoot, 'tools/hq-prod-env.sh');
     const { server, url } = await listenWithVersion({
       commitSha: driftSha,
       buildTime: '2026-07-06T18:26:00.000Z',
@@ -367,8 +368,21 @@ describe('deploy provenance', () => {
 
     try {
       assert.ok(app, 'PM2 drift-check app is committed');
+      assert.strictEqual(app.cwd, '/home/ubuntu/agentfolio-prod-locked');
+      assert.strictEqual(
+        app.args,
+        '--write-evidence=/home/ubuntu/.agentfolio/reports/deploy-drift-latest.json'
+      );
       assert.strictEqual(app.env.AGENTFOLIO_CREATE_DRIFT_TASK, 'true');
-      assert.strictEqual(app.env.HQ_CLI, '~/clawd/scripts/hq-env.zsh hq');
+      assert.strictEqual(app.env.HQ_CLI, 'tools/hq-prod-env.sh');
+      assert.strictEqual(app.env.HQ_RUNTIME_DIR, '/home/ubuntu/brainai-hq-v4');
+      assert.strictEqual(app.env.HQ_URL, 'http://127.0.0.1:3100');
+      assert.strictEqual(app.env.HQ_AGENT_ID, 'brainforge');
+      assert.ok(fs.existsSync(hqWrapper), 'production HQ environment wrapper is committed');
+      assert.ok(
+        fs.readFileSync(hqWrapper, 'utf8').includes('source "${hq_env_file}"'),
+        'production HQ wrapper loads the protected runtime environment without embedding credentials'
+      );
 
       const result = await runDriftCheck([
         `--prod-url=${url}`,
