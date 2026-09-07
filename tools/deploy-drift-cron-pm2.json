@@ -15,6 +15,7 @@
         "AGENTFOLIO_CREATE_DRIFT_TASK": "true",
         "HQ_CLI": "tools/hq-prod-env.sh",
         "HQ_RUNTIME_DIR": "/home/ubuntu/brainai-hq-v4",
+        "HQ_AGENT_HOME": "/home/ubuntu",
         "HQ_URL": "http://127.0.0.1:3100",
         "HQ_AGENT_ID": "brainforge"
       },
