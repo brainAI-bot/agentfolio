@@ -353,6 +353,7 @@ describe('deploy provenance', () => {
       'utf8'
     ));
     const app = pm2Config.apps.find((entry) => entry.name === 'agentfolio-deploy-drift-check');
+    const hqWrapper = path.resolve(repoRoot, 'tools/hq-prod-env.sh');
     const { server, url } = await listenWithVersion({
       commitSha: driftSha,
       buildTime: '2026-07-06T18:26:00.000Z',
@@ -367,8 +368,18 @@ describe('deploy provenance', () => {
 
     try {
       assert.ok(app, 'PM2 drift-check app is committed');
+      assert.strictEqual(app.cwd, '/home/ubuntu/agentfolio-prod-locked');
+      assert.strictEqual(
+        app.args,
+        '--write-evidence=/home/ubuntu/.agentfolio/reports/deploy-drift-latest.json'
+      );
       assert.strictEqual(app.env.AGENTFOLIO_CREATE_DRIFT_TASK, 'true');
-      assert.strictEqual(app.env.HQ_CLI, '~/clawd/scripts/hq-env.zsh hq');
+      assert.strictEqual(app.env.HQ_CLI, 'tools/hq-prod-env.sh');
+      assert.strictEqual(app.env.HQ_RUNTIME_DIR, '/home/ubuntu/brainai-hq-v4');
+      assert.strictEqual(app.env.HQ_AGENT_HOME, '/home/ubuntu');
+      assert.strictEqual(app.env.HQ_URL, 'http://127.0.0.1:3100');
+      assert.strictEqual(app.env.HQ_AGENT_ID, 'brainforge');
+      assert.ok(fs.existsSync(hqWrapper), 'production HQ environment wrapper is committed');
 
       const result = await runDriftCheck([
         `--prod-url=${url}`,
@@ -411,6 +422,52 @@ describe('deploy provenance', () => {
       assert.match(hqArgs, /AgentFolio deploy drift check: drift/);
     } finally {
       server.close();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('passes only scoped HQ authentication context through the production wrapper', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-hq-wrapper-'));
+    const runtimeDir = path.join(tempDir, 'hq-runtime');
+    const agentHome = path.join(tempDir, 'agent-home');
+    const tokenDir = path.join(agentHome, '.config', 'hq');
+    const mockHqCli = path.join(runtimeDir, 'cli', 'hq');
+    const hqWrapper = path.resolve(repoRoot, 'tools/hq-prod-env.sh');
+
+    fs.mkdirSync(path.dirname(mockHqCli), { recursive: true });
+    fs.mkdirSync(tokenDir, { recursive: true });
+    fs.writeFileSync(path.join(tokenDir, 'agent-token'), 'scoped-test-token\n', { mode: 0o600 });
+    fs.writeFileSync(mockHqCli, [
+      '#!/bin/sh',
+      '[ "${HQ_API_KEY+x}" != x ] || exit 91',
+      '[ "${UNRELATED_SECRET+x}" != x ] || exit 92',
+      '[ "${HQ_AGENT_TOKEN+x}" != x ] || exit 97',
+      '[ "$HQ_AGENT_ID" = "brainforge" ] || exit 93',
+      '[ "$HQ_URL" = "http://127.0.0.1:3100" ] || exit 94',
+      '[ -r "$HOME/.config/hq/agent-token" ] || exit 96',
+      'printf "%s\\n" "$HOME"',
+      '',
+    ].join('\n'), { mode: 0o700 });
+
+    try {
+      const result = childProcess.spawnSync(hqWrapper, ['task', 'list'], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          PATH: process.env.PATH,
+          HQ_RUNTIME_DIR: runtimeDir,
+          HQ_AGENT_HOME: agentHome,
+          HQ_URL: 'http://127.0.0.1:3100',
+          HQ_AGENT_ID: 'brainforge',
+          HQ_API_KEY: 'must-not-pass-through',
+          HQ_AGENT_TOKEN: 'must-not-pass-through',
+          UNRELATED_SECRET: 'must-not-pass-through',
+        },
+      });
+
+      assert.strictEqual(result.status, 0, result.stderr);
+      assert.strictEqual(result.stdout, `${agentHome}\n`);
+    } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
