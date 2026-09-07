@@ -17,7 +17,11 @@ const {
   listJobThread,
   registerMarketplaceDeliveryRoutes,
 } = require('../src/routes/marketplace-delivery-routes');
-const { listJobTransitionAudit, listMarketplaceEscrowEffects } = require('../src/lib/marketplace-state-machine');
+const {
+  listJobTransitionAudit,
+  listMarketplaceEscrowEffects,
+  transitionJobState,
+} = require('../src/lib/marketplace-state-machine');
 
 function createDb() {
   const db = new Database(':memory:');
@@ -26,16 +30,6 @@ function createDb() {
     CREATE TABLE profiles (
       id TEXT PRIMARY KEY,
       api_key TEXT
-    );
-    CREATE TABLE jobs (
-      id TEXT PRIMARY KEY,
-      client_id TEXT NOT NULL,
-      budget_type TEXT DEFAULT 'fixed',
-      status TEXT NOT NULL,
-      selected_agent_id TEXT,
-      escrow_id TEXT,
-      escrow_funded INTEGER DEFAULT 0,
-      updated_at TEXT NOT NULL
     );
   `);
   initializeMarketplaceDeliverySchema(db);
@@ -48,17 +42,19 @@ function createDb() {
 function insertJob(db, id = 'job_delivery', overrides = {}) {
   db.prepare(`
     INSERT INTO jobs (
-      id, client_id, budget_type, status, selected_agent_id,
-      escrow_id, escrow_funded, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      id, client_id, title, budget_type, status, selected_agent_id,
+      escrow_id, escrow_funded, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     overrides.clientId || 'client',
+    `Delivery job ${id}`,
     overrides.budgetType || 'fixed',
     overrides.status || 'in_progress',
     overrides.selectedAgentId === undefined ? 'worker' : overrides.selectedAgentId,
     overrides.escrowId || null,
     overrides.escrowFunded ? 1 : 0,
+    overrides.createdAt || '2026-09-01T00:00:00.000Z',
     overrides.updatedAt || '2026-09-01T00:00:00.000Z',
   );
 }
@@ -189,11 +185,19 @@ test('seven-day silence auto-approves once through an auditable idempotent timer
   try {
     insertJob(db, 'job_timer');
     const delivery = submit(db, 'job_timer', '2026-09-01T00:00:00.000Z');
-    assert.deepEqual(autoApproveDueDeliverables(db, { now: '2026-09-07T23:59:59.999Z' }), []);
-    const [approved] = autoApproveDueDeliverables(db, { now: '2026-09-08T00:00:00.000Z' });
+    assert.deepEqual(
+      autoApproveDueDeliverables(db, { now: '2026-09-07T23:59:59.999Z' }),
+      { results: [], errors: [] },
+    );
+    const firstSweep = autoApproveDueDeliverables(db, { now: '2026-09-08T00:00:00.000Z' });
+    const [approved] = firstSweep.results;
+    assert.deepEqual(firstSweep.errors, []);
     assert.equal(approved.deliverableId, delivery.deliverable.id);
     assert.equal(approved.status, 'approved');
-    assert.deepEqual(autoApproveDueDeliverables(db, { now: '2026-09-09T00:00:00.000Z' }), []);
+    assert.deepEqual(
+      autoApproveDueDeliverables(db, { now: '2026-09-09T00:00:00.000Z' }),
+      { results: [], errors: [] },
+    );
     const audit = listJobTransitionAudit(db, 'job_timer');
     const autoAudit = audit.find((entry) => entry.idempotencyKey === `deliverable-auto-approve:${delivery.deliverable.id}`);
     assert.equal(autoAudit.actorId, 'system:marketplace-auto-approval');
@@ -202,6 +206,86 @@ test('seven-day silence auto-approves once through an auditable idempotent timer
   } finally {
     db.close();
   }
+});
+
+test('auto-approval isolates a poisoned candidate and reports its error without starving later jobs', () => {
+  const db = createDb();
+  try {
+    insertJob(db, 'job_poisoned');
+    insertJob(db, 'job_healthy');
+    const poisoned = submit(db, 'job_poisoned', '2026-09-01T00:00:00.000Z', 'Poisoned delivery');
+    const healthy = submit(db, 'job_healthy', '2026-09-01T00:00:01.000Z', 'Healthy delivery');
+    db.prepare("UPDATE jobs SET budget_type = 'hourly' WHERE id = ?").run('job_poisoned');
+
+    const sweep = autoApproveDueDeliverables(db, { now: '2026-09-08T00:00:01.000Z' });
+
+    assert.equal(sweep.results.length, 1);
+    assert.equal(sweep.results[0].jobId, 'job_healthy');
+    assert.equal(sweep.results[0].deliverableId, healthy.deliverable.id);
+    assert.equal(sweep.results[0].status, 'approved');
+    assert.match(sweep.results[0].transitionAuditId, /^jta_/);
+    assert.deepEqual(sweep.errors, [{
+      jobId: 'job_poisoned',
+      deliverableId: poisoned.deliverable.id,
+      code: 'FIXED_PRICE_ONLY',
+      error: 'Only fixed-price jobs are supported',
+    }]);
+    assert.equal(db.prepare('SELECT status FROM jobs WHERE id = ?').get('job_poisoned').status, 'submitted');
+    assert.equal(db.prepare('SELECT status FROM jobs WHERE id = ?').get('job_healthy').status, 'approved');
+  } finally {
+    db.close();
+  }
+});
+
+test('timer-driven approval preserves the client dispute path', () => {
+  const db = createDb();
+  try {
+    insertJob(db, 'job_auto_dispute');
+    submit(db, 'job_auto_dispute', '2026-09-01T00:00:00.000Z');
+    const sweep = autoApproveDueDeliverables(db, { now: '2026-09-08T00:00:00.000Z' });
+    assert.equal(sweep.results[0].status, 'approved');
+
+    const disputed = transitionJobState(db, 'job_auto_dispute', 'disputed', {
+      actorId: 'client',
+      reason: 'deliverable was not received',
+      source: 'marketplace-dispute-api',
+      idempotencyKey: 'post-auto-approval-dispute',
+      now: '2026-09-09T00:00:00.000Z',
+    });
+
+    assert.equal(disputed.job.status, 'disputed');
+    assert.equal(disputed.audit.fromStatus, 'approved');
+    assert.equal(disputed.audit.toStatus, 'disputed');
+  } finally {
+    db.close();
+  }
+});
+
+test('delivery route registration initializes marketplace prerequisites on a clean database', () => {
+  const db = new Database(':memory:');
+  db.pragma('foreign_keys = ON');
+  db.exec(`
+    CREATE TABLE profiles (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL
+    );
+  `);
+  const app = express();
+
+  assert.doesNotThrow(() => registerMarketplaceDeliveryRoutes(app, { getDb: () => db }));
+  assert.deepEqual(
+    db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('jobs', 'applications', 'escrows') ORDER BY name").all(),
+    [{ name: 'applications' }, { name: 'escrows' }, { name: 'jobs' }],
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = 'guard_jobs_status_transition'").get().count,
+    1,
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM pragma_table_info('profiles') WHERE name = 'api_key'").get().count,
+    1,
+  );
+  db.close();
 });
 
 test('structured comments are immutable attachment-link-only evidence limited to parties/admin', () => {

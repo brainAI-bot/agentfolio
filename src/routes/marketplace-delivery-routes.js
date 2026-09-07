@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const rateLimit = require('express-rate-limit');
 const marketplaceState = require('../lib/marketplace-state-machine');
+const { initializeMarketplaceCoreSchema } = require('../lib/marketplace-schema');
 
 const AUTO_APPROVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_REVISION_REQUESTS = 2;
@@ -31,8 +32,12 @@ function parseJson(value, fallback) {
 }
 
 function initializeMarketplaceDeliverySchema(db) {
+  initializeMarketplaceCoreSchema(db);
   marketplaceState.initializeMarketplaceState(db);
-  try { db.exec('ALTER TABLE profiles ADD COLUMN api_key TEXT'); } catch (_) {}
+  const profileColumns = db.prepare('PRAGMA table_info(profiles)').all();
+  if (!profileColumns.some((entry) => entry.name === 'api_key')) {
+    db.exec('ALTER TABLE profiles ADD COLUMN api_key TEXT');
+  }
   db.exec(`
     CREATE TABLE IF NOT EXISTS marketplace_deliverables (
       id TEXT PRIMARY KEY,
@@ -373,6 +378,7 @@ function autoApproveDueDeliverables(db, { now = new Date().toISOString() } = {})
     ORDER BY d.auto_approve_at ASC, d.id ASC
   `).all(marketplaceState.JOB_STATUS.SUBMITTED, now);
   const results = [];
+  const errors = [];
   for (const candidate of due) {
     const execute = db.transaction(() => {
       const job = requireJob(db, candidate.job_id);
@@ -388,10 +394,19 @@ function autoApproveDueDeliverables(db, { now = new Date().toISOString() } = {})
       });
       return { jobId: job.id, deliverableId: current.id, status: transition.job.status, transitionAuditId: transition.audit.id };
     });
-    const result = execute();
-    if (result) results.push(result);
+    try {
+      const result = execute();
+      if (result) results.push(result);
+    } catch (error) {
+      errors.push({
+        jobId: candidate.job_id,
+        deliverableId: candidate.id,
+        code: error.code || 'AUTO_APPROVAL_FAILED',
+        error: error.message,
+      });
+    }
   }
-  return results;
+  return { results, errors };
 }
 
 function addJobComment(db, {
