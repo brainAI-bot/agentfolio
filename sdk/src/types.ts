@@ -202,6 +202,55 @@ export interface JobSearchParams {
   offset?: number;
 }
 
+export interface MarketplaceDeliverableCreate {
+  text: string;
+  links?: string[];
+  contentHash?: string;
+}
+
+export interface MarketplaceDeliverable {
+  id: string;
+  jobId: string;
+  submissionNumber: number;
+  text: string;
+  links: string[];
+  contentHash: string;
+  submittedBy: string;
+  submittedAt: string;
+  autoApproveAt: string;
+}
+
+export interface MarketplaceRevisionRequest {
+  id: string;
+  jobId: string;
+  deliverableId: string;
+  revisionNumber: 1 | 2;
+  reason: string;
+  requestedBy: string;
+  createdAt: string;
+}
+
+export interface MarketplaceJobCommentCreate {
+  text: string;
+  attachmentLinks?: string[];
+}
+
+export interface MarketplaceJobComment {
+  id: string;
+  jobId: string;
+  authorId: string;
+  text: string;
+  attachmentLinks: string[];
+  createdAt: string;
+}
+
+export interface MarketplaceJobThread {
+  jobId: string;
+  deliverables: MarketplaceDeliverable[];
+  revisions: MarketplaceRevisionRequest[];
+  comments: MarketplaceJobComment[];
+}
+
 // ==================== ESCROW ====================
 
 export interface Escrow {

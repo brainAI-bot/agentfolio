@@ -1891,6 +1891,14 @@ app.get('/api/marketplace/jobs', publicMarketplaceReadLimiter, listSqliteMarketp
 app.get('/api/marketplace/jobs/:id', publicMarketplaceReadLimiter, getSqliteMarketplaceJob);
 app.get('/api/marketplace/jobs/:id/applications', publicMarketplaceReadLimiter, getSqliteMarketplaceApplications);
 
+// Canonical P1 marketplace delivery mutations and job thread. Register before
+// the retired JSON mutation module so both API path families stay on SQLite.
+const { registerMarketplaceDeliveryRoutes } = require('./routes/marketplace-delivery-routes');
+registerMarketplaceDeliveryRoutes(app, {
+  getDb: () => profileStore.getDb(),
+  autoApprovalSweepIntervalMs: 60 * 1000,
+});
+
 // Canonical P1 marketplace application mutations. Register before the retired
 // JSON mutation module so both compatibility and marketplace paths use SQLite.
 const { registerMarketplaceApplicationRoutes } = require('./routes/marketplace-application-routes');

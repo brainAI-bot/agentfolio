@@ -79,6 +79,11 @@ export class MarketplaceClient {
   job(id: string): Promise<any>;
   createJob(data: any): Promise<any>;
   apply(jobId: string, data: any): Promise<any>;
+  submitDeliverable(jobId: string, data: MarketplaceDeliverableCreate): Promise<{ deliverable: MarketplaceDeliverable; status: 'submitted' }>;
+  requestRevision(jobId: string, deliverableId: string, reason: string): Promise<{ revision: MarketplaceRevisionRequest; status: 'in_progress' }>;
+  approveDeliverable(jobId: string, deliverableId: string): Promise<{ deliverable: MarketplaceDeliverable; status: 'approved' }>;
+  addComment(jobId: string, data: MarketplaceJobCommentCreate): Promise<{ comment: MarketplaceJobComment }>;
+  thread(jobId: string): Promise<MarketplaceJobThread>;
   withdrawApplication(jobId: string, applicationId: string): Promise<MarketplaceApplication>;
   rejectApplication(jobId: string, applicationId: string): Promise<MarketplaceApplication>;
   selectApplication(jobId: string, applicationId: string): Promise<MarketplaceAward>;
@@ -87,6 +92,55 @@ export class MarketplaceClient {
   processAwardTimeout(jobId: string): Promise<MarketplaceAward>;
   recommendations(jobId: string): Promise<any>;
   myJobs(): Promise<any>;
+}
+
+export interface MarketplaceDeliverableCreate {
+  text: string;
+  links?: string[];
+  contentHash?: string;
+}
+
+export interface MarketplaceDeliverable {
+  id: string;
+  jobId: string;
+  submissionNumber: number;
+  text: string;
+  links: string[];
+  contentHash: string;
+  submittedBy: string;
+  submittedAt: string;
+  autoApproveAt: string;
+}
+
+export interface MarketplaceRevisionRequest {
+  id: string;
+  jobId: string;
+  deliverableId: string;
+  revisionNumber: 1 | 2;
+  reason: string;
+  requestedBy: string;
+  createdAt: string;
+}
+
+export interface MarketplaceJobCommentCreate {
+  text: string;
+  attachmentLinks?: string[];
+}
+
+export interface MarketplaceJobComment {
+  id: string;
+  jobId: string;
+  authorId: string;
+  text: string;
+  attachmentLinks: string[];
+  createdAt: string;
+}
+
+export interface MarketplaceJobThread {
+  jobId: string;
+  deliverables: MarketplaceDeliverable[];
+  revisions: MarketplaceRevisionRequest[];
+  comments: MarketplaceJobComment[];
 }
 
 export interface MarketplaceApplication {

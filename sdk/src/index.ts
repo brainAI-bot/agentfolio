@@ -17,6 +17,12 @@ import {
   JobCreate,
   JobApplication,
   JobApplicationCreate,
+  MarketplaceDeliverable,
+  MarketplaceDeliverableCreate,
+  MarketplaceRevisionRequest,
+  MarketplaceJobComment,
+  MarketplaceJobCommentCreate,
+  MarketplaceJobThread,
   MarketplaceAward,
   JobSearchParams,
   Escrow,
@@ -452,9 +458,25 @@ class JobsAPI {
     });
   }
 
+  /** Submit immutable deliverable content (awarded worker only). */
+  async submitDeliverable(jobId: string, deliverable: MarketplaceDeliverableCreate): Promise<{ deliverable: MarketplaceDeliverable; status: 'submitted' }> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables`, {
+      body: deliverable,
+      requireAuth: true,
+    });
+  }
+
   /** Withdraw the authenticated agent's pending application. */
   async withdrawApplication(jobId: string, applicationId: string): Promise<JobApplication> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/withdraw`, {
+      requireAuth: true,
+    });
+  }
+
+  /** Request one of at most two revisions (job client only). */
+  async requestRevision(jobId: string, deliverableId: string, reason: string): Promise<{ revision: MarketplaceRevisionRequest; status: 'in_progress' }> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables/${encodeURIComponent(deliverableId)}/revisions`, {
+      body: { reason },
       requireAuth: true,
     });
   }
@@ -466,9 +488,24 @@ class JobsAPI {
     });
   }
 
+  /** Approve the current deliverable (job client only). */
+  async approveDeliverable(jobId: string, deliverableId: string): Promise<{ deliverable: MarketplaceDeliverable; status: 'approved' }> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables/${encodeURIComponent(deliverableId)}/approve`, {
+      requireAuth: true,
+    });
+  }
+
   /** Select a funded application and open its 48 hour award window. */
   async selectApplication(jobId: string, applicationId: string): Promise<MarketplaceAward> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/select`, {
+      requireAuth: true,
+    });
+  }
+
+  /** Add an immutable structured job comment (job parties/admin only). */
+  async addComment(jobId: string, comment: MarketplaceJobCommentCreate): Promise<{ comment: MarketplaceJobComment }> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/comments`, {
+      body: comment,
       requireAuth: true,
     });
   }
@@ -480,9 +517,23 @@ class JobsAPI {
     });
   }
 
+  /** Read the structured delivery/revision/comment evidence thread. */
+  async getThread(jobId: string): Promise<MarketplaceJobThread> {
+    return this.client.request('GET', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/thread`, {
+      requireAuth: true,
+    });
+  }
+
   /** Decline an active award and reopen the job. */
   async declineAward(jobId: string, applicationId: string): Promise<MarketplaceAward> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/decline`, {
+      requireAuth: true,
+    });
+  }
+
+  /** Accept an application (client only) */
+  async acceptApplication(jobId: string, applicationId: string): Promise<void> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${applicationId}/accept`, {
       requireAuth: true,
     });
   }
