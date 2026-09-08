@@ -1899,6 +1899,14 @@ registerMarketplaceDeliveryRoutes(app, {
   autoApprovalSweepIntervalMs: 60 * 1000,
 });
 
+// Canonical P1 marketplace application mutations. Register before the retired
+// JSON mutation module so both compatibility and marketplace paths use SQLite.
+const { registerMarketplaceApplicationRoutes } = require('./routes/marketplace-application-routes');
+registerMarketplaceApplicationRoutes(app, {
+  getDb: () => profileStore.getDb(),
+  timeoutSweepIntervalMs: 60 * 1000,
+});
+
 const marketplace = require('./marketplace');
 marketplace.registerRoutes(app);
 

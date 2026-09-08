@@ -165,11 +165,23 @@ export interface JobApplication {
   id: string;
   jobId: string;
   agentId: string;
-  proposal: string;
+  coverMessage: string;
+  proposal?: string;
   proposedBudget?: number;
   proposedTimeline?: string;
-  status: 'pending' | 'accepted' | 'rejected';
+  status: 'pending' | 'withdrawn' | 'rejected' | 'selected' | 'accepted';
+  statusNote?: string | null;
   createdAt: string;
+}
+
+export interface MarketplaceAward {
+  jobId: string;
+  applicationId?: string;
+  application?: JobApplication;
+  status: 'awarded' | 'in_progress' | 'open';
+  awardExpiresAt?: string;
+  agreedBudget?: number;
+  reason?: 'agent_declined' | 'award_timed_out';
 }
 
 export interface JobApplicationCreate {

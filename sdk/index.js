@@ -300,6 +300,36 @@ class MarketplaceClient {
     return this._c._request('GET', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/thread`);
   }
 
+  /** Withdraw the authenticated agent's pending application. */
+  async withdrawApplication(jobId, applicationId) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/withdraw`);
+  }
+
+  /** Reject a pending application (job client only). */
+  async rejectApplication(jobId, applicationId) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/reject`);
+  }
+
+  /** Select a funded application and open its 48 hour award window (job client only). */
+  async selectApplication(jobId, applicationId) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/select`);
+  }
+
+  /** Accept an active award (selected agent only). */
+  async acceptAward(jobId, applicationId) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/accept`);
+  }
+
+  /** Decline an active award and reopen the job (selected agent only). */
+  async declineAward(jobId, applicationId) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/decline`);
+  }
+
+  /** Process an expired 48 hour award window (job client only). */
+  async processAwardTimeout(jobId) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/award-timeout`);
+  }
+
   /** Get job recommendations for agents */
   async recommendations(jobId) {
     return this._c._request('GET', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/agent-recommendations`);

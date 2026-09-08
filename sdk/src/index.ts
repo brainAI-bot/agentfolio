@@ -23,6 +23,7 @@ import {
   MarketplaceJobComment,
   MarketplaceJobCommentCreate,
   MarketplaceJobThread,
+  MarketplaceAward,
   JobSearchParams,
   Escrow,
   EscrowCreate,
@@ -465,6 +466,13 @@ class JobsAPI {
     });
   }
 
+  /** Withdraw the authenticated agent's pending application. */
+  async withdrawApplication(jobId: string, applicationId: string): Promise<JobApplication> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/withdraw`, {
+      requireAuth: true,
+    });
+  }
+
   /** Request one of at most two revisions (job client only). */
   async requestRevision(jobId: string, deliverableId: string, reason: string): Promise<{ revision: MarketplaceRevisionRequest; status: 'in_progress' }> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables/${encodeURIComponent(deliverableId)}/revisions`, {
@@ -473,9 +481,23 @@ class JobsAPI {
     });
   }
 
+  /** Reject a pending application (job client only). */
+  async rejectApplication(jobId: string, applicationId: string): Promise<JobApplication> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/reject`, {
+      requireAuth: true,
+    });
+  }
+
   /** Approve the current deliverable (job client only). */
   async approveDeliverable(jobId: string, deliverableId: string): Promise<{ deliverable: MarketplaceDeliverable; status: 'approved' }> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables/${encodeURIComponent(deliverableId)}/approve`, {
+      requireAuth: true,
+    });
+  }
+
+  /** Select a funded application and open its 48 hour award window. */
+  async selectApplication(jobId: string, applicationId: string): Promise<MarketplaceAward> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/select`, {
       requireAuth: true,
     });
   }
@@ -488,6 +510,13 @@ class JobsAPI {
     });
   }
 
+  /** Accept an active award (selected agent only). */
+  async acceptAward(jobId: string, applicationId: string): Promise<MarketplaceAward> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/accept`, {
+      requireAuth: true,
+    });
+  }
+
   /** Read the structured delivery/revision/comment evidence thread. */
   async getThread(jobId: string): Promise<MarketplaceJobThread> {
     return this.client.request('GET', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/thread`, {
@@ -495,9 +524,23 @@ class JobsAPI {
     });
   }
 
+  /** Decline an active award and reopen the job. */
+  async declineAward(jobId: string, applicationId: string): Promise<MarketplaceAward> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/decline`, {
+      requireAuth: true,
+    });
+  }
+
   /** Accept an application (client only) */
   async acceptApplication(jobId: string, applicationId: string): Promise<void> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${applicationId}/accept`, {
+      requireAuth: true,
+    });
+  }
+
+  /** Process an expired 48 hour award window (job client only). */
+  async processAwardTimeout(jobId: string): Promise<MarketplaceAward> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/award-timeout`, {
       requireAuth: true,
     });
   }
