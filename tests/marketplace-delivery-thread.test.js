@@ -13,6 +13,7 @@ const {
   requestRevision,
   approveDeliverable,
   autoApproveDueDeliverables,
+  runAutoApprovalSweep,
   addJobComment,
   listJobThread,
   registerMarketplaceDeliveryRoutes,
@@ -232,6 +233,41 @@ test('auto-approval isolates a poisoned candidate and reports its error without 
     }]);
     assert.equal(db.prepare('SELECT status FROM jobs WHERE id = ?').get('job_poisoned').status, 'submitted');
     assert.equal(db.prepare('SELECT status FROM jobs WHERE id = ?').get('job_healthy').status, 'approved');
+  } finally {
+    db.close();
+  }
+});
+
+test('production auto-approval sweep logs each poisoned candidate returned by the batch', () => {
+  const db = createDb();
+  try {
+    insertJob(db, 'job_poisoned');
+    insertJob(db, 'job_healthy');
+    const poisoned = submit(db, 'job_poisoned', '2026-09-01T00:00:00.000Z', 'Poisoned production delivery');
+    const healthy = submit(db, 'job_healthy', '2026-09-01T00:00:01.000Z', 'Healthy production delivery');
+    db.prepare("UPDATE jobs SET budget_type = 'hourly' WHERE id = ?").run('job_poisoned');
+    const logged = [];
+
+    const sweep = runAutoApprovalSweep(db, {
+      now: '2026-09-08T00:00:01.000Z',
+      logger: { error: (...args) => logged.push(args) },
+    });
+
+    assert.equal(sweep.results.length, 1);
+    assert.equal(sweep.results[0].deliverableId, healthy.deliverable.id);
+    assert.deepEqual(sweep.errors, [{
+      jobId: 'job_poisoned',
+      deliverableId: poisoned.deliverable.id,
+      code: 'FIXED_PRICE_ONLY',
+      error: 'Only fixed-price jobs are supported',
+    }]);
+    assert.deepEqual(logged, [[
+      '[Marketplace] auto-approval skipped job %s deliverable %s: %s (%s)',
+      'job_poisoned',
+      poisoned.deliverable.id,
+      'FIXED_PRICE_ONLY',
+      'Only fixed-price jobs are supported',
+    ]]);
   } finally {
     db.close();
   }

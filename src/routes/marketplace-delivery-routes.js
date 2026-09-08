@@ -409,6 +409,20 @@ function autoApproveDueDeliverables(db, { now = new Date().toISOString() } = {})
   return { results, errors };
 }
 
+function runAutoApprovalSweep(db, { now = new Date().toISOString(), logger = console } = {}) {
+  const result = autoApproveDueDeliverables(db, { now });
+  for (const failure of result.errors) {
+    logger.error(
+      '[Marketplace] auto-approval skipped job %s deliverable %s: %s (%s)',
+      failure.jobId,
+      failure.deliverableId,
+      failure.code,
+      failure.error,
+    );
+  }
+  return result;
+}
+
 function addJobComment(db, {
   jobId,
   actorId,
@@ -541,7 +555,7 @@ function registerMarketplaceDeliveryRoutes(app, { getDb, closeDb = false, autoAp
     const timer = setInterval(() => {
       const db = getDb();
       try {
-        autoApproveDueDeliverables(db);
+        runAutoApprovalSweep(db);
       } catch (error) {
         console.error('[Marketplace] deliverable auto-approval sweep failed:', error.message);
       } finally {
@@ -561,6 +575,7 @@ module.exports = {
   requestRevision,
   approveDeliverable,
   autoApproveDueDeliverables,
+  runAutoApprovalSweep,
   addJobComment,
   listJobThread,
   registerMarketplaceDeliveryRoutes,
