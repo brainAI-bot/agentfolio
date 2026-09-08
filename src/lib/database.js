@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const { summarizeCanonicalReviews } = require('./canonical-review-evidence');
 const marketplaceState = require('./marketplace-state-machine');
+const { initializeMarketplaceCoreSchema } = require('./marketplace-schema');
 
 const DB_PATH = path.join(__dirname, '../../data/agentfolio.db');
 
@@ -78,96 +79,8 @@ function initializeSchema() {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_activity_profile ON activity(profile_id)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_activity_created ON activity(created_at DESC)`);
 
-  // Jobs table (marketplace)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS jobs (
-      id TEXT PRIMARY KEY,
-      client_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT,
-      category TEXT DEFAULT 'other',
-      skills TEXT DEFAULT '[]',  -- JSON array
-      budget_type TEXT DEFAULT 'fixed',
-      budget_amount REAL DEFAULT 0,
-      budget_currency TEXT DEFAULT 'SOL',
-      budget_max REAL,
-      timeline TEXT DEFAULT 'flexible',
-      status TEXT DEFAULT 'open',
-      attachments TEXT DEFAULT '[]',  -- JSON array
-      requirements TEXT DEFAULT '',
-      expires_at TEXT,
-      selected_agent_id TEXT,
-      selected_at TEXT,
-      agreed_budget REAL,
-      agreed_timeline TEXT,
-      application_count INTEGER DEFAULT 0,
-      view_count INTEGER DEFAULT 0,
-      escrow_id TEXT,
-      escrow_required INTEGER DEFAULT 0,
-      escrow_funded INTEGER DEFAULT 0,
-      deposit_confirmed_at TEXT,
-      funds_locked INTEGER DEFAULT 0,
-      completed_at TEXT,
-      completion_note TEXT,
-      funds_released INTEGER DEFAULT 0,
-      cancelled_at TEXT,
-      cancel_reason TEXT,
-      funds_refunded INTEGER DEFAULT 0,
-      disputed_at TEXT,
-      dispute_id TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_jobs_client ON jobs(client_id)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_jobs_category ON jobs(category)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC)`);
-
-  // Add expired_at and expiry_reason columns if not present (job expiry feature)
-  try { db.exec(`ALTER TABLE jobs ADD COLUMN expired_at TEXT`); } catch (e) { /* column already exists */ }
-  try { db.exec(`ALTER TABLE jobs ADD COLUMN expiry_reason TEXT`); } catch (e) { /* column already exists */ }
-
+  initializeMarketplaceCoreSchema(db);
   marketplaceState.initializeMarketplaceState(db);
-
-  // Applications table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS applications (
-      id TEXT PRIMARY KEY,
-      job_id TEXT NOT NULL,
-      agent_id TEXT NOT NULL,
-      cover_message TEXT DEFAULT '',
-      proposed_budget REAL,
-      proposed_timeline TEXT,
-      portfolio_items TEXT DEFAULT '[]',  -- JSON array
-      status TEXT DEFAULT 'pending',
-      status_note TEXT,
-      accepted_at TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (job_id) REFERENCES jobs(id),
-      UNIQUE(job_id, agent_id)
-    )
-  `);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_applications_job ON applications(job_id)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_applications_agent ON applications(agent_id)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status)`);
-  
-  // Add team_id column to applications if not exists (for team-based job applications)
-  try {
-    db.exec(`ALTER TABLE applications ADD COLUMN team_id TEXT DEFAULT NULL`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_applications_team ON applications(team_id)`);
-  } catch (e) {
-    // Column already exists
-  }
-  
-  // Add wallet_address column to applications if not exists (for escrow payments)
-  try {
-    db.exec(`ALTER TABLE applications ADD COLUMN wallet_address TEXT DEFAULT NULL`);
-    console.log('[Database] Added team_id column to applications');
-  } catch (e) {
-    // Column already exists
-  }
 
   // Bounty submissions table
   db.exec(`
@@ -209,39 +122,6 @@ function initializeSchema() {
   `);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_reviews_reviewee ON reviews(reviewee_id)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_reviews_job ON reviews(job_id)`);
-
-  // Escrows table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS escrows (
-      id TEXT PRIMARY KEY,
-      job_id TEXT NOT NULL,
-      client_id TEXT NOT NULL,
-      client_wallet TEXT,
-      agent_id TEXT,
-      agent_wallet TEXT,
-      amount REAL NOT NULL,
-      currency TEXT DEFAULT 'SOL',
-      platform_fee REAL,
-      agent_payout REAL,
-      status TEXT DEFAULT 'pending',
-      deposit_address TEXT,
-      deposit_tx_hash TEXT,
-      deposit_confirmed_at TEXT,
-      release_tx_hash TEXT,
-      released_at TEXT,
-      refund_tx_hash TEXT,
-      refunded_at TEXT,
-      locked_at TEXT,
-      expires_at TEXT,
-      notes TEXT DEFAULT '[]',  -- JSON array
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (job_id) REFERENCES jobs(id)
-    )
-  `);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_escrows_job ON escrows(job_id)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_escrows_client ON escrows(client_id)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_escrows_status ON escrows(status)`);
 
   // Disputes table
   db.exec(`
