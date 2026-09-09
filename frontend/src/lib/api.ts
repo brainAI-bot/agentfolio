@@ -131,26 +131,33 @@ export async function fetchJobs(): Promise<APIJob[]> {
   }
 }
 
-export async function fetchStats(): Promise<{
+export interface PublicStats {
   totalAgents: number;
   totalSkills: number;
+  claimed: number;
   verified: number;
   onChain: number;
-}> {
-  try {
-    const res = await fetch(`${API_BASE}/api/ecosystem/stats`, {
-      next: { revalidate: 300 }
-    });
-    if (!res.ok) throw new Error('Failed to fetch stats');
-    const data = await res.json();
-    return {
-      totalAgents: data.agents?.total || data.total_agents || data.totalAgents || 0,
-      totalSkills: Math.round(data.agents?.avgSkills * (data.agents?.total || 0)) || data.total_skills || data.totalSkills || 0,
-      verified: data.agents?.verified || data.verified || 0,
-      onChain: data.agents?.verified || data.on_chain || data.onChain || 0
-    };
-  } catch (error) {
-    console.error('Error fetching stats:', error);
-    return { totalAgents: 0, totalSkills: 0, verified: 0, onChain: 0 };
-  }
+  verificationTypes: number;
+}
+
+function publicCount(value: unknown): number {
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? count : 0;
+}
+
+export async function fetchStats(): Promise<PublicStats> {
+  const res = await fetch(`${API_BASE}/api/stats`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Failed to fetch public stats: ${res.status}`);
+
+  const data = await res.json();
+  const totalAgents = publicCount(data.total ?? data.totalAgents ?? data.agents?.total);
+
+  return {
+    totalAgents,
+    totalSkills: publicCount(data.totalSkills ?? data.total_skills),
+    claimed: publicCount(data.claimed ?? data.agents?.claimed),
+    verified: publicCount(data.verified ?? data.verifiedAgents ?? data.agents?.verified),
+    onChain: publicCount(data.onChain ?? data.on_chain),
+    verificationTypes: publicCount(data.verificationTypes),
+  };
 }

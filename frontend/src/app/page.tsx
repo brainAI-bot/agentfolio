@@ -1,26 +1,27 @@
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 import type { Metadata } from "next";
+import { fetchStats } from "@/lib/api";
 
 export async function generateMetadata(): Promise<Metadata> {
-  let count = 50;
+  let liveRegistrationSummary = "";
   try {
-    const stats = await fetch("http://localhost:3333/api/ecosystem/stats", { next: { revalidate: 300 } }).then(r => r.ok ? r.json() : null);
-    count = stats?.totalAgents || stats?.total || 50;
+    const stats = await fetchStats();
+    liveRegistrationSummary = ` ${stats.totalAgents} agents currently registered on Solana.`;
   } catch {}
   return {
     title: "AgentFolio — Build Your AI Agent's Trust Score",
-    description: `Register your AI agent, verify identity on-chain via SATP, and get discovered by clients. Free to join. ${count}+ agents registered on Solana.`,
+    description: `Register your AI agent, verify identity on-chain via SATP, and get discovered by clients. Free to join.${liveRegistrationSummary}`,
     alternates: {
       canonical: "https://agentfolio.bot",
     },
   };
 }
 
-import { getAllAgents, getActivityFeed, getStats, getTopVerifiedAgents, getRecentlyVerified } from "@/lib/data";
+import { getAllAgents, getActivityFeed, getTopVerifiedAgents, getRecentlyVerified } from "@/lib/data";
 import dynamicImport from "next/dynamic";
 const LeaderboardTable = dynamicImport(() => import("@/components/LeaderboardTable").then(m => m.LeaderboardTable), { loading: () => <div style={{height: 400, display: "flex", alignItems: "center", justifyContent: "center", color: "#666"}}>Loading agents...</div> });
-import { Activity, Users, Shield, Link as LinkIcon, Zap, Code, Globe, ArrowRight, CheckCircle, Lock, TrendingUp, Star, Award } from "lucide-react";
+import { Activity, Users, Shield, Link as LinkIcon, UserCheck, Code, Globe, ArrowRight, CheckCircle, Lock, TrendingUp, Star, Award } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
 
@@ -40,7 +41,7 @@ function resolveAvatar(agent: any): string | null {
 export default async function HomePage() {
   const agents = await getAllAgents();
   const activityFeed = await getActivityFeed();
-  const platformStats = await getStats();
+  const platformStats = await fetchStats();
   const topAgents = await getTopVerifiedAgents(6);
   const recentlyVerified = await getRecentlyVerified(5);
 
@@ -125,10 +126,10 @@ export default async function HomePage() {
               {/* Stats grid */}
               <div className="grid grid-cols-2 gap-3">
                 {[
-                  { icon: Users, label: "Agents", value: `${platformStats.totalAgents}+` },
+                  { icon: Users, label: "Agents", value: platformStats.totalAgents },
+                  { icon: UserCheck, label: "Claimed", value: platformStats.claimed },
                   { icon: Shield, label: "Verified", value: platformStats.verified },
                   { icon: LinkIcon, label: "On-Chain", value: platformStats.onChain },
-                  { icon: Zap, label: "Born", value: platformStats.bornAgents },
                 ].map(({ icon: Icon, label, value }) => (
                   <div
                     key={label}
@@ -428,7 +429,7 @@ export default async function HomePage() {
             View Marketplace →
           </Link>
         </div>
-        <LeaderboardTable agents={agents.slice(0, 24)} totalAgents={agents.length} allSkills={[...new Set(agents.flatMap(a => a.skills))].sort()} />
+        <LeaderboardTable agents={agents.slice(0, 24)} totalAgents={platformStats.totalAgents} allSkills={[...new Set(agents.flatMap(a => a.skills))].sort()} />
       </section>
 
       {/* Bottom CTA */}
