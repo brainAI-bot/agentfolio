@@ -140,13 +140,21 @@ export interface PublicStats {
   verificationTypes: number;
 }
 
+export interface PublicStatCounter {
+  key: 'totalAgents' | 'claimed' | 'verified' | 'onChain';
+  label: 'Agents' | 'Claimed' | 'Verified' | 'On-Chain';
+  value: number;
+}
+
 function publicCount(value: unknown): number {
   const count = Number(value);
   return Number.isFinite(count) && count >= 0 ? count : 0;
 }
 
-export async function fetchStats(): Promise<PublicStats> {
-  const res = await fetch(`${API_BASE}/api/stats`, { cache: 'no-store' });
+type StatsFetch = (input: string, init?: RequestInit) => Promise<Response>;
+
+export async function fetchStats(fetchImpl: StatsFetch = fetch): Promise<PublicStats> {
+  const res = await fetchImpl(`${API_BASE}/api/stats`, { cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to fetch public stats: ${res.status}`);
 
   const data = await res.json();
@@ -160,4 +168,27 @@ export async function fetchStats(): Promise<PublicStats> {
     onChain: publicCount(data.onChain ?? data.on_chain),
     verificationTypes: publicCount(data.verificationTypes),
   };
+}
+
+export async function fetchHomepageStats(
+  loadStats: () => Promise<PublicStats> = fetchStats,
+  reportError: (message: string, error: unknown) => void = console.error,
+): Promise<PublicStats | null> {
+  try {
+    return await loadStats();
+  } catch (error) {
+    reportError('Homepage stats unavailable:', error);
+    return null;
+  }
+}
+
+export function getPublicStatCounters(stats: PublicStats | null): PublicStatCounter[] {
+  if (!stats) return [];
+
+  return [
+    { key: 'totalAgents', label: 'Agents', value: stats.totalAgents },
+    { key: 'claimed', label: 'Claimed', value: stats.claimed },
+    { key: 'verified', label: 'Verified', value: stats.verified },
+    { key: 'onChain', label: 'On-Chain', value: stats.onChain },
+  ];
 }

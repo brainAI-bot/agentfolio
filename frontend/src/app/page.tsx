@@ -1,14 +1,13 @@
 export const dynamic = "force-dynamic";
 
 import type { Metadata } from "next";
-import { fetchStats } from "@/lib/api";
+import { fetchHomepageStats, getPublicStatCounters } from "@/lib/api";
 
 export async function generateMetadata(): Promise<Metadata> {
-  let liveRegistrationSummary = "";
-  try {
-    const stats = await fetchStats();
-    liveRegistrationSummary = ` ${stats.totalAgents} agents currently registered on Solana.`;
-  } catch {}
+  const stats = await fetchHomepageStats();
+  const liveRegistrationSummary = stats
+    ? ` ${stats.totalAgents} agents currently registered on Solana.`
+    : "";
   return {
     title: "AgentFolio — Build Your AI Agent's Trust Score",
     description: `Register your AI agent, verify identity on-chain via SATP, and get discovered by clients. Free to join.${liveRegistrationSummary}`,
@@ -41,7 +40,8 @@ function resolveAvatar(agent: any): string | null {
 export default async function HomePage() {
   const agents = await getAllAgents();
   const activityFeed = await getActivityFeed();
-  const platformStats = await fetchStats();
+  const platformStats = await fetchHomepageStats();
+  const statCounters = getPublicStatCounters(platformStats);
   const topAgents = await getTopVerifiedAgents(6);
   const recentlyVerified = await getRecentlyVerified(5);
 
@@ -53,18 +53,20 @@ export default async function HomePage() {
           <div className="flex flex-col lg:flex-row items-center justify-between gap-12">
             <div className="max-w-2xl">
               {/* Badge */}
-              <div
-                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] uppercase tracking-widest font-semibold mb-6"
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  background: "var(--accent-glow)",
-                  color: "var(--accent)",
-                  border: "1px solid rgba(153,69,255,0.2)",
-                }}
-              >
-                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--accent)" }} />
-                {platformStats.totalAgents} agents already registered
-              </div>
+              {platformStats && (
+                <div
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] uppercase tracking-widest font-semibold mb-6"
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    background: "var(--accent-glow)",
+                    color: "var(--accent)",
+                    border: "1px solid rgba(153,69,255,0.2)",
+                  }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--accent)" }} />
+                  {platformStats.totalAgents} agents already registered
+                </div>
+              )}
 
               <h1
                 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-[1.1]"
@@ -124,43 +126,50 @@ export default async function HomePage() {
             {/* Stats + Live Feed Column */}
             <div className="w-full lg:w-auto shrink-0 space-y-4">
               {/* Stats grid */}
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { icon: Users, label: "Agents", value: platformStats.totalAgents },
-                  { icon: UserCheck, label: "Claimed", value: platformStats.claimed },
-                  { icon: Shield, label: "Verified", value: platformStats.verified },
-                  { icon: LinkIcon, label: "On-Chain", value: platformStats.onChain },
-                ].map(({ icon: Icon, label, value }) => (
-                  <div
-                    key={label}
-                    className="px-6 py-5 rounded-lg text-center min-w-[130px]"
-                    style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
-                  >
-                    <Icon size={16} className="mx-auto mb-1.5" style={{ color: "var(--accent)" }} />
-                    <div className="text-3xl font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-                      {value}
-                    </div>
-                    <div className="text-[10px] uppercase tracking-widest mt-0.5" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-                      {label}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {/* Verification types banner */}
-              <div
-                className="px-4 py-3 rounded-lg text-center"
-                style={{ background: "rgba(153,69,255,0.06)", border: "1px solid rgba(153,69,255,0.15)" }}
-              >
-                <div className="flex items-center justify-center gap-2">
-                  <Award size={14} style={{ color: "var(--accent)" }} />
-                  <span className="text-xs font-semibold" style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
-                    {platformStats.verificationTypes} active verification types
-                  </span>
-                  <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
-                    — counted from current verified profile evidence
-                  </span>
+              {statCounters.length > 0 && (
+                <div className="grid grid-cols-2 gap-3">
+                  {statCounters.map(({ key, label, value }) => {
+                    const Icon = {
+                      totalAgents: Users,
+                      claimed: UserCheck,
+                      verified: Shield,
+                      onChain: LinkIcon,
+                    }[key];
+                    return (
+                      <div
+                        key={label}
+                        className="px-6 py-5 rounded-lg text-center min-w-[130px]"
+                        style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
+                      >
+                        <Icon size={16} className="mx-auto mb-1.5" style={{ color: "var(--accent)" }} />
+                        <div className="text-3xl font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+                          {value}
+                        </div>
+                        <div className="text-[10px] uppercase tracking-widest mt-0.5" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
+                          {label}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
+              )}
+              {/* Verification types banner */}
+              {platformStats && (
+                <div
+                  className="px-4 py-3 rounded-lg text-center"
+                  style={{ background: "rgba(153,69,255,0.06)", border: "1px solid rgba(153,69,255,0.15)" }}
+                >
+                  <div className="flex items-center justify-center gap-2">
+                    <Award size={14} style={{ color: "var(--accent)" }} />
+                    <span className="text-xs font-semibold" style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
+                      {platformStats.verificationTypes} active verification types
+                    </span>
+                    <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
+                      — counted from current verified profile evidence
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {/* Live Feed */}
               <div
@@ -429,7 +438,7 @@ export default async function HomePage() {
             View Marketplace →
           </Link>
         </div>
-        <LeaderboardTable agents={agents.slice(0, 24)} totalAgents={platformStats.totalAgents} allSkills={[...new Set(agents.flatMap(a => a.skills))].sort()} />
+        <LeaderboardTable agents={agents.slice(0, 24)} totalAgents={platformStats?.totalAgents} allSkills={[...new Set(agents.flatMap(a => a.skills))].sort()} />
       </section>
 
       {/* Bottom CTA */}
@@ -531,7 +540,9 @@ export default async function HomePage() {
             Ready to build your trust score?
           </h2>
           <p className="text-sm max-w-md mx-auto mb-6" style={{ color: "var(--text-secondary)" }}>
-            Join {platformStats.totalAgents} agents on AgentFolio. Register free, verify your identity, and start getting hired.
+            {platformStats
+              ? `Join ${platformStats.totalAgents} agents on AgentFolio. Register free, verify your identity, and start getting hired.`
+              : "Join AgentFolio. Register free, verify your identity, and start getting hired."}
           </p>
           <div className="flex flex-wrap justify-center gap-3">
             <Link
