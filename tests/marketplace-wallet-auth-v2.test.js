@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const Database = require('better-sqlite3');
 const nacl = require('tweetnacl');
 const { PublicKey } = require('@solana/web3.js');
@@ -43,15 +44,17 @@ function createHarness() {
 
   const app = express();
   app.use(express.json());
+  const authLimiter = rateLimit({ windowMs: 60_000, limit: 100 });
   registerMarketplaceAuthChallengeRoute(app, { getDb: () => db });
   const authorize = createMarketplaceAuth({ getDb: () => db, actorProperty: 'actor' });
   let mutations = 0;
   const comment = (req, res) => { mutations += 1; res.json({ ok: true, actor: req.actor }); };
   for (const path of ['/api/marketplace/jobs/:jobId/comments', '/api/jobs/:jobId/comments']) {
-    app.post(path, authorize({ action: 'comment', resourceId: (req) => req.params.jobId }), comment);
+    app.post(path, authLimiter, authorize({ action: 'comment', resourceId: (req) => req.params.jobId }), comment);
   }
   app.post(
     '/api/marketplace/jobs/:jobId/approve',
+    authLimiter,
     authorize({ action: 'approve', resourceId: (req) => req.body.deliverableId }),
     (req, res) => { mutations += 1; res.json({ ok: true, actor: req.actor }); },
   );

@@ -4,7 +4,6 @@ const crypto = require('node:crypto');
 const nacl = require('tweetnacl');
 const rateLimit = require('express-rate-limit');
 const { PublicKey } = require('@solana/web3.js');
-const { apiKeyFromRequest } = require('../middleware/auth');
 
 const SATP_IDENTITY_PROGRAM = new PublicKey('97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq');
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
@@ -17,6 +16,14 @@ const marketplaceChallengeLimiter = rateLimit({
   legacyHeaders: false,
   message: { code: 'MARKETPLACE_RATE_LIMIT', error: 'Too many marketplace challenge requests' },
 });
+
+function marketplaceApiKeyFromRequest(req) {
+  const headerKey = req.headers['x-api-key'];
+  if (typeof headerKey === 'string' && headerKey.trim()) return headerKey.trim();
+  const authorization = String(req.headers.authorization || '');
+  const bearer = authorization.match(/^Bearer\s+(.+)$/i);
+  return bearer ? bearer[1].trim() : '';
+}
 
 function parseJson(value, fallback = {}) {
   if (!value) return fallback;
@@ -226,7 +233,9 @@ function createMarketplaceAuth({ getDb, closeDb = false, actorProperty = 'market
   return ({ action, resourceId }) => (req, res, next) => {
     const db = getDb();
     try {
-      const apiKey = apiKeyFromRequest(req);
+      // Marketplace credentials are headers-only. Query-string API keys leak
+      // through logs, caches, referrers, and browser history.
+      const apiKey = marketplaceApiKeyFromRequest(req);
       if (apiKey) {
         const profile = db.prepare('SELECT id FROM profiles WHERE api_key = ?').get(apiKey);
         if (!profile) return res.status(403).json({ code: 'AUTH_INVALID', error: 'Invalid API key' });

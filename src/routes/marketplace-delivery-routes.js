@@ -518,6 +518,7 @@ function registerMarketplaceDeliveryRoutes(app, { getDb, closeDb = false, autoAp
   ));
   const getAliases = (paths, action, handler) => paths.forEach((routePath) => app.get(
     routePath,
+    marketplaceMutationLimiter,
     authorize({ action, resourceId: (req) => req.params.jobId || req.params.id }),
     handler,
   ));
