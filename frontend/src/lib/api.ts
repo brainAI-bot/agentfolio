@@ -131,26 +131,64 @@ export async function fetchJobs(): Promise<APIJob[]> {
   }
 }
 
-export async function fetchStats(): Promise<{
+export interface PublicStats {
   totalAgents: number;
   totalSkills: number;
+  claimed: number;
   verified: number;
   onChain: number;
-}> {
+  verificationTypes: number;
+}
+
+export interface PublicStatCounter {
+  key: 'totalAgents' | 'claimed' | 'verified' | 'onChain';
+  label: 'Agents' | 'Claimed' | 'Verified' | 'On-Chain';
+  value: number;
+}
+
+function publicCount(value: unknown): number {
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? count : 0;
+}
+
+type StatsFetch = (input: string, init?: RequestInit) => Promise<Response>;
+
+export async function fetchStats(fetchImpl: StatsFetch = fetch): Promise<PublicStats> {
+  const res = await fetchImpl(`${API_BASE}/api/stats`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Failed to fetch public stats: ${res.status}`);
+
+  const data = await res.json();
+  const totalAgents = publicCount(data.total ?? data.totalAgents ?? data.agents?.total);
+
+  return {
+    totalAgents,
+    totalSkills: publicCount(data.totalSkills ?? data.total_skills),
+    claimed: publicCount(data.claimed ?? data.agents?.claimed),
+    verified: publicCount(data.verified ?? data.verifiedAgents ?? data.agents?.verified),
+    onChain: publicCount(data.onChain ?? data.on_chain),
+    verificationTypes: publicCount(data.verificationTypes),
+  };
+}
+
+export async function fetchHomepageStats(
+  loadStats: () => Promise<PublicStats> = fetchStats,
+  reportError: (message: string, error: unknown) => void = console.error,
+): Promise<PublicStats | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/ecosystem/stats`, {
-      next: { revalidate: 300 }
-    });
-    if (!res.ok) throw new Error('Failed to fetch stats');
-    const data = await res.json();
-    return {
-      totalAgents: data.agents?.total || data.total_agents || data.totalAgents || 0,
-      totalSkills: Math.round(data.agents?.avgSkills * (data.agents?.total || 0)) || data.total_skills || data.totalSkills || 0,
-      verified: data.agents?.verified || data.verified || 0,
-      onChain: data.agents?.verified || data.on_chain || data.onChain || 0
-    };
+    return await loadStats();
   } catch (error) {
-    console.error('Error fetching stats:', error);
-    return { totalAgents: 0, totalSkills: 0, verified: 0, onChain: 0 };
+    reportError('Homepage stats unavailable:', error);
+    return null;
   }
+}
+
+export function getPublicStatCounters(stats: PublicStats | null): PublicStatCounter[] {
+  if (!stats) return [];
+
+  return [
+    { key: 'totalAgents', label: 'Agents', value: stats.totalAgents },
+    { key: 'claimed', label: 'Claimed', value: stats.claimed },
+    { key: 'verified', label: 'Verified', value: stats.verified },
+    { key: 'onChain', label: 'On-Chain', value: stats.onChain },
+  ];
 }
