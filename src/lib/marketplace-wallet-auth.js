@@ -21,8 +21,8 @@ function marketplaceApiKeyFromRequest(req) {
   const headerKey = req.headers['x-api-key'];
   if (typeof headerKey === 'string' && headerKey.trim()) return headerKey.trim();
   const authorization = String(req.headers.authorization || '');
-  const bearer = authorization.match(/^Bearer\s+(.+)$/i);
-  return bearer ? bearer[1].trim() : '';
+  if (authorization.length > 4096 || authorization.slice(0, 7).toLowerCase() !== 'bearer ') return '';
+  return authorization.slice(7).trim();
 }
 
 function parseJson(value, fallback = {}) {
