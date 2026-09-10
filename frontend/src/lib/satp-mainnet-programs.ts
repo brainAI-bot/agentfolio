@@ -12,4 +12,19 @@ export const SATP_MAINNET_REGISTRATION_PROGRAM_ID =
 
 export const SATP_V3_IDENTITY_PROGRAM_ID = SATP_MAINNET_PROGRAMS.IDENTITY;
 
+export const SATP_DISPLAYED_MAINNET_PROGRAMS = [
+  {
+    key: "REGISTRATION_IDENTITY",
+    name: "Live Registration Identity",
+    id: SATP_MAINNET_REGISTRATION_PROGRAM_ID,
+    provenance: "registration" as const,
+  },
+  ...Object.entries(SATP_MAINNET_PROGRAMS).map(([key, id]) => ({
+    key,
+    name: key === "IDENTITY" ? "V3 Identity Cluster" : key,
+    id,
+    provenance: "satp-v3" as const,
+  })),
+] as const;
+
 export type SatpMainnetProgramName = keyof typeof SATP_MAINNET_PROGRAMS;

@@ -2,8 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, Code, Shield, Zap, Book, Terminal, Key } from "lucide-react";
 import {
-  SATP_MAINNET_PROGRAMS,
-  SATP_MAINNET_REGISTRATION_PROGRAM_ID,
+  SATP_DISPLAYED_MAINNET_PROGRAMS,
 } from "@/lib/satp-mainnet-programs";
 
 export const metadata: Metadata = {
@@ -13,16 +12,7 @@ export const metadata: Metadata = {
 
 export default async function DocsPage() {
   const baseUrl = "https://agentfolio.bot";
-  const satpProgramRows = [
-    {
-      name: "Live Registration Identity",
-      addr: SATP_MAINNET_REGISTRATION_PROGRAM_ID,
-    },
-    ...Object.entries(SATP_MAINNET_PROGRAMS).map(([name, addr]) => ({
-      name: name === "IDENTITY" ? "V3 Identity Cluster" : name,
-      addr,
-    })),
-  ];
+  const satpProgramRows = SATP_DISPLAYED_MAINNET_PROGRAMS;
 
   const endpoints = [
     {
@@ -437,7 +427,7 @@ const { transaction, identityPDA } = await sdk.buildRegisterIdentity(
             SATP Program IDs (Mainnet)
           </h2>
           <div className="space-y-2">
-            {satpProgramRows.map(({ name, addr }) => (
+            {satpProgramRows.map(({ name, id }) => (
               <div
                 key={name}
                 className="flex flex-col gap-2 px-4 py-3 rounded-lg sm:flex-row sm:items-center sm:justify-between"
@@ -447,7 +437,7 @@ const { transaction, identityPDA } = await sdk.buildRegisterIdentity(
                   {name === "ESCROW" ? "Escrow (live-funds gated)" : name}
                 </span>
                 <code className="break-all text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
-                  {addr}
+                  {id}
                 </code>
               </div>
             ))}

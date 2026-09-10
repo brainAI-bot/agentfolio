@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import {
-  SATP_MAINNET_PROGRAMS,
-  SATP_MAINNET_REGISTRATION_PROGRAM_ID,
+  SATP_DISPLAYED_MAINNET_PROGRAMS,
 } from "@/lib/satp-mainnet-programs";
 
 export const metadata: Metadata = {
@@ -46,16 +45,7 @@ export default function HowItWorksPage() {
     { data: "Reviews & Endorsements", onChain: false, verify: "API: /api/profile/:id (on-chain planned)" },
   ];
 
-  const satpProgramRows = [
-    {
-      name: "LIVE REGISTRATION IDENTITY",
-      address: SATP_MAINNET_REGISTRATION_PROGRAM_ID,
-    },
-    ...Object.entries(SATP_MAINNET_PROGRAMS).map(([name, address]) => ({
-      name: name === "IDENTITY" ? "V3 IDENTITY CLUSTER" : name,
-      address,
-    })),
-  ];
+  const satpProgramRows = SATP_DISPLAYED_MAINNET_PROGRAMS;
 
   return (
     <div className="min-h-screen" style={{ background: "var(--bg-primary)", color: "var(--text-primary)" }}>
@@ -140,13 +130,13 @@ export default function HowItWorksPage() {
               <div key={program.name} className="grid grid-cols-1 text-xs sm:grid-cols-[210px_1fr]" style={{ borderTop: "1px solid var(--border)" }}>
                 <div className="p-2 font-bold" style={{ fontFamily: "var(--font-mono)" }}>{program.name}</div>
                 <a
-                  href={`https://explorer.solana.com/address/${program.address}`}
+                  href={`https://explorer.solana.com/address/${program.id}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="p-2 break-all hover:underline"
                   style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}
                 >
-                  {program.address}
+                  {program.id}
                 </a>
               </div>
             ))}
