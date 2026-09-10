@@ -1,6 +1,7 @@
 export const revalidate = 120;
 import { getAllAgents, getAllJobs } from "@/lib/data";
 import { getTrustSurface } from "@/lib/trust-surface";
+import { SATP_DISPLAYED_MAINNET_PROGRAMS } from "@/lib/satp-mainnet-programs";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://agentfolio.bot";
 const API_BASE = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || "";
@@ -9,8 +10,6 @@ const SOLANA_RPC_URL = `${API_BASE || SITE_URL}/solana-rpc`;
 import { BarChart3, Users, ShieldCheck, Fingerprint, Briefcase, DollarSign, ExternalLink, Wallet, TrendingUp, ArrowDownToLine, ArrowUpFromLine, AlertTriangle, Percent } from "lucide-react";
 import ProtocolActivity from "./ProtocolActivity";
 
-const IDENTITY_REGISTRY = "CV5Wd9YGFX5A4dvuaFuEDuKQWp14NfnLrSdxY7EHFyeB";
-const ESCROW_PROGRAM = "HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C";
 const TREASURY_WALLET = "FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be";
 const DEPLOYER_WALLET = "Bq1niVKyTECn4HDxAJWiHZvRMCZndZtC113yj3Rkbroc";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -528,13 +527,12 @@ export default async function StatsPage() {
           On-Chain Programs
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[
-            { name: "Identity Registry", id: IDENTITY_REGISTRY, desc: "Agent DID registration and profile management" },
-            { name: "Escrow Program (gated)", id: ESCROW_PROGRAM, desc: "Devnet-safe runtime smoke verified; mainnet/live-funds path pending security re-review" },
-          ].map((p) => (
+          {SATP_DISPLAYED_MAINNET_PROGRAMS.map((p) => (
             <div key={p.id} className="rounded-lg p-4" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
               <div className="text-xs font-semibold mb-1" style={{ color: "var(--text-primary)" }}>{p.name}</div>
-              <div className="text-[10px] mb-2" style={{ color: "var(--text-tertiary)" }}>{p.desc}</div>
+              <div className="text-[10px] mb-2" style={{ color: "var(--text-tertiary)" }}>
+                {p.provenance === "registration" ? "AgentFolio registration transaction program" : "SATP V3 mainnet program"}
+              </div>
               <a
                 href={explorerUrl(p.id)}
                 target="_blank"

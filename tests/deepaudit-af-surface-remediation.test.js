@@ -123,12 +123,13 @@ test('AF2: how-it-works exposes non-empty SATP mainnet program ids', () => {
     'utf8'
   );
 
-  const addresses = [...programsSource.matchAll(/: "([^"]+)"/g)].map((match) => match[1]);
+  const programsBlock = programsSource.match(/SATP_MAINNET_PROGRAMS\s*=\s*\{([\s\S]*?)\}\s+as\s+const/)?.[1] || '';
+  const addresses = [...programsBlock.matchAll(/:\s*"([^"]+)"/g)].map((match) => match[1]);
   assert.equal(addresses.length, 6);
   for (const address of addresses) {
     assert.match(address, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
   }
-  assert.match(pageSource, /SATP_MAINNET_PROGRAMS/);
+  assert.match(pageSource, /SATP_DISPLAYED_MAINNET_PROGRAMS/);
   assert.match(pageSource, /explorer\.solana\.com\/address/);
   assert.doesNotMatch(pageSource, /BY4jzmnr|TQ4P9R2Y|AdDWFa9o/);
 });
@@ -141,9 +142,7 @@ test('AF14: displayed SATP IDs preserve V3 and registration program provenance',
 
   for (const surface of canonicalDocsSurfaces) {
     const source = fs.readFileSync(path.join(repoRoot, surface), 'utf8');
-    assert.match(source, /SATP_MAINNET_PROGRAMS/, `${surface} must source displayed IDs from the verified registry`);
-    assert.match(source, /SATP_MAINNET_REGISTRATION_PROGRAM_ID/, `${surface} must label the live registration program separately`);
-    assert.match(source, /V3 (Identity Cluster|IDENTITY CLUSTER)/, `${surface} must distinguish the V3 identity cluster from registration`);
+    assert.match(source, /SATP_DISPLAYED_MAINNET_PROGRAMS/, `${surface} must source displayed IDs from the verified registry`);
     assert.doesNotMatch(source, /BY4jzmnr|TQ4P9R2Y|AdDWFa9o/, `${surface} must not display retired docs program IDs`);
   }
 
@@ -178,8 +177,12 @@ test('AF14: displayed SATP IDs preserve V3 and registration program provenance',
     'frontend/src/app/stats/page.tsx',
   ]) {
     const source = fs.readFileSync(path.join(repoRoot, surface), 'utf8');
-    assert.match(source, new RegExp(registrationProgram), `${surface} must agree with the live registration transaction path`);
+    assert.match(source, /SATP_DISPLAYED_MAINNET_PROGRAMS/, `${surface} must consume the displayed-ID registry`);
+    assert.doesNotMatch(source, new RegExp(registrationProgram), `${surface} must not bypass the displayed-ID registry`);
   }
+
+  assert.match(registrySource, /name:\s*"Live Registration Identity"/);
+  assert.match(registrySource, /name:\s*key === "IDENTITY" \? "V3 Identity Cluster" : key/);
 });
 
 test('AF25: escrow refund authorizes before remaining fail-closed without state mutation', async () => {
@@ -338,7 +341,7 @@ test('AF9 and AF13: tracked backup artifacts are absent from repo surface', () =
   assert.deepEqual(backupArtifacts, []);
 });
 
-test('AF6 and AF10: CI-on-merge workflow runs explicit PR and main-branch merge gates', () => {
+test('AF6, AF10, and AF14: CI-on-merge workflow runs explicit PR and main-branch merge gates', () => {
   const workflow = fs.readFileSync(
     path.join(repoRoot, '.github/workflows/ci-on-merge.yml'),
     'utf8'

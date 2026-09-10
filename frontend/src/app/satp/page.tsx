@@ -1,21 +1,13 @@
 import { getAllAgents } from "@/lib/data";
+import { SATP_DISPLAYED_MAINNET_PROGRAMS } from "@/lib/satp-mainnet-programs";
 import { Shield, Database, FileCheck, Lock, ExternalLink } from "lucide-react";
 
-const IDENTITY_REGISTRY = "CV5Wd9YGFX5A4dvuaFuEDuKQWp14NfnLrSdxY7EHFyeB";
-const ESCROW_PROGRAM = "HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C";
-
-const programs = [
-  {
-    name: "Identity Registry",
-    id: IDENTITY_REGISTRY,
-    desc: "Agent DID registration and profile management on-chain",
-  },
-  {
-    name: "Escrow Program (gated)",
-    id: ESCROW_PROGRAM,
-    desc: "Devnet-safe runtime smoke verified; mainnet/live-funds escrow remains pending security re-review",
-  },
-];
+const programs = SATP_DISPLAYED_MAINNET_PROGRAMS.map((program) => ({
+  ...program,
+  desc: program.provenance === "registration"
+    ? "AgentFolio registration transaction program"
+    : "SATP V3 mainnet program",
+}));
 
 function explorerUrl(address: string) {
   return `https://explorer.solana.com/address/${address}`;

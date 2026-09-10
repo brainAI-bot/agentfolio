@@ -46,6 +46,23 @@ function loadRegistry() {
       };
     });
 
+  const registrationMatch = source.match(
+    /export\s+const\s+SATP_MAINNET_REGISTRATION_PROGRAM_ID\s*=\s*\n?\s*"([^"]+)"\s*;/
+  );
+  if (!registrationMatch) {
+    throw new Error('SATP_MAINNET_REGISTRATION_PROGRAM_ID export not found');
+  }
+  const registrationEnvKey = 'SATP_MAINNET_REGISTRATION_PROGRAM_ID';
+  const registrationOverride = process.env[registrationEnvKey];
+  rows.unshift({
+    name: 'REGISTRATION_IDENTITY',
+    id: allowEnvOverrides && registrationOverride ? registrationOverride : registrationMatch[1],
+    provenance: allowEnvOverrides && registrationOverride
+      ? registrationEnvKey
+      : 'frontend/src/lib/satp-mainnet-programs.ts',
+    overrideEnvKey: registrationOverride ? registrationEnvKey : null,
+  });
+
   if (rows.length === 0) {
     throw new Error('SATP_MAINNET_PROGRAMS contains no parseable program ids');
   }

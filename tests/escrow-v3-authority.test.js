@@ -578,6 +578,7 @@ test('packaged SATP escrow IDL carries mainnet HXCU and all 14 instructions', ()
 test('SATP mainnet program verifier checks every registry id in explicit fixture mode and can fail closed', () => {
   const owner = 'BPFLoaderUpgradeab1e11111111111111111111111';
   const fixture = {
+    REGISTRATION_IDENTITY: { slot: 99, owner, exists: true, executable: true, status: 'verified' },
     IDENTITY: { slot: 100, owner, exists: true, executable: true, status: 'verified' },
     REVIEWS: { slot: 101, owner, exists: true, executable: true, status: 'verified' },
     REPUTATION: { slot: 102, owner, exists: true, executable: true, status: 'verified' },
@@ -602,7 +603,7 @@ test('SATP mainnet program verifier checks every registry id in explicit fixture
   assert.equal(evidence.mode.strict, false);
   assert.equal(evidence.mode.allowFixture, true);
   assert.equal(evidence.rpcGenesisHash, null);
-  assert.equal(evidence.programs.length, 6);
+  assert.equal(evidence.programs.length, 7);
   for (const program of evidence.programs) {
     assert.equal(program.owner, owner);
     assert.equal(program.exists, true);
@@ -634,6 +635,7 @@ test('SATP mainnet program verifier checks every registry id in explicit fixture
 test('SATP mainnet strict verifier rejects fixture evidence before checking accounts', () => {
   const owner = 'BPFLoaderUpgradeab1e11111111111111111111111';
   const fixture = {
+    REGISTRATION_IDENTITY: { slot: 99, owner, exists: true, executable: true, status: 'verified' },
     IDENTITY: { slot: 100, owner, exists: true, executable: true, status: 'verified' },
     REVIEWS: { slot: 101, owner, exists: true, executable: true, status: 'verified' },
     REPUTATION: { slot: 102, owner, exists: true, executable: true, status: 'verified' },
@@ -658,12 +660,13 @@ test('SATP mainnet strict verifier rejects fixture evidence before checking acco
   assert.equal(evidence.fixtureEnvKey, 'AGENTFOLIO_SATP_PROGRAM_VERIFY_FIXTURE');
   assert.equal(evidence.mode.strict, true);
   assert.equal(evidence.mode.allowFixture, false);
-  assert.equal(evidence.programs.length, 6);
+  assert.equal(evidence.programs.length, 7);
 });
 
 test('SATP mainnet strict verifier rejects env overrides before checking accounts', () => {
   const owner = 'BPFLoaderUpgradeab1e11111111111111111111111';
   const fixture = {
+    REGISTRATION_IDENTITY: { slot: 99, owner, exists: true, executable: true, status: 'verified' },
     IDENTITY: { slot: 100, owner, exists: true, executable: true, status: 'verified' },
     REVIEWS: { slot: 101, owner, exists: true, executable: true, status: 'verified' },
     REPUTATION: { slot: 102, owner, exists: true, executable: true, status: 'verified' },
@@ -712,7 +715,7 @@ test('SATP mainnet verifier fails closed on on-chain mismatch in CI mode without
     assert.equal(evidence.mode.strict, false);
     assert.equal(evidence.mode.ci, true);
     assert.equal(evidence.rpcGenesisHash, '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d');
-    assert.equal(evidence.programs.length, 6);
+    assert.equal(evidence.programs.length, 7);
     assert.ok(evidence.programs.every((program) => program.exists === false));
   });
 });
