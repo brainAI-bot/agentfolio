@@ -4,11 +4,11 @@ import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useSmartConnect } from "@/components/WalletProvider";
 import { Briefcase, Send, Share2, Check } from "lucide-react";
-import { fetchMarketplaceApplyResourceId, signMarketplaceAction } from "@/lib/marketplace-auth";
+import { marketplaceErrorMessage, signedMarketplaceRequest } from "@/lib/marketplace-api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
 
-export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: string }) {
+export function JobApplyForm({ jobId, jobStatus, onApplied }: { jobId: string; jobStatus: string; onApplied?: () => void | Promise<void> }) {
   const { connected, publicKey, signMessage } = useWallet();
   const { smartConnect } = useSmartConnect();
   const [showForm, setShowForm] = useState(false);
@@ -52,35 +52,26 @@ export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: s
     setResult(null);
     try {
       if (!publicKey) throw new Error("Connect the wallet linked to this AgentFolio profile");
-      const applyResourceId = await fetchMarketplaceApplyResourceId(API_BASE, jobId, effectiveId);
-      const walletChallenge = await signMarketplaceAction({
+      await signedMarketplaceRequest({
+        path: `/api/marketplace/jobs/${encodeURIComponent(jobId)}/apply`,
         action: "apply",
-        resourceId: applyResourceId,
+        resourceId: jobId,
         actorId: effectiveId,
         walletAddress: publicKey.toBase58(),
         signMessage,
-      });
-      const res = await fetch(`${API_BASE}/api/marketplace/jobs/${jobId}/apply`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: {
           applicantId: effectiveId,
           coverMessage: proposal.trim(),
           proposedBudget: budget ? parseFloat(budget) : undefined,
           proposedTimeline: timeline,
           portfolioItems: portfolioItems.split(",").map((item) => item.trim()).filter(Boolean),
-          walletChallenge,
-        }),
+        },
       });
-      const data = await res.json();
-      if (data.error) {
-        setResult({ ok: false, msg: data.error });
-      } else {
-        setResult({ ok: true, msg: "Application submitted!" });
-        setShowForm(false);
-      }
-    } catch (e: any) {
-      setResult({ ok: false, msg: e.message });
+      await onApplied?.();
+      setResult({ ok: true, msg: "Application recorded in the canonical marketplace." });
+      setShowForm(false);
+    } catch (error) {
+      setResult({ ok: false, msg: marketplaceErrorMessage(error) });
     } finally {
       setSubmitting(false);
     }
@@ -173,7 +164,7 @@ export function JobApplyForm({ jobId, jobStatus }: { jobId: string; jobStatus: s
               />
             </div>
             <div>
-              <label className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>Proposed Budget (USDC, optional)</label>
+              <label className="text-[11px] font-bold uppercase tracking-widest mb-1 block" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>Proposed Budget (SOL, optional)</label>
               <input
                 type="number"
                 value={budget}

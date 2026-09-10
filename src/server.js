@@ -1761,11 +1761,21 @@ function mapSqliteMarketplaceJob(row, profileMap, applicationCounts) {
     assignee: row.selected_agent_id ? (profileMap.get(row.selected_agent_id) || row.selected_agent_id) : null,
     assigneeId: row.selected_agent_id || null,
     selectedAgentId: row.selected_agent_id || null,
+    selectedApplicationId: row.selected_application_id || null,
+    awardExpiresAt: row.award_expires_at || null,
+    expiresAt: row.expires_at || null,
     skills,
     skills_required: skills,
     attachments,
     applicationCount,
     proposals: applicationCount,
+    escrow: {
+      id: row.escrow_id || null,
+      required: Boolean(row.escrow_required),
+      funded: Boolean(row.escrow_funded),
+      mode: 'staged',
+      moneyMoved: false,
+    },
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1891,8 +1901,11 @@ app.get('/api/marketplace/jobs', publicMarketplaceReadLimiter, listSqliteMarketp
 app.get('/api/marketplace/jobs/:id', publicMarketplaceReadLimiter, getSqliteMarketplaceJob);
 app.get('/api/marketplace/jobs/:id/applications', publicMarketplaceReadLimiter, getSqliteMarketplaceApplications);
 
-// Canonical P1 marketplace delivery mutations and job thread. Register before
-// the retired JSON mutation module so both API path families stay on SQLite.
+// Canonical P1 marketplace mutations. Register before the retired JSON module
+// so every fixed-price web/API path writes only to SQLite.
+const { registerMarketplaceJobRoutes } = require('./routes/marketplace-job-routes');
+registerMarketplaceJobRoutes(app, { getDb: () => profileStore.getDb() });
+
 const { registerMarketplaceDeliveryRoutes } = require('./routes/marketplace-delivery-routes');
 registerMarketplaceDeliveryRoutes(app, {
   getDb: () => profileStore.getDb(),

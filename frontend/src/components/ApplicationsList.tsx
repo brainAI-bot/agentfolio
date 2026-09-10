@@ -1,286 +1,167 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Shield } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { getTrustSurface } from "@/lib/trust-surface";
+import { Shield } from "lucide-react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { signMarketplaceAction } from "@/lib/marketplace-auth";
+import { marketplaceErrorMessage, marketplaceRead, signedMarketplaceRequest } from "@/lib/marketplace-api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
-
-interface Application {
+export interface MarketplaceApplication {
   id: string;
   applicantId: string;
   applicantName?: string;
-  applicantAvatar?: string;
   applicantProfileId?: string;
   proposal: string;
-  coverMessage?: string;
-  bidAmount?: number;
   proposedBudget?: number;
+  bidAmount?: number;
   proposedTimeline?: string;
-  portfolioItems?: string[];
   status: string;
   createdAt: string;
-  trustScore?: number;
-  rating?: number;
-  reviewCount?: number;
-  jobsCompleted?: number;
-  verificationLevel?: number;
-  verificationLevelName?: string;
-  verificationBadges?: string[];
 }
 
-const badgeIcons: Record<string, string> = {
-  solana: "◎",
-  github: "💻",
-  x: "𝕏",
-  satp: "⛓️",
-  agentmail: "📧",
-};
+interface Props {
+  jobId: string;
+  jobStatus: string;
+  clientId?: string;
+  selectedApplicationId?: string;
+  escrowFunded?: boolean;
+  viewerProfileId?: string | null;
+  onChanged?: () => void | Promise<void>;
+  reloadToken?: number;
+}
 
-const levelColors: Record<number, string> = {
-  0: "#6b7280",
-  1: "#9ca3af",
-  2: "#06b6d4",
-  3: "#22c55e",
-  4: "#eab308",
-  5: "#9945ff",
-};
-
-function timeAgo(dateStr: string): string {
+function applicationTime(dateStr: string): string {
   const createdAt = new Date(dateStr).getTime();
   if (!Number.isFinite(createdAt)) return "date unavailable";
-  const diff = Date.now() - createdAt;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return mins <= 1 ? "just now" : `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
+  const days = Math.floor((Date.now() - createdAt) / 86_400_000);
+  return days < 1 ? "today" : `${days}d ago`;
 }
 
-export function ApplicationsList({ jobId }: { jobId: string }) {
-  const { connected, publicKey, signMessage } = useWallet();
-  const [apps, setApps] = useState<Application[]>([]);
+export function ApplicationsList({
+  jobId,
+  jobStatus,
+  clientId,
+  selectedApplicationId,
+  escrowFunded = false,
+  viewerProfileId,
+  onChanged,
+  reloadToken,
+}: Props) {
+  const { publicKey, signMessage } = useWallet();
+  const [apps, setApps] = useState<MarketplaceApplication[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewerProfileId, setViewerProfileId] = useState<string | null>(null);
-  const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [acting, setActing] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch(`${API_BASE}/api/jobs/${jobId}/applications`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (data?.applications) {
-          setApps(data.applications.filter((a: any) => a && !a.error));
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await marketplaceRead<{ applications: MarketplaceApplication[] }>(`/api/jobs/${jobId}/applications`);
+      setApps(Array.isArray(data.applications) ? data.applications : []);
+    } catch (failure) {
+      setError(marketplaceErrorMessage(failure));
+    } finally {
+      setLoading(false);
+    }
   }, [jobId]);
 
-  useEffect(() => {
-    if (!connected || !publicKey) {
-      setViewerProfileId(null);
+  useEffect(() => { void load(); }, [load, reloadToken]);
+
+  const act = async (application: MarketplaceApplication, action: "select" | "reject" | "accept" | "decline" | "withdraw") => {
+    if (!viewerProfileId || !publicKey) {
+      setError("Unauthorized: connect the wallet linked to the acting AgentFolio profile.");
       return;
     }
-    fetch(`${API_BASE}/api/profile-by-wallet?wallet=${publicKey.toBase58()}`)
-      .then((response) => response.ok ? response.json() : null)
-      .then((profile) => setViewerProfileId(profile?.id || null))
-      .catch(() => setViewerProfileId(null));
-  }, [connected, publicKey]);
-
-  const withdrawApplication = async (application: Application) => {
-    if (!viewerProfileId || !publicKey) return;
-    setWithdrawingId(application.id);
+    setActing(`${application.id}:${action}`);
+    setError(null);
     try {
-      const walletChallenge = await signMarketplaceAction({
-        action: "withdraw",
+      await signedMarketplaceRequest({
+        path: `/api/marketplace/applications/${encodeURIComponent(application.id)}/${action}`,
+        action,
         resourceId: application.id,
         actorId: viewerProfileId,
         walletAddress: publicKey.toBase58(),
         signMessage,
       });
-      const response = await fetch(`${API_BASE}/api/marketplace/applications/${application.id}/withdraw`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ withdrawnBy: viewerProfileId, walletChallenge }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Unable to withdraw application");
-      setApps((current) => current.map((item) => item.id === application.id ? { ...item, status: "withdrawn" } : item));
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Unable to withdraw application");
+      await load();
+      await onChanged?.();
+    } catch (failure) {
+      setError(marketplaceErrorMessage(failure));
     } finally {
-      setWithdrawingId(null);
+      setActing(null);
     }
   };
 
-  if (loading) return (
-    <div className="text-xs py-4 text-center" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
-      Loading applications...
-    </div>
-  );
+  if (loading) return <State text="Loading applications from the canonical SQLite API…" />;
+  if (error && apps.length === 0) return <State text={error} error retry={load} />;
+  if (apps.length === 0) return <State text="No applications yet." />;
 
-  if (apps.length === 0) return (
-    <div className="text-xs py-4 text-center" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
-      No applications yet
-    </div>
-  );
-
+  const isClient = Boolean(viewerProfileId && viewerProfileId === clientId);
   return (
     <div className="space-y-3">
-      {apps.map(app => {
-        const trust = getTrustSurface(app);
-        const lvlColor = levelColors[trust.verificationLevel] || "#6b7280";
-        const profileUrl = app.applicantProfileId
-          ? `/profile/${app.applicantName || app.applicantProfileId}`
-          : null;
-
+      {error && <State text={error} error retry={load} />}
+      {apps.map((application) => {
+        const isApplicant = viewerProfileId === application.applicantId;
+        const isSelected = selectedApplicationId === application.id || application.status === "selected";
         return (
-          <div
-            key={app.id}
-            className="rounded-lg p-4"
-            style={{
-              background: "var(--bg-primary)",
-              border: app.status === "accepted"
-                ? "1px solid rgba(34,197,94,0.4)"
-                : "1px solid var(--border)",
-            }}
-          >
-            {/* Applicant header */}
-            <div className="flex items-center gap-3 mb-2">
-              {/* Avatar */}
-              {app.applicantAvatar ? (
-                <img
-                  src={app.applicantAvatar}
-                  alt={app.applicantName || app.applicantId}
-                  className="w-8 h-8 rounded-full object-cover"
-                  style={{ border: `2px solid ${lvlColor}` }}
-                />
-              ) : (
-                <div
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
-                  style={{ background: `${lvlColor}20`, color: lvlColor, border: `2px solid ${lvlColor}` }}
-                >
-                  {(app.applicantName || app.applicantId || "?")[0].toUpperCase()}
-                </div>
-              )}
-
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  {profileUrl ? (
-                    <Link
-                      href={profileUrl}
-                      className="text-sm font-bold hover:underline truncate"
-                      style={{ color: "var(--text-primary)" }}
-                    >
-                      {app.applicantName || app.applicantId}
-                    </Link>
-                  ) : (
-                    <span className="text-sm font-bold truncate" style={{ color: "var(--text-primary)" }}>
-                      {app.applicantName || app.applicantId}
-                    </span>
-                  )}
-
-                  {/* Verification level badge */}
-                  {trust.verificationLevel > 0 && (
-                    <span
-                      className="text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
-                      style={{
-                        color: lvlColor,
-                        background: `${lvlColor}15`,
-                        border: `1px solid ${lvlColor}30`,
-                        fontFamily: "var(--font-mono)",
-                      }}
-                    >
-                      {trust.tierLabel}
-                    </span>
-                  )}
-
-                  {app.status === "accepted" && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ color: "#22c55e", background: "rgba(34,197,94,0.1)", fontFamily: "var(--font-mono)" }}>
-                      ✓ ACCEPTED
-                    </span>
-                  )}
-                  {app.status !== "pending" && app.status !== "accepted" && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase" style={{ color: "var(--text-tertiary)", background: "var(--bg-secondary)", fontFamily: "var(--font-mono)" }}>
-                      {app.status}
-                    </span>
-                  )}
-                </div>
-
-                {/* Trust score + badges */}
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-[10px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
-                    <Shield size={10} className="inline mr-0.5" style={{ verticalAlign: "middle" }} />
-                    {trust.trustScoreFraction}
-                  </span>
-                  <span className="text-[10px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
-                    {trust.reviewSummary}
-                  </span>
-                  <span className="text-[10px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
-                    {trust.jobHistory}
-                  </span>
-                  {app.verificationBadges && app.verificationBadges.length > 0 && (
-                    <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
-                      {app.verificationBadges.map(b => badgeIcons[b] || b).join(" ")}
-                    </span>
-                  )}
-                  <span className="text-[10px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
-                    {timeAgo(app.createdAt)}
-                  </span>
+          <article key={application.id} className="rounded-lg p-4" style={{ background: "var(--bg-primary)", border: isSelected ? "1px solid #eab308" : "1px solid var(--border)" }}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <Link href={`/profile/${application.applicantProfileId || application.applicantId}`} className="text-sm font-bold hover:underline">
+                  {application.applicantName || application.applicantId}
+                </Link>
+                <div className="text-[10px] uppercase mt-1" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
+                  {application.status}{isSelected ? " · award awaiting agent response" : ""} · {applicationTime(application.createdAt)}
                 </div>
               </div>
-
-              {/* Bid amount */}
-              {(app.proposedBudget ?? app.bidAmount) != null && (app.proposedBudget ?? app.bidAmount ?? 0) > 0 && (
-                <div className="text-right">
-                  <span className="text-sm font-bold" style={{ color: "var(--solana, #9945ff)", fontFamily: "var(--font-mono)" }}>
-                    {app.proposedBudget ?? app.bidAmount} USDC
-                  </span>
-                  {app.proposedTimeline && (
-                    <div className="text-[10px] mt-0.5" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
-                      {app.proposedTimeline.replaceAll("_", " ")}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Proposal text */}
-            <div
-              className="text-xs mt-2 leading-relaxed"
-              style={{ color: "var(--text-secondary)", paddingLeft: "44px" }}
-            >
-              {app.coverMessage || app.proposal}
-            </div>
-            {app.portfolioItems && app.portfolioItems.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mt-3" style={{ paddingLeft: "44px" }}>
-                {app.portfolioItems.map((item) => (
-                  <span key={item} className="text-[10px] px-2 py-1 rounded" style={{ background: "var(--bg-secondary)", color: "var(--text-tertiary)", border: "1px solid var(--border)", fontFamily: "var(--font-mono)" }}>
-                    {item}
-                  </span>
-                ))}
+              <div className="text-right text-xs" style={{ fontFamily: "var(--font-mono)" }}>
+                {(application.proposedBudget ?? application.bidAmount) != null && <strong>{application.proposedBudget ?? application.bidAmount} SOL</strong>}
+                {application.proposedTimeline && <div style={{ color: "var(--text-tertiary)" }}>{application.proposedTimeline.replaceAll("_", " ")}</div>}
               </div>
-            )}
-            {app.status === "pending" && viewerProfileId === app.applicantId && (
-              <div className="mt-3 text-right">
-                <button
-                  type="button"
-                  onClick={() => withdrawApplication(app)}
-                  disabled={withdrawingId === app.id}
-                  className="text-[10px] px-3 py-1.5 rounded disabled:opacity-50"
-                  style={{ color: "var(--text-tertiary)", border: "1px solid var(--border)", fontFamily: "var(--font-mono)" }}
-                >
-                  {withdrawingId === app.id ? "Signing..." : "Withdraw application"}
+            </div>
+            <p className="text-sm mt-3 whitespace-pre-wrap" style={{ color: "var(--text-secondary)" }}>{application.proposal}</p>
+            <div className="flex flex-wrap gap-2 mt-4">
+              {isClient && jobStatus === "open" && application.status === "pending" && (
+                <>
+                  <button type="button" disabled={!escrowFunded || Boolean(acting)} onClick={() => act(application, "select")} className="px-3 py-1.5 rounded text-xs disabled:opacity-40" style={{ background: "var(--accent)", color: "white" }}>
+                    {acting === `${application.id}:select` ? "Selecting…" : escrowFunded ? "Select funded offer" : "Selection requires verified staged funding"}
+                  </button>
+                  <button type="button" disabled={Boolean(acting)} onClick={() => act(application, "reject")} className="px-3 py-1.5 rounded text-xs disabled:opacity-40" style={{ border: "1px solid var(--border)" }}>
+                    Reject
+                  </button>
+                </>
+              )}
+              {isApplicant && jobStatus === "open" && application.status === "pending" && (
+                <button type="button" disabled={Boolean(acting)} onClick={() => act(application, "withdraw")} className="px-3 py-1.5 rounded text-xs disabled:opacity-40" style={{ border: "1px solid var(--border)" }}>
+                  {acting === `${application.id}:withdraw` ? "Withdrawing…" : "Withdraw application"}
                 </button>
-              </div>
+              )}
+              {isApplicant && jobStatus === "awarded" && isSelected && (
+                <>
+                  <button type="button" disabled={Boolean(acting)} onClick={() => act(application, "accept")} className="px-3 py-1.5 rounded text-xs disabled:opacity-40" style={{ background: "#22c55e", color: "white" }}>
+                    {acting === `${application.id}:accept` ? "Accepting…" : "Accept award"}
+                  </button>
+                  <button type="button" disabled={Boolean(acting)} onClick={() => act(application, "decline")} className="px-3 py-1.5 rounded text-xs disabled:opacity-40" style={{ border: "1px solid #ef4444", color: "#ef4444" }}>
+                    Decline award
+                  </button>
+                </>
+              )}
+            </div>
+            {!escrowFunded && isClient && jobStatus === "open" && application.status === "pending" && (
+              <div className="mt-3 text-[11px]" style={{ color: "#eab308" }}><Shield size={11} className="inline mr-1" />No funds moved. Selection stays disabled until the canonical API reports verified staged escrow funding.</div>
             )}
-          </div>
+          </article>
         );
       })}
+    </div>
+  );
+}
+
+function State({ text, error = false, retry }: { text: string; error?: boolean; retry?: () => void | Promise<void> }) {
+  return (
+    <div role={error ? "alert" : "status"} className="text-xs py-4 text-center rounded-lg" style={{ color: error ? "#ef4444" : "var(--text-tertiary)", border: "1px solid var(--border)", fontFamily: "var(--font-mono)" }}>
+      {text} {retry && <button type="button" className="underline ml-2" onClick={() => void retry()}>Retry</button>}
     </div>
   );
 }

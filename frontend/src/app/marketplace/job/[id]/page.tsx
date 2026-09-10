@@ -1,10 +1,65 @@
 import type { Metadata } from "next";
-import { getJob } from "@/lib/data";
+import type { Job } from "@/lib/types";
+
+const MARKETPLACE_API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
+const JOB_STATUSES = new Set<Job["status"]>(["draft", "open", "awarded", "in_progress", "submitted", "approved", "released", "closed", "cancelled", "expired", "disputed"]);
+
+class CanonicalJobLoadError extends Error {
+  constructor(readonly timedOut: boolean) {
+    super(timedOut
+      ? "The canonical marketplace request timed out. No fixture or JSON fallback was used."
+      : "The canonical marketplace API is unavailable. No fixture or JSON fallback was used.");
+  }
+}
+
+function mapCanonicalJob(raw: Record<string, unknown>): Job {
+  const statusValue = String(raw.status || "open") as Job["status"];
+  const status = JOB_STATUSES.has(statusValue) ? statusValue : "open";
+  const escrow = raw.escrow && typeof raw.escrow === "object" ? raw.escrow as Record<string, unknown> : {};
+  const funded = Boolean(escrow.funded ?? raw.escrow_funded);
+  return {
+    id: String(raw.id || ""),
+    title: String(raw.title || "Untitled job"),
+    description: String(raw.description || ""),
+    poster: String(raw.poster || raw.clientId || raw.client_id || "Unknown client"),
+    posterAvatar: String(raw.posterAvatar || ""),
+    budget: `${Number(raw.budgetAmount ?? raw.budget_amount ?? 0)} ${String(raw.budgetCurrency || raw.budget_currency || "SOL")}`,
+    skills: Array.isArray(raw.skills) ? raw.skills.filter((skill): skill is string => typeof skill === "string") : [],
+    status,
+    escrowStatus: funded ? "funded" : "ready",
+    proposals: Number(raw.applicationCount ?? raw.application_count ?? 0),
+    deadline: String(raw.timeline || "flexible").replaceAll("_", " "),
+    assignee: raw.assignee ? String(raw.assignee) : undefined,
+    assigneeId: raw.assigneeId || raw.selectedAgentId || raw.selected_agent_id ? String(raw.assigneeId || raw.selectedAgentId || raw.selected_agent_id) : undefined,
+    clientId: raw.clientId || raw.client_id ? String(raw.clientId || raw.client_id) : undefined,
+    selectedApplicationId: raw.selectedApplicationId || raw.selected_application_id ? String(raw.selectedApplicationId || raw.selected_application_id) : undefined,
+    awardExpiresAt: raw.awardExpiresAt || raw.award_expires_at ? String(raw.awardExpiresAt || raw.award_expires_at) : undefined,
+    expiresAt: raw.expiresAt || raw.expires_at ? String(raw.expiresAt || raw.expires_at) : undefined,
+    escrowFunded: funded,
+    createdAt: String(raw.createdAt || raw.created_at || new Date(0).toISOString()),
+  };
+}
+
+async function getCanonicalJob(id: string): Promise<Job | null> {
+  try {
+    const response = await fetch(`${MARKETPLACE_API_BASE}/api/jobs/${encodeURIComponent(id)}`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new CanonicalJobLoadError(false);
+    return mapCanonicalJob(await response.json());
+  } catch (error) {
+    if (error instanceof CanonicalJobLoadError) throw error;
+    throw new CanonicalJobLoadError(error instanceof DOMException && error.name === "TimeoutError");
+  }
+}
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  const job = await getJob(id);
-  if (!job) return { title: "Job Not Found — AgentFolio" };
+  let job: Job | null = null;
+  try { job = await getCanonicalJob(id); } catch { /* render generic metadata while the page shows the explicit API state */ }
+  if (!job) return { title: "Marketplace Job — AgentFolio" };
   return {
     title: `${job.title} — AgentFolio Marketplace`,
     description: job.description.substring(0, 160),
@@ -29,17 +84,20 @@ import { WalletRequired } from "@/components/WalletRequired";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import { JobApplyForm } from "@/components/JobApplyForm";
-import { JobReviewSection } from "@/components/JobReviewSection";
-import { SubmitWorkForm } from "@/components/SubmitWorkForm";
-import { ApplicationsList } from "@/components/ApplicationsList";
+import { MarketplaceJobWorkspace } from "@/components/MarketplaceJobWorkspace";
 
 export const dynamic = "force-dynamic";
 
 const statusConfig: Record<string, { label: string; color: string }> = {
   open: { label: "OPEN", color: "#22c55e" },
+  awarded: { label: "AWARDED", color: "#eab308" },
   in_progress: { label: "IN PROGRESS", color: "#eab308" },
-  completed: { label: "COMPLETED", color: "#06b6d4" },
+  submitted: { label: "SUBMITTED", color: "#06b6d4" },
+  approved: { label: "APPROVED (STAGED)", color: "#22c55e" },
+  released: { label: "RELEASED", color: "#22c55e" },
+  closed: { label: "CLOSED", color: "#6b7280" },
+  cancelled: { label: "CANCELLED", color: "#6b7280" },
+  expired: { label: "EXPIRED", color: "#6b7280" },
   disputed: { label: "DISPUTED", color: "#ef4444" },
 };
 
@@ -53,7 +111,21 @@ const escrowLabels: Record<string, string> = {
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const job = await getJob(id);
+  let job: Job | null;
+  try {
+    job = await getCanonicalJob(id);
+  } catch (error) {
+    const message = error instanceof CanonicalJobLoadError ? error.message : "The canonical marketplace API is unavailable.";
+    return (
+      <div className="min-h-screen px-4 py-16" style={{ background: "var(--bg-primary)", color: "var(--text-primary)" }}>
+        <div role="alert" className="max-w-2xl mx-auto rounded-xl p-6" style={{ background: "var(--bg-secondary)", border: "1px solid #ef4444" }}>
+          <h1 className="font-bold mb-2">Marketplace job unavailable</h1>
+          <p className="text-sm" style={{ color: "var(--text-secondary)" }}>{message}</p>
+          <Link href={`/marketplace/job/${encodeURIComponent(id)}`} className="inline-block underline mt-4 text-sm">Retry canonical API</Link>
+        </div>
+      </div>
+    );
+  }
   if (!job) return notFound();
 
   const sc = statusConfig[job.status] || statusConfig.open;
@@ -104,7 +176,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             </span>
             <span style={{ color: "var(--text-tertiary)" }}>·</span>
             <span className="text-lg font-bold" style={{ color: "var(--solana, #9945ff)" }}>{job.budget}</span>
-            <span title="A 5% platform fee applies on successful completion" style={{ color: "var(--text-tertiary)", fontSize: "11px", cursor: "help" }}>(5% fee)</span>
+            <span title="The configured default fee is 10% if the live escrow gate is separately authorized" style={{ color: "var(--text-tertiary)", fontSize: "11px", cursor: "help" }}>(10% configured fee; staged)</span>
             <span style={{ color: "var(--text-tertiary)" }}>·</span>
             <span style={{ color: "var(--text-secondary)" }}>{escrowLabels[job.escrowStatus] || job.escrowStatus}</span>
             <span style={{ color: "var(--text-tertiary)" }}>·</span>
@@ -134,48 +206,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           </div>
         </div>
 
-        {/* Applications with trust scores */}
-        <div className="rounded-xl p-6 mb-6" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
-          <h2 className="text-sm font-bold uppercase tracking-widest mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
-            Applications ({job.proposals})
-          </h2>
-          <ApplicationsList jobId={job.id} />
-        </div>
-
-        {/* Submit Work / Review Deliverables (in_progress only) */}
-        {job.status === "in_progress" && (
-          <div className="mb-6">
-            <SubmitWorkForm
-              jobId={job.id}
-              jobStatus={job.status}
-              assigneeId={job.assigneeId}
-              clientId={job.clientId}
-              deliverableId={job.deliverableId}
-              deliverableDescription={job.deliverableDescription}
-              deliverableStatus={job.deliverableStatus}
-              deliverableSubmittedAt={job.deliverableSubmittedAt}
-            />
-          </div>
-        )}
-
-        {/* Apply / Actions */}
-        <div className="rounded-xl p-6" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
-          <h2 className="text-sm font-bold uppercase tracking-widest mb-4" style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
-            {job.status === "open" ? "Apply" : "Actions"}
-          </h2>
-          <JobApplyForm jobId={job.id} jobStatus={job.status} />
-          <JobReviewSection 
-            jobId={job.id} 
-            jobStatus={job.status} 
-            deliverableDescription={(job as any).deliverableDescription}
-            deliverableStatus={(job as any).deliverableStatus}
-            deliverableSubmittedAt={(job as any).deliverableSubmittedAt}
-            assigneeId={(job as any).assigneeId}
-            clientId={(job as any).clientId}
-            escrowStatus={(job as any).escrowStatus}
-          />
-
-        </div>
+        <MarketplaceJobWorkspace initialJob={job} />
       </div>
     </div>
   );

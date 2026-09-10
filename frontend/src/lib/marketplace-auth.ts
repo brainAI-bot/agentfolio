@@ -1,72 +1,38 @@
-import { PublicKey } from "@solana/web3.js";
-
-const SATP_IDENTITY_PROGRAM = new PublicKey("97yL33fcu6iWT2TdERS5HeqrMSGiUnxuy6nUcTrKieSq");
-
 export interface MarketplaceWalletChallenge {
+  challengeId: string;
+  nonce: string;
+  action: string;
+  resourceId: string;
+  method: string;
+  path: string;
+  actorId: string;
   walletAddress: string;
   identityPDA: string;
+  bodyDigest: string;
+  issuedAt: string;
+  expiresAt: string;
   message: string;
-  signature: string;
+  signature?: string;
 }
 
-export async function fetchMarketplaceApplyResourceId(apiBase: string, jobId: string, actorId: string): Promise<string> {
-  const response = await fetch(`${apiBase}/api/marketplace/jobs/${jobId}`);
-  if (!response.ok) throw new Error("Unable to load the current application authorization state");
-
-  const job = await response.json();
-  const actorRevisions = job.applyChallengeRevisions;
-  const actorRevision = actorRevisions && typeof actorRevisions === "object"
-    && Object.prototype.hasOwnProperty.call(actorRevisions, actorId)
-    ? actorRevisions[actorId]
-    : undefined;
-  const revision = Number(actorRevision ?? job.applyChallengeRevision ?? 0);
-  if (!Number.isSafeInteger(revision) || revision < 0) {
-    throw new Error("Invalid application authorization state");
+export async function signMarketplaceChallenge(
+  challenge: MarketplaceWalletChallenge,
+  walletAddress: string,
+  signMessage?: (message: Uint8Array) => Promise<Uint8Array>,
+): Promise<MarketplaceWalletChallenge> {
+  if (!signMessage) throw new Error("Your wallet does not support message signing");
+  if (challenge.walletAddress !== walletAddress) {
+    throw new Error("The connected wallet is not the profile wallet selected by the server");
   }
-  return `${jobId}#${revision}`;
-}
-
-export function buildMarketplaceWalletChallenge(params: {
-  action: string;
-  resourceId: string;
-  actorId: string;
-  walletAddress: string;
-  identityPDA: string;
-}): string {
-  return [
-    "AgentFolio Marketplace Wallet Challenge",
-    `action:${params.action}`,
-    `resource:${params.resourceId}`,
-    `actor:${params.actorId}`,
-    `wallet:${params.walletAddress}`,
-    `satpIdentityPDA:${params.identityPDA}`,
-  ].join("\n");
-}
-
-export async function signMarketplaceAction(params: {
-  action: string;
-  resourceId: string;
-  actorId: string;
-  walletAddress: string;
-  signMessage?: (message: Uint8Array) => Promise<Uint8Array>;
-}): Promise<MarketplaceWalletChallenge> {
-  if (!params.signMessage) throw new Error("Your wallet does not support message signing");
-  const wallet = new PublicKey(params.walletAddress);
-  const [identityPDA] = PublicKey.findProgramAddressSync(
-    [new TextEncoder().encode("identity"), wallet.toBytes()],
-    SATP_IDENTITY_PROGRAM,
-  );
-  const message = buildMarketplaceWalletChallenge({
-    ...params,
-    identityPDA: identityPDA.toBase58(),
-  });
-  const signature = await params.signMessage(new TextEncoder().encode(message));
-  const signatureBase64 = btoa(Array.from(signature, (byte) => String.fromCharCode(byte)).join(""));
-
+  if (!challenge.message || !challenge.challengeId || !challenge.expiresAt) {
+    throw new Error("The marketplace server returned an invalid wallet challenge");
+  }
+  if (Date.now() >= new Date(challenge.expiresAt).getTime()) {
+    throw new Error("The marketplace wallet challenge expired before it could be signed");
+  }
+  const signature = await signMessage(new TextEncoder().encode(challenge.message));
   return {
-    walletAddress: params.walletAddress,
-    identityPDA: identityPDA.toBase58(),
-    message,
-    signature: signatureBase64,
+    ...challenge,
+    signature: btoa(Array.from(signature, (byte) => String.fromCharCode(byte)).join("")),
   };
 }

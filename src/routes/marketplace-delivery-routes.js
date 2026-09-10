@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const rateLimit = require('express-rate-limit');
 const marketplaceState = require('../lib/marketplace-state-machine');
 const { initializeMarketplaceCoreSchema } = require('../lib/marketplace-schema');
+const { createMarketplaceAuth, registerMarketplaceAuthChallengeRoute } = require('../lib/marketplace-wallet-auth');
 
 const AUTO_APPROVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_REVISION_REQUESTS = 2;
@@ -482,29 +483,15 @@ function registerMarketplaceDeliveryRoutes(app, { getDb, closeDb = false, autoAp
   initializeMarketplaceDeliverySchema(schemaDb);
   if (closeDb) schemaDb.close();
 
-  function requireAuth(req, res, next) {
-    const key = req.headers['x-api-key'] || String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-    if (!key) return res.status(401).json({ code: 'AUTH_REQUIRED', error: 'Missing API key' });
-    const db = getDb();
-    try {
-      initializeMarketplaceDeliverySchema(db);
-      const profile = db.prepare('SELECT id FROM profiles WHERE api_key = ?').get(key);
-      if (!profile) return res.status(403).json({ code: 'AUTH_INVALID', error: 'Invalid API key' });
-      req.marketplaceDeliveryActorId = profile.id;
-      return next();
-    } catch (error) {
-      return res.status(500).json({ code: 'AUTH_FAILURE', error: error.message });
-    } finally {
-      if (closeDb) db.close();
-    }
-  }
+  registerMarketplaceAuthChallengeRoute(app, { getDb, closeDb });
+  const authorize = createMarketplaceAuth({ getDb, closeDb, actorProperty: 'marketplaceDeliveryActorId' });
 
   const invoke = (operation, successStatus = 200) => (req, res) => {
     const db = getDb();
     try {
       const result = operation(db, {
         jobId: req.params.jobId || req.params.id,
-        deliverableId: req.params.deliverableId || null,
+        deliverableId: req.params.deliverableId || req.body?.deliverableId || null,
         actorId: req.marketplaceDeliveryActorId,
         body: req.body || {},
         idempotencyKey: req.headers['idempotency-key'] || null,
@@ -523,33 +510,42 @@ function registerMarketplaceDeliveryRoutes(app, { getDb, closeDb = false, autoAp
     }
   };
 
-  const postAliases = (paths, handler) => paths.forEach((routePath) => app.post(routePath, marketplaceMutationLimiter, requireAuth, handler));
-  const getAliases = (paths, handler) => paths.forEach((routePath) => app.get(routePath, requireAuth, handler));
+  const postAliases = (paths, action, resourceId, handler) => paths.forEach((routePath) => app.post(
+    routePath,
+    marketplaceMutationLimiter,
+    authorize({ action, resourceId }),
+    handler,
+  ));
+  const getAliases = (paths, action, handler) => paths.forEach((routePath) => app.get(
+    routePath,
+    authorize({ action, resourceId: (req) => req.params.jobId || req.params.id }),
+    handler,
+  ));
   postAliases([
     '/api/jobs/:jobId/deliverables',
     '/api/marketplace/jobs/:jobId/deliverables',
     '/api/marketplace/jobs/:id/deliver',
-  ], invoke(submitDeliverable, 201));
+  ], 'submit', (req) => req.params.jobId || req.params.id, invoke(submitDeliverable, 201));
   postAliases([
     '/api/jobs/:jobId/deliverables/:deliverableId/revisions',
     '/api/marketplace/jobs/:jobId/deliverables/:deliverableId/revisions',
     '/api/jobs/:jobId/request-changes',
     '/api/marketplace/jobs/:jobId/request-changes',
-  ], invoke(requestRevision, 201));
+  ], 'revise', (req) => req.params.deliverableId || req.body?.deliverableId, invoke(requestRevision, 201));
   postAliases([
     '/api/jobs/:jobId/deliverables/:deliverableId/approve',
     '/api/marketplace/jobs/:jobId/deliverables/:deliverableId/approve',
     '/api/jobs/:jobId/approve',
     '/api/marketplace/jobs/:jobId/approve',
-  ], invoke(approveDeliverable));
+  ], 'approve', (req) => req.params.deliverableId || req.body?.deliverableId, invoke(approveDeliverable));
   postAliases([
     '/api/jobs/:jobId/comments',
     '/api/marketplace/jobs/:jobId/comments',
-  ], invoke(addJobComment, 201));
+  ], 'comment', (req) => req.params.jobId || req.params.id, invoke(addJobComment, 201));
   getAliases([
     '/api/jobs/:jobId/thread',
     '/api/marketplace/jobs/:jobId/thread',
-  ], invoke(listJobThread));
+  ], 'thread', invoke(listJobThread));
 
   if (Number(autoApprovalSweepIntervalMs) > 0) {
     const timer = setInterval(() => {

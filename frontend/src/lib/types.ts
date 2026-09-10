@@ -53,7 +53,7 @@ export interface Job {
   posterAvatar: string;
   budget: string;
   skills: string[];
-  status: "open" | "in_progress" | "completed" | "disputed";
+  status: "draft" | "open" | "awarded" | "in_progress" | "submitted" | "approved" | "released" | "closed" | "cancelled" | "expired" | "disputed";
   escrowStatus: "ready" | "locked" | "funded" | "released" | "disputed";
   escrowTx?: string | null;
   v3EscrowPDA?: string | null;
@@ -62,6 +62,10 @@ export interface Job {
   assignee?: string;
   assigneeId?: string;
   clientId?: string;
+  selectedApplicationId?: string;
+  awardExpiresAt?: string;
+  expiresAt?: string;
+  escrowFunded?: boolean;
   deliverableId?: string;
   deliverableDescription?: string;
   deliverableStatus?: string;
