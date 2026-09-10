@@ -394,6 +394,26 @@ test('HTTP aliases authenticate actors and expose the SQLite job thread', async 
     const threadBody = await thread.json();
     assert.equal(threadBody.deliverables.length, 1);
     assert.equal(threadBody.comments.length, 1);
+
+    let readLimitResponse = null;
+    for (let request = 0; request < 110; request += 1) {
+      const response = await fetch(`${base}/api/jobs/job_route/thread`, {
+        headers: { 'X-Api-Key': 'client-key' },
+      });
+      if (response.status === 429) {
+        readLimitResponse = response;
+        break;
+      }
+    }
+    assert.ok(readLimitResponse, 'authenticated thread reads should have a bounded read-only budget');
+    assert.equal((await readLimitResponse.json()).code, 'MARKETPLACE_READ_RATE_LIMIT');
+
+    const mutationAfterReadLimit = await fetch(`${base}/api/jobs/job_route/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Api-Key': 'client-key', 'Idempotency-Key': 'after-read-limit' },
+      body: JSON.stringify({ text: 'Mutation budget remains independent' }),
+    });
+    assert.equal(mutationAfterReadLimit.status, 201, await mutationAfterReadLimit.text());
   } finally {
     await new Promise((resolve) => server.close(resolve));
     db.close();

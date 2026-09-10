@@ -176,7 +176,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             </span>
             <span style={{ color: "var(--text-tertiary)" }}>·</span>
             <span className="text-lg font-bold" style={{ color: "var(--solana, #9945ff)" }}>{job.budget}</span>
-            <span title="The configured default fee is 10% if the live escrow gate is separately authorized" style={{ color: "var(--text-tertiary)", fontSize: "11px", cursor: "help" }}>(10% configured fee; staged)</span>
+            <span title="The deployed escrow program charges 5% (500 bps); escrow remains staged until the live gate is separately authorized" style={{ color: "var(--text-tertiary)", fontSize: "11px", cursor: "help" }}>(5% deployed fee; staged)</span>
             <span style={{ color: "var(--text-tertiary)" }}>·</span>
             <span style={{ color: "var(--text-secondary)" }}>{escrowLabels[job.escrowStatus] || job.escrowStatus}</span>
             <span style={{ color: "var(--text-tertiary)" }}>·</span>

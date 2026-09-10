@@ -102,6 +102,8 @@ test('frontend parity surface names every P1D action and explicit failure state 
   assert.doesNotMatch(listingPage + detailPage, /from ["']@\/lib\/data["']/);
   assert.match(listingPage, /jobs=\{\[\]\}/);
   assert.match(detailPage, /getCanonicalJob/);
+  assert.match(detailPage, /deployed escrow program charges 5% \(500 bps\)/i);
+  assert.doesNotMatch(detailPage, /10% configured fee/i);
   assert.match(workspace, /onApplied=.*refreshJob/);
   assert.match(workspace, /setApplicationsVersion/);
   assert.match(list, /reloadToken/);

@@ -15,6 +15,13 @@ const marketplaceMutationLimiter = rateLimit({
   legacyHeaders: false,
   message: { code: 'MARKETPLACE_RATE_LIMIT', error: 'Too many marketplace mutation requests' },
 });
+const marketplaceReadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { code: 'MARKETPLACE_READ_RATE_LIMIT', error: 'Too many marketplace read requests, please retry later' },
+});
 
 class MarketplaceDeliveryError extends Error {
   constructor(status, code, message, details = {}) {
@@ -518,7 +525,7 @@ function registerMarketplaceDeliveryRoutes(app, { getDb, closeDb = false, autoAp
   ));
   const getAliases = (paths, action, handler) => paths.forEach((routePath) => app.get(
     routePath,
-    marketplaceMutationLimiter,
+    marketplaceReadLimiter,
     authorize({ action, resourceId: (req) => req.params.jobId || req.params.id }),
     handler,
   ));
