@@ -59,6 +59,18 @@ test('homepage omits public counters when the stats endpoint is unavailable', as
   assert.deepEqual(getPublicStatCounters(stats), []);
 });
 
+test('homepage leaderboard rows and total come from the same agent population', async () => {
+  const { getHomepageLeaderboard } = await import(pathToFileURL(
+    path.join(__dirname, '..', 'frontend', 'src', 'lib', 'homepage.ts')
+  ));
+  const agents = Array.from({ length: 38 }, (_, id) => ({ id }));
+
+  const leaderboard = getHomepageLeaderboard(agents);
+
+  assert.deepEqual(leaderboard.agents, agents.slice(0, 24));
+  assert.equal(leaderboard.totalAgents, agents.length);
+});
+
 test('homepage source uses the fail-closed stats view model without hardcoded counts', () => {
   assert.match(apiSource, /fetchImpl\(`\$\{API_BASE\}\/api\/stats`, \{ cache: 'no-store' \}\)/);
   assert.doesNotMatch(apiSource, /api\/ecosystem\/stats/);
@@ -72,6 +84,4 @@ test('homepage source uses the fail-closed stats view model without hardcoded co
   assert.doesNotMatch(homepageSource, /\bgetStats\b/);
   assert.doesNotMatch(homepageSource, /bornAgents|\$\{platformStats\.totalAgents\}\+/);
   assert.match(homepageSource, /statCounters\.length > 0/);
-  assert.match(homepageSource, /totalAgents=\{platformStats\?\.totalAgents\}/);
-  assert.doesNotMatch(homepageSource, /totalAgents=\{agents\.length\}/);
 });

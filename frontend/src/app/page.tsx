@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import type { Metadata } from "next";
 import { fetchHomepageStats, getPublicStatCounters } from "@/lib/api";
+import { getHomepageLeaderboard } from "@/lib/homepage";
 
 export async function generateMetadata(): Promise<Metadata> {
   const stats = await fetchHomepageStats();
@@ -39,6 +40,7 @@ function resolveAvatar(agent: any): string | null {
 
 export default async function HomePage() {
   const agents = await getAllAgents();
+  const leaderboard = getHomepageLeaderboard(agents);
   const activityFeed = await getActivityFeed();
   const platformStats = await fetchHomepageStats();
   const statCounters = getPublicStatCounters(platformStats);
@@ -438,7 +440,7 @@ export default async function HomePage() {
             View Marketplace →
           </Link>
         </div>
-        <LeaderboardTable agents={agents.slice(0, 24)} totalAgents={platformStats?.totalAgents} allSkills={[...new Set(agents.flatMap(a => a.skills))].sort()} />
+        <LeaderboardTable agents={leaderboard.agents} totalAgents={leaderboard.totalAgents} allSkills={[...new Set(agents.flatMap(a => a.skills))].sort()} />
       </section>
 
       {/* Bottom CTA */}
