@@ -9,7 +9,7 @@ interface Job {
   poster: string;
   assignee?: string;
   budget: string;
-  status: "open" | "in_progress" | "completed" | "disputed";
+  status: string;
   createdAt: string;
 }
 

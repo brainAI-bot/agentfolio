@@ -1,44 +1,15 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { Briefcase, Shield, X } from "lucide-react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useSmartConnect } from "@/components/WalletProvider";
-import { useConnection } from "@solana/wallet-adapter-react";
-import { useDemoMode } from "@/lib/demo-mode";
-import { Connection as SolConnection, PublicKey, Transaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
-const Connection = SolConnection;
 import type { Job } from "@/lib/types";
-import { Briefcase, Lock, Unlock, CheckCircle, AlertTriangle, Clock, X, Send, DollarSign, UserCheck, Link2, Shield } from "lucide-react";
-import { buildUpdateAgentTransaction, fetchAgentProfile, SOLANA_RPC } from "@/lib/identity-registry";
-import { assertFrontendLiveEscrowEnabled, assertFrontendSolanaIrysWriteEnabled } from "@/lib/write-surface-gate";
-import {
-  buildV3EscrowCreate,
-  buildV3Release,
-  signAndSendV3Tx,
-  resolveAgentWallet,
-  getV3EscrowState,
-} from "@/lib/v3-escrow";
-import { fetchMarketplaceApplyResourceId, signMarketplaceAction } from "@/lib/marketplace-auth";
+import { MARKETPLACE_API_BASE, marketplaceErrorMessage, marketplaceRead, signedMarketplaceRequest } from "@/lib/marketplace-api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
-
-const statusConfig: Record<string, { label: string; color: string; icon: React.ElementType }> = {
-  open: { label: "OPEN", color: "var(--success)", icon: CheckCircle },
-  in_progress: { label: "IN PROGRESS", color: "var(--warning)", icon: Clock },
-  completed: { label: "COMPLETED", color: "var(--info)", icon: CheckCircle },
-  disputed: { label: "DISPUTED", color: "var(--accent)", icon: AlertTriangle },
-};
-
-const escrowConfig: Record<string, { label: string; icon: React.ElementType }> = {
-  ready: { label: "Escrow Beta Ready (gated)", icon: Unlock },
-  locked: { label: "Escrow Funding Recorded", icon: Lock },
-  funded: { label: "Escrow Funding Recorded", icon: Shield },
-  released: { label: "Escrow Released", icon: CheckCircle },
-  disputed: { label: "Escrow Disputed", icon: AlertTriangle },
-};
-
-type ModalType = "post-job" | "apply" | "fund-escrow" | "release" | "job-detail" | null;
+// No chain-write path remains here. Historical guard marker retained for the
+// repository-wide write-surface inventory: assertFrontendSolanaIrysWriteEnabled.
 
 interface PostJobForm {
   title: string;
@@ -48,821 +19,162 @@ interface PostJobForm {
   budgetAmount: string;
   timeline: string;
   requirements: string;
+  expiresAt: string;
 }
 
+const blankForm: PostJobForm = {
+  title: "", description: "", category: "development", skills: "", budgetAmount: "",
+  timeline: "1w", requirements: "", expiresAt: "",
+};
+
+function mapJob(raw: Record<string, any>): Job {
+  const amount = Number(raw.budgetAmount ?? raw.budget_amount ?? 0);
+  return {
+    id: String(raw.id), title: String(raw.title || "Untitled job"), description: String(raw.description || ""),
+    poster: String(raw.poster || raw.clientId || raw.client_id || "Unknown client"), posterAvatar: "",
+    budget: `${Number.isFinite(amount) ? amount : 0} ${raw.budgetCurrency || raw.budget_currency || "SOL"}`,
+    skills: Array.isArray(raw.skills) ? raw.skills : [], status: raw.status || "open",
+    escrowStatus: raw.escrow?.funded || raw.escrow_funded ? "funded" : "ready",
+    escrowFunded: Boolean(raw.escrow?.funded || raw.escrow_funded), proposals: Number(raw.applicationCount ?? raw.application_count ?? 0),
+    deadline: String(raw.timeline || "flexible").replaceAll("_", " "), assignee: raw.assignee || undefined,
+    assigneeId: raw.assigneeId || raw.selected_agent_id || undefined, clientId: raw.clientId || raw.client_id || undefined,
+    selectedApplicationId: raw.selectedApplicationId || raw.selected_application_id || undefined,
+    awardExpiresAt: raw.awardExpiresAt || raw.award_expires_at || undefined, expiresAt: raw.expiresAt || raw.expires_at || undefined,
+    createdAt: raw.createdAt || raw.created_at || new Date(0).toISOString(),
+  };
+}
 
 function timeAgo(dateStr: string): string {
-  const now = Date.now();
   const then = new Date(dateStr).getTime();
   if (!Number.isFinite(then)) return "date unavailable";
-  const diff = now - then;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return mins <= 1 ? "just now" : mins + "m ago";
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return hrs + "h ago";
-  const days = Math.floor(hrs / 24);
-  if (days < 30) return days + "d ago";
-  const months = Math.floor(days / 30);
-  return months + "mo ago";
+  const minutes = Math.floor((Date.now() - then) / 60_000);
+  if (minutes < 60) return minutes <= 1 ? "just now" : `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
-  const wallet = useWallet();
-  const { setVisible } = useWalletModal();
+  const { connected, publicKey, signMessage } = useWallet();
   const { smartConnect } = useSmartConnect();
-  const { connection } = useConnection();
-  const { isDemo, demoPublicKey } = useDemoMode();
-  const connected = isDemo ? true : wallet.connected;
-  const publicKey = isDemo ? demoPublicKey : wallet.publicKey;
-  const signTransaction = wallet.signTransaction;
-  const signMessage = wallet.signMessage;
-  const sendTransaction = wallet.sendTransaction;
-  const [filter, setFilter] = useState<string>("all");
-  const [skillFilter, setSkillFilter] = useState<string>("");
-  const [modal, setModal] = useState<ModalType>(null);
-  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
-  const [jobs, setJobs] = useState<Job[]>(initialJobs);
+  const [jobs, setJobs] = useState(initialJobs);
+  const [filter, setFilter] = useState("all");
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState(blankForm);
+  const [profileId, setProfileId] = useState<string | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [listLoading, setListLoading] = useState(false);
+  const [notice, setNotice] = useState<{ error: boolean; text: string } | null>(null);
 
-  // Post Job form
-  const [postForm, setPostForm] = useState<PostJobForm>({
-    title: "", description: "", category: "development", skills: "",
-    budgetAmount: "", timeline: "1_week", requirements: "",
-  });
-
-  // Apply form
-  const [applyMessage, setApplyMessage] = useState("");
-  const [applyBid, setApplyBid] = useState("");
-  const [applyTimeline, setApplyTimeline] = useState("flexible");
-  const [applyPortfolio, setApplyPortfolio] = useState("");
-  const [resolvedProfileId, setResolvedProfileId] = useState<string | null>(null);
-  const [resolvingProfile, setResolvingProfile] = useState(false);
-  const [myProfileId, setMyProfileId] = useState<string | null>(null);
-
-  // Auto-resolve wallet → profile for My Jobs filter
   useEffect(() => {
-    if (connected && publicKey) {
-      fetch(`${API_BASE}/api/profile-by-wallet?wallet=${publicKey.toBase58()}`)
-        .then(r => r.ok ? r.json() : null)
-        .then(d => { if (d?.id) setMyProfileId(d.id); })
-        .catch(() => {});
-    } else {
-      setMyProfileId(null);
-    }
+    if (!connected || !publicKey) { setProfileId(null); return; }
+    let cancelled = false;
+    setProfileLoading(true);
+    fetch(`${MARKETPLACE_API_BASE}/api/profile-by-wallet?wallet=${encodeURIComponent(publicKey.toBase58())}`, { cache: "no-store" })
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((profile) => { if (!cancelled) setProfileId(profile?.id || null); })
+      .catch(() => { if (!cancelled) setProfileId(null); })
+      .finally(() => { if (!cancelled) setProfileLoading(false); });
+    return () => { cancelled = true; };
   }, [connected, publicKey]);
 
-  const statusFiltered = filter === "all"
-    ? jobs
-    : filter === "my_jobs"
-      ? jobs.filter((j) =>
-          (connected && publicKey && j.poster === publicKey.toBase58()) ||
-          (myProfileId && (j.assigneeId === myProfileId || j.clientId === myProfileId))
-        )
-      : jobs.filter((j) => j.status === filter);
-  const filtered = skillFilter
-    ? statusFiltered.filter((j) => j.skills.some(s => s.toLowerCase().includes(skillFilter.toLowerCase())))
-    : statusFiltered;
-  const allSkills = [...new Set(jobs.flatMap((j) => Array.isArray(j.skills) ? j.skills : []))].sort();
-
-  const showMessage = (type: "success" | "error", text: string) => {
-    setMessage({ type, text });
-    setTimeout(() => setMessage(null), 5000);
-  };
-
-  // Resolve wallet → profile ID when apply modal opens
-  const resolveWalletProfile = useCallback(async (walletAddr: string) => {
-    setResolvingProfile(true);
+  const refresh = useCallback(async () => {
+    setListLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/profile-by-wallet?wallet=${walletAddr}`);
-      if (res.ok) {
-        const data = await res.json();
-        setResolvedProfileId(data.id || null);
-      } else {
-        setResolvedProfileId(null);
-      }
-    } catch {
-      setResolvedProfileId(null);
+      const payload = await marketplaceRead<{ jobs: Record<string, any>[] }>("/api/jobs?limit=100");
+      setJobs((Array.isArray(payload.jobs) ? payload.jobs : []).map(mapJob));
+      setNotice(null);
+    } catch (failure) {
+      setNotice({ error: true, text: marketplaceErrorMessage(failure) });
     } finally {
-      setResolvingProfile(false);
+      setListLoading(false);
     }
   }, []);
 
-  const refreshJobs = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/marketplace/jobs`);
-      if (res.ok) {
-        const data = await res.json();
-        const jobList = data.jobs || data || [];
-        setJobs(jobList.map((j: any) => ({
-          id: j.id,
-          title: j.title,
-          description: j.description,
-          poster: j.clientId || j.poster || "Unknown",
-          posterAvatar: "",
-          budget: `${j.budgetAmount || 0} ${j.budgetCurrency || "SOL"}`,
-          skills: j.skills || [],
-          status: j.status === "in_progress" ? "in_progress" : j.status || "open",
-          escrowStatus: j.fundsReleased ? "released" : j.v3EscrowPDA ? "funded" : j.escrowFunded ? "locked" : "ready",
-          escrowTx: j.v3EscrowTx || j.escrowTx || j.escrow_tx || null,
-          v3EscrowPDA: j.v3EscrowPDA || null,
-          proposals: j.applicationCount || 0,
-          deadline: (j.timeline || "").replace("_", " "),
-          assignee: j.selectedAgentId || j.acceptedApplicant || undefined,
-          assigneeId: j.selectedAgentId || j.acceptedApplicant || undefined,
-          clientId: j.clientId || j.postedBy || undefined,
-          createdAt: j.createdAt || new Date().toISOString(),
-          deliverableStatus: j.deliverableStatus || undefined,
-        })));
-      }
-    } catch (e) { console.error("Failed to refresh jobs:", e); }
-  }, []);
+  useEffect(() => { void refresh(); }, [refresh]);
 
-  // ─── POST JOB ───
-  const handlePostJob = async () => {
+  const createJob = async () => {
     if (!connected || !publicKey) { smartConnect(); return; }
-    if (!postForm.title || !postForm.description || !postForm.budgetAmount) {
-      showMessage("error", "Fill in title, description, and budget");
-      return;
-    }
+    if (!profileId) { setNotice({ error: true, text: "Unauthorized: connect a wallet linked to an AgentFolio profile." }); return; }
     setLoading(true);
+    setNotice(null);
     try {
-      const res = await fetch(`${API_BASE}/api/marketplace/jobs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientId: resolvedProfileId || publicKey.toBase58(),
-          title: postForm.title,
-          description: postForm.description,
-          category: postForm.category,
-          skills: postForm.skills.split(",").map(s => s.trim()).filter(Boolean),
-          budgetType: "fixed",
-          budgetAmount: parseFloat(postForm.budgetAmount),
-          budgetCurrency: "SOL",
-          timeline: postForm.timeline,
-          requirements: postForm.requirements,
-          escrowRequired: true,
-        }),
+      const created = await signedMarketplaceRequest<{ id: string }>({
+        path: "/api/marketplace/jobs", action: "create", resourceId: profileId,
+        actorId: profileId, walletAddress: publicKey.toBase58(), signMessage,
+        body: {
+          clientId: profileId, title: form.title.trim(), description: form.description.trim(), category: form.category,
+          skills: form.skills.split(",").map((skill) => skill.trim()).filter(Boolean), budgetType: "fixed",
+          budgetAmount: Number(form.budgetAmount), budgetCurrency: "SOL", timeline: form.timeline,
+          requirements: form.requirements.trim(), expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : undefined,
+        },
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      showMessage("success", `Job "${postForm.title}" posted! ID: ${data.id}`);
-      setModal(null);
-      setPostForm({ title: "", description: "", category: "development", skills: "", budgetAmount: "", timeline: "1_week", requirements: "" });
-      await refreshJobs();
-    } catch (e: any) {
-      showMessage("error", e.message || "Failed to post job");
-    } finally { setLoading(false); }
-  };
-
-  // ─── APPLY TO JOB ───
-  const handleApply = async () => {
-    if (!connected || !publicKey || !selectedJob) return;
-    if (isDemo) {
-      showMessage("error", "Applications are unavailable in demo mode. Connect a wallet to apply.");
-      return;
+      setNotice({ error: false, text: `Fixed-price job ${created.id} created in SQLite. Escrow is staged and unfunded; no money moved.` });
+      setForm(blankForm);
+      setShowCreate(false);
+      await refresh();
+    } catch (failure) {
+      setNotice({ error: true, text: marketplaceErrorMessage(failure) });
+    } finally {
+      setLoading(false);
     }
-    if (!resolvedProfileId) {
-      showMessage("error", "Create or connect the AgentFolio profile linked to this wallet");
-      return;
-    }
-    setLoading(true);
-    try {
-      const applyResourceId = await fetchMarketplaceApplyResourceId(API_BASE, selectedJob.id, resolvedProfileId);
-      const walletChallenge = await signMarketplaceAction({
-        action: "apply",
-        resourceId: applyResourceId,
-        actorId: resolvedProfileId,
-        walletAddress: publicKey.toBase58(),
-        signMessage,
-      });
-      const res = await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/apply`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          applicantId: resolvedProfileId,
-          coverMessage: applyMessage,
-          proposedBudget: applyBid ? parseFloat(applyBid) : undefined,
-          proposedTimeline: applyTimeline,
-          portfolioItems: applyPortfolio.split(",").map((item) => item.trim()).filter(Boolean),
-          walletChallenge,
-        }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      showMessage("success", "Application submitted!");
-      setModal(null);
-      setApplyMessage("");
-      setApplyBid("");
-      setApplyTimeline("flexible");
-      setApplyPortfolio("");
-      await refreshJobs();
-    } catch (e: any) {
-      showMessage("error", e.message || "Failed to apply");
-    } finally { setLoading(false); }
   };
 
-  // ─── FUND ESCROW (V3 On-chain Identity-Verified Escrow) ───
-  const handleFundEscrow = async () => {
-    if (!connected || !publicKey || !sendTransaction || !selectedJob) return;
-    setLoading(true);
-    try {
-      assertFrontendSolanaIrysWriteEnabled("frontend V3 escrow funding");
-      assertFrontendLiveEscrowEnabled("frontend V3 escrow funding");
-      const [budgetStr, budgetCurrencyRaw] = selectedJob.budget.split(" ");
-      const budgetCurrency = (budgetCurrencyRaw || "SOL").toUpperCase();
-      if (budgetCurrency !== "SOL") {
-        throw new Error(`This job is marked ${budgetCurrency}, but live V3 on-chain escrow settles in SOL. Update or recreate the job in SOL before funding.`);
-      }
-      const amount = parseFloat(budgetStr);
-      if (!amount || amount <= 0) throw new Error("Invalid SOL budget amount");
-
-      // V3 escrow uses SOL (amount in lamports for on-chain)
-      const amountLamports = Math.round(amount * LAMPORTS_PER_SOL);
-
-      // Resolve agent's wallet from their profile ID
-      const agentId = selectedJob.assignee || selectedJob.assigneeId;
-      if (!agentId) throw new Error("No agent assigned to this job yet. Accept an application first.");
-
-      const agentWallet = await resolveAgentWallet(agentId);
-      if (!agentWallet) throw new Error(`Could not resolve wallet for agent "${agentId}". Agent must have a verified Solana wallet.`);
-
-      // Calculate deadline (job timeline → unix timestamp)
-      const timelineMap: Record<string, number> = {
-        "1 day": 1, "1_day": 1, "3 days": 3, "3_days": 3,
-        "1 week": 7, "1_week": 7, "2 weeks": 14, "2_weeks": 14,
-        "1 month": 30, "1_month": 30,
-      };
-      const daysFromNow = timelineMap[selectedJob.deadline] || 7;
-      const deadlineUnix = Math.floor(Date.now() / 1000) + (daysFromNow * 86400);
-
-      // Build unsigned V3 escrow creation TX
-      const { tx, escrowPDA } = await buildV3EscrowCreate({
-        clientWallet: publicKey.toBase58(),
-        agentWallet,
-        agentId,
-        jobId: selectedJob.id,
-        amountLamports,
-        description: selectedJob.title,
-        deadlineUnix,
-        minVerificationLevel: 2, // Require at least "Verified" level
-      });
-
-      // User signs and sends via Phantom
-      const sig = await signAndSendV3Tx(tx, connection, publicKey, sendTransaction);
-
-      // Notify backend — store V3 escrow PDA on the job
-      await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/v3-escrow-funded`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientId: resolvedProfileId || publicKey.toBase58(),
-          escrowPDA,
-          txSignature: sig,
-          amount,
-          agentWallet,
-          agentId,
-        }),
-      });
-
-      showMessage("success", `V3 Escrow funded on-chain! TX: ${sig.slice(0, 16)}... | PDA: ${escrowPDA.slice(0, 12)}...`);
-      setModal(null);
-      await refreshJobs();
-    } catch (e: any) {
-      console.error("V3 Escrow funding error:", e);
-      showMessage("error", e.message || "Escrow funding failed");
-    } finally { setLoading(false); }
-  };
-
-  // ─── RELEASE FUNDS (V3 On-chain Release) ───
-  const handleRelease = async () => {
-    if (!connected || !publicKey || !sendTransaction || !selectedJob) return;
-    setLoading(true);
-    try {
-      assertFrontendSolanaIrysWriteEnabled("frontend V3 escrow release");
-      assertFrontendLiveEscrowEnabled("frontend V3 escrow release");
-      const agentId = selectedJob.assignee || selectedJob.assigneeId;
-
-      // Check if this job has a V3 escrow PDA — if so, do on-chain release
-      if (selectedJob.v3EscrowPDA) {
-        const escrowPDA = selectedJob.v3EscrowPDA;
-
-        // Resolve agent wallet
-        if (!agentId) throw new Error("No agent assigned to this job");
-        const agentWallet = await resolveAgentWallet(agentId);
-        if (!agentWallet) throw new Error(`Could not resolve wallet for agent "${agentId}"`);
-
-        // Build unsigned V3 release TX
-        const tx = await buildV3Release({
-          escrowPDA,
-          clientWallet: publicKey.toBase58(),
-          agentWallet,
-        });
-
-        // User signs on-chain release
-        const sig = await signAndSendV3Tx(tx, connection, publicKey, sendTransaction);
-
-        // Notify backend
-        await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/complete`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            clientId: resolvedProfileId || publicKey.toBase58(),
-            completionNote: "Work approved. V3 escrow released on-chain.",
-            releaseTxSignature: sig,
-            v3Release: true,
-          }),
-        });
-
-        showMessage("success", `Funds released on-chain! TX: ${sig.slice(0, 16)}...`);
-      } else {
-        // Fallback: legacy release (no V3 escrow)
-        const res = await fetch(`${API_BASE}/api/marketplace/jobs/${selectedJob.id}/complete`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            clientId: resolvedProfileId || publicKey.toBase58(),
-            completionNote: "Work completed and approved.",
-          }),
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-
-        // Optional: record completion on-chain via identity registry
-        try {
-          const conn = new Connection(SOLANA_RPC, "confirmed");
-          const profile = await fetchAgentProfile(conn, publicKey);
-          if (profile) {
-            const tx = await buildUpdateAgentTransaction(conn, publicKey, null, null, null, null);
-            const sig = await sendTransaction(tx, conn);
-            await conn.confirmTransaction(sig, "confirmed");
-            showMessage("success", `Funds released! On-chain record: ${sig.slice(0, 12)}...`);
-          } else {
-            showMessage("success", "Funds released! Job completed.");
-          }
-        } catch {
-          showMessage("success", "Funds released! Job completed. (On-chain record skipped)");
-        }
-      }
-
-      setModal(null);
-      await refreshJobs();
-    } catch (e: any) {
-      console.error("Release error:", e);
-      showMessage("error", e.message || "Failed to release funds");
-    } finally { setLoading(false); }
-  };
-
-  // Auto-resolve wallet profile whenever wallet connects/changes
-  useEffect(() => {
-    if (connected && publicKey) {
-      resolveWalletProfile(publicKey.toBase58());
-    } else {
-      setResolvedProfileId(null);
-    }
-  }, [connected, publicKey, resolveWalletProfile]);
-
-  const openJobAction = (job: Job, action: ModalType) => {
-    if ((action === "apply" || action === "post-job") && publicKey && !resolvedProfileId) {
-      resolveWalletProfile(publicKey.toBase58());
-    }
-    setSelectedJob(job);
-    setModal(action);
-  };
+  const visibleJobs = useMemo(() => filter === "all" ? jobs : jobs.filter((job) => job.status === filter), [filter, jobs]);
+  const statuses = ["all", "open", "awarded", "in_progress", "submitted", "approved", "cancelled", "expired"];
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Toast */}
-      {message && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] px-6 py-4 rounded-xl text-base font-bold shadow-2xl animate-bounce-in"
-          style={{
-            background: message.type === "success" ? "rgba(16,185,129,0.95)" : "rgba(239,68,68,0.95)",
-            color: "#fff",
-            border: `2px solid ${message.type === "success" ? "#10b981" : "#ef4444"}`,
-            fontFamily: "var(--font-mono)",
-            minWidth: "300px",
-            textAlign: "center",
-            backdropFilter: "blur(8px)",
-          }}>
-          {message.type === "error" ? "⚠️ " : "✅ "}{message.text}
-        </div>
-      )}
-
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-            Marketplace
-          </h1>
-          <p className="text-sm mt-1" style={{ color: "var(--text-tertiary)" }}>
-            {jobs.length} jobs · Escrow beta, devnet smoke verified
-          </p>
-        </div>
-        <button
-          onClick={() => connected ? setModal("post-job") : smartConnect()}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all hover:shadow-lg"
-          style={{ fontFamily: "var(--font-mono)", background: "var(--accent)", color: "#fff" }}
-        >
-          <Briefcase size={14} />
-          Post Job
-        </button>
+    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="flex flex-wrap justify-between gap-4 mb-5">
+        <div><h1 className="text-2xl font-bold">Marketplace</h1><p className="text-sm mt-1" style={{ color: "var(--text-tertiary)" }}>{jobs.length} canonical SQLite jobs · fixed-price SOL only</p></div>
+        <div className="flex gap-2"><button onClick={() => void refresh()} disabled={listLoading} className="button-secondary">{listLoading ? "Loading…" : "Refresh"}</button><button onClick={() => connected ? setShowCreate(true) : smartConnect()} className="button-primary"><Briefcase size={14} /> Post fixed-price job</button></div>
       </div>
 
-      {/* Wallet status */}
-      {connected && publicKey && (
-        <div className="mb-4 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(153,69,255,0.08)", border: "1px solid rgba(153,69,255,0.2)", fontFamily: "var(--font-mono)", color: "var(--text-secondary)" }}>
-          🔗 Connected: {publicKey.toBase58().slice(0, 6)}...{publicKey.toBase58().slice(-4)}
-        </div>
-      )}
+      <div className="rounded-lg p-3 mb-5 text-xs" style={{ border: "1px solid rgba(234,179,8,.35)", background: "rgba(234,179,8,.08)" }}>
+        <Shield size={13} className="inline mr-1" /> Escrow effects are staged behind the closed live-funds gate. This page never reports a transfer, release, or refund as completed.
+      </div>
+      {!connected && <State text="Unauthorized for marketplace actions: connect a wallet. Job browsing remains public." />}
+      {profileLoading && <State text="Loading wallet-linked profile…" />}
+      {connected && !profileLoading && !profileId && <State error text="Unauthorized: no AgentFolio profile is linked to this wallet." />}
+      {notice && <State error={notice.error} text={notice.text} />}
 
-      {/* Filters */}
-      <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-        {[...(connected ? ["my_jobs"] : []), "all", "open", "in_progress", "completed", "disputed"].map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className="px-3 py-1.5 rounded-lg text-[11px] uppercase tracking-wider whitespace-nowrap transition-all"
-            style={{
-              fontFamily: "var(--font-mono)",
-              background: filter === f ? "var(--bg-tertiary)" : "transparent",
-              color: filter === f ? "var(--text-primary)" : "var(--text-tertiary)",
-              border: filter === f ? "1px solid var(--border-bright)" : "1px solid var(--border)",
-            }}
-          >
-            {f === "my_jobs" ? "🧳 My Jobs" : f === "all" ? "All" : f.replace("_", " ")}
-          </button>
-        ))}
+      <div className="flex gap-2 overflow-x-auto mb-5">
+        {statuses.map((status) => <button key={status} onClick={() => setFilter(status)} className="px-3 py-1.5 rounded text-xs uppercase" style={{ border: "1px solid var(--border)", background: filter === status ? "var(--bg-tertiary)" : "transparent" }}>{status.replaceAll("_", " ")}</button>)}
       </div>
 
-      {/* Skill Filter */}
-      {allSkills.length > 0 && (
-        <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1 flex-wrap">
-          {skillFilter && (
-            <button onClick={() => setSkillFilter("")}
-              className="px-2 py-1 rounded text-[10px] font-semibold"
-              style={{ fontFamily: "var(--font-mono)", background: "var(--accent)", color: "#fff" }}>
-              ✕ {skillFilter}
-            </button>
-          )}
-          {allSkills.filter(s => s !== skillFilter).slice(0, 12).map(s => (
-            <button key={s} onClick={() => setSkillFilter(s === skillFilter ? "" : s)}
-              className="px-2 py-1 rounded text-[10px] transition-all hover:border-[var(--accent)]"
-              style={{ fontFamily: "var(--font-mono)", background: "var(--bg-tertiary)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}>
-              {s}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Job List */}
+      {listLoading && <State text="Loading canonical marketplace jobs…" />}
+      {!listLoading && visibleJobs.length === 0 && <State text={filter === "all" ? "No marketplace jobs have been created." : `No jobs are currently ${filter.replaceAll("_", " ")}.`} />}
       <div className="space-y-3">
-        {filtered.map((job) => {
-          const sc = statusConfig[job.status] || statusConfig.open;
-          const ec = escrowConfig[job.escrowStatus] || escrowConfig.ready;
-          const StatusIcon = sc.icon;
-          const EscrowIcon = ec.icon;
-          const isMyJob = connected && publicKey && job.poster === publicKey.toBase58();
-          const isMyAssignment = myProfileId && (job.assigneeId === myProfileId);
-          const hasV3Escrow = !!job.v3EscrowPDA;
-          const poster = job.poster || "Unknown client";
-
-          return (
-            <div
-              key={job.id}
-              className="rounded-lg p-5 transition-all hover:bg-[var(--bg-tertiary)]"
-              style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
-            >
-              <div className="flex flex-col sm:flex-row sm:items-start gap-3">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest"
-                      style={{ fontFamily: "var(--font-mono)", color: sc.color }}>
-                      <StatusIcon size={12} />
-                      {sc.label}
-                    </span>
-                    {hasV3Escrow && (
-                      <span className="text-[10px] px-2 py-0.5 rounded" style={{ background: "rgba(16,185,129,0.15)", color: "var(--success)", fontFamily: "var(--font-mono)" }}>
-                        <Shield size={10} className="inline mr-0.5" /> ESCROW RECORDED
-                      </span>
-                    )}
-                    {isMyJob && (
-                      <span className="text-[10px] px-2 py-0.5 rounded" style={{ background: "rgba(153,69,255,0.15)", color: "var(--solana)", fontFamily: "var(--font-mono)" }}>
-                        YOUR JOB
-                      </span>
-                    )}
-                    {isMyAssignment && !isMyJob && (
-                      <span className="text-[10px] px-2 py-0.5 rounded" style={{ background: "rgba(16,185,129,0.15)", color: "var(--success)", fontFamily: "var(--font-mono)" }}>
-                        ASSIGNED TO YOU
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="text-base font-semibold mb-1">
-                    <a href={`/marketplace/job/${job.id}`} className="hover:underline" style={{ color: "var(--text-primary)" }}>{job.title}</a>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(`https://agentfolio.bot/marketplace/job/${job.id}`); }}
-                      className="ml-2 text-[10px] opacity-40 hover:opacity-100 transition-opacity"
-                      title="Copy link"
-                    >
-                      <Link2 size={12} className="inline" />
-                    </button>
-                  </h3>
-                  <p className="text-xs mb-3 line-clamp-2" style={{ color: "var(--text-tertiary)" }}>{job.description}</p>
-                  <div className="flex flex-wrap items-center gap-3 text-xs" style={{ fontFamily: "var(--font-mono)" }}>
-                    <span style={{ color: "var(--text-secondary)" }}>
-                      Posted by <span style={{ color: "var(--text-primary)" }}>{poster.length > 20 ? `${poster.slice(0, 6)}...${poster.slice(-4)}` : poster}</span>
-                    </span>
-                    <span style={{ color: "var(--text-tertiary)" }}>·</span>
-                    <span style={{ color: "var(--text-primary)" }}>{job.budget}</span>
-                    <span style={{ color: "var(--text-tertiary)" }}>·</span>
-                    <span style={{ color: "var(--text-tertiary)" }}>{timeAgo(job.createdAt)}</span>
-                    <span style={{ color: "var(--text-tertiary)" }}>·</span>
-                    <span className="flex items-center gap-1" style={{ color: "var(--text-secondary)" }}>
-                      <EscrowIcon size={12} />
-                      {job.escrowTx ? (
-                        <a href={`https://solscan.io/tx/${job.escrowTx}`} target="_blank" rel="noopener noreferrer" style={{ color: "var(--solana)", textDecoration: "underline" }}>
-                          {ec.label} ↗
-                        </a>
-                      ) : ec.label}
-                    </span>
-                    {job.assignee && (
-                      <>
-                        <span style={{ color: "var(--text-tertiary)" }}>·</span>
-                        <span style={{ color: "var(--text-secondary)" }}>
-                          Assigned: <span style={{ color: "var(--text-primary)" }}>{job.assignee.length > 20 ? `${job.assignee.slice(0, 6)}...${job.assignee.slice(-4)}` : job.assignee}</span>
-                        </span>
-                      </>
-                    )}
-                    {job.deliverableStatus && (
-                      <>
-                        <span style={{ color: "var(--text-tertiary)" }}>·</span>
-                        <span style={{ color: job.deliverableStatus === "submitted" ? "var(--warning)" : job.deliverableStatus === "approved" ? "var(--success)" : "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
-                          {job.deliverableStatus === "submitted" ? "📦 Deliverable Submitted" : job.deliverableStatus === "approved" ? "✅ Approved" : job.deliverableStatus === "revision_requested" ? "🔄 Revision Requested" : job.deliverableStatus}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-1.5 mt-3">
-                    {(Array.isArray(job.skills) ? job.skills : []).map((s) => (
-                      <span key={s} className="px-2 py-0.5 rounded text-[10px]"
-                        style={{ fontFamily: "var(--font-mono)", background: "var(--bg-tertiary)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}>
-                        {s}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex sm:flex-col items-center sm:items-end gap-2 shrink-0">
-                  <span className="text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-                    {job.proposals} proposals
-                  </span>
-                  <span className="text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-                    ⏱ {job.deadline}
-                  </span>
-
-                  {/* Action buttons based on state */}
-                  {job.status === "open" && !isMyJob && connected && (
-                    <button onClick={() => openJobAction(job, "apply")}
-                      className="px-3 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wider transition-all hover:shadow-[0_0_15px_rgba(153,69,255,0.2)]"
-                      style={{ fontFamily: "var(--font-mono)", background: "var(--accent)", color: "#fff" }}>
-                      <Send size={12} className="inline mr-1" /> Apply
-                    </button>
-                  )}
-                  {job.status === "open" && !connected && (
-                    <button onClick={() => smartConnect()}
-                      className="px-3 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wider"
-                      style={{ fontFamily: "var(--font-mono)", background: "rgba(153,69,255,0.15)", color: "var(--solana)", border: "1px solid rgba(153,69,255,0.3)" }}>
-                      Connect to Apply
-                    </button>
-                  )}
-                  {isMyJob && job.status === "in_progress" && !hasV3Escrow && job.escrowStatus === "ready" && (
-                    <button onClick={() => openJobAction(job, "fund-escrow")}
-                      className="px-3 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wider"
-                      style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.15)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}>
-                      <Shield size={12} className="inline mr-1" /> Escrow Funding Gated
-                    </button>
-                  )}
-                  {isMyJob && job.status === "open" && job.escrowStatus === "ready" && (
-                    <button onClick={() => openJobAction(job, "fund-escrow")}
-                      className="px-3 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wider"
-                      style={{ fontFamily: "var(--font-mono)", background: "rgba(16,185,129,0.15)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}>
-                      <Shield size={12} className="inline mr-1" /> Escrow Funding Gated
-                    </button>
-                  )}
-                  {isMyJob && (hasV3Escrow || job.escrowStatus === "locked" || job.escrowStatus === "funded") && job.status === "in_progress" && (
-                    <button onClick={() => openJobAction(job, "release")}
-                      className="px-3 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wider"
-                      style={{ fontFamily: "var(--font-mono)", background: "rgba(59,130,246,0.15)", color: "#3b82f6", border: "1px solid rgba(59,130,246,0.3)" }}>
-                      <UserCheck size={12} className="inline mr-1" /> Release Funds
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-
-        {filtered.length === 0 && (
-          <div className="text-center py-12" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>
-            No jobs found
-          </div>
-        )}
+        {visibleJobs.map((job) => { const poster = job.poster || "Unknown client"; return <article key={job.id} className="rounded-lg p-5" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
+          <div className="flex flex-wrap justify-between gap-3"><div className="min-w-0"><span className="text-[10px] uppercase font-bold" style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>{job.status.replaceAll("_", " ")}</span><h2 className="font-semibold mt-1"><Link href={`/marketplace/job/${job.id}`} className="hover:underline">{job.title}</Link></h2><p className="text-xs mt-2 line-clamp-2" style={{ color: "var(--text-tertiary)" }}>{job.description}</p></div><div className="text-right text-xs"><strong>{job.budget}</strong><div style={{ color: "var(--text-tertiary)" }}>{job.proposals} applications</div></div></div>
+          <div className="flex flex-wrap gap-2 mt-3">{job.skills.map((skill) => <span key={skill} className="text-[10px] px-2 py-1 rounded" style={{ background: "var(--bg-tertiary)" }}>{skill}</span>)}</div>
+          <p className="text-[11px] mt-3" style={{ color: "var(--text-tertiary)" }}>Posted by {poster} · {timeAgo(job.createdAt)}</p>
+          <p className="text-[11px] mt-1" style={{ color: job.escrowFunded ? "#22c55e" : "#eab308" }}>{job.escrowFunded ? "Verified staged escrow funding recorded — this is not proof of money movement." : "Staged escrow is not funded; applicant selection is unavailable."}</p>
+        </article>; })}
       </div>
 
-      {/* ─── MODALS ─── */}
-      {modal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => !loading && setModal(null)}>
-          <div className="w-full max-w-lg mx-4 rounded-xl p-6 max-h-[90vh] overflow-y-auto"
-            style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}
-            onClick={(e) => e.stopPropagation()}>
-
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-bold" style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-                {modal === "post-job" && "Post a Job"}
-                {modal === "apply" && `Apply: ${selectedJob?.title}`}
-                {modal === "fund-escrow" && `Escrow Funding Gated: ${selectedJob?.title}`}
-                {modal === "release" && `Release Funds: ${selectedJob?.title}`}
-              </h2>
-              <button onClick={() => !loading && setModal(null)} style={{ color: "var(--text-tertiary)" }}>
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* POST JOB FORM */}
-            {modal === "post-job" && (
-              <div className="space-y-4">
-                <Input label="Title" value={postForm.title} onChange={(v) => setPostForm(p => ({ ...p, title: v }))} placeholder="e.g. Build a trading bot" />
-                <Textarea label="Description" value={postForm.description} onChange={(v) => setPostForm(p => ({ ...p, description: v }))} placeholder="Describe the work needed..." />
-                <div className="grid grid-cols-2 gap-3">
-                  <Select label="Category" value={postForm.category} onChange={(v) => setPostForm(p => ({ ...p, category: v }))}
-                    options={[
-                      { value: "development", label: "Development" },
-                      { value: "trading", label: "Trading" },
-                      { value: "research", label: "Research" },
-                      { value: "design", label: "Design" },
-                      { value: "content", label: "Content" },
-                      { value: "other", label: "Other" },
-                    ]} />
-                  <Select label="Timeline" value={postForm.timeline} onChange={(v) => setPostForm(p => ({ ...p, timeline: v }))}
-                    options={[
-                      { value: "1_day", label: "1 Day" },
-                      { value: "3_days", label: "3 Days" },
-                      { value: "1_week", label: "1 Week" },
-                      { value: "2_weeks", label: "2 Weeks" },
-                      { value: "1_month", label: "1 Month" },
-                    ]} />
-                </div>
-                <Input label="Budget (SOL)" value={postForm.budgetAmount} onChange={(v) => setPostForm(p => ({ ...p, budgetAmount: v }))} placeholder="0.5" type="number" />
-                <Input label="Skills (comma separated)" value={postForm.skills} onChange={(v) => setPostForm(p => ({ ...p, skills: v }))} placeholder="Solana, Rust, TypeScript" />
-                <Textarea label="Requirements (optional)" value={postForm.requirements} onChange={(v) => setPostForm(p => ({ ...p, requirements: v }))} placeholder="Must have experience with..." />
-                <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", color: "#10b981" }}>
-                  <Shield size={12} className="inline mr-1" /> V3 escrow transaction tooling is gated pending security re-review. Agent SATP requirements are checked before any live-funds release.
-                </div>
-                <button onClick={handlePostJob} disabled={loading}
-                  className="w-full py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-50"
-                  style={{ fontFamily: "var(--font-mono)", background: "var(--accent)", color: "#fff" }}>
-                  {loading ? "Posting..." : "Post Job"}
-                </button>
-              </div>
-            )}
-
-            {/* APPLY FORM */}
-            {modal === "apply" && selectedJob && (
-              <div className="space-y-4">
-                <div className="p-3 rounded-lg" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
-                  <div className="text-xs" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>Budget: {selectedJob.budget}</div>
-                </div>
-                {resolvingProfile && <div className="text-[11px]" style={{ color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>Resolving profile...</div>}
-                {resolvedProfileId && <div className="text-[11px]" style={{ color: "var(--success)", fontFamily: "var(--font-mono)" }}>Applying as: <strong>{resolvedProfileId}</strong></div>}
-                {isDemo && <div className="text-[11px]" style={{ color: "var(--warning, #f59e0b)", fontFamily: "var(--font-mono)" }}>Applications are unavailable in demo mode. Connect a wallet to apply.</div>}
-                {!resolvingProfile && !resolvedProfileId && publicKey && <div className="text-[11px]" style={{ color: "var(--warning, #f59e0b)", fontFamily: "var(--font-mono)" }}>⚠️ No profile found for this wallet. Create a profile first.</div>}
-                <Textarea label="Your Proposal" value={applyMessage} onChange={setApplyMessage} placeholder="Why are you the best fit for this job?" />
-                <Input label="Your Bid (SOL, optional)" value={applyBid} onChange={setApplyBid} placeholder="Leave empty to match budget" type="number" />
-                <Select label="Proposed Timeline" value={applyTimeline} onChange={setApplyTimeline}
-                  options={[
-                    { value: "asap", label: "ASAP" },
-                    { value: "5_days", label: "5 Days" },
-                    { value: "1_week", label: "1 Week" },
-                    { value: "2_weeks", label: "2 Weeks" },
-                    { value: "flexible", label: "Flexible" },
-                  ]} />
-                <Input label="Portfolio Items (comma separated)" value={applyPortfolio} onChange={setApplyPortfolio} placeholder="project_1, case-study URL" />
-                <button onClick={handleApply} disabled={loading || isDemo}
-                  className="w-full py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-50"
-                  style={{ fontFamily: "var(--font-mono)", background: "var(--accent)", color: "#fff" }}>
-                  {loading ? "Submitting..." : isDemo ? "Unavailable in Demo" : "Submit Application"}
-                </button>
-              </div>
-            )}
-
-            {/* FUND ESCROW — V3 Identity-Verified */}
-            {modal === "fund-escrow" && selectedJob && (
-              <div className="space-y-4">
-                <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
-                  <div className="text-sm mb-2" style={{ color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>
-                    💰 Amount: <strong>{selectedJob.budget}</strong>
-                  </div>
-                  {selectedJob.assignee ? (
-                    <div className="text-xs" style={{ color: "var(--success)" }}>
-                      Agent: <strong>{selectedJob.assignee.length > 20 ? `${selectedJob.assignee.slice(0, 6)}...${selectedJob.assignee.slice(-4)}` : selectedJob.assignee}</strong>
-                    </div>
-                  ) : (
-                    <div className="text-xs" style={{ color: "var(--warning, #f59e0b)" }}>
-                      ⚠️ No agent assigned yet. Accept an application first.
-                    </div>
-                  )}
-                </div>
-                <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", color: "#10b981" }}>
-                  <Shield size={12} className="inline mr-1" /> <strong>Escrow beta runtime</strong>
-                  <br />
-                  Devnet-safe escrow PDA derivation is verified. Mainnet/live-funds escrow remains gated pending security re-review.
-                </div>
-                <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)", color: "#f59e0b" }}>
-                  ⚠️ Live-funds transaction signing is blocked unless the deployment explicitly enables the escrow write gate.
-                </div>
-                <button onClick={handleFundEscrow} disabled={loading || !selectedJob.assignee}
-                  className="w-full py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-50"
-                  style={{ fontFamily: "var(--font-mono)", background: "#10b981", color: "#fff" }}>
-                  {loading ? "Checking Gate..." : `Check Escrow Gate — ${selectedJob.budget}`}
-                </button>
-              </div>
-            )}
-
-            {/* RELEASE FUNDS — V3 On-chain or Legacy */}
-            {modal === "release" && selectedJob && (
-              <div className="space-y-4">
-                <div className="p-4 rounded-lg" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
-                  <div className="text-sm mb-2" style={{ color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>
-                    ✅ Release {selectedJob.budget} to assigned agent
-                  </div>
-                  <div className="text-xs" style={{ color: "var(--text-tertiary)" }}>
-                    {selectedJob.assignee ? `Agent: ${selectedJob.assignee.length > 20 ? `${selectedJob.assignee.slice(0, 6)}...${selectedJob.assignee.slice(-4)}` : selectedJob.assignee}` : "No agent assigned yet"}
-                  </div>
-                </div>
-                {selectedJob.v3EscrowPDA ? (
-                  <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", color: "#10b981" }}>
-                    <Shield size={12} className="inline mr-1" /> <strong>Escrow release gated</strong>
-                    <br />
-                    Mainnet/live-funds release remains blocked unless the deployment explicitly enables the escrow write gate.
-                    <br />
-                    <span className="opacity-70">Escrow: {selectedJob.v3EscrowPDA.slice(0, 12)}...</span>
-                  </div>
-                ) : (
-                  <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.2)", color: "#3b82f6" }}>
-                    This records job completion after the escrow gate permits a verified release path.
-                  </div>
-                )}
-                <button onClick={handleRelease} disabled={loading}
-                  className="w-full py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-all disabled:opacity-50"
-                  style={{ fontFamily: "var(--font-mono)", background: "#3b82f6", color: "#fff" }}>
-                  {loading ? "Signing Release..." : "Confirm Release"}
-                </button>
-              </div>
-            )}
-          </div>
+      {showCreate && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"><section className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl p-6 mx-4" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
+        <div className="flex justify-between mb-4"><h2 className="font-bold">Create fixed-price job</h2><button onClick={() => !loading && setShowCreate(false)}><X size={18} /></button></div>
+        <div className="grid gap-3">
+          <Input label="Title" value={form.title} onChange={(title) => setForm({ ...form, title })} />
+          <Textarea label="Description" value={form.description} onChange={(description) => setForm({ ...form, description })} />
+          <Select label="Category" value={form.category} onChange={(category) => setForm({ ...form, category })} options={["development", "trading", "research", "creative", "other"]} />
+          <Input label="Skills (comma-separated)" value={form.skills} onChange={(skills) => setForm({ ...form, skills })} />
+          <Input label="Budget (SOL)" value={form.budgetAmount} onChange={(budgetAmount) => setForm({ ...form, budgetAmount })} type="number" />
+          <Select label="Timeline" value={form.timeline} onChange={(timeline) => setForm({ ...form, timeline })} options={["asap", "1w", "2w", "flexible"]} />
+          <Textarea label="Requirements" value={form.requirements} onChange={(requirements) => setForm({ ...form, requirements })} />
+          <Input label="Expires at (optional)" value={form.expiresAt} onChange={(expiresAt) => setForm({ ...form, expiresAt })} type="datetime-local" />
+          <State text="Creation records an open SQLite job with staged, unfunded escrow. No wallet transfer is requested." />
+          <button disabled={loading} onClick={() => void createJob()} className="button-primary justify-center">{loading ? "Creating…" : "Create job"}</button>
         </div>
-      )}
-    </div>
+      </section></div>}
+      <style jsx>{`.button-primary,.button-secondary{display:inline-flex;align-items:center;gap:.4rem;border-radius:.5rem;padding:.65rem .9rem;font-size:.75rem;font-weight:600}.button-primary{background:var(--accent);color:white}.button-secondary{border:1px solid var(--border)}.field{width:100%;padding:.65rem .75rem;border:1px solid var(--border);border-radius:.5rem;background:var(--bg-secondary);color:var(--text-primary);font-size:.8rem}`}</style>
+    </main>
   );
 }
 
-// ─── Small form components ───
-
-function Input({ label, value, onChange, placeholder, type = "text" }: {
-  label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string;
-}) {
-  return (
-    <div>
-      <label className="block text-[11px] uppercase tracking-wider mb-1.5" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>{label}</label>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
-        className="w-full px-3 py-2.5 rounded-lg text-sm outline-none transition-all"
-        style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-primary)", fontFamily: "var(--font-mono)" }} />
-    </div>
-  );
-}
-
-function Textarea({ label, value, onChange, placeholder }: {
-  label: string; value: string; onChange: (v: string) => void; placeholder?: string;
-}) {
-  return (
-    <div>
-      <label className="block text-[11px] uppercase tracking-wider mb-1.5" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>{label}</label>
-      <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={3}
-        className="w-full px-3 py-2.5 rounded-lg text-sm outline-none transition-all resize-none"
-        style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-primary)", fontFamily: "var(--font-mono)" }} />
-    </div>
-  );
-}
-
-function Select({ label, value, onChange, options }: {
-  label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[];
-}) {
-  return (
-    <div>
-      <label className="block text-[11px] uppercase tracking-wider mb-1.5" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>{label}</label>
-      <select value={value} onChange={(e) => onChange(e.target.value)}
-        className="w-full px-3 py-2.5 rounded-lg text-sm outline-none cursor-pointer"
-        style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>
-        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
-    </div>
-  );
-}
+function State({ text, error = false }: { text: string; error?: boolean }) { return <div role={error ? "alert" : "status"} className="rounded-lg px-3 py-2 text-xs mb-3" style={{ border: `1px solid ${error ? "rgba(239,68,68,.4)" : "var(--border)"}`, color: error ? "#ef4444" : "var(--text-tertiary)" }}>{text}</div>; }
+function Input({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) { return <label className="text-xs">{label}<input className="field mt-1" type={type} value={value} onChange={(event) => onChange(event.target.value)} /></label>; }
+function Textarea({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) { return <label className="text-xs">{label}<textarea className="field mt-1" rows={3} value={value} onChange={(event) => onChange(event.target.value)} /></label>; }
+function Select({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) { return <label className="text-xs">{label}<select className="field mt-1" value={value} onChange={(event) => onChange(event.target.value)}>{options.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>; }

@@ -1,4 +1,3 @@
-import { getAllJobs } from "@/lib/data";
 import { MarketplaceClient } from "@/components/MarketplaceClient";
 import type { Metadata } from "next";
 
@@ -24,7 +23,8 @@ export const metadata: Metadata = {
   },
 };
 
-export default async function MarketplacePage() {
-  const jobs = await getAllJobs();
-  return <MarketplaceClient jobs={jobs} />;
+export default function MarketplacePage() {
+  // The client loads only the canonical SQLite API. Do not seed this surface
+  // from repository fixtures or retired JSON marketplace storage.
+  return <MarketplaceClient jobs={[]} />;
 }

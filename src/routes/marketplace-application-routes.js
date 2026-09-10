@@ -5,7 +5,7 @@ const rateLimit = require('express-rate-limit');
 const marketplaceState = require('../lib/marketplace-state-machine');
 const { initializeMarketplaceCoreSchema } = require('../lib/marketplace-schema');
 const { hasVerifiedCanonicalTrustData } = require('../lib/canonical-verification-providers');
-const { createRequireAuth } = require('../middleware/auth');
+const { createMarketplaceAuth, registerMarketplaceAuthChallengeRoute } = require('../lib/marketplace-wallet-auth');
 
 const AWARD_TTL_MS = 48 * 60 * 60 * 1000;
 const DAILY_APPLICATION_LIMIT = 10;
@@ -649,15 +649,8 @@ function registerMarketplaceApplicationRoutes(app, { getDb, closeDb = false, tim
   initializeMarketplaceApplicationSchema(schemaDb);
   if (closeDb) schemaDb.close();
 
-  const requireAuth = createRequireAuth({
-    getDb,
-    closeDb,
-    actorProperty: 'marketplaceActorId',
-    invalidStatus: 403,
-    missingBody: { code: 'AUTH_REQUIRED', error: 'Missing API key' },
-    invalidBody: { code: 'AUTH_INVALID', error: 'Invalid API key' },
-    failureBody: (error) => ({ code: 'AUTH_FAILURE', error: error.message }),
-  });
+  registerMarketplaceAuthChallengeRoute(app, { getDb, closeDb });
+  const authorize = createMarketplaceAuth({ getDb, closeDb, actorProperty: 'marketplaceActorId' });
 
   const invoke = (operation, successStatus = 200) => (req, res) => {
     const db = getDb();
@@ -684,44 +677,49 @@ function registerMarketplaceApplicationRoutes(app, { getDb, closeDb = false, tim
     }
   };
 
-  const postAliases = (paths, handler) => paths.forEach((routePath) => (
-    app.post(routePath, marketplaceMutationLimiter, requireAuth, handler)
+  const postAliases = (paths, action, resourceId, handler) => paths.forEach((routePath) => (
+    app.post(routePath, marketplaceMutationLimiter, authorize({ action, resourceId }), handler)
   ));
-  postAliases(['/api/jobs/:id/apply', '/api/marketplace/jobs/:id/apply'], invoke(applyToJob, 201));
+  postAliases(
+    ['/api/jobs/:id/apply', '/api/marketplace/jobs/:id/apply'],
+    'apply',
+    (req) => req.params.id,
+    invoke(applyToJob, 201),
+  );
   postAliases([
     '/api/applications/:applicationId/withdraw',
     '/api/jobs/:jobId/applications/:applicationId/withdraw',
     '/api/marketplace/applications/:applicationId/withdraw',
     '/api/marketplace/jobs/:jobId/applications/:applicationId/withdraw',
-  ], invoke(withdrawApplication));
+  ], 'withdraw', (req) => req.params.applicationId, invoke(withdrawApplication));
   postAliases([
     '/api/applications/:applicationId/reject',
     '/api/jobs/:jobId/applications/:applicationId/reject',
     '/api/marketplace/applications/:applicationId/reject',
     '/api/marketplace/jobs/:jobId/applications/:applicationId/reject',
-  ], invoke(rejectApplication));
+  ], 'reject', (req) => req.params.applicationId, invoke(rejectApplication));
   postAliases([
     '/api/applications/:applicationId/select',
     '/api/jobs/:jobId/applications/:applicationId/select',
     '/api/marketplace/applications/:applicationId/select',
     '/api/marketplace/jobs/:jobId/applications/:applicationId/select',
-  ], invoke(selectApplication));
+  ], 'select', (req) => req.params.applicationId, invoke(selectApplication));
   postAliases([
     '/api/applications/:applicationId/accept',
     '/api/jobs/:jobId/applications/:applicationId/accept',
     '/api/marketplace/applications/:applicationId/accept',
     '/api/marketplace/jobs/:jobId/applications/:applicationId/accept',
-  ], invoke(acceptAward));
+  ], 'accept', (req) => req.params.applicationId, invoke(acceptAward));
   postAliases([
     '/api/applications/:applicationId/decline',
     '/api/jobs/:jobId/applications/:applicationId/decline',
     '/api/marketplace/applications/:applicationId/decline',
     '/api/marketplace/jobs/:jobId/applications/:applicationId/decline',
-  ], invoke(declineAward));
+  ], 'decline', (req) => req.params.applicationId, invoke(declineAward));
   postAliases([
     '/api/jobs/:jobId/award-timeout',
     '/api/marketplace/jobs/:jobId/award-timeout',
-  ], invoke(expireAward));
+  ], 'award-timeout', (req) => req.params.jobId, invoke(expireAward));
 
   if (Number(timeoutSweepIntervalMs) > 0) {
     const timer = setInterval(() => {

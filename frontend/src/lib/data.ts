@@ -262,16 +262,18 @@ function loadAllProfiles(): Agent[] {
 function mapApiJob(raw: any): Job {
   const statusMap: Record<string, Job["status"]> = {
     open: "open",
-    draft: "open",
-    awarded: "in_progress",
+    draft: "draft",
+    awarded: "awarded",
     agent_accepted: "in_progress",
-    submitted: "in_progress",
+    submitted: "submitted",
     work_submitted: "in_progress",
     in_progress: "in_progress",
-    approved: "completed",
-    released: "completed",
-    closed: "completed",
-    completed: "completed",
+    approved: "approved",
+    released: "released",
+    closed: "closed",
+    completed: "closed",
+    cancelled: "cancelled",
+    expired: "expired",
     disputed: "disputed",
   };
   const amount = Number(raw.budgetAmount ?? raw.budget_amount ?? raw.agreed_budget ?? 0);
@@ -292,6 +294,10 @@ function mapApiJob(raw: any): Job {
     assignee: raw.assignee || raw.selectedAgentId || raw.selected_agent_id || undefined,
     assigneeId: raw.assigneeId || raw.selectedAgentId || raw.selected_agent_id || undefined,
     clientId: raw.clientId || raw.client_id || undefined,
+    selectedApplicationId: raw.selectedApplicationId || raw.selected_application_id || undefined,
+    awardExpiresAt: raw.awardExpiresAt || raw.award_expires_at || undefined,
+    expiresAt: raw.expiresAt || raw.expires_at || undefined,
+    escrowFunded: Boolean(raw.escrow?.funded ?? raw.escrowFunded ?? raw.escrow_funded),
     createdAt: createdAt && Number.isFinite(new Date(createdAt).getTime()) ? createdAt : new Date(0).toISOString(),
   };
 }
