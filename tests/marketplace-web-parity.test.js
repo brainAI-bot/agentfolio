@@ -83,6 +83,7 @@ test('frontend parity surface names every P1D action and explicit failure state 
   const workspace = fs.readFileSync(path.join(root, 'components', 'MarketplaceJobWorkspace.tsx'), 'utf8');
   const list = fs.readFileSync(path.join(root, 'components', 'ApplicationsList.tsx'), 'utf8');
   const client = fs.readFileSync(path.join(root, 'components', 'MarketplaceClient.tsx'), 'utf8');
+  const providers = fs.readFileSync(path.join(root, 'components', 'ClientProviders.tsx'), 'utf8');
   const apply = fs.readFileSync(path.join(root, 'components', 'JobApplyForm.tsx'), 'utf8');
   const api = fs.readFileSync(path.join(root, 'lib', 'marketplace-api.ts'), 'utf8');
   const listingPage = fs.readFileSync(path.join(root, 'app', 'marketplace', 'page.tsx'), 'utf8');
@@ -97,7 +98,8 @@ test('frontend parity surface names every P1D action and explicit failure state 
   }
   assert.match(combined, /no money moved/i);
   assert.match(combined, /canonical SQLite API/i);
-  assert.match(client, /Post a Job/, 'marketplace list exposes the canonical live-check call to action');
+  assert.match(client, /Post a Job/, 'marketplace source preserves the canonical call-to-action label');
+  assert.doesNotMatch(providers, /ssr\s*:\s*false/, 'root provider must not remove route content from server-rendered HTML');
   assert.doesNotMatch(combined, /Payment released|Funds released|sent to worker/i);
   assert.doesNotMatch(workspace, /\/api\/marketplace\/escrow\//);
   assert.doesNotMatch(listingPage + detailPage, /from ["']@\/lib\/data["']/);

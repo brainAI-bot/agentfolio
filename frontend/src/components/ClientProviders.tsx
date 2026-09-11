@@ -4,8 +4,7 @@ import dynamic from "next/dynamic";
 import { ReactNode, useState, useCallback, createContext, useContext } from "react";
 
 const WalletProvider = dynamic(
-  () => import("@/components/WalletProvider").then(m => m.WalletProvider),
-  { ssr: false }
+  () => import("@/components/WalletProvider").then(m => m.WalletProvider)
 );
 
 // Context to let any component trigger wallet loading
@@ -25,8 +24,8 @@ export function ClientProviders({ children }: { children: ReactNode }) {
     if (!walletReady) setWalletReady(true);
   }, [walletReady]);
 
-  // Always render WalletProvider so useWallet() never throws.
-  // The dynamic import means the JS only loads client-side.
+  // Always render WalletProvider so useWallet() never throws. Keep SSR enabled:
+  // route content (including marketplace CTAs) must remain in the HTML response.
   return (
     <WalletLoadContext.Provider value={{ loaded: walletReady, triggerLoad }}>
       <WalletProvider>{children}</WalletProvider>
