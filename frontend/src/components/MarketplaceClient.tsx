@@ -128,7 +128,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
     <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="flex flex-wrap justify-between gap-4 mb-5">
         <div><h1 className="text-2xl font-bold">Marketplace</h1><p className="text-sm mt-1" style={{ color: "var(--text-tertiary)" }}>{jobs.length} canonical SQLite jobs · fixed-price SOL only</p></div>
-        <div className="flex gap-2"><button onClick={() => void refresh()} disabled={listLoading} className="button-secondary">{listLoading ? "Loading…" : "Refresh"}</button><button onClick={() => connected ? setShowCreate(true) : smartConnect()} className="button-primary"><Briefcase size={14} /> Post fixed-price job</button></div>
+        <div className="flex gap-2"><button onClick={() => void refresh()} disabled={listLoading} className="button-secondary">{listLoading ? "Loading…" : "Refresh"}</button><button onClick={() => connected ? setShowCreate(true) : smartConnect()} className="button-primary"><Briefcase size={14} /> Post a Job</button></div>
       </div>
 
       <div className="rounded-lg p-3 mb-5 text-xs" style={{ border: "1px solid rgba(234,179,8,.35)", background: "rgba(234,179,8,.08)" }}>
