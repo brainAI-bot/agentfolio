@@ -97,6 +97,7 @@ test('frontend parity surface names every P1D action and explicit failure state 
   }
   assert.match(combined, /no money moved/i);
   assert.match(combined, /canonical SQLite API/i);
+  assert.match(client, /Post a Job/, 'marketplace list exposes the canonical live-check call to action');
   assert.doesNotMatch(combined, /Payment released|Funds released|sent to worker/i);
   assert.doesNotMatch(workspace, /\/api\/marketplace\/escrow\//);
   assert.doesNotMatch(listingPage + detailPage, /from ["']@\/lib\/data["']/);
