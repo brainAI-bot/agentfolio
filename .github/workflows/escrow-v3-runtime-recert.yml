@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/escrow-v3-runtime-recert.yml"
       - "config/escrow-v3-provenance-ef7e4581.json"
+      - "scripts/verify-escrow-v3-deployed-bytecode.mjs"
       - "scripts/verify-escrow-v3-runtime-recert.mjs"
       - "src/lib/escrow-v3-authority.js"
       - "tests/escrow-v3-authority.test.js"

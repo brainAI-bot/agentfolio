@@ -16,4 +16,4 @@ cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "node ../../scripts/verify-escrow-v3-source-idl.mjs"
+test = "node ../../scripts/verify-escrow-v3-deployed-bytecode.mjs --strict"
