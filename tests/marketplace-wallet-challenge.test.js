@@ -94,7 +94,7 @@ function freshMarketplace(dataDir, profiles, overrides = {}) {
   return { marketplace, restore };
 }
 
-function signedChallenge(marketplace, keypair, { action, resourceId, actorId, identityPDA }) {
+function signedChallenge(marketplace, keypair, { action, resourceId, actorId, identityPDA, escrowPDA, txSignature }) {
   const walletAddress = keypair.publicKey.toBase58();
   const message = marketplace.buildMarketplaceWalletChallenge({
     action,
@@ -102,6 +102,8 @@ function signedChallenge(marketplace, keypair, { action, resourceId, actorId, id
     actorId,
     walletAddress,
     identityPDA,
+    ...(escrowPDA !== undefined ? { escrowPDA } : {}),
+    ...(txSignature !== undefined ? { txSignature } : {}),
   });
   return {
     walletAddress,
@@ -706,7 +708,7 @@ test('legacy escrow release checks signed actor challenges when a release actor 
   }
 });
 
-test('AF17/AF23 escrow funding routes require signed actor auth before paused 423 gate', async () => {
+test('AF17/AF23 escrow funding routes require complete proof-bound auth before paused 423 gate', async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-marketplace-wallet-'));
   const client = Keypair.generate();
   const { marketplace, restore } = freshMarketplace(dataDir, []);
@@ -747,16 +749,20 @@ test('AF17/AF23 escrow funding routes require signed actor auth before paused 42
       txHash: 'sig_body_only',
       confirmedBy: 'client_agent',
     });
-    assert.equal(bodyOnlyConfirm.status, 401);
+    assert.equal(bodyOnlyConfirm.status, 400);
+    assert.equal(bodyOnlyConfirm.body.error, 'escrowPDA and txSignature required');
 
     const signedConfirm = await postJSON(baseUrl, '/api/marketplace/jobs/job_af17_af23/confirm-deposit', {
       txHash: 'sig_signed',
+      escrowPDA: 'pda_signed',
       confirmedBy: 'client_agent',
       walletChallenge: signedChallenge(loaded.marketplace, client, {
         action: 'confirm_deposit',
         resourceId: 'job_af17_af23',
         actorId: 'client_agent',
         identityPDA: clientIdentity,
+        escrowPDA: 'pda_signed',
+        txSignature: 'sig_signed',
       }),
     });
     assert.equal(signedConfirm.status, 423);
@@ -778,6 +784,8 @@ test('AF17/AF23 escrow funding routes require signed actor auth before paused 42
         resourceId: 'job_af17_af23',
         actorId: 'client_agent',
         identityPDA: clientIdentity,
+        escrowPDA: 'pda_signed',
+        txSignature: 'tx_signed',
       }),
     });
     assert.equal(signedV3.status, 423);
@@ -787,5 +795,202 @@ test('AF17/AF23 escrow funding routes require signed actor auth before paused 42
   } finally {
     await close(server);
     loaded.restore();
+  }
+});
+
+test('AF23 records escrow proofs only after canonical on-chain readback succeeds', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-marketplace-wallet-'));
+  const client = Keypair.generate();
+  const worker = Keypair.generate();
+  const initial = freshMarketplace(dataDir, []);
+  const clientIdentity = initial.marketplace.deriveSatpIdentityPDA(client.publicKey.toBase58());
+  initial.restore();
+
+  const previousEnable = process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
+  const previousOwner = process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
+  const previousKillSwitch = process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
+  process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = 'true';
+  process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION = 'owner-approved-live-escrow-writes';
+  delete process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
+
+  const readbacks = [];
+  const loaded = freshMarketplace(dataDir, [
+    {
+      id: 'client_agent',
+      name: 'Client Agent',
+      wallet: client.publicKey.toBase58(),
+      wallets: JSON.stringify({ solana: client.publicKey.toBase58() }),
+      verification_data: JSON.stringify({ solana: { verified: true, address: client.publicKey.toBase58() }, satp: { identityPDA: clientIdentity } }),
+    },
+    {
+      id: 'worker_agent',
+      name: 'Worker Agent',
+      wallet: worker.publicKey.toBase58(),
+      wallets: JSON.stringify({ solana: worker.publicKey.toBase58() }),
+      verification_data: JSON.stringify({ solana: { verified: true, address: worker.publicKey.toBase58() } }),
+    },
+  ]);
+
+  writeJSON(dataDir, 'jobs', 'job_af23_readback', {
+    id: 'job_af23_readback',
+    postedBy: 'client_agent',
+    clientId: 'client_agent',
+    status: 'in_progress',
+    escrowId: 'escrow_af23_readback',
+    acceptedApplicant: 'worker_agent',
+  });
+  writeJSON(dataDir, 'escrow', 'escrow_af23_readback', {
+    id: 'escrow_af23_readback',
+    jobId: 'job_af23_readback',
+    depositConfirmed: false,
+  });
+
+  const app = express();
+  app.use(express.json());
+  loaded.marketplace.registerRoutes(app, {
+    async verifyEscrowFundingOnChain(proof) {
+      readbacks.push(proof);
+      if (proof.txSignature.startsWith('rejected')) {
+        const error = new Error('Transaction is not bound to the supplied escrowPDA');
+        error.statusCode = 422;
+        error.code = 'ESCROW_ONCHAIN_READBACK_FAILED';
+        error.reason = 'transaction_escrow_mismatch';
+        throw error;
+      }
+      return {
+        verified: true,
+        network: 'devnet',
+        slot: 42,
+        escrowPDA: proof.escrowPDA,
+        txSignature: proof.txSignature,
+        escrowProgramId: 'program_af23',
+        commitment: 'confirmed',
+        client: proof.expectedClient,
+        agent: proof.expectedAgent,
+        amount: '1000000000',
+        remaining: '1000000000',
+        currency: 'SOL',
+        status: 'Active',
+      };
+    },
+  });
+  const server = await listen(app);
+
+  const proofBody = (action, txSignature) => ({
+    clientId: 'client_agent',
+    confirmedBy: 'client_agent',
+    escrowPDA: 'escrow_pda_af23',
+    txSignature,
+    walletChallenge: signedChallenge(loaded.marketplace, client, {
+      action,
+      resourceId: 'job_af23_readback',
+      actorId: 'client_agent',
+      identityPDA: clientIdentity,
+      escrowPDA: 'escrow_pda_af23',
+      txSignature,
+    }),
+  });
+
+  try {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    const tamperedProof = proofBody('confirm_deposit', 'signed_tx');
+    tamperedProof.txSignature = 'different_tx';
+    const tampered = await postJSON(
+      baseUrl,
+      '/api/marketplace/jobs/job_af23_readback/confirm-deposit',
+      tamperedProof,
+    );
+    assert.equal(tampered.status, 401);
+    assert.equal(readbacks.length, 0);
+
+    const rejectedConfirm = await postJSON(
+      baseUrl,
+      '/api/marketplace/jobs/job_af23_readback/confirm-deposit',
+      proofBody('confirm_deposit', 'rejected_confirm'),
+    );
+    assert.equal(rejectedConfirm.status, 422);
+    assert.equal(rejectedConfirm.body.reason, 'transaction_escrow_mismatch');
+    assert.equal(readJSON(dataDir, 'escrow', 'escrow_af23_readback').depositConfirmed, false);
+
+    const confirmed = await postJSON(
+      baseUrl,
+      '/api/marketplace/jobs/job_af23_readback/confirm-deposit',
+      proofBody('confirm_deposit', 'confirmed_tx'),
+    );
+    assert.equal(confirmed.status, 200);
+    const escrow = readJSON(dataDir, 'escrow', 'escrow_af23_readback');
+    assert.equal(escrow.depositConfirmed, true);
+    assert.equal(escrow.escrowPDA, 'escrow_pda_af23');
+    assert.equal(escrow.txSignature, 'confirmed_tx');
+    assert.equal(escrow.onChainReadback.slot, 42);
+
+    const rejectedV3 = await postJSON(
+      baseUrl,
+      '/api/marketplace/jobs/job_af23_readback/v3-escrow-funded',
+      proofBody('v3_escrow_funded', 'rejected_v3'),
+    );
+    assert.equal(rejectedV3.status, 422);
+    assert.equal(readJSON(dataDir, 'jobs', 'job_af23_readback').v3EscrowTx, 'confirmed_tx');
+
+    const funded = await postJSON(
+      baseUrl,
+      '/api/marketplace/jobs/job_af23_readback/v3-escrow-funded',
+      proofBody('v3_escrow_funded', 'confirmed_v3'),
+    );
+    assert.equal(funded.status, 200);
+    const job = readJSON(dataDir, 'jobs', 'job_af23_readback');
+    assert.equal(job.escrowFunded, true);
+    assert.equal(job.v3EscrowPDA, 'escrow_pda_af23');
+    assert.equal(job.v3EscrowTx, 'confirmed_v3');
+    assert.equal(job.v3EscrowOnChainReadback.commitment, 'confirmed');
+    assert.equal(job.v3EscrowAmount, '1000000000');
+    assert.equal(job.v3EscrowAgentWallet, worker.publicKey.toBase58());
+
+    writeJSON(dataDir, 'jobs', 'job_af23_replay', {
+      id: 'job_af23_replay',
+      postedBy: 'client_agent',
+      clientId: 'client_agent',
+      status: 'in_progress',
+      escrowId: 'escrow_af23_replay',
+      acceptedApplicant: 'worker_agent',
+    });
+    const replayBody = {
+      clientId: 'client_agent',
+      escrowPDA: 'escrow_pda_af23',
+      txSignature: 'confirmed_v3',
+      walletChallenge: signedChallenge(loaded.marketplace, client, {
+        action: 'v3_escrow_funded',
+        resourceId: 'job_af23_replay',
+        actorId: 'client_agent',
+        identityPDA: clientIdentity,
+        escrowPDA: 'escrow_pda_af23',
+        txSignature: 'confirmed_v3',
+      }),
+    };
+    const replayed = await postJSON(
+      baseUrl,
+      '/api/marketplace/jobs/job_af23_replay/v3-escrow-funded',
+      replayBody,
+    );
+    assert.equal(replayed.status, 409);
+    assert.equal(replayed.body.code, 'ESCROW_PROOF_REUSED');
+
+    assert.ok(readbacks.every((readback) => readback.expectedClient === client.publicKey.toBase58()));
+    assert.ok(readbacks.every((readback) => readback.expectedAgent === worker.publicKey.toBase58()));
+    assert.deepEqual(readbacks.map(({ escrowPDA, txSignature }) => ({ escrowPDA, txSignature })), [
+      { escrowPDA: 'escrow_pda_af23', txSignature: 'rejected_confirm' },
+      { escrowPDA: 'escrow_pda_af23', txSignature: 'confirmed_tx' },
+      { escrowPDA: 'escrow_pda_af23', txSignature: 'rejected_v3' },
+      { escrowPDA: 'escrow_pda_af23', txSignature: 'confirmed_v3' },
+    ]);
+  } finally {
+    await close(server);
+    loaded.restore();
+    if (previousEnable === undefined) delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
+    else process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = previousEnable;
+    if (previousOwner === undefined) delete process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
+    else process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION = previousOwner;
+    if (previousKillSwitch === undefined) delete process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
+    else process.env.AGENTFOLIO_ESCROW_KILL_SWITCH = previousKillSwitch;
   }
 });

@@ -1026,15 +1026,53 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
             'application/json': {
               schema: {
                 type: 'object',
+                required: ['escrowPDA', 'txSignature', 'confirmedBy', 'walletChallenge'],
                 properties: {
-                  txHash: { type: 'string', description: 'Transaction hash (optional, for verification)' }
+                  escrowPDA: { type: 'string', description: 'SATP V3 escrow account address' },
+                  txSignature: { type: 'string', description: 'Confirmed SATP V3 create-escrow transaction signature' },
+                  confirmedBy: { type: 'string', description: 'Authenticated job poster profile ID' },
+                  walletChallenge: { type: 'object', description: 'Signed challenge bound to this job, escrowPDA, and txSignature' }
                 }
               }
             }
           }
         },
         responses: {
-          200: { description: 'Deposit confirmed' }
+          200: { description: 'Deposit confirmed after canonical transaction and account-state readback' },
+          401: { description: 'Wallet challenge missing, invalid, or not bound to the escrow proof' },
+          422: { description: 'Transaction/account readback does not prove an active funded SATP V3 escrow' },
+          503: { description: 'Canonical Solana RPC or SATP V3 program-ID readback unavailable' }
+        }
+      }
+    },
+    '/api/marketplace/jobs/{id}/v3-escrow-funded': {
+      post: {
+        tags: ['Escrow'],
+        summary: 'Record verified SATP V3 escrow funding',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
+        ],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['clientId', 'escrowPDA', 'txSignature', 'walletChallenge'],
+                properties: {
+                  clientId: { type: 'string', description: 'Authenticated job poster profile ID' },
+                  escrowPDA: { type: 'string', description: 'SATP V3 escrow account address' },
+                  txSignature: { type: 'string', description: 'Confirmed SATP V3 create-escrow transaction signature' },
+                  walletChallenge: { type: 'object', description: 'Signed challenge bound to this job, escrowPDA, and txSignature' }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: { description: 'V3 escrow recorded after canonical transaction and account-state readback' },
+          401: { description: 'Wallet challenge missing, invalid, or not bound to the escrow proof' },
+          422: { description: 'Transaction/account readback does not prove an active funded SATP V3 escrow' },
+          503: { description: 'Canonical Solana RPC or SATP V3 program-ID readback unavailable' }
         }
       }
     },

@@ -17,6 +17,10 @@ const {
   sendCustodialEscrowDisabledResponse,
   sendLiveEscrowGateResponse,
 } = require('./lib/write-surface-gate');
+const {
+  READBACK_ERROR_CODE,
+  verifyEscrowFundingOnChain,
+} = require('./lib/marketplace-escrow-readback');
 const { writeJsonAtomicSync } = require('./lib/atomic-file');
 let addActivity;
 try { addActivity = require('./profile-store').addActivity; } catch { addActivity = () => {}; }
@@ -219,15 +223,43 @@ function loadMarketplaceActorAuthority(actorId) {
   }
 }
 
-function buildMarketplaceWalletChallenge({ action, resourceId, actorId, walletAddress, identityPDA }) {
-  return [
+function loadJobEscrowAgentAuthority(job) {
+  const agentId = job?.selectedAgentId
+    || job?.selected_agent_id
+    || job?.acceptedApplicant
+    || job?.assigneeId
+    || null;
+  return agentId ? loadMarketplaceActorAuthority(agentId) : null;
+}
+
+function findEscrowProofConflict(jobId, escrowPDA, txSignature) {
+  const jobsDir = path.join(DATA_DIR, 'jobs');
+  let filenames = [];
+  try { filenames = fs.readdirSync(jobsDir); } catch (_) { return null; }
+
+  for (const filename of filenames) {
+    if (!filename.endsWith('.json')) continue;
+    const candidate = readJSON(path.join(jobsDir, filename));
+    if (!candidate || candidate.id === jobId) continue;
+    if (candidate.v3EscrowPDA === escrowPDA || candidate.v3EscrowTx === txSignature) {
+      return candidate.id;
+    }
+  }
+  return null;
+}
+
+function buildMarketplaceWalletChallenge({ action, resourceId, actorId, walletAddress, identityPDA, escrowPDA, txSignature }) {
+  const lines = [
     'AgentFolio Marketplace Wallet Challenge',
     `action:${action}`,
     `resource:${resourceId}`,
     `actor:${actorId}`,
     `wallet:${walletAddress}`,
     `satpIdentityPDA:${identityPDA}`,
-  ].join('\n');
+  ];
+  if (escrowPDA !== undefined) lines.push(`escrowPDA:${escrowPDA}`);
+  if (txSignature !== undefined) lines.push(`txSignature:${txSignature}`);
+  return lines.join('\n');
 }
 
 function getApplyChallengeRevision(job = {}, actorId) {
@@ -258,7 +290,7 @@ function getMarketplaceWalletChallenge(body = {}) {
   return body.walletChallenge || body.walletAuthorization || body.satpWalletChallenge || {};
 }
 
-function verifyMarketplaceMutationSignature({ action, resourceId, actorId, body }) {
+function verifyMarketplaceMutationSignature({ action, resourceId, actorId, body, escrowProof = null }) {
   const authority = loadMarketplaceActorAuthority(actorId);
   if (!authority) {
     return { ok: false, error: 'SATP wallet authority not found for actor' };
@@ -286,6 +318,7 @@ function verifyMarketplaceMutationSignature({ action, resourceId, actorId, body 
     actorId,
     walletAddress: authority.walletAddress,
     identityPDA: authority.identityPDA,
+    ...(escrowProof || {}),
   });
   if (message !== expectedMessage) {
     return { ok: false, error: 'Wallet challenge message mismatch' };
@@ -480,7 +513,8 @@ function writeJobReviews(jobId, reviews) {
 
 // ===== ROUTES =====
 
-function registerRoutes(app) {
+function registerRoutes(app, dependencies = {}) {
+  const verifyEscrowReadback = dependencies.verifyEscrowFundingOnChain || verifyEscrowFundingOnChain;
 
   // 1. POST /api/marketplace/jobs — Create a job
   app.post('/api/marketplace/jobs', (req, res) => {
@@ -1043,7 +1077,7 @@ function registerRoutes(app) {
   });
 
   // POST /api/marketplace/jobs/:id/confirm-deposit — Confirm on-chain escrow deposit
-  app.post('/api/marketplace/jobs/:id/confirm-deposit', marketplaceMutationLimiter, (req, res) => {
+  app.post('/api/marketplace/jobs/:id/confirm-deposit', marketplaceMutationLimiter, async (req, res) => {
     const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
     const job = readJSON(jobPath);
     if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -1053,38 +1087,88 @@ function registerRoutes(app) {
     const escrow = readJSON(escrowPath);
     if (!escrow) return res.status(404).json({ error: 'Escrow record not found' });
 
-    const { txHash, confirmedBy, clientId } = req.body;
-    if (!txHash) return res.status(400).json({ error: 'txHash required' });
+    const { escrowPDA, confirmedBy, clientId } = req.body;
+    const txSignature = req.body.txSignature || req.body.txHash;
     const depositActor = confirmedBy || clientId;
     if (!depositActor) return res.status(400).json({ error: 'confirmedBy or clientId required' });
+    if (!escrowPDA || !txSignature) {
+      return res.status(400).json({ error: 'escrowPDA and txSignature required' });
+    }
     const authResult = verifyMarketplaceMutationSignature({
       action: 'confirm_deposit',
       resourceId: job.id,
       actorId: depositActor,
       body: req.body,
+      escrowProof: { escrowPDA, txSignature },
     });
     if (!authResult.ok) return sendMarketplaceAuthFailure(res, authResult);
     if (depositActor !== job.postedBy && depositActor !== job.clientId) {
       return res.status(403).json({ error: 'Only the job poster can confirm deposit' });
     }
     if (sendLiveEscrowGateResponse(res, 'marketplace confirm-deposit')) return;
+    const escrowAgentAuthority = loadJobEscrowAgentAuthority(job);
+    if (!escrowAgentAuthority) {
+      return res.status(409).json({ error: 'Selected job agent has no canonical Solana wallet authority' });
+    }
+    const conflictingJobId = findEscrowProofConflict(job.id, escrowPDA, txSignature);
+    if (conflictingJobId) {
+      return res.status(409).json({
+        error: 'Escrow proof is already bound to another marketplace job',
+        code: 'ESCROW_PROOF_REUSED',
+        conflictingJobId,
+      });
+    }
 
-    escrow.txHash = txHash;
-    escrow.depositConfirmed = true;
-    escrow.depositConfirmedAt = new Date().toISOString();
-    escrow.depositConfirmedBy = depositActor;
-    writeJSON(escrowPath, escrow);
+    let chainReadback;
+    try {
+      chainReadback = await verifyEscrowReadback({
+        escrowPDA,
+        txSignature,
+        expectedClient: authResult.authority.walletAddress,
+        expectedAgent: escrowAgentAuthority.walletAddress,
+      });
+    } catch (error) {
+      return res.status(error.statusCode || 503).json({
+        error: error.message,
+        code: error.code || READBACK_ERROR_CODE,
+        reason: error.reason || 'rpc_readback_failed',
+      });
+    }
 
-    res.json({ message: 'Deposit confirmed', escrow });
+    const confirmedEscrow = readJSON(escrowPath);
+    const confirmedJob = readJSON(jobPath);
+    if (!confirmedEscrow || !confirmedJob
+        || (depositActor !== confirmedJob.postedBy && depositActor !== confirmedJob.clientId)) {
+      return res.status(409).json({ error: 'Job or escrow record changed during on-chain readback' });
+    }
+    confirmedEscrow.escrowPDA = chainReadback.escrowPDA;
+    confirmedEscrow.txSignature = chainReadback.txSignature;
+    confirmedEscrow.txHash = chainReadback.txSignature;
+    confirmedEscrow.onChainReadback = chainReadback;
+    confirmedEscrow.depositConfirmed = true;
+    confirmedEscrow.depositConfirmedAt = new Date().toISOString();
+    confirmedEscrow.depositConfirmedBy = depositActor;
+    confirmedJob.v3EscrowPDA = chainReadback.escrowPDA;
+    confirmedJob.v3EscrowTx = chainReadback.txSignature;
+    confirmedJob.v3EscrowOnChainReadback = chainReadback;
+    confirmedJob.v3EscrowAmount = chainReadback.amount;
+    confirmedJob.v3EscrowCurrency = chainReadback.currency;
+    confirmedJob.v3EscrowAgentWallet = chainReadback.agent;
+    confirmedJob.escrowFunded = true;
+    confirmedJob.updatedAt = new Date().toISOString();
+    writeJSON(escrowPath, confirmedEscrow);
+    writeJSON(jobPath, confirmedJob);
+
+    res.json({ message: 'Deposit confirmed', escrow: confirmedEscrow });
   });
 
   // POST /api/marketplace/jobs/:id/v3-escrow-funded — Record V3 on-chain escrow creation
-  app.post("/api/marketplace/jobs/:id/v3-escrow-funded", marketplaceMutationLimiter, (req, res) => {
+  app.post("/api/marketplace/jobs/:id/v3-escrow-funded", marketplaceMutationLimiter, async (req, res) => {
     const jobPath = path.join(DATA_DIR, "jobs", `${req.params.id}.json`);
     const job = readJSON(jobPath);
     if (!job) return res.status(404).json({ error: "Job not found" });
 
-    const { clientId, escrowPDA, txSignature, amount, agentWallet, agentId } = req.body;
+    const { clientId, escrowPDA, txSignature } = req.body;
     if (!escrowPDA || !txSignature) {
       return res.status(400).json({ error: "escrowPDA and txSignature required" });
     }
@@ -1094,33 +1178,82 @@ function registerRoutes(app) {
       resourceId: job.id,
       actorId: clientId,
       body: req.body,
+      escrowProof: { escrowPDA, txSignature },
     });
     if (!authResult.ok) return sendMarketplaceAuthFailure(res, authResult);
     if (clientId !== job.postedBy && clientId !== job.clientId) {
       return res.status(403).json({ error: "Only the job poster can record V3 escrow funding" });
     }
     if (sendLiveEscrowGateResponse(res, 'marketplace v3-escrow-funded')) return;
+    const escrowAgentAuthority = loadJobEscrowAgentAuthority(job);
+    if (!escrowAgentAuthority) {
+      return res.status(409).json({ error: 'Selected job agent has no canonical Solana wallet authority' });
+    }
+    const conflictingJobId = findEscrowProofConflict(job.id, escrowPDA, txSignature);
+    if (conflictingJobId) {
+      return res.status(409).json({
+        error: 'Escrow proof is already bound to another marketplace job',
+        code: 'ESCROW_PROOF_REUSED',
+        conflictingJobId,
+      });
+    }
 
-    // Store V3 escrow data on the job
-    job.v3EscrowPDA = escrowPDA;
-    job.v3EscrowTx = txSignature;
-    job.v3EscrowAmount = amount || null;
-    job.v3EscrowAgentWallet = agentWallet || null;
-    job.v3EscrowAgentId = agentId || null;
-    job.v3EscrowFundedAt = new Date().toISOString();
-    job.v3EscrowFundedBy = clientId || null;
-    job.escrowFunded = true;
-    job.updatedAt = new Date().toISOString();
+    let chainReadback;
+    try {
+      chainReadback = await verifyEscrowReadback({
+        escrowPDA,
+        txSignature,
+        expectedClient: authResult.authority.walletAddress,
+        expectedAgent: escrowAgentAuthority.walletAddress,
+      });
+    } catch (error) {
+      return res.status(error.statusCode || 503).json({
+        error: error.message,
+        code: error.code || READBACK_ERROR_CODE,
+        reason: error.reason || 'rpc_readback_failed',
+      });
+    }
 
-    writeJSON(jobPath, job);
+    const fundedJob = readJSON(jobPath);
+    if (!fundedJob || (clientId !== fundedJob.postedBy && clientId !== fundedJob.clientId)) {
+      return res.status(409).json({ error: 'Job ownership changed during on-chain readback' });
+    }
 
-    try { addActivity(clientId || "system", "v3_escrow_funded", { jobId: job.id, escrowPDA, txSignature, amount }); } catch(e) {}
+    // Store V3 escrow data on the latest job record after the asynchronous readback.
+    fundedJob.v3EscrowPDA = chainReadback.escrowPDA;
+    fundedJob.v3EscrowTx = chainReadback.txSignature;
+    fundedJob.v3EscrowOnChainReadback = chainReadback;
+    fundedJob.v3EscrowAmount = chainReadback.amount;
+    fundedJob.v3EscrowCurrency = chainReadback.currency;
+    fundedJob.v3EscrowAgentWallet = chainReadback.agent;
+    fundedJob.v3EscrowAgentId = fundedJob.selectedAgentId
+      || fundedJob.selected_agent_id
+      || fundedJob.acceptedApplicant
+      || fundedJob.assigneeId;
+    fundedJob.v3EscrowFundedAt = new Date().toISOString();
+    fundedJob.v3EscrowFundedBy = clientId || null;
+    fundedJob.escrowFunded = true;
+    fundedJob.updatedAt = new Date().toISOString();
+
+    writeJSON(jobPath, fundedJob);
+
+    try {
+      addActivity(clientId || "system", "v3_escrow_funded", {
+        jobId: job.id,
+        escrowPDA: chainReadback.escrowPDA,
+        txSignature: chainReadback.txSignature,
+        amount: chainReadback.amount,
+        currency: chainReadback.currency,
+        agentWallet: chainReadback.agent,
+      });
+    } catch(e) {}
 
     res.json({
       message: "V3 escrow recorded on job",
       jobId: job.id,
-      escrowPDA,
-      txSignature,
+      escrowPDA: chainReadback.escrowPDA,
+      txSignature: chainReadback.txSignature,
+      onChainReadback: chainReadback,
     });
   });
 
