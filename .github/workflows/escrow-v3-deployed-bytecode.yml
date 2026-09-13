@@ -1,0 +1,56 @@
+name: Escrow V3 Deployed Bytecode Provenance
+
+on:
+  pull_request:
+    paths:
+      - "onchain/**"
+      - "scripts/verify-*"
+      - "tests/escrow-v3-authority.test.js"
+      - "tests/escrow-v3-deployed-bytecode.test.js"
+      - "config/escrow-v3-provenance-ef7e4581.json"
+      - ".github/workflows/escrow-v3-deployed-bytecode.yml"
+      - ".github/workflows/escrow-v3-runtime-recert.yml"
+  push:
+    branches:
+      - main
+      - master
+  schedule:
+    - cron: "41 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: escrow-v3-deployed-bytecode-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deployed-bytecode-provenance:
+    name: AF1 deployed-bytecode provenance gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify finalized mainnet ProgramData bytecode
+        env:
+          SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+        shell: bash
+        run: |
+          set +e
+          npm run verify:escrow-v3-deployed-bytecode
+          status=$?
+          set -e
+          if [[ "$status" -eq 2 && "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            echo "::warning::Solana RPC infrastructure unavailable after bounded retries; PR provenance result is neutral"
+            exit 0
+          fi
+          exit "$status"
