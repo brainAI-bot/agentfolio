@@ -708,7 +708,7 @@ test('legacy escrow release checks signed actor challenges when a release actor 
   }
 });
 
-test('AF17/AF23 escrow funding routes require signed actor auth before paused 423 gate', async () => {
+test('AF17/AF23 escrow funding routes require complete proof-bound auth before paused 423 gate', async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentfolio-marketplace-wallet-'));
   const client = Keypair.generate();
   const { marketplace, restore } = freshMarketplace(dataDir, []);
@@ -749,7 +749,8 @@ test('AF17/AF23 escrow funding routes require signed actor auth before paused 42
       txHash: 'sig_body_only',
       confirmedBy: 'client_agent',
     });
-    assert.equal(bodyOnlyConfirm.status, 401);
+    assert.equal(bodyOnlyConfirm.status, 400);
+    assert.equal(bodyOnlyConfirm.body.error, 'escrowPDA and txSignature required');
 
     const signedConfirm = await postJSON(baseUrl, '/api/marketplace/jobs/job_af17_af23/confirm-deposit', {
       txHash: 'sig_signed',

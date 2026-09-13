@@ -129,7 +129,24 @@ function validateEscrowProofInput(escrowPDA, txSignature) {
   return escrow;
 }
 
-function validateEscrowAccount(accountInfo, expectedProgramId, expectedClient, expectedAgent) {
+function decodedU64(value, field) {
+  if (typeof value === 'bigint') {
+    if (value < 0n) throw new Error(`${field} must be non-negative`);
+    return value;
+  }
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${field} must be a non-negative safe integer`);
+  }
+  return BigInt(value);
+}
+
+function validateEscrowAccount(
+  accountInfo,
+  expectedProgramId,
+  expectedClient,
+  expectedAgent,
+  deserializeEscrowV3 = satpClient.deserializeEscrowV3,
+) {
   if (!accountInfo?.data) {
     throw new EscrowOnChainReadbackError('Escrow account was not found on-chain', 422, 'escrow_account_not_found');
   }
@@ -144,8 +161,12 @@ function validateEscrowAccount(accountInfo, expectedProgramId, expectedClient, e
   }
 
   let escrowState;
+  let amountLamports;
+  let releasedAmountLamports;
   try {
-    escrowState = satpClient.deserializeEscrowV3(data);
+    escrowState = deserializeEscrowV3(data);
+    amountLamports = decodedU64(escrowState.amount, 'amount');
+    releasedAmountLamports = decodedU64(escrowState.releasedAmount, 'releasedAmount');
   } catch (error) {
     throw new EscrowOnChainReadbackError(`Escrow account state is malformed: ${error.message}`, 422, 'escrow_state_malformed');
   }
@@ -158,8 +179,6 @@ function validateEscrowAccount(accountInfo, expectedProgramId, expectedClient, e
   if (escrowState.status !== 'Active') {
     throw new EscrowOnChainReadbackError('Escrow is not in the funded Active state', 422, 'escrow_not_active');
   }
-  const amountLamports = data.readBigUInt64LE(8 + 32 + 32 + 32);
-  const releasedAmountLamports = data.readBigUInt64LE(8 + 32 + 32 + 32 + 8);
   if (amountLamports <= 0n || amountLamports <= releasedAmountLamports) {
     throw new EscrowOnChainReadbackError('Escrow has no positive funded balance', 422, 'escrow_not_funded');
   }
@@ -178,6 +197,7 @@ async function verifyEscrowFundingOnChain(
     network = normalizeNetwork(process.env.SATP_NETWORK || process.env.SOLANA_NETWORK || 'mainnet'),
     programId = null,
     getV3ProgramIds = satpClient.getV3ProgramIds,
+    deserializeEscrowV3 = satpClient.deserializeEscrowV3,
     env = process.env,
   } = {},
 ) {
@@ -232,7 +252,13 @@ async function verifyEscrowFundingOnChain(
     );
   }
 
-  const escrowState = validateEscrowAccount(accountInfo, expectedProgramId, expectedClient, expectedAgent);
+  const escrowState = validateEscrowAccount(
+    accountInfo,
+    expectedProgramId,
+    expectedClient,
+    expectedAgent,
+    deserializeEscrowV3,
+  );
 
   return {
     verified: true,

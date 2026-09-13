@@ -1091,6 +1091,9 @@ function registerRoutes(app, dependencies = {}) {
     const txSignature = req.body.txSignature || req.body.txHash;
     const depositActor = confirmedBy || clientId;
     if (!depositActor) return res.status(400).json({ error: 'confirmedBy or clientId required' });
+    if (!escrowPDA || !txSignature) {
+      return res.status(400).json({ error: 'escrowPDA and txSignature required' });
+    }
     const authResult = verifyMarketplaceMutationSignature({
       action: 'confirm_deposit',
       resourceId: job.id,
@@ -1106,9 +1109,6 @@ function registerRoutes(app, dependencies = {}) {
     const escrowAgentAuthority = loadJobEscrowAgentAuthority(job);
     if (!escrowAgentAuthority) {
       return res.status(409).json({ error: 'Selected job agent has no canonical Solana wallet authority' });
-    }
-    if (!escrowPDA || !txSignature) {
-      return res.status(400).json({ error: 'escrowPDA and txSignature required' });
     }
     const conflictingJobId = findEscrowProofConflict(job.id, escrowPDA, txSignature);
     if (conflictingJobId) {

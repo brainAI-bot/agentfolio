@@ -114,6 +114,89 @@ test('verifies the create instruction and funded SATP V3 escrow state for the au
   assert.equal(result.status, 'Active');
 });
 
+test('uses the SATP decoder as the single source of truth for escrow amounts', async () => {
+  const escrow = Keypair.generate().publicKey;
+  const programId = Keypair.generate().publicKey;
+  const client = Keypair.generate().publicKey;
+  const agent = Keypair.generate().publicKey;
+  const signature = validSignature();
+  const transaction = {
+    slot: 42,
+    transaction: {
+      message: {
+        staticAccountKeys: [escrow, programId],
+        compiledInstructions: [{
+          programIdIndex: 1,
+          accountKeyIndexes: [0],
+          data: createEscrowInstructionData(),
+        }],
+      },
+    },
+    meta: { err: null, loadedAddresses: { writable: [], readonly: [] } },
+  };
+  let decodedData;
+
+  const result = await verifyEscrowFundingOnChain(
+    { escrowPDA: escrow.toBase58(), txSignature: signature, expectedClient: client, expectedAgent: agent },
+    {
+      network: 'devnet',
+      programId,
+      connection: {
+        async getTransaction() { return transaction; },
+        async getAccountInfo() { return accountInfo(programId, { client, agent }); },
+      },
+      deserializeEscrowV3(data) {
+        decodedData = data;
+        return {
+          client: client.toBase58(),
+          agent: agent.toBase58(),
+          amount: 250,
+          releasedAmount: 50,
+          currency: 'SOL',
+          status: 'Active',
+        };
+      },
+    },
+  );
+
+  assert.ok(Buffer.isBuffer(decodedData));
+  assert.equal(result.amount, '250');
+  assert.equal(result.remaining, '200');
+});
+
+test('fails closed when decoded escrow amounts are not safe unsigned integers', async () => {
+  const escrow = Keypair.generate().publicKey;
+  const programId = Keypair.generate().publicKey;
+  const transaction = {
+    slot: 42,
+    transaction: {
+      message: {
+        staticAccountKeys: [escrow, programId],
+        compiledInstructions: [{ programIdIndex: 1, accountKeyIndexes: [0], data: createEscrowInstructionData() }],
+      },
+    },
+    meta: { err: null, loadedAddresses: { writable: [], readonly: [] } },
+  };
+
+  await assert.rejects(
+    verifyEscrowFundingOnChain(
+      { escrowPDA: escrow.toBase58(), txSignature: validSignature() },
+      {
+        network: 'devnet',
+        programId,
+        connection: {
+          async getTransaction() { return transaction; },
+          async getAccountInfo() { return accountInfo(programId); },
+        },
+        deserializeEscrowV3() {
+          return { amount: Number.MAX_SAFE_INTEGER + 1, releasedAmount: 0 };
+        },
+      },
+    ),
+    (error) => error.reason === 'escrow_state_malformed' && /safe integer/.test(error.message),
+  );
+});
+
 test('rejects a transaction that does not create the supplied escrow PDA', async () => {
   const escrow = Keypair.generate().publicKey;
   const programId = Keypair.generate().publicKey;
