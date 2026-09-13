@@ -25,13 +25,14 @@ async function fixture() {
     data: Buffer.concat([programDataHeader, bytecode]),
   };
   const expected = {
+    genesisHash: '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
     programData: encodeBase58(programDataKey),
     upgradeSlot: 42,
     upgradeAuthority: encodeBase58(authorityKey),
     allocatedBytes: bytecode.length,
     allocatedSha256: crypto.createHash('sha256').update(bytecode).digest('hex'),
   };
-  return { program, programData, expected };
+  return { genesisHash: expected.genesisHash, program, programData, expected };
 }
 
 test('accepts the exact deployed ProgramData bytecode hash', async () => {
@@ -54,4 +55,51 @@ test('fails closed when deployed ProgramData bytecode drifts', async () => {
   assert.equal(result.verified, false);
   assert.equal(result.checks.deployedBytecodeLengthMatches, true);
   assert.equal(result.checks.deployedBytecodeSha256Matches, false);
+});
+
+test('fails closed when mainnet genesis or upgrade authority presence drifts', async () => {
+  const { verifyDeployment } = await verifierModule;
+  const wrongGenesis = await fixture();
+  wrongGenesis.genesisHash = 'not-mainnet';
+  assert.equal(verifyDeployment(wrongGenesis).checks.genesisHashMatches, false);
+
+  const immutable = await fixture();
+  immutable.programData.data[12] = 0;
+  assert.equal(verifyDeployment(immutable).checks.upgradeAuthorityIsPresent, false);
+});
+
+test('receipt must bind the deployed bytes to the pinned reproducible SATP build', async () => {
+  const { verifyReceipt } = await verifierModule;
+  const sourceCommit = '3f8188bec89db0d4a081931f35272e10185d1c0d';
+  const receipt = {
+    source: { commit: sourceCommit },
+    rebuild: { sha256: 'artifact-hash' },
+    deployedRuntime: { sourceArtifactPrefixSha256: 'artifact-hash' },
+    bindings: {
+      sourceBuildMatchesDeployedRuntime: true,
+      allocationPaddingIsAllZero: true,
+    },
+  };
+
+  assert.equal(verifyReceipt(receipt, sourceCommit).verified, true);
+  receipt.bindings.sourceBuildMatchesDeployedRuntime = false;
+  assert.equal(verifyReceipt(receipt, sourceCommit).verified, false);
+});
+
+test('receipt fails closed when its source commit drifts from runtime recertification', async () => {
+  const { pinnedSatpSourceCommit, verifyReceipt } = await verifierModule;
+  const sourceCommit = pinnedSatpSourceCommit('env:\n  SATP_SOURCE_COMMIT: "3f8188bec89db0d4a081931f35272e10185d1c0d"');
+  const receipt = {
+    source: { commit: '0'.repeat(40) },
+    rebuild: { sha256: 'artifact-hash' },
+    deployedRuntime: { sourceArtifactPrefixSha256: 'artifact-hash' },
+    bindings: {
+      sourceBuildMatchesDeployedRuntime: true,
+      allocationPaddingIsAllZero: true,
+    },
+  };
+
+  const result = verifyReceipt(receipt, sourceCommit);
+  assert.equal(result.verified, false);
+  assert.equal(result.checks.receiptSourceCommitMatchesWorkflow, false);
 });

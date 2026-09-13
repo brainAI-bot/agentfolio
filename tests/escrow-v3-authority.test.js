@@ -205,6 +205,27 @@ test('escrow_v3 authority readback names the HQ-selected program id from SATP ma
   assert.match(readback.leftoverInventory.note, /not a missing IDL/);
 });
 
+test('escrow_v3 source and IDL strict verifier confirms the pinned program id', () => {
+  const output = execFileSync(process.execPath, ['scripts/verify-escrow-v3-source-idl.mjs', '--strict'], {
+    cwd: require('node:path').resolve(__dirname, '..'),
+    encoding: 'utf8',
+  });
+  const evidence = JSON.parse(output);
+  assert.equal(evidence.label, 'escrow_v3_source_idl');
+  assert.equal(evidence.expectedProgramId, AUTHORITY_PROGRAM_ID);
+  assert.equal(evidence.status, 'verified');
+  assert.equal(evidence.checks.anchorProgramIdMatches, true);
+  assert.equal(evidence.checks.declareIdMatches, true);
+  assert.equal(evidence.checks.idlAddressMatches, true);
+  assert.equal(evidence.checks.idlNameMatches, true);
+  assert.equal(evidence.checks.createEscrowValidatesIdentityBeforeFunding, true);
+  assert.equal(evidence.checks.createEscrowValidatesIdentityBeforeRecordingRequirements, true);
+  assert.equal(evidence.checks.identityPdaBoundToAgentIdHash, true);
+  assert.equal(evidence.checks.identityOwnedBySatpProgram, true);
+  assert.equal(evidence.checks.minVerificationLevelEnforced, true);
+  assert.equal(evidence.checks.requireBornEnforced, true);
+});
+
 test('escrow_v3 provenance readback certifies source/build while published IDLs stay fail-closed', () => {
   const provenance = getEscrowV3ProvenanceReadback({
     authorityReadback: authorityReadbackFixture(),

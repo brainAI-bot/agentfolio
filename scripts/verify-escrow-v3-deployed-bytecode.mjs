@@ -6,6 +6,10 @@ const RECEIPT = JSON.parse(fs.readFileSync(
   new URL('../config/escrow-v3-provenance-ef7e4581.json', import.meta.url),
   'utf8',
 ));
+const RECERT_WORKFLOW = fs.readFileSync(
+  new URL('../.github/workflows/escrow-v3-runtime-recert.yml', import.meta.url),
+  'utf8',
+);
 
 const LOADER = 'BPFLoaderUpgradeab1e11111111111111111111111';
 const MAINNET_GENESIS_HASH = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
@@ -34,6 +38,27 @@ export function encodeBase58(bytes) {
   let leadingZeroes = 0;
   while (leadingZeroes < bytes.length && bytes[leadingZeroes] === 0) leadingZeroes += 1;
   return '1'.repeat(leadingZeroes) + encoded;
+}
+
+export function pinnedSatpSourceCommit(workflowSource = RECERT_WORKFLOW) {
+  const match = workflowSource.match(/SATP_SOURCE_COMMIT:\s*["']([0-9a-f]{40})["']/);
+  if (!match) throw new Error('escrow-v3-runtime-recert.yml does not pin SATP_SOURCE_COMMIT');
+  return match[1];
+}
+
+export function verifyReceipt(receipt, expectedSourceCommit) {
+  const checks = {
+    receiptSourceCommitMatchesWorkflow: receipt.source?.commit === expectedSourceCommit,
+    sourceBuildMatchesDeployedRuntime: receipt.bindings?.sourceBuildMatchesDeployedRuntime === true,
+    allocationPaddingIsAllZero: receipt.bindings?.allocationPaddingIsAllZero === true,
+    rebuildMatchesDeployedRuntimePrefix:
+      receipt.rebuild?.sha256 === receipt.deployedRuntime?.sourceArtifactPrefixSha256,
+  };
+
+  return {
+    checks,
+    verified: Object.values(checks).every(Boolean),
+  };
 }
 
 function sleep(milliseconds) {
@@ -85,7 +110,7 @@ async function account(address) {
   return { ...result.value, data: Buffer.from(result.value.data[0], 'base64') };
 }
 
-export function verifyDeployment({ program, programData, expected }) {
+export function verifyDeployment({ genesisHash, program, programData, expected }) {
   if (program.data.length < 36) throw new Error('program account data is shorter than the upgradeable-loader header');
   if (programData.data.length < PROGRAMDATA_HEADER_LENGTH) {
     throw new Error('ProgramData account data is shorter than the upgradeable-loader header');
@@ -98,11 +123,13 @@ export function verifyDeployment({ program, programData, expected }) {
   const deployedBytecodeSha256 = sha256(deployedBytecode);
 
   const checks = {
+    genesisHashMatches: genesisHash === expected.genesisHash,
     programOwnerMatches: program.owner === LOADER,
     programIsExecutable: program.executable === true,
     programDataAddressMatches: derivedProgramData === expected.programData,
     programDataOwnerMatches: programData.owner === LOADER,
     programDataSlotMatches: observedSlot === expected.upgradeSlot,
+    upgradeAuthorityIsPresent: programData.data[12] === 1,
     upgradeAuthorityMatches: observedAuthority === expected.upgradeAuthority,
     deployedBytecodeLengthMatches: deployedBytecode.length === expected.allocatedBytes,
     deployedBytecodeSha256Matches: deployedBytecodeSha256 === expected.allocatedSha256,
@@ -122,7 +149,10 @@ export function verifyDeployment({ program, programData, expected }) {
 }
 
 export async function main() {
+  const expectedSourceCommit = pinnedSatpSourceCommit();
+  const receiptResult = verifyReceipt(RECEIPT, expectedSourceCommit);
   const expected = {
+    genesisHash: MAINNET_GENESIS_HASH,
     programId: RECEIPT.program.programId,
     programData: RECEIPT.program.programData,
     upgradeSlot: RECEIPT.program.upgradeSlot,
@@ -135,8 +165,8 @@ export async function main() {
     account(expected.programId),
     account(expected.programData),
   ]);
-  const result = verifyDeployment({ program, programData, expected });
-  result.checks.genesisHashMatches = genesisHash === MAINNET_GENESIS_HASH;
+  const result = verifyDeployment({ genesisHash, program, programData, expected });
+  result.checks = { ...receiptResult.checks, ...result.checks };
   result.verified = Object.values(result.checks).every(Boolean);
   const evidence = {
     label: 'escrow_v3_deployed_bytecode_provenance',
@@ -151,6 +181,9 @@ export async function main() {
       upgradeAuthority: expected.upgradeAuthority,
       deployedBytecodeBytes: expected.allocatedBytes,
       deployedBytecodeSha256: expected.allocatedSha256,
+      satpSourceCommit: expectedSourceCommit,
+      rebuiltArtifactSha256: RECEIPT.rebuild.sha256,
+      deployedRuntimeSourcePrefixSha256: RECEIPT.deployedRuntime.sourceArtifactPrefixSha256,
     },
     status: result.verified ? 'verified' : 'blocked_deployed_bytecode_mismatch',
     checks: result.checks,
