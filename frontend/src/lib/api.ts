@@ -154,10 +154,13 @@ function publicCount(value: unknown): number {
 type StatsFetch = (input: string, init?: RequestInit) => Promise<Response>;
 
 export async function fetchStats(fetchImpl: StatsFetch = fetch): Promise<PublicStats> {
-  const res = await fetchImpl(`${API_BASE}/api/stats`, { cache: 'no-store' });
+  const res = await fetchImpl(`${API_BASE}/api/stats?excludeFixtures=true`, { cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to fetch public stats: ${res.status}`);
 
   const data = await res.json();
+  if (data.publicTraction?.excludedFixtures !== true) {
+    throw new Error('Public stats did not confirm fixture exclusion');
+  }
   const totalAgents = publicCount(data.total ?? data.totalAgents ?? data.agents?.total);
 
   return {
