@@ -440,7 +440,7 @@ export default async function HomePage() {
             View Marketplace →
           </Link>
         </div>
-        <LeaderboardTable agents={leaderboard.agents} totalAgents={leaderboard.totalAgents} allSkills={[...new Set(agents.flatMap(a => a.skills))].sort()} />
+        <LeaderboardTable agents={leaderboard.agents} totalAgents={leaderboard.totalAgents} cohortLabel={leaderboard.cohortLabel} allSkills={[...new Set(agents.flatMap(a => a.skills))].sort()} />
       </section>
 
       {/* Bottom CTA */}
