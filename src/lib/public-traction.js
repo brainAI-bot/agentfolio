@@ -41,9 +41,16 @@ function isFixtureJob(job) {
   );
 }
 
+function shouldExcludeFixtures(value) {
+  if (Array.isArray(value)) value = value[value.length - 1];
+  if (value === false || String(value || '').trim().toLowerCase() === 'false') return false;
+  return true;
+}
+
 module.exports = {
   normalizeIdentity,
   isFixtureIdentity,
   isPublicTractionIdentity,
   isFixtureJob,
+  shouldExcludeFixtures,
 };
