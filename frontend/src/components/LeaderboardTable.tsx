@@ -10,13 +10,14 @@ interface LeaderboardTableProps {
   agents: Agent[]; // Initial page from SSR
   totalAgents?: number;
   allSkills?: string[];
+  cohortLabel?: string;
 }
 
 type SortKey = "trustScore" | "newest" | "jobs" | "rating";
 
 const PAGE_SIZE = 24;
 
-export function LeaderboardTable({ agents: initialAgents, totalAgents: initialTotal, allSkills: initialSkills }: LeaderboardTableProps) {
+export function LeaderboardTable({ agents: initialAgents, totalAgents: initialTotal, allSkills: initialSkills, cohortLabel = "agents" }: LeaderboardTableProps) {
   const [agents, setAgents] = useState<Agent[]>(initialAgents);
   const [total, setTotal] = useState(initialTotal || initialAgents.length);
   const [allSkills, setAllSkills] = useState<string[]>(initialSkills || []);
@@ -151,7 +152,7 @@ export function LeaderboardTable({ agents: initialAgents, totalAgents: initialTo
       {/* Pagination + Count */}
       <div className="mt-3 flex items-center justify-between">
         <div className="text-[11px]" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-          Showing {startIdx + 1}&ndash;{Math.min(startIdx + PAGE_SIZE, total)} of {total} agents
+          Showing {startIdx + 1}&ndash;{Math.min(startIdx + PAGE_SIZE, total)} of {total} {cohortLabel}
         </div>
         {totalPages > 1 && (
           <div className="flex items-center gap-1">

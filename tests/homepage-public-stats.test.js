@@ -12,6 +12,10 @@ const apiSource = fs.readFileSync(
   path.join(__dirname, '..', 'frontend', 'src', 'lib', 'api.ts'),
   'utf8'
 );
+const leaderboardSource = fs.readFileSync(
+  path.join(__dirname, '..', 'frontend', 'src', 'components', 'LeaderboardTable.tsx'),
+  'utf8'
+);
 
 test('fetchStats maps the canonical live payload into homepage counts', async () => {
   const { fetchStats, getPublicStatCounters } = await import(pathToFileURL(
@@ -89,7 +93,7 @@ test('homepage omits public counters when the stats endpoint is unavailable', as
   assert.deepEqual(getPublicStatCounters(stats), []);
 });
 
-test('homepage leaderboard rows and total come from the same agent population', async () => {
+test('homepage labels the broader profile cohort when it differs from public agent stats', async () => {
   const { getHomepageLeaderboard } = await import(pathToFileURL(
     path.join(__dirname, '..', 'frontend', 'src', 'lib', 'homepage.ts')
   ));
@@ -99,6 +103,8 @@ test('homepage leaderboard rows and total come from the same agent population', 
 
   assert.deepEqual(leaderboard.agents, agents.slice(0, 24));
   assert.equal(leaderboard.totalAgents, agents.length);
+  assert.equal(leaderboard.cohortLabel, 'profiles, including test/QA fixtures');
+  assert.notEqual(leaderboard.totalAgents, 11);
 });
 
 test('homepage source uses the fail-closed stats view model without hardcoded counts', () => {
@@ -115,4 +121,7 @@ test('homepage source uses the fail-closed stats view model without hardcoded co
   assert.doesNotMatch(homepageSource, /\bgetStats\b/);
   assert.doesNotMatch(homepageSource, /bornAgents|\$\{platformStats\.totalAgents\}\+/);
   assert.match(homepageSource, /statCounters\.length > 0/);
+  assert.match(homepageSource, /cohortLabel=\{leaderboard\.cohortLabel\}/);
+  assert.match(leaderboardSource, /cohortLabel = "agents"/);
+  assert.match(leaderboardSource, /of \{total\} \{cohortLabel\}/);
 });
