@@ -1,4 +1,4 @@
-export const HOMEPAGE_PROFILE_COHORT_LABEL = "profiles, including test/QA fixtures";
+export const HOMEPAGE_PROFILE_COHORT_LABEL = "agents";
 
 export function getHomepageLeaderboard<T>(agents: T[], pageSize = 24) {
   return {

@@ -97,18 +97,18 @@ test('homepage omits public counters when the stats endpoint is unavailable', as
   assert.deepEqual(getPublicStatCounters(stats), []);
 });
 
-test('homepage labels the broader profile cohort when it differs from public agent stats', async () => {
+test('homepage leaderboard uses only the already filtered public cohort', async () => {
   const { getHomepageLeaderboard } = await import(pathToFileURL(
     path.join(__dirname, '..', 'frontend', 'src', 'lib', 'homepage.ts')
   ));
-  const agents = Array.from({ length: 38 }, (_, id) => ({ id }));
+  const agents = Array.from({ length: 11 }, (_, id) => ({ id }));
 
   const leaderboard = getHomepageLeaderboard(agents);
 
   assert.deepEqual(leaderboard.agents, agents.slice(0, 24));
   assert.equal(leaderboard.totalAgents, agents.length);
-  assert.equal(leaderboard.cohortLabel, 'profiles, including test/QA fixtures');
-  assert.notEqual(leaderboard.totalAgents, 11);
+  assert.equal(leaderboard.cohortLabel, 'agents');
+  assert.equal(leaderboard.totalAgents, 11);
 });
 
 test('homepage source uses the fail-closed stats view model without hardcoded counts', () => {
@@ -130,8 +130,19 @@ test('homepage source uses the fail-closed stats view model without hardcoded co
   assert.match(leaderboardSource, /of \{total\} \{cohortLabel\}/);
 });
 
-test('leaderboard page labels its fixture-inclusive profile cohort without an agent ranking overclaim', () => {
-  assert.match(leaderboardPageSource, /profiles listed, including test\/QA fixtures/);
-  assert.match(leaderboardPageSource, /cohortLabel="profiles, including test\/QA fixtures"/);
+test('leaderboard page renders only the public non-fixture cohort', () => {
+  assert.match(leaderboardPageSource, /getAllPublicAgents/);
+  assert.match(leaderboardPageSource, /agents listed from the public non-fixture cohort/);
+  assert.match(leaderboardPageSource, /cohortLabel="agents"/);
   assert.doesNotMatch(leaderboardPageSource, /agents ranked by evidence-backed trust score/);
+});
+
+test('all homepage identity surfaces use the shared public cohort', () => {
+  const dataSource = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'src', 'lib', 'data.ts'), 'utf8');
+  assert.match(dataSource, /public-fixture-cohort\.json/);
+  assert.match(dataSource, /export function getAllPublicAgents/);
+  assert.match(homepageSource, /const agents = await getAllPublicAgents\(\)/);
+  assert.match(dataSource, /export function getTopVerifiedAgents[\s\S]*?const agents = getAllPublicAgents\(\)/);
+  assert.match(dataSource, /export function getActivityFeed[\s\S]*?const agents = getAllPublicAgents\(\)/);
+  assert.match(dataSource, /export function getRecentlyVerified[\s\S]*?const agents = getAllPublicAgents\(\)/);
 });

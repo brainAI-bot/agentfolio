@@ -18,7 +18,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-import { getAllAgents, getActivityFeed, getTopVerifiedAgents, getRecentlyVerified } from "@/lib/data";
+import { getAllPublicAgents, getActivityFeed, getTopVerifiedAgents, getRecentlyVerified } from "@/lib/data";
 import dynamicImport from "next/dynamic";
 const LeaderboardTable = dynamicImport(() => import("@/components/LeaderboardTable").then(m => m.LeaderboardTable), { loading: () => <div style={{height: 400, display: "flex", alignItems: "center", justifyContent: "center", color: "#666"}}>Loading agents...</div> });
 import { Activity, Users, Shield, Link as LinkIcon, UserCheck, Code, Globe, ArrowRight, CheckCircle, Lock, TrendingUp, Star, Award } from "lucide-react";
@@ -39,7 +39,7 @@ function resolveAvatar(agent: any): string | null {
 }
 
 export default async function HomePage() {
-  const agents = await getAllAgents();
+  const agents = await getAllPublicAgents();
   const leaderboard = getHomepageLeaderboard(agents);
   const activityFeed = await getActivityFeed();
   const platformStats = await fetchHomepageStats();

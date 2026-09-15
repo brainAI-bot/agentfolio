@@ -2,7 +2,14 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { isFixtureIdentity, isPublicTractionIdentity, isFixtureJob, shouldExcludeFixtures } = require('../src/lib/public-traction');
+const fixtureCohort = require('../src/lib/public-fixture-cohort.json');
+const {
+  REVIEWED_FIXTURE_PROFILE_IDS,
+  isFixtureIdentity,
+  isPublicTractionIdentity,
+  isFixtureJob,
+  shouldExcludeFixtures,
+} = require('../src/lib/public-traction');
 
 describe('public traction fixture filter', () => {
   it('excludes the documented smoke/QA/fixture patterns and keeps real identities', () => {
@@ -18,6 +25,25 @@ describe('public traction fixture filter', () => {
     assert.equal(isPublicTractionIdentity('agent_brainforge', 'brainForge'), true);
     assert.equal(isFixtureJob({ title: 'CPI Test escrow', client_id: 'agent_brainforge' }), true);
     assert.equal(isFixtureJob({ title: 'Website copy', client_id: 'agent_brainforge' }), false);
+  });
+
+  it('pins the complete reviewed 38-profile QA cohort by id', () => {
+    assert.equal(fixtureCohort.reviewedProfileCount, 38);
+    assert.equal(fixtureCohort.profileIds.length, 38);
+    assert.equal(new Set(fixtureCohort.profileIds).size, 38);
+    assert.equal(REVIEWED_FIXTURE_PROFILE_IDS.size, 38);
+    for (const id of fixtureCohort.profileIds) {
+      assert.equal(isFixtureIdentity(id), true, `${id} must remain in the reviewed fixture cohort`);
+    }
+
+    for (const knownQaId of [
+      'agent_p1reg_35028542',
+      'agent_sm423064591',
+      'agent_p1t897160938',
+      'agent_sm816063701',
+    ]) {
+      assert.equal(REVIEWED_FIXTURE_PROFILE_IDS.has(knownQaId), true);
+    }
   });
 
   it('is wired into public stats and leaderboard', () => {

@@ -5,6 +5,15 @@ import type { Agent, Job } from "./types";
 import { getAgentProfilePDA, AGENT_PROFILE_DISCRIMINATOR, SOLANA_RPC } from "./identity-registry";
 import { fetchV3Scores, v3ToComputedScores } from "./v3-scores";
 import { isCanonicalTrustProvider } from "./canonical-verifications";
+import fixtureCohort from "../../../src/lib/public-fixture-cohort.json";
+
+const REVIEWED_FIXTURE_PROFILE_IDS = new Set(
+  fixtureCohort.profileIds.map(id => id.trim().toLowerCase())
+);
+
+export function isPublicAgentId(id: string): boolean {
+  return !REVIEWED_FIXTURE_PROFILE_IDS.has(String(id || "").trim().toLowerCase());
+}
 
 // Cache on-chain lookups to avoid rate limiting during builds
 const _onChainCache = new Map<string, boolean>();
@@ -306,6 +315,10 @@ export function getAllAgents(): Agent[] {
   return loadAllProfiles();
 }
 
+export function getAllPublicAgents(): Agent[] {
+  return loadAllProfiles().filter(agent => isPublicAgentId(agent.id));
+}
+
 export function getAgent(id: string): Agent | undefined {
   return loadAllProfiles().find(a => a.id === id);
 }
@@ -352,7 +365,7 @@ export function getStats() {
 
 
 export function getTopVerifiedAgents(limit = 6): Agent[] {
-  const agents = loadAllProfiles();
+  const agents = getAllPublicAgents();
   return agents
     .filter(a => a.trustScore >= 50)
     .sort((a, b) => b.trustScore - a.trustScore)
@@ -382,7 +395,7 @@ export async function getJob(id: string): Promise<Job | undefined> {
 }
 
 export function getActivityFeed() {
-  const agents = loadAllProfiles();
+  const agents = getAllPublicAgents();
   // Generate from real data - recent registrations and endorsements
   const activities: Array<{ agent: string; action: string; time: string }> = [];
 
@@ -412,7 +425,7 @@ export function getActivityFeed() {
 }
 
 export function getRecentlyVerified(limit = 5): Array<{ name: string; id: string; avatar: string | null; platform: string; date: string; trustScore: number; verificationLevel: number; verificationLevelName: string }> {
-  const agents = loadAllProfiles();
+  const agents = getAllPublicAgents();
   const results: Array<{ name: string; id: string; avatar: string | null; platform: string; date: string; trustScore: number; verificationLevel: number; verificationLevelName: string; ts: number }> = [];
   
   for (const a of agents) {
