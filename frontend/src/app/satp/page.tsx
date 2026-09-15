@@ -1,4 +1,4 @@
-import { getAllAgents } from "@/lib/data";
+import { getAllPublicAgents } from "@/lib/data";
 import { SATP_DISPLAYED_MAINNET_PROGRAMS } from "@/lib/satp-mainnet-programs";
 import { Shield, Database, FileCheck, Lock, ExternalLink } from "lucide-react";
 
@@ -14,7 +14,7 @@ function explorerUrl(address: string) {
 }
 
 export default async function SATPPage() {
-  const agents = await getAllAgents();
+  const agents = await getAllPublicAgents();
   const satpAgents = agents.filter((a) => a.verifications.satp?.verified);
   const totalRegistered = satpAgents.length;
   const totalAttestations = agents.reduce(

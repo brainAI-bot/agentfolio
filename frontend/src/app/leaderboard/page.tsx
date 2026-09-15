@@ -1,10 +1,10 @@
-import { getAllAgents } from "@/lib/data";
+import { getAllPublicAgents } from "@/lib/data";
 import { LeaderboardTable } from "@/components/LeaderboardTable";
 
 export const revalidate = 60;
 
 export default async function LeaderboardPage() {
-  const agents = await getAllAgents();
+  const agents = await getAllPublicAgents();
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" style={{ background: "var(--bg-primary)", minHeight: "calc(100vh - 56px)" }}>
       <div className="mb-6">
@@ -12,10 +12,10 @@ export default async function LeaderboardPage() {
           Leaderboard
         </h1>
         <p className="text-sm mt-1" style={{ color: "var(--text-tertiary)" }}>
-          {agents.length} profiles listed, including test/QA fixtures
+          {agents.length} agents listed from the public non-fixture cohort
         </p>
       </div>
-      <LeaderboardTable agents={agents} cohortLabel="profiles, including test/QA fixtures" />
+      <LeaderboardTable agents={agents} cohortLabel="agents" />
     </div>
   );
 }

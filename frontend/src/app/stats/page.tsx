@@ -1,5 +1,5 @@
 export const revalidate = 120;
-import { getAllAgents, getAllJobs } from "@/lib/data";
+import { getAllJobs, getAllPublicAgents } from "@/lib/data";
 import { getTrustSurface } from "@/lib/trust-surface";
 import { SATP_DISPLAYED_MAINNET_PROGRAMS } from "@/lib/satp-mainnet-programs";
 
@@ -78,7 +78,7 @@ async function getUsdcBalance(ownerAddress: string): Promise<number> {
 }
 
 export default async function StatsPage() {
-  const agents = await getAllAgents();
+  const agents = await getAllPublicAgents();
   const jobs = await getAllJobs();
 
   // === Top Stats ===

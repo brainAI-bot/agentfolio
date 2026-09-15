@@ -1,4 +1,4 @@
-import { getAllAgents } from "@/lib/data";
+import { getAllPublicAgents } from "@/lib/data";
 import { isLiveDisplayVerificationProvider, normalizeTrustProvider } from "@/lib/canonical-verifications";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -12,7 +12,8 @@ export async function GET(req: NextRequest) {
   const sort = searchParams.get("sort") || "trustScore";
   const skill = searchParams.get("skill") || "";
 
-  let agents = getAllAgents();
+  const publicAgents = getAllPublicAgents();
+  let agents = [...publicAgents];
 
   // Filter
   if (search) {
@@ -79,7 +80,7 @@ export async function GET(req: NextRequest) {
   }));
 
   // Collect all skills for filter dropdown
-  const allSkills = [...new Set(getAllAgents().flatMap(a => a.skills))].sort();
+  const allSkills = [...new Set(publicAgents.flatMap(a => a.skills))].sort();
 
   return NextResponse.json({ agents: lite, total, totalPages, page, limit, allSkills });
 }

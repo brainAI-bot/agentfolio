@@ -18,7 +18,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-import { getAllAgents, getActivityFeed, getTopVerifiedAgents, getRecentlyVerified } from "@/lib/data";
+import { getAllPublicAgents, getActivityFeed, getTopVerifiedAgents, getRecentlyVerified } from "@/lib/data";
 import dynamicImport from "next/dynamic";
 const LeaderboardTable = dynamicImport(() => import("@/components/LeaderboardTable").then(m => m.LeaderboardTable), { loading: () => <div style={{height: 400, display: "flex", alignItems: "center", justifyContent: "center", color: "#666"}}>Loading agents...</div> });
 import { Activity, Users, Shield, Link as LinkIcon, UserCheck, Code, Globe, ArrowRight, CheckCircle, Lock, TrendingUp, Star, Award } from "lucide-react";
@@ -39,7 +39,7 @@ function resolveAvatar(agent: any): string | null {
 }
 
 export default async function HomePage() {
-  const agents = await getAllAgents();
+  const agents = await getAllPublicAgents();
   const leaderboard = getHomepageLeaderboard(agents);
   const activityFeed = await getActivityFeed();
   const platformStats = await fetchHomepageStats();
@@ -301,7 +301,8 @@ export default async function HomePage() {
       </section>
 
       {/* Social Proof — Top Verified Agents */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+      {topAgents.length > 0 && (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="text-center mb-10">
           <h2
             className="text-2xl sm:text-3xl font-bold"
@@ -362,7 +363,8 @@ export default async function HomePage() {
             </Link>
           ))}
         </div>
-      </section>
+        </section>
+      )}
 
       {/* Value Props — Why AgentFolio */}
       <section className="border-y" style={{ borderColor: "var(--border)", background: "var(--bg-secondary)" }}>
