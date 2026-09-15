@@ -16,6 +16,10 @@ const leaderboardSource = fs.readFileSync(
   path.join(__dirname, '..', 'frontend', 'src', 'components', 'LeaderboardTable.tsx'),
   'utf8'
 );
+const leaderboardPageSource = fs.readFileSync(
+  path.join(__dirname, '..', 'frontend', 'src', 'app', 'leaderboard', 'page.tsx'),
+  'utf8'
+);
 
 test('fetchStats maps the canonical live payload into homepage counts', async () => {
   const { fetchStats, getPublicStatCounters } = await import(pathToFileURL(
@@ -124,4 +128,10 @@ test('homepage source uses the fail-closed stats view model without hardcoded co
   assert.match(homepageSource, /cohortLabel=\{leaderboard\.cohortLabel\}/);
   assert.match(leaderboardSource, /cohortLabel = "agents"/);
   assert.match(leaderboardSource, /of \{total\} \{cohortLabel\}/);
+});
+
+test('leaderboard page labels its fixture-inclusive profile cohort without an agent ranking overclaim', () => {
+  assert.match(leaderboardPageSource, /profiles listed, including test\/QA fixtures/);
+  assert.match(leaderboardPageSource, /cohortLabel="profiles, including test\/QA fixtures"/);
+  assert.doesNotMatch(leaderboardPageSource, /agents ranked by evidence-backed trust score/);
 });

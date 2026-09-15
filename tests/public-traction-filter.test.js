@@ -2,7 +2,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { isFixtureIdentity, isPublicTractionIdentity, isFixtureJob } = require('../src/lib/public-traction');
+const { isFixtureIdentity, isPublicTractionIdentity, isFixtureJob, shouldExcludeFixtures } = require('../src/lib/public-traction');
 
 describe('public traction fixture filter', () => {
   it('excludes the documented smoke/QA/fixture patterns and keeps real identities', () => {
@@ -28,5 +28,19 @@ describe('public traction fixture filter', () => {
     const statsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'ecosystem-stats.js'), 'utf8');
     assert.match(statsSource, /isFixtureIdentity/);
     assert.match(statsSource, /isFixtureJob/);
+  });
+
+  it('honours the stats excludeFixtures query with a fail-closed default', () => {
+    assert.equal(shouldExcludeFixtures(undefined), true);
+    assert.equal(shouldExcludeFixtures('true'), true);
+    assert.equal(shouldExcludeFixtures('false'), false);
+    assert.equal(shouldExcludeFixtures(false), false);
+    assert.equal(shouldExcludeFixtures(['true', 'false']), false);
+
+    const serverSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
+    assert.match(serverSource, /getEcosystemStatsPayload\(shouldExcludeFixtures\(req\.query\.excludeFixtures\)\)/);
+    assert.match(serverSource, /publicTraction: \{ excludedFixtures: excludeFixtures \}/);
+    assert.match(serverSource, /!excludeFixtures \|\| !isFixtureIdentity/);
+    assert.match(serverSource, /!excludeFixtures \|\| !isFixtureJob/);
   });
 });

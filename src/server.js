@@ -39,7 +39,7 @@ const {
 // Scoring module
 const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainData } = require('./scoring');
 const { computeUnifiedTrustScore } = require('./lib/unified-trust-score');
-const { isFixtureIdentity, isFixtureJob } = require('./lib/public-traction');
+const { isFixtureIdentity, isFixtureJob, shouldExcludeFixtures } = require('./lib/public-traction');
 const { isOnChainIdentity } = require('./lib/onchain-identity');
 const {
   CANONICAL_TRUST_PROVIDERS,
@@ -1144,10 +1144,10 @@ app.get('/docs', (req, res) => {
 </html>`);
 });
 
-function getEcosystemStatsPayload() {
+function getEcosystemStatsPayload(excludeFixtures = true) {
   const d = profileStore.getDb();
   const profileRows = d.prepare('SELECT id, name, handle, claimed, verification_data FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL)').all('active')
-    .filter((row) => !isFixtureIdentity(row.id, row.name, row.handle));
+    .filter((row) => !excludeFixtures || !isFixtureIdentity(row.id, row.name, row.handle));
   const total = profileRows.length;
   const claimed = profileRows.filter((row) => Number(row.claimed) === 1).length;
 
@@ -1165,7 +1165,7 @@ function getEcosystemStatsPayload() {
   let totalVolume = 0;
   try {
     const jobRows = d.prepare('SELECT client_id, agent_id, title, description, status, agreed_budget, budget_amount FROM jobs').all()
-      .filter((job) => !isFixtureJob(job));
+      .filter((job) => !excludeFixtures || !isFixtureJob(job));
     totalJobs = jobRows.length;
     openJobs = jobRows.filter((job) => job.status === 'open').length;
     inProgressJobs = jobRows.filter((job) => job.status === 'in_progress').length;
@@ -1179,13 +1179,13 @@ function getEcosystemStatsPayload() {
   const profilesDir = '/home/ubuntu/agentfolio/data/profiles';
   let jsonFiles = [];
   try {
-    jsonFiles = fs.readdirSync(profilesDir).filter(f => f.endsWith('.json') && !isFixtureIdentity(f.replace(/\.json$/, '')));
+    jsonFiles = fs.readdirSync(profilesDir).filter(f => f.endsWith('.json') && (!excludeFixtures || !isFixtureIdentity(f.replace(/\.json$/, ''))));
   } catch {}
 
   for (const file of jsonFiles) {
     try {
       const p = JSON.parse(fs.readFileSync(path.join(profilesDir, file), 'utf-8'));
-      if (isFixtureIdentity(p.id, p.name, p.handle, file.replace(/\.json$/, ''))) continue;
+      if (excludeFixtures && isFixtureIdentity(p.id, p.name, p.handle, file.replace(/\.json$/, ''))) continue;
       if (p.skills) {
         for (const s of p.skills) {
           const name = typeof s === 'string' ? s : s.name;
@@ -1236,7 +1236,7 @@ function getEcosystemStatsPayload() {
     },
     verificationTypes: verificationTypes.size,
     verificationPlatforms: [...verificationTypes].sort(),
-    publicTraction: { excludedFixtures: true },
+    publicTraction: { excludedFixtures: excludeFixtures },
   };
 }
 
@@ -1251,7 +1251,7 @@ app.get('/api/ecosystem/stats', (req, res) => {
 
 app.get('/api/stats', (req, res) => {
   try {
-    res.json(getEcosystemStatsPayload());
+    res.json(getEcosystemStatsPayload(shouldExcludeFixtures(req.query.excludeFixtures)));
   } catch (err) {
     res.status(500).json({ error: 'Failed to compute stats' });
   }
