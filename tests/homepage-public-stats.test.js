@@ -20,6 +20,18 @@ const leaderboardPageSource = fs.readFileSync(
   path.join(__dirname, '..', 'frontend', 'src', 'app', 'leaderboard', 'page.tsx'),
   'utf8'
 );
+const agentsRouteSource = fs.readFileSync(
+  path.join(__dirname, '..', 'frontend', 'src', 'app', 'api', 'agents', 'route.ts'),
+  'utf8'
+);
+const statsPageSource = fs.readFileSync(
+  path.join(__dirname, '..', 'frontend', 'src', 'app', 'stats', 'page.tsx'),
+  'utf8'
+);
+const satpPageSource = fs.readFileSync(
+  path.join(__dirname, '..', 'frontend', 'src', 'app', 'satp', 'page.tsx'),
+  'utf8'
+);
 
 test('fetchStats maps the canonical live payload into homepage counts', async () => {
   const { fetchStats, getPublicStatCounters } = await import(pathToFileURL(
@@ -145,4 +157,31 @@ test('all homepage identity surfaces use the shared public cohort', () => {
   assert.match(dataSource, /export function getTopVerifiedAgents[\s\S]*?const agents = getAllPublicAgents\(\)/);
   assert.match(dataSource, /export function getActivityFeed[\s\S]*?const agents = getAllPublicAgents\(\)/);
   assert.match(dataSource, /export function getRecentlyVerified[\s\S]*?const agents = getAllPublicAgents\(\)/);
+});
+
+test('interactive and secondary public surfaces use the non-fixture cohort', () => {
+  assert.match(agentsRouteSource, /const publicAgents = getAllPublicAgents\(\)/);
+  assert.match(agentsRouteSource, /let agents = \[\.\.\.publicAgents\]/);
+  assert.match(agentsRouteSource, /new Set\(publicAgents\.flatMap\(a => a\.skills\)\)/);
+  assert.doesNotMatch(agentsRouteSource, /\bgetAllAgents\b/);
+  assert.match(statsPageSource, /const agents = await getAllPublicAgents\(\)/);
+  assert.match(satpPageSource, /const agents = await getAllPublicAgents\(\)/);
+});
+
+test('frontend fixture cohort mirror is identical to the server source', () => {
+  const serverCohort = JSON.parse(fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'lib', 'public-fixture-cohort.json'),
+    'utf8'
+  ));
+  const frontendCohort = JSON.parse(fs.readFileSync(
+    path.join(__dirname, '..', 'frontend', 'src', 'lib', 'public-fixture-cohort.json'),
+    'utf8'
+  ));
+
+  assert.deepEqual(frontendCohort, serverCohort);
+});
+
+test('empty public cohorts do not render misleading social proof or pagination ranges', () => {
+  assert.match(homepageSource, /topAgents\.length > 0 &&/);
+  assert.match(leaderboardSource, /total === 0[\s\S]*?Showing 0 of 0/);
 });

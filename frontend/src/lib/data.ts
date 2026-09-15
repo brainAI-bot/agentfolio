@@ -5,7 +5,7 @@ import type { Agent, Job } from "./types";
 import { getAgentProfilePDA, AGENT_PROFILE_DISCRIMINATOR, SOLANA_RPC } from "./identity-registry";
 import { fetchV3Scores, v3ToComputedScores } from "./v3-scores";
 import { isCanonicalTrustProvider } from "./canonical-verifications";
-import fixtureCohort from "../../../src/lib/public-fixture-cohort.json";
+import fixtureCohort from "./public-fixture-cohort.json";
 
 const REVIEWED_FIXTURE_PROFILE_IDS = new Set(
   fixtureCohort.profileIds.map(id => id.trim().toLowerCase())

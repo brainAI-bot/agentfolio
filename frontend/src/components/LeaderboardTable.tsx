@@ -152,7 +152,9 @@ export function LeaderboardTable({ agents: initialAgents, totalAgents: initialTo
       {/* Pagination + Count */}
       <div className="mt-3 flex items-center justify-between">
         <div className="text-[11px]" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-          Showing {startIdx + 1}&ndash;{Math.min(startIdx + PAGE_SIZE, total)} of {total} {cohortLabel}
+          {total === 0
+            ? `Showing 0 of 0 ${cohortLabel}`
+            : <>Showing {startIdx + 1}&ndash;{Math.min(startIdx + PAGE_SIZE, total)} of {total} {cohortLabel}</>}
         </div>
         {totalPages > 1 && (
           <div className="flex items-center gap-1">
