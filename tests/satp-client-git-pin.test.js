@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const PIN_SHA = '91455b6824798c9993c29816acca7d394ae39365';
-const PROVENANCE_SOURCE_SHA = '3f8188bec89db0d4a081931f35272e10185d1c0d';
+const PROVENANCE_SOURCE_SHA = PIN_SHA;
 
 describe('@brainai/satp-client git pin (G5)', () => {
   it('package.json pin contains the HQ SATP SHA', () => {
@@ -14,7 +14,7 @@ describe('@brainai/satp-client git pin (G5)', () => {
     assert.match(pin, new RegExp(PIN_SHA));
   });
 
-  it('runtime recertification checks out the current deployed-source candidate', () => {
+  it('runtime recertification checks out the canonical consumer and source commit', () => {
     const workflow = fs.readFileSync(
       path.join(__dirname, '..', '.github', 'workflows', 'escrow-v3-runtime-recert.yml'),
       'utf8',
@@ -25,7 +25,7 @@ describe('@brainai/satp-client git pin (G5)', () => {
     ));
     assert.equal(receipt.source.commit, PROVENANCE_SOURCE_SHA);
     assert.match(workflow, new RegExp(`SATP_SOURCE_COMMIT: ["']${PROVENANCE_SOURCE_SHA}["']`));
-    assert.notEqual(receipt.source.commit, PIN_SHA, 'consumer package commit is newer than the deployed-source build commit');
+    assert.equal(receipt.source.commit, PIN_SHA);
   });
 
   it('require() yields verifyIdentityAttestationRequest', () => {

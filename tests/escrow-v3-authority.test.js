@@ -252,7 +252,7 @@ test('escrow_v3 provenance readback certifies current canonical Program Metadata
   assert.equal(provenance.receiptBaseline.sourceBuildTruthSatpPullRequest, 169);
   assert.equal(provenance.receiptBaseline.sourceBuildTruthHead, '06327cefd7aafb5adba720e1fb9c6a6299f4799e');
   assert.equal(provenance.receiptBaseline.receiptObservedAt, '2026-08-31T17:31:46.888Z');
-  assert.equal(provenance.artifactCommit, '3f8188bec89db0d4a081931f35272e10185d1c0d');
+  assert.equal(provenance.artifactCommit, '91455b6824798c9993c29816acca7d394ae39365');
   assert.equal(provenance.sourceHash, '380b20d36f18253a5c382ec1abc4a1147a08092a9a42cdae25e5d954f41acd0a');
   assert.equal(provenance.idlHash, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
   assert.equal(provenance.publishedIdlHash, 'ef9622a6d07bd818d3a74ba6c61f3b3f447f61167e82aadc65ecbce4fb307829');
