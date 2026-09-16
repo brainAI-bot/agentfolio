@@ -28,14 +28,16 @@ const CURRENT_ALLOCATED_RUNTIME_SHA256 = '7672bd30bf01134bc56e088013a5cafd65ff85
 const CURRENT_TRIMMED_RUNTIME_SHA256 = '85e71adf087b268b199c933918a1b8bb2b0a5f67f9e71b1467b3ca8357b8458a';
 const SATP_ESCROW_IDL_PACKAGE_RELATIVE = 'idls/v3/escrow_v3.json';
 const SATP_ESCROW_IDL_PACKAGE_PATH = 'node_modules/@brainai/satp-client/idls/v3/escrow_v3.json';
+const SATP_CLIENT_INSTALLED_LOCK_PATH = 'node_modules/.package-lock.json';
+const SATP_CLIENT_INSTALLED_LOCK_KEY = 'node_modules/@brainai/satp-client';
 const AUTHORITATIVE_SOURCE = 'satp-client-package';
 // Repo-checked fallback is a byte-for-byte copy of SATP idls/v3/escrow_v3.json
 // at commit 91455b6824798c9993c29816acca7d394ae39365
 // (git blob 4c846a12878401ec69f558fd8968d9fc0e986f94, 20926 bytes).
 // The git-pinned satp-client package ships idls/. The repo-checked copy remains
-// a read-only diagnostic fallback if a broken install omits that package path.
-// It supports read-only consumers but cannot satisfy live-write provenance;
-// the authoritative package path must be present for authority verification.
+// an exact, commit-pinned consumer artifact if an install omits that package
+// path. Only this canonical fallback path can satisfy source selection, and it
+// must still pass the independent hash, program, schema, and fee-route checks.
 const SATP_ESCROW_IDL_FALLBACK_PATH = 'third_party/satp/91455b6/idls/v3/escrow_v3.json';
 const SATP_ESCROW_IDL_FALLBACK_COMMIT = '91455b6824798c9993c29816acca7d394ae39365';
 const SATP_ESCROW_IDL_FALLBACK_BLOB_SHA = '4c846a12878401ec69f558fd8968d9fc0e986f94';
@@ -266,12 +268,23 @@ function fileInfo(targetPath, displayPath = null) {
   };
 }
 
+function extractGitCommit(value) {
+  if (typeof value !== 'string') return null;
+  const match = value.match(/#([0-9a-f]{7,40})$/i);
+  return match ? match[1] : null;
+}
+
 function getSatpClientCommit() {
   const lock = readJsonIfPresent('package-lock.json');
   const dep = lock?.packages?.['']?.dependencies?.['@brainai/satp-client'];
   if (typeof dep !== 'string') return null;
-  const match = dep.match(/#([0-9a-f]{7,40})$/i);
-  return match ? match[1] : dep;
+  return extractGitCommit(dep) || dep;
+}
+
+function getInstalledSatpClientCommit(installedLockPath = SATP_CLIENT_INSTALLED_LOCK_PATH) {
+  const lock = readJsonIfPresent(installedLockPath);
+  const installed = lock?.packages?.[SATP_CLIENT_INSTALLED_LOCK_KEY];
+  return extractGitCommit(installed?.resolved);
 }
 
 function publicKeyToString(value) {
@@ -318,6 +331,7 @@ function getEscrowV3AuthorityReadback({
   env = process.env,
   packagedSatpEscrowIdlPath,
   repoCheckedFallbackPath,
+  installedSatpClientLockPath,
 } = {}) {
   const sourceWorkspace = fileInfo(AUTHORITY_SOURCE_WORKSPACE);
   const anchorToml = fileInfo(AUTHORITY_ANCHOR_TOML);
@@ -337,6 +351,10 @@ function getEscrowV3AuthorityReadback({
     interfaceSource: resolvedIdl.source,
   });
   const satpRuntime = readSatpRuntimeIds(satpClient);
+  const declaredSatpClientCommit = getSatpClientCommit();
+  const installedSatpClientCommit = getInstalledSatpClientCommit(installedSatpClientLockPath);
+  const installedSatpClientMatchesProvenanceSource
+    = installedSatpClientCommit === PROVENANCE_SOURCE_COMMIT;
 
   const trackedIdlAddress = trackedIdlJson?.address || null;
   const packagedIdlAddressField = nonEmptyIdlAddress(packagedSatpEscrowIdlJson?.address);
@@ -352,11 +370,26 @@ function getEscrowV3AuthorityReadback({
   const satpMainnetMatches = satpRuntime.mainnetEscrowProgramId === AUTHORITY_PROGRAM_ID;
   const satpDevnetMatches = satpRuntime.devnetEscrowProgramId === AUTHORITY_PROGRAM_ID;
   const packagedIdlMatches = packagedSatpEscrowIdl.exists && packagedIdlAddress === AUTHORITY_PROGRAM_ID;
-  const packagedIdlSourceMatches = resolvedIdl.packagedMissing === false
+  const packageSourceSelected = resolvedIdl.packagedMissing === false
     && resolvedIdl.source === AUTHORITATIVE_SOURCE;
+  const pinnedFallbackSelected = resolvedIdl.fallbackUsed === true
+    && resolvedIdl.source === SATP_ESCROW_IDL_FALLBACK_SOURCE
+    && path.resolve(resolvedIdl.usedPath) === path.join(REPO_ROOT, SATP_ESCROW_IDL_FALLBACK_PATH)
+    && installedSatpClientMatchesProvenanceSource;
+  // Production may retain the repository-checked artifact when the git-pinned
+  // dependency's non-code files are absent from node_modules. That exact path is
+  // an authoritative consumer artifact only when the installed dependency lock
+  // resolves to the same SATP commit and the independently checked program id,
+  // instruction schema, fee routing, and content hash also match.
+  // Fallback authority is granted only when the installed satp-client commit
+  // equals the IDL's source commit (review agentfolio#316 R1 option b); live
+  // writes remain independently Owner-gated below. An arbitrary fallback path
+  // never acquires this authority.
+  const packagedIdlSourceMatches = packageSourceSelected || pinnedFallbackSelected;
   const packagedIdlInstructionCountMatches = packagedIdlInstructionCount === AUTHORITY_INSTRUCTION_COUNT;
   const packagedIdlHashMatches = packagedSatpEscrowIdl.sha256 === AUTHORITY_IDL_SHA256;
-  // AF onchain/escrow_v3 is leftover inventory. SATP package is the authority.
+  // AF onchain/escrow_v3 is leftover inventory. The pinned SATP consumer
+  // artifact (package path or exact repository-checked copy) is the authority.
   // B1Se is the separate devnet runtime and must not invalidate finalized mainnet
   // HXCU provenance. Live writes remain independently owner-gated below.
   const verified = packagedIdlMatches
@@ -423,7 +456,10 @@ function getEscrowV3AuthorityReadback({
     },
     releaseFeeRouting,
     satpArtifact: {
-      commit: getSatpClientCommit(),
+      commit: declaredSatpClientCommit,
+      installedCommit: installedSatpClientCommit,
+      installedCommitSource: SATP_CLIENT_INSTALLED_LOCK_PATH,
+      installedMatchesProvenanceSource: installedSatpClientMatchesProvenanceSource,
       runtime: satpRuntime,
       mainnetMatchesExpectedProgramId: satpMainnetMatches,
       devnetMatchesExpectedProgramId: satpDevnetMatches,
@@ -516,7 +552,7 @@ function getEscrowV3ProvenanceReadback({
   return {
     label: readback.label || AUTHORITY_LABEL,
     authoritativeSource: sourceBuildVerified ? provenanceReceipt.source.repository : null,
-    consumerInterfaceSource: AUTHORITATIVE_SOURCE,
+    consumerInterfaceSource: packaged.source || AUTHORITATIVE_SOURCE,
     provenanceReceiptPath: PROVENANCE_RECEIPT_PATH,
     provenanceStatus: receiptValid ? provenanceReceipt.status : 'unverified',
     receiptBaseline: receiptValid ? provenanceReceipt.baseline : null,
@@ -578,6 +614,8 @@ module.exports = {
   SATP_ESCROW_IDL_FALLBACK_SOURCE,
   SATP_ESCROW_IDL_PACKAGE_PATH,
   SATP_ESCROW_IDL_PACKAGE_RELATIVE,
+  SATP_CLIENT_INSTALLED_LOCK_PATH,
+  getInstalledSatpClientCommit,
   getEscrowV3AuthorityReadback,
   getEscrowV3ReleaseFeeRoutingReadback,
   getEscrowV3ProvenanceReadback,
