@@ -1,0 +1,985 @@
+{
+  "address": "HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C",
+  "metadata": {
+    "name": "escrow_v3",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "SATP V3 Escrow — Identity-verified on-chain escrow for agent transactions",
+    "deployments": {
+      "devnet": "B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg",
+      "localnet": "B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg",
+      "mainnet": "HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C"
+    }
+  },
+  "docs": [
+    "SATP V3 Escrow Program",
+    "",
+    "Identity-verified on-chain escrow for agent transactions.",
+    "Requires both client and agent to have SATP V3 Genesis Records.",
+    "",
+    "Upgrade over satp-escrow V1:",
+    "- CPI to identity_v3 — verifies agent has on-chain identity",
+    "- Minimum trust tier enforcement (optional per escrow)",
+    "- Agent \"born\" requirement (optional — can require burn-to-become)",
+    "- Configurable arbiter (third-party, not client-as-arbiter)",
+    "- Escrow fee support (percentage to protocol treasury)",
+    "- Milestone-based partial releases",
+    "",
+    "Security model:",
+    "- PDA seeds include client + agent_id_hash + nonce → unique per job",
+    "- Agent identity verified via Genesis Record PDA derivation",
+    "- Authority checks on all state transitions",
+    "- Deadline enforcement with grace period for disputes"
+  ],
+  "instructions": [
+    {
+      "name": "create_escrow",
+      "docs": [
+        "Create an escrow between a client and a verified SATP V3 agent.",
+        "",
+        "The instruction verifies the agent's Genesis Record exists on-chain",
+        "by checking the `identity_account` PDA derivation matches the expected",
+        "seeds. Optionally enforces minimum reputation and verification level.",
+        "",
+        "# Arguments",
+        "* `agent_id` - The agent's string identifier (used for PDA derivation)",
+        "* `amount` - Lamports to escrow",
+        "* `description_hash` - SHA256 of job description (for uniqueness + audit)",
+        "* `deadline` - Unix timestamp deadline for work submission",
+        "* `nonce` - Unique nonce (allows multiple escrows between same parties)",
+        "* `min_verification_level` - Minimum required verification level (0-5, 0 = no requirement)",
+        "* `require_born` - If true, agent must have completed burn-to-become"
+      ],
+      "discriminator": [
+        253,
+        215,
+        165,
+        116,
+        36,
+        108,
+        68,
+        80
+      ],
+      "accounts": [
+        {
+          "name": "client",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "agent_wallet",
+          "docs": [
+            "The agent's wallet that will receive funds"
+          ]
+        },
+        {
+          "name": "agent_identity",
+          "docs": [
+            "The agent's SATP V3 Genesis Record"
+          ]
+        },
+        {
+          "name": "arbiter",
+          "docs": [
+            "Arbiter for dispute resolution — must be a third party (not client or agent)"
+          ]
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "agent_id",
+          "type": "string"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "description_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "deadline",
+          "type": "i64"
+        },
+        {
+          "name": "nonce",
+          "type": "u64"
+        },
+        {
+          "name": "min_verification_level",
+          "type": "u8"
+        },
+        {
+          "name": "require_born",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "create_usdc_escrow",
+      "docs": [
+        "Create an escrow funded with USDC/SPL tokens.",
+        "",
+        "The vault must be the associated token account for the escrow PDA and",
+        "USDC mint. Clients are expected to include an idempotent ATA creation",
+        "instruction before this instruction when the vault may not exist."
+      ],
+      "discriminator": [
+        90,
+        241,
+        187,
+        228,
+        185,
+        194,
+        187,
+        152
+      ],
+      "accounts": [
+        {
+          "name": "client",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "agent_wallet"
+        },
+        {
+          "name": "agent_identity"
+        },
+        {
+          "name": "arbiter"
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "client_usdc_account",
+          "writable": true
+        },
+        {
+          "name": "vault_usdc_account",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "agent_id",
+          "type": "string"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "description_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "deadline",
+          "type": "i64"
+        },
+        {
+          "name": "nonce",
+          "type": "u64"
+        },
+        {
+          "name": "min_verification_level",
+          "type": "u8"
+        },
+        {
+          "name": "require_born",
+          "type": "bool"
+        },
+        {
+          "name": "token_decimals",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "submit_work",
+      "docs": [
+        "Agent submits work proof. Only callable before deadline."
+      ],
+      "discriminator": [
+        158,
+        80,
+        101,
+        51,
+        114,
+        130,
+        101,
+        253
+      ],
+      "accounts": [
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "agent",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "work_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "release",
+      "docs": [
+        "Client releases full remaining funds to agent.",
+        "Allowed in Active or WorkSubmitted status."
+      ],
+      "discriminator": [
+        253,
+        249,
+        15,
+        206,
+        28,
+        127,
+        193,
+        241
+      ],
+      "accounts": [
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "client",
+          "signer": true
+        },
+        {
+          "name": "agent",
+          "writable": true
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "release_usdc",
+      "docs": [
+        "Client releases full remaining USDC/SPL funds to agent."
+      ],
+      "discriminator": [
+        18,
+        122,
+        66,
+        80,
+        106,
+        106,
+        191,
+        167
+      ],
+      "accounts": [
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "client",
+          "signer": true
+        },
+        {
+          "name": "agent"
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "vault_usdc_account",
+          "writable": true
+        },
+        {
+          "name": "agent_usdc_account",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "partial_release",
+      "docs": [
+        "Client releases a partial amount (milestone payment).",
+        "Escrow stays Active until fully released or cancelled."
+      ],
+      "discriminator": [
+        20,
+        4,
+        101,
+        245,
+        53,
+        131,
+        213,
+        8
+      ],
+      "accounts": [
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "client",
+          "signer": true
+        },
+        {
+          "name": "agent",
+          "writable": true
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "partial_release_usdc",
+      "docs": [
+        "Client releases a partial USDC/SPL amount."
+      ],
+      "discriminator": [
+        96,
+        50,
+        106,
+        239,
+        190,
+        153,
+        153,
+        106
+      ],
+      "accounts": [
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "client",
+          "signer": true
+        },
+        {
+          "name": "agent"
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "vault_usdc_account",
+          "writable": true
+        },
+        {
+          "name": "agent_usdc_account",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "cancel",
+      "docs": [
+        "Client cancels escrow and gets refund of unreleased funds.",
+        "Only if deadline passed AND status is Active (no work submitted)."
+      ],
+      "discriminator": [
+        232,
+        219,
+        223,
+        41,
+        219,
+        236,
+        220,
+        190
+      ],
+      "accounts": [
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "client",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "cancel_usdc",
+      "docs": [
+        "Client cancels USDC/SPL escrow and gets refund of unreleased funds."
+      ],
+      "discriminator": [
+        25,
+        132,
+        227,
+        232,
+        60,
+        46,
+        9,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "client",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "vault_usdc_account",
+          "writable": true
+        },
+        {
+          "name": "client_usdc_account",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "raise_dispute",
+      "docs": [
+        "Either client or agent raises a dispute. Only when work has been submitted."
+      ],
+      "discriminator": [
+        41,
+        243,
+        1,
+        51,
+        150,
+        95,
+        246,
+        73
+      ],
+      "accounts": [
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "signer",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "reason_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "resolve_dispute",
+      "docs": [
+        "Arbiter resolves dispute. Can split funds between agent and client.",
+        "",
+        "# Arguments",
+        "* `agent_amount` - Lamports to release to agent",
+        "* `client_amount` - Lamports to refund to client",
+        "",
+        "agent_amount + client_amount must equal remaining escrowed funds."
+      ],
+      "discriminator": [
+        231,
+        6,
+        202,
+        6,
+        96,
+        103,
+        12,
+        230
+      ],
+      "accounts": [
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "arbiter",
+          "signer": true
+        },
+        {
+          "name": "agent",
+          "writable": true
+        },
+        {
+          "name": "client_wallet",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "agent_amount",
+          "type": "u64"
+        },
+        {
+          "name": "client_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "resolve_dispute_usdc",
+      "docs": [
+        "Arbiter resolves USDC/SPL dispute. Split must equal remaining vault funds."
+      ],
+      "discriminator": [
+        103,
+        249,
+        11,
+        83,
+        254,
+        225,
+        114,
+        0
+      ],
+      "accounts": [
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "arbiter",
+          "signer": true
+        },
+        {
+          "name": "agent"
+        },
+        {
+          "name": "client_wallet"
+        },
+        {
+          "name": "usdc_mint"
+        },
+        {
+          "name": "vault_usdc_account",
+          "writable": true
+        },
+        {
+          "name": "agent_usdc_account",
+          "writable": true
+        },
+        {
+          "name": "client_usdc_account",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "agent_amount",
+          "type": "u64"
+        },
+        {
+          "name": "client_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "extend_deadline",
+      "docs": [
+        "Client extends the escrow deadline. Only when Active.",
+        "New deadline must be strictly after the current deadline."
+      ],
+      "discriminator": [
+        18,
+        209,
+        27,
+        175,
+        87,
+        13,
+        213,
+        188
+      ],
+      "accounts": [
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "client",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_deadline",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "close_escrow",
+      "docs": [
+        "Close a settled escrow account. Returns rent to client.",
+        "Only when Released, Cancelled, or Resolved."
+      ],
+      "discriminator": [
+        139,
+        171,
+        94,
+        146,
+        191,
+        91,
+        144,
+        50
+      ],
+      "accounts": [
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "client",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "escrow_v3::EscrowV3",
+      "discriminator": [
+        145,
+        108,
+        37,
+        52,
+        197,
+        162,
+        232,
+        59
+      ]
+    }
+  ],
+  "types": [
+    {
+      "name": "escrow_v3::EscrowCurrency",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Sol"
+          },
+          {
+            "name": "Usdc"
+          }
+        ]
+      }
+    },
+    {
+      "name": "escrow_v3::EscrowStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Active"
+          },
+          {
+            "name": "WorkSubmitted"
+          },
+          {
+            "name": "Released"
+          },
+          {
+            "name": "Cancelled"
+          },
+          {
+            "name": "Disputed"
+          },
+          {
+            "name": "Resolved"
+          }
+        ]
+      }
+    },
+    {
+      "name": "escrow_v3::EscrowV3",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "client",
+            "docs": [
+              "Client who created the escrow"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "agent",
+            "docs": [
+              "Agent wallet that receives funds"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "agent_id_hash",
+            "docs": [
+              "SHA-256 of agent_id (links to Genesis Record)"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "Total escrowed amount in lamports"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "released_amount",
+            "docs": [
+              "Amount already released (for partial/milestone releases)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "description_hash",
+            "docs": [
+              "SHA-256 of job description"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "deadline",
+            "docs": [
+              "Deadline for work submission (Unix timestamp)"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "nonce",
+            "docs": [
+              "Nonce for uniqueness (same client+agent can have multiple escrows)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "currency",
+            "docs": [
+              "Escrow funding currency."
+            ],
+            "type": {
+              "defined": {
+                "name": "escrow_v3::EscrowCurrency"
+              }
+            }
+          },
+          {
+            "name": "token_mint",
+            "docs": [
+              "SPL mint used for token-funded escrow; None for SOL."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "token_vault",
+            "docs": [
+              "SPL vault ATA controlled by the escrow PDA; None for SOL."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "token_decimals",
+            "docs": [
+              "SPL mint decimals used by transfer_checked; None for SOL."
+            ],
+            "type": {
+              "option": "u8"
+            }
+          },
+          {
+            "name": "status",
+            "docs": [
+              "Current escrow status"
+            ],
+            "type": {
+              "defined": {
+                "name": "escrow_v3::EscrowStatus"
+              }
+            }
+          },
+          {
+            "name": "min_verification_level",
+            "docs": [
+              "Minimum verification level required at creation"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "require_born",
+            "docs": [
+              "Whether born status was required at creation"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Creation timestamp"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "arbiter",
+            "docs": [
+              "Designated arbiter for dispute resolution"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "work_hash",
+            "docs": [
+              "Work proof hash (set on submit_work)"
+            ],
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  32
+                ]
+              }
+            }
+          },
+          {
+            "name": "work_submitted_at",
+            "docs": [
+              "When work was submitted"
+            ],
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "dispute_reason_hash",
+            "docs": [
+              "Dispute reason hash (set on raise_dispute)"
+            ],
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  32
+                ]
+              }
+            }
+          },
+          {
+            "name": "disputed_at",
+            "docs": [
+              "When dispute was raised"
+            ],
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "disputed_by",
+            "docs": [
+              "Who raised the dispute"
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump seed"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ]
+}

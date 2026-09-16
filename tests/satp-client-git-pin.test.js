@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const PIN_SHA = '93fc6c0d86302cfe8b0d8c798ba2817d7eeace44';
+const PIN_SHA = '91455b6824798c9993c29816acca7d394ae39365';
 const PROVENANCE_SOURCE_SHA = '3f8188bec89db0d4a081931f35272e10185d1c0d';
 
 describe('@brainai/satp-client git pin (G5)', () => {
@@ -25,7 +25,7 @@ describe('@brainai/satp-client git pin (G5)', () => {
     ));
     assert.equal(receipt.source.commit, PROVENANCE_SOURCE_SHA);
     assert.match(workflow, new RegExp(`SATP_SOURCE_COMMIT: ["']${PROVENANCE_SOURCE_SHA}["']`));
-    assert.notEqual(receipt.source.commit, PIN_SHA, 'consumer package pin is historical until publication is reconciled');
+    assert.notEqual(receipt.source.commit, PIN_SHA, 'consumer package commit is newer than the deployed-source build commit');
   });
 
   it('require() yields verifyIdentityAttestationRequest', () => {
