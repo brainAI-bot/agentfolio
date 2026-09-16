@@ -381,9 +381,10 @@ function getEscrowV3AuthorityReadback({
   // an authoritative consumer artifact only when the installed dependency lock
   // resolves to the same SATP commit and the independently checked program id,
   // instruction schema, fee routing, and content hash also match.
-  // HQ REDO TASK-0dc002ec authorizes this narrower fallback contract; it does
-  // not authorize live writes, which remain independently Owner-gated below.
-  // An arbitrary fallback path never acquires this authority.
+  // Fallback authority is granted only when the installed satp-client commit
+  // equals the IDL's source commit (review agentfolio#316 R1 option b); live
+  // writes remain independently Owner-gated below. An arbitrary fallback path
+  // never acquires this authority.
   const packagedIdlSourceMatches = packageSourceSelected || pinnedFallbackSelected;
   const packagedIdlInstructionCountMatches = packagedIdlInstructionCount === AUTHORITY_INSTRUCTION_COUNT;
   const packagedIdlHashMatches = packagedSatpEscrowIdl.sha256 === AUTHORITY_IDL_SHA256;
