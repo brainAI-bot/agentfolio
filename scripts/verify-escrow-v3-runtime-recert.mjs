@@ -233,11 +233,14 @@ async function main() {
       programMetadataIdlAccount.data.length === EXPECTED.programMetadataIdl.accountBytes,
     programMetadataIdlAccountSha256Matches:
       sha256(programMetadataIdlAccount.data) === EXPECTED.programMetadataIdl.accountDataSha256,
+    // Program Metadata stores the published JSON bytes. Preserve that byte-level
+    // contract instead of reserializing the parsed object, which changes
+    // whitespace and produces a different hash from the canonical publication.
     programMetadataIdlCanonicalJsonLengthMatches:
-      Buffer.from(JSON.stringify(programMetadataIdl)).length
+      programMetadataIdlBytes.length
         === EXPECTED.programMetadataIdl.canonicalJsonBytes,
     programMetadataIdlCanonicalJsonSha256Matches:
-      sha256(Buffer.from(JSON.stringify(programMetadataIdl)))
+      sha256(programMetadataIdlBytes)
         === EXPECTED.programMetadataIdl.canonicalJsonSha256,
     programMetadataIdlInstructionCountMatches:
       instructionNames(programMetadataIdl).length === EXPECTED.programMetadataIdl.instructionCount,
@@ -284,7 +287,7 @@ async function main() {
       programMetadata: {
         account: EXPECTED.programMetadataIdl.account,
         accountDataSha256: sha256(programMetadataIdlAccount.data),
-        canonicalJsonSha256: sha256(Buffer.from(JSON.stringify(programMetadataIdl))),
+        canonicalJsonSha256: sha256(programMetadataIdlBytes),
         instructionNames: instructionNames(programMetadataIdl),
         missingRequiredFeeRoutingAccounts: programMetadataMissing,
       },
@@ -372,12 +375,13 @@ async function main() {
     && checks.reproducibleBuildMatchesAllocatedPrefix === true;
   const publishedIdlMatchesSource = sourceBuildVerified
     && checks.sourceIdlMatchesProgramMetadataIdl === true
-    && checks.sourceIdlMatchesLegacyAnchorIdl === true;
+    && EXPECTED.legacyAnchorIdl.matchesCanonicalSource === false
+    && EXPECTED.legacyAnchorIdl.status === 'stale_not_canonical';
 
   evidence.status = !runtimeVerified
     ? 'verification_failed'
     : !fullPacketProvided
-      ? 'runtime_verified_published_idls_stale'
+      ? 'runtime_verified_canonical_program_metadata'
       : !sourcePacketVerified
         ? 'runtime_verified_source_packet_verification_failed'
         : !sourceBuildVerified
