@@ -70,7 +70,7 @@ test('fails closed when mainnet genesis or upgrade authority presence drifts', a
 
 test('receipt must bind the deployed bytes to the pinned reproducible SATP build', async () => {
   const { verifyReceipt } = await verifierModule;
-  const sourceCommit = '3f8188bec89db0d4a081931f35272e10185d1c0d';
+  const sourceCommit = '91455b6824798c9993c29816acca7d394ae39365';
   const receipt = {
     source: { commit: sourceCommit },
     rebuild: { sha256: 'artifact-hash' },
@@ -88,7 +88,7 @@ test('receipt must bind the deployed bytes to the pinned reproducible SATP build
 
 test('receipt fails closed when its source commit drifts from runtime recertification', async () => {
   const { pinnedSatpSourceCommit, verifyReceipt } = await verifierModule;
-  const sourceCommit = pinnedSatpSourceCommit('env:\n  SATP_SOURCE_COMMIT: "3f8188bec89db0d4a081931f35272e10185d1c0d"');
+  const sourceCommit = pinnedSatpSourceCommit('env:\n  SATP_SOURCE_COMMIT: "91455b6824798c9993c29816acca7d394ae39365"');
   const receipt = {
     source: { commit: '0'.repeat(40) },
     rebuild: { sha256: 'artifact-hash' },

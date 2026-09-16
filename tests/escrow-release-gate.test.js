@@ -390,10 +390,12 @@ test('legacy non-V3 escrow transaction builders cannot bypass identity-gated esc
   }
 });
 
-test('V3 release builders fail closed when the certified runtime lacks treasury routing', async () => {
+test('V3 release builders stay live-funds gated after treasury routing is certified', async () => {
   const previousEnable = process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
+  const previousOwnerAuthorization = process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
   const previousKill = process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
   delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
+  delete process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
   delete process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
 
   const app = express();
@@ -417,20 +419,18 @@ test('V3 release builders fail closed when the certified runtime lacks treasury 
         body: JSON.stringify({}),
       });
       const body = await res.json();
-      assert.equal(res.status, 501);
-      assert.equal(body.code, 'ESCROW_V3_FEE_ROUTING_UNSUPPORTED');
-      assert.equal(body.instruction, instruction);
-      assert.equal(body.escrowProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
-      assert.equal(body.feeRouting.status, 'unsupported');
-      assert.equal(body.feeRouting.supported, false);
-      assert.equal(body.feeRouting.failClosed, true);
-      assert.equal(body.feeRouting.routes[instruction].treasuryAccountPresent, false);
+      assert.equal(res.status, 423);
+      assert.equal(body.code, 'LIVE_ESCROW_WRITES_READ_ONLY');
+      assert.equal(body.liveEscrow.enabled, false);
+      assert.equal(body.liveEscrow.ownerAuthorized, false);
+      assert.equal(body.liveEscrow.ownerAuthorization.status, 'missing_owner_authorization');
       assert.equal(body.transaction, undefined);
-      assert.match(body.error, /transaction construction is disabled/);
     }
   } finally {
     if (previousEnable === undefined) delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
     else process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = previousEnable;
+    if (previousOwnerAuthorization === undefined) delete process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
+    else process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION = previousOwnerAuthorization;
     if (previousKill === undefined) delete process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
     else process.env.AGENTFOLIO_ESCROW_KILL_SWITCH = previousKill;
     await close(server);

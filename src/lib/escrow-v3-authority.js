@@ -14,31 +14,31 @@ const {
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const AUTHORITY_PROGRAM_ID = 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C';
-const AUTHORITY_PROGRAM_ID_PROVENANCE = 'HQ task AGENTFOLIO-SATP-ESCROW-V3-AUTHORITATIVE-RUNTIME-REFRESH-20260824: finalized SATP mainnet runtime from git-pinned @brainai/satp-client commit 93fc6c0d86302cfe8b0d8c798ba2817d7eeace44 (packaged idls/v3/escrow_v3.json + getV3ProgramIds(\'mainnet\').ESCROW); AgentFolio onchain/escrow_v3 and the B1Se devnet runtime are leftover inventory, not the mainnet IDL or program source of truth';
+const AUTHORITY_PROGRAM_ID_PROVENANCE = 'HQ task TASK-c491817f: finalized SATP mainnet runtime and canonical Program Metadata IDL from git-pinned @brainai/satp-client commit 91455b6824798c9993c29816acca7d394ae39365 (packaged idls/v3/escrow_v3.json + getV3ProgramIds(\'mainnet\').ESCROW); AgentFolio onchain/escrow_v3, the B1Se devnet runtime, and the legacy Anchor IDL account are non-canonical inventory';
 const AUTHORITY_INSTRUCTION_COUNT = 14;
-const AUTHORITY_IDL_SHA256 = 'e8c142f27e225d8edc2f8f41e6fb698ebbb73f69d2fc078d5bf963234ebc8fa9';
+const AUTHORITY_IDL_SHA256 = 'ef9622a6d07bd818d3a74ba6c61f3b3f447f61167e82aadc65ecbce4fb307829';
 const AUTHORITY_LABEL = 'escrow_v3';
 const AUTHORITY_SOURCE_WORKSPACE = 'onchain/escrow_v3';
 const AUTHORITY_ANCHOR_TOML = 'onchain/escrow_v3/Anchor.toml';
 const AUTHORITY_IDL_PATH = 'onchain/escrow_v3/target/idl/escrow_v3.json';
 const AUTHORITY_PROGRAM_SOURCE = 'onchain/escrow_v3/programs/escrow_v3/src/lib.rs';
 const PROVENANCE_RECEIPT_PATH = 'config/escrow-v3-provenance-ef7e4581.json';
-const PROVENANCE_SOURCE_COMMIT = '3f8188bec89db0d4a081931f35272e10185d1c0d';
+const PROVENANCE_SOURCE_COMMIT = '91455b6824798c9993c29816acca7d394ae39365';
 const CURRENT_ALLOCATED_RUNTIME_SHA256 = '7672bd30bf01134bc56e088013a5cafd65ff850c402a56e532be3e28a3d5b4c9';
 const CURRENT_TRIMMED_RUNTIME_SHA256 = '85e71adf087b268b199c933918a1b8bb2b0a5f67f9e71b1467b3ca8357b8458a';
 const SATP_ESCROW_IDL_PACKAGE_RELATIVE = 'idls/v3/escrow_v3.json';
 const SATP_ESCROW_IDL_PACKAGE_PATH = 'node_modules/@brainai/satp-client/idls/v3/escrow_v3.json';
 const AUTHORITATIVE_SOURCE = 'satp-client-package';
 // Repo-checked fallback is a byte-for-byte copy of SATP idls/v3/escrow_v3.json
-// at commit 93fc6c0d86302cfe8b0d8c798ba2817d7eeace44
-// (git blob 3d3d675926b6d4e8259adde5783a18827a7a946f, 20548 bytes).
-// The git-pinned satp-client install does not currently ship idls/, so the
-// repo-checked, hash-pinned copy is the expected consumer path in that layout.
+// at commit 91455b6824798c9993c29816acca7d394ae39365
+// (git blob 4c846a12878401ec69f558fd8968d9fc0e986f94, 20926 bytes).
+// The git-pinned satp-client package ships idls/. The repo-checked copy remains
+// a read-only diagnostic fallback if a broken install omits that package path.
 // It supports read-only consumers but cannot satisfy live-write provenance;
 // the authoritative package path must be present for authority verification.
-const SATP_ESCROW_IDL_FALLBACK_PATH = 'third_party/satp/93fc6c0d/idls/v3/escrow_v3.json';
-const SATP_ESCROW_IDL_FALLBACK_COMMIT = '93fc6c0d86302cfe8b0d8c798ba2817d7eeace44';
-const SATP_ESCROW_IDL_FALLBACK_BLOB_SHA = '3d3d675926b6d4e8259adde5783a18827a7a946f';
+const SATP_ESCROW_IDL_FALLBACK_PATH = 'third_party/satp/91455b6/idls/v3/escrow_v3.json';
+const SATP_ESCROW_IDL_FALLBACK_COMMIT = '91455b6824798c9993c29816acca7d394ae39365';
+const SATP_ESCROW_IDL_FALLBACK_BLOB_SHA = '4c846a12878401ec69f558fd8968d9fc0e986f94';
 const SATP_ESCROW_IDL_FALLBACK_SOURCE = 'repo-checked-fallback';
 const ESCROW_V3_FEE_ROUTING_ROUTES = ['release', 'partial_release'];
 const ESCROW_V3_FEE_ROUTING_TREASURY_ACCOUNT = 'treasury';
@@ -194,10 +194,10 @@ function isValidEscrowV3ProvenanceReceipt(receipt) {
   const programMetadataMatchesSource = programMetadataIdl.matchesCanonicalSource === true
     && programMetadataIdl.canonicalJsonSha256 === receipt?.sourceIdl?.sha256
     && programMetadataIdl.instructionCount === receipt?.sourceIdl?.instructionCount;
-  const legacyAnchorMatchesSource = legacyAnchorIdl.matchesCanonicalSource === true
-    && legacyAnchorIdl.inflatedSha256 === receipt?.sourceIdl?.sha256
-    && legacyAnchorIdl.instructionCount === receipt?.sourceIdl?.instructionCount;
-  const sourceIdlMatchesPublished = programMetadataMatchesSource && legacyAnchorMatchesSource;
+  const legacyAnchorIsExplicitlyNonCanonical = legacyAnchorIdl.matchesCanonicalSource === false
+    && legacyAnchorIdl.status === 'stale_not_canonical';
+  const sourceIdlMatchesPublished = programMetadataMatchesSource
+    && legacyAnchorIsExplicitlyNonCanonical;
   const threeWayBindingVerified = sourceBuildMatchesDeployedRuntime
     && sourceIdlMatchesPublished;
   const expectedStatus = threeWayBindingVerified
@@ -363,6 +363,7 @@ function getEscrowV3AuthorityReadback({
     && packagedIdlSourceMatches
     && packagedIdlInstructionCountMatches
     && packagedIdlHashMatches
+    && releaseFeeRouting.supported
     && satpMainnetMatches;
   const liveEscrow = liveEscrowGateStatus(env);
   const liveEscrowWritesAllowed = verified && liveEscrow.enabled;
@@ -498,6 +499,12 @@ function getEscrowV3ProvenanceReadback({
   if (runtime.available === false) mismatches.push('runtime_unavailable');
   if (readback.satpArtifact?.mainnetMatchesExpectedProgramId !== true) {
     mismatches.push('mainnet_runtime_program_id_mismatch');
+  }
+  if (readback.releaseFeeRouting?.supported !== true) {
+    mismatches.push('packaged_idl_fee_routing_mismatch');
+  }
+  if (!readback.releaseGate) {
+    mismatches.push('missing_release_gate');
   }
   if (readback.status && readback.status !== 'verified') {
     mismatches.push('authority_status_not_verified');
