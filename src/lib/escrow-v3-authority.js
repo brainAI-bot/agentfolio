@@ -33,9 +33,9 @@ const AUTHORITATIVE_SOURCE = 'satp-client-package';
 // at commit 91455b6824798c9993c29816acca7d394ae39365
 // (git blob 4c846a12878401ec69f558fd8968d9fc0e986f94, 20926 bytes).
 // The git-pinned satp-client package ships idls/. The repo-checked copy remains
-// a read-only diagnostic fallback if a broken install omits that package path.
-// It supports read-only consumers but cannot satisfy live-write provenance;
-// the authoritative package path must be present for authority verification.
+// an exact, commit-pinned consumer artifact if an install omits that package
+// path. Only this canonical fallback path can satisfy source selection, and it
+// must still pass the independent hash, program, schema, and fee-route checks.
 const SATP_ESCROW_IDL_FALLBACK_PATH = 'third_party/satp/91455b6/idls/v3/escrow_v3.json';
 const SATP_ESCROW_IDL_FALLBACK_COMMIT = '91455b6824798c9993c29816acca7d394ae39365';
 const SATP_ESCROW_IDL_FALLBACK_BLOB_SHA = '4c846a12878401ec69f558fd8968d9fc0e986f94';
@@ -352,11 +352,22 @@ function getEscrowV3AuthorityReadback({
   const satpMainnetMatches = satpRuntime.mainnetEscrowProgramId === AUTHORITY_PROGRAM_ID;
   const satpDevnetMatches = satpRuntime.devnetEscrowProgramId === AUTHORITY_PROGRAM_ID;
   const packagedIdlMatches = packagedSatpEscrowIdl.exists && packagedIdlAddress === AUTHORITY_PROGRAM_ID;
-  const packagedIdlSourceMatches = resolvedIdl.packagedMissing === false
+  const packageSourceSelected = resolvedIdl.packagedMissing === false
     && resolvedIdl.source === AUTHORITATIVE_SOURCE;
+  const pinnedFallbackSelected = resolvedIdl.fallbackUsed === true
+    && resolvedIdl.source === SATP_ESCROW_IDL_FALLBACK_SOURCE
+    && path.resolve(resolvedIdl.usedPath) === path.join(REPO_ROOT, SATP_ESCROW_IDL_FALLBACK_PATH)
+    && SATP_ESCROW_IDL_FALLBACK_COMMIT === PROVENANCE_SOURCE_COMMIT;
+  // Production may retain the repository-checked artifact when the git-pinned
+  // dependency's non-code files are absent from node_modules. That exact path is
+  // an authoritative consumer artifact only when the independently checked
+  // program id, instruction schema, fee routing, and content hash also match.
+  // An arbitrary fallback path never acquires this authority.
+  const packagedIdlSourceMatches = packageSourceSelected || pinnedFallbackSelected;
   const packagedIdlInstructionCountMatches = packagedIdlInstructionCount === AUTHORITY_INSTRUCTION_COUNT;
   const packagedIdlHashMatches = packagedSatpEscrowIdl.sha256 === AUTHORITY_IDL_SHA256;
-  // AF onchain/escrow_v3 is leftover inventory. SATP package is the authority.
+  // AF onchain/escrow_v3 is leftover inventory. The pinned SATP consumer
+  // artifact (package path or exact repository-checked copy) is the authority.
   // B1Se is the separate devnet runtime and must not invalidate finalized mainnet
   // HXCU provenance. Live writes remain independently owner-gated below.
   const verified = packagedIdlMatches
@@ -516,7 +527,7 @@ function getEscrowV3ProvenanceReadback({
   return {
     label: readback.label || AUTHORITY_LABEL,
     authoritativeSource: sourceBuildVerified ? provenanceReceipt.source.repository : null,
-    consumerInterfaceSource: AUTHORITATIVE_SOURCE,
+    consumerInterfaceSource: packaged.source || AUTHORITATIVE_SOURCE,
     provenanceReceiptPath: PROVENANCE_RECEIPT_PATH,
     provenanceStatus: receiptValid ? provenanceReceipt.status : 'unverified',
     receiptBaseline: receiptValid ? provenanceReceipt.baseline : null,

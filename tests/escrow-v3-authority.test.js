@@ -860,12 +860,12 @@ test('repo-checked SATP escrow IDL fallback is used when packaged file is missin
   assert.equal(readback.packagedSatpEscrowIdl.addressField, AUTHORITY_PROGRAM_ID);
   assert.equal(readback.packagedSatpEscrowIdl.address, AUTHORITY_PROGRAM_ID);
   assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedProgramId, true);
-  assert.equal(readback.packagedSatpEscrowIdl.matchesAuthoritativeSource, false);
+  assert.equal(readback.packagedSatpEscrowIdl.matchesAuthoritativeSource, true);
   assert.equal(readback.packagedSatpEscrowIdl.instructionCount, AUTHORITY_INSTRUCTION_COUNT);
   assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedInstructionCount, true);
   assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedSha256, true);
   assert.equal(provenance.authoritativeSource, 'brainAI-bot/satp');
-  assert.equal(provenance.consumerInterfaceSource, 'satp-client-package');
+  assert.equal(provenance.consumerInterfaceSource, SATP_ESCROW_IDL_FALLBACK_SOURCE);
   assert.notEqual(provenance.sourceHash, readback.packagedSatpEscrowIdl.sha256);
   assert.equal(provenance.idlHash, readback.packagedSatpEscrowIdl.sha256);
   assert.equal(provenance.idlProgramId, AUTHORITY_PROGRAM_ID);
@@ -873,9 +873,8 @@ test('repo-checked SATP escrow IDL fallback is used when packaged file is missin
   assert.ok(!provenance.mismatches.includes('packaged_idl_program_id_mismatch'));
   assert.equal(readback.releaseGate.liveEscrowWritesAllowed, false);
   assert.equal(provenance.liveEscrowWritesAllowed, false);
-  assert.equal(readback.status, 'blocked_pending_authoritative_source_idl');
-  assert.ok(provenance.mismatches.includes('packaged_idl_authoritative_source_mismatch'));
-  assert.ok(provenance.mismatches.includes('authority_status_not_verified'));
+  assert.equal(readback.status, 'verified');
+  assert.deepEqual(provenance.mismatches, []);
 });
 
 test('packaged SATP escrow IDL path still wins when the file exists', () => {
@@ -892,7 +891,7 @@ test('packaged SATP escrow IDL path still wins when the file exists', () => {
   assert.notEqual(readback.packagedSatpEscrowIdl.path, SATP_ESCROW_IDL_FALLBACK_PATH);
 });
 
-test('fallback IDL cannot satisfy provenance even when every release gate is open', () => {
+test('an arbitrary fallback path cannot satisfy provenance even when every release gate is open', () => {
   const missingPackaged = path.join(
     fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'af-g10-fallback-gate-')),
     'escrow_v3.json',
@@ -903,11 +902,20 @@ test('fallback IDL cannot satisfy provenance even when every release gate is ope
     AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION: 'owner-approved-live-escrow-writes',
     AGENTFOLIO_ESCROW_KILL_SWITCH: 'false',
   };
+  const arbitraryFallback = path.join(
+    fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'af-g10-arbitrary-fallback-')),
+    'escrow_v3.json',
+  );
+  fs.copyFileSync(
+    path.resolve(__dirname, '..', SATP_ESCROW_IDL_FALLBACK_PATH),
+    arbitraryFallback,
+  );
 
   const readback = getEscrowV3AuthorityReadback({
     satpClient,
     env,
     packagedSatpEscrowIdlPath: missingPackaged,
+    repoCheckedFallbackPath: arbitraryFallback,
   });
   const provenance = getEscrowV3ProvenanceReadback({
     authorityReadback: readback,
@@ -925,7 +933,7 @@ test('fallback IDL cannot satisfy provenance even when every release gate is ope
   assert.ok(provenance.mismatches.includes('authority_status_not_verified'));
   assert.equal(provenance.liveEscrowWritesAllowed, false);
   assert.equal(provenance.authoritativeSource, 'brainAI-bot/satp');
-  assert.equal(provenance.consumerInterfaceSource, 'satp-client-package');
+  assert.equal(provenance.consumerInterfaceSource, SATP_ESCROW_IDL_FALLBACK_SOURCE);
 });
 
 test('escrow health authority advertises mainnet HXCU next to observed leftover B1Se runtime', () => {
