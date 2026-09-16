@@ -28,6 +28,8 @@ const CURRENT_ALLOCATED_RUNTIME_SHA256 = '7672bd30bf01134bc56e088013a5cafd65ff85
 const CURRENT_TRIMMED_RUNTIME_SHA256 = '85e71adf087b268b199c933918a1b8bb2b0a5f67f9e71b1467b3ca8357b8458a';
 const SATP_ESCROW_IDL_PACKAGE_RELATIVE = 'idls/v3/escrow_v3.json';
 const SATP_ESCROW_IDL_PACKAGE_PATH = 'node_modules/@brainai/satp-client/idls/v3/escrow_v3.json';
+const SATP_CLIENT_INSTALLED_LOCK_PATH = 'node_modules/.package-lock.json';
+const SATP_CLIENT_INSTALLED_LOCK_KEY = 'node_modules/@brainai/satp-client';
 const AUTHORITATIVE_SOURCE = 'satp-client-package';
 // Repo-checked fallback is a byte-for-byte copy of SATP idls/v3/escrow_v3.json
 // at commit 91455b6824798c9993c29816acca7d394ae39365
@@ -266,12 +268,23 @@ function fileInfo(targetPath, displayPath = null) {
   };
 }
 
+function extractGitCommit(value) {
+  if (typeof value !== 'string') return null;
+  const match = value.match(/#([0-9a-f]{7,40})$/i);
+  return match ? match[1] : null;
+}
+
 function getSatpClientCommit() {
   const lock = readJsonIfPresent('package-lock.json');
   const dep = lock?.packages?.['']?.dependencies?.['@brainai/satp-client'];
   if (typeof dep !== 'string') return null;
-  const match = dep.match(/#([0-9a-f]{7,40})$/i);
-  return match ? match[1] : dep;
+  return extractGitCommit(dep) || dep;
+}
+
+function getInstalledSatpClientCommit(installedLockPath = SATP_CLIENT_INSTALLED_LOCK_PATH) {
+  const lock = readJsonIfPresent(installedLockPath);
+  const installed = lock?.packages?.[SATP_CLIENT_INSTALLED_LOCK_KEY];
+  return extractGitCommit(installed?.resolved);
 }
 
 function publicKeyToString(value) {
@@ -318,6 +331,7 @@ function getEscrowV3AuthorityReadback({
   env = process.env,
   packagedSatpEscrowIdlPath,
   repoCheckedFallbackPath,
+  installedSatpClientLockPath,
 } = {}) {
   const sourceWorkspace = fileInfo(AUTHORITY_SOURCE_WORKSPACE);
   const anchorToml = fileInfo(AUTHORITY_ANCHOR_TOML);
@@ -337,6 +351,10 @@ function getEscrowV3AuthorityReadback({
     interfaceSource: resolvedIdl.source,
   });
   const satpRuntime = readSatpRuntimeIds(satpClient);
+  const declaredSatpClientCommit = getSatpClientCommit();
+  const installedSatpClientCommit = getInstalledSatpClientCommit(installedSatpClientLockPath);
+  const installedSatpClientMatchesProvenanceSource
+    = installedSatpClientCommit === PROVENANCE_SOURCE_COMMIT;
 
   const trackedIdlAddress = trackedIdlJson?.address || null;
   const packagedIdlAddressField = nonEmptyIdlAddress(packagedSatpEscrowIdlJson?.address);
@@ -357,11 +375,14 @@ function getEscrowV3AuthorityReadback({
   const pinnedFallbackSelected = resolvedIdl.fallbackUsed === true
     && resolvedIdl.source === SATP_ESCROW_IDL_FALLBACK_SOURCE
     && path.resolve(resolvedIdl.usedPath) === path.join(REPO_ROOT, SATP_ESCROW_IDL_FALLBACK_PATH)
-    && SATP_ESCROW_IDL_FALLBACK_COMMIT === PROVENANCE_SOURCE_COMMIT;
+    && installedSatpClientMatchesProvenanceSource;
   // Production may retain the repository-checked artifact when the git-pinned
   // dependency's non-code files are absent from node_modules. That exact path is
-  // an authoritative consumer artifact only when the independently checked
-  // program id, instruction schema, fee routing, and content hash also match.
+  // an authoritative consumer artifact only when the installed dependency lock
+  // resolves to the same SATP commit and the independently checked program id,
+  // instruction schema, fee routing, and content hash also match.
+  // HQ REDO TASK-0dc002ec authorizes this narrower fallback contract; it does
+  // not authorize live writes, which remain independently Owner-gated below.
   // An arbitrary fallback path never acquires this authority.
   const packagedIdlSourceMatches = packageSourceSelected || pinnedFallbackSelected;
   const packagedIdlInstructionCountMatches = packagedIdlInstructionCount === AUTHORITY_INSTRUCTION_COUNT;
@@ -434,7 +455,10 @@ function getEscrowV3AuthorityReadback({
     },
     releaseFeeRouting,
     satpArtifact: {
-      commit: getSatpClientCommit(),
+      commit: declaredSatpClientCommit,
+      installedCommit: installedSatpClientCommit,
+      installedCommitSource: SATP_CLIENT_INSTALLED_LOCK_PATH,
+      installedMatchesProvenanceSource: installedSatpClientMatchesProvenanceSource,
       runtime: satpRuntime,
       mainnetMatchesExpectedProgramId: satpMainnetMatches,
       devnetMatchesExpectedProgramId: satpDevnetMatches,
@@ -589,6 +613,8 @@ module.exports = {
   SATP_ESCROW_IDL_FALLBACK_SOURCE,
   SATP_ESCROW_IDL_PACKAGE_PATH,
   SATP_ESCROW_IDL_PACKAGE_RELATIVE,
+  SATP_CLIENT_INSTALLED_LOCK_PATH,
+  getInstalledSatpClientCommit,
   getEscrowV3AuthorityReadback,
   getEscrowV3ReleaseFeeRoutingReadback,
   getEscrowV3ProvenanceReadback,

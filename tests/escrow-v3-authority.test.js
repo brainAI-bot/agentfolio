@@ -17,6 +17,7 @@ const {
   SATP_ESCROW_IDL_FALLBACK_PATH,
   SATP_ESCROW_IDL_FALLBACK_SOURCE,
   SATP_ESCROW_IDL_PACKAGE_PATH,
+  SATP_CLIENT_INSTALLED_LOCK_PATH,
   ADVERTISED_ESCROW_PROGRAM_ID,
   ADVERTISED_NETWORK,
   HOST_ENV_SPLIT_NOTE,
@@ -117,6 +118,21 @@ function execFileAsync(file, args, options) {
       });
     });
   });
+}
+
+function writeInstalledSatpClientLock(commit) {
+  const lockPath = path.join(
+    fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'af-satp-installed-lock-')),
+    '.package-lock.json',
+  );
+  fs.writeFileSync(lockPath, JSON.stringify({
+    packages: {
+      'node_modules/@brainai/satp-client': {
+        resolved: `git+ssh://git@github.com/brainAI-bot/satp.git#${commit}`,
+      },
+    },
+  }));
+  return lockPath;
 }
 
 function withMockSolanaRpc(handler) {
@@ -864,6 +880,9 @@ test('repo-checked SATP escrow IDL fallback is used when packaged file is missin
   assert.equal(readback.packagedSatpEscrowIdl.instructionCount, AUTHORITY_INSTRUCTION_COUNT);
   assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedInstructionCount, true);
   assert.equal(readback.packagedSatpEscrowIdl.matchesExpectedSha256, true);
+  assert.equal(readback.satpArtifact.installedCommit, SATP_ESCROW_IDL_FALLBACK_COMMIT);
+  assert.equal(readback.satpArtifact.installedCommitSource, SATP_CLIENT_INSTALLED_LOCK_PATH);
+  assert.equal(readback.satpArtifact.installedMatchesProvenanceSource, true);
   assert.equal(provenance.authoritativeSource, 'brainAI-bot/satp');
   assert.equal(provenance.consumerInterfaceSource, SATP_ESCROW_IDL_FALLBACK_SOURCE);
   assert.notEqual(provenance.sourceHash, readback.packagedSatpEscrowIdl.sha256);
@@ -875,6 +894,55 @@ test('repo-checked SATP escrow IDL fallback is used when packaged file is missin
   assert.equal(provenance.liveEscrowWritesAllowed, false);
   assert.equal(readback.status, 'verified');
   assert.deepEqual(provenance.mismatches, []);
+});
+
+test('repo-checked fallback fails closed when the installed SATP client commit is stale', () => {
+  const missingPackaged = path.join(
+    fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'af-g10-stale-client-')),
+    'escrow_v3.json',
+  );
+  const installedSatpClientLockPath = writeInstalledSatpClientLock(
+    '06327cefd7aafb5adba720e1fb9c6a6299f4799e',
+  );
+  const readback = getEscrowV3AuthorityReadback({
+    satpClient,
+    packagedSatpEscrowIdlPath: missingPackaged,
+    installedSatpClientLockPath,
+  });
+  const provenance = getEscrowV3ProvenanceReadback({ authorityReadback: readback });
+
+  assert.equal(readback.packagedSatpEscrowIdl.source, SATP_ESCROW_IDL_FALLBACK_SOURCE);
+  assert.equal(readback.packagedSatpEscrowIdl.matchesAuthoritativeSource, false);
+  assert.equal(readback.satpArtifact.installedCommit, '06327cefd7aafb5adba720e1fb9c6a6299f4799e');
+  assert.equal(readback.satpArtifact.installedMatchesProvenanceSource, false);
+  assert.equal(readback.status, 'blocked_pending_authoritative_source_idl');
+  assert.equal(readback.releaseGate.liveEscrowWritesAllowed, false);
+  assert.ok(provenance.mismatches.includes('packaged_idl_authoritative_source_mismatch'));
+  assert.ok(provenance.mismatches.includes('authority_status_not_verified'));
+});
+
+test('commit-bound repo fallback preserves the existing Owner-gated live-write path', () => {
+  const missingPackaged = path.join(
+    fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'af-g10-owner-gated-fallback-')),
+    'escrow_v3.json',
+  );
+  const env = {
+    ...process.env,
+    AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES: 'true',
+    AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION: 'owner-approved-live-escrow-writes',
+    AGENTFOLIO_ESCROW_KILL_SWITCH: 'false',
+  };
+  const readback = getEscrowV3AuthorityReadback({
+    satpClient,
+    env,
+    packagedSatpEscrowIdlPath: missingPackaged,
+  });
+
+  assert.equal(readback.packagedSatpEscrowIdl.matchesAuthoritativeSource, true);
+  assert.equal(readback.satpArtifact.installedMatchesProvenanceSource, true);
+  assert.equal(readback.status, 'verified');
+  assert.equal(readback.releaseGate.ownerAuthorizationStatus, 'owner_authorized');
+  assert.equal(readback.releaseGate.liveEscrowWritesAllowed, true);
 });
 
 test('packaged SATP escrow IDL path still wins when the file exists', () => {
