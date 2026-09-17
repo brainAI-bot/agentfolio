@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "reviewedProfileCount": 38,
-  "reviewedAt": "2026-09-15",
-  "source": "TASK-db54c6f7 live /api/profiles readback",
+  "reviewedProfileCount": 40,
+  "reviewedAt": "2026-09-17",
+  "source": "TASK-545db0bf live /api/profiles provenance readback",
   "profileIds": [
     "agent_braintest",
     "agent_braintest5",
@@ -41,6 +41,8 @@
     "local_endorse_44f9f9f8",
     "local_endorse_c909ea22",
     "agent_forgetest",
-    "agent_forgetest2"
+    "agent_forgetest2",
+    "agent_c07a79f1de3bf165",
+    "agent_a838d53d7b88bce8"
   ]
 }
