@@ -27,11 +27,11 @@ describe('public traction fixture filter', () => {
     assert.equal(isFixtureJob({ title: 'Website copy', client_id: 'agent_brainforge' }), false);
   });
 
-  it('pins the complete reviewed 38-profile QA cohort by id', () => {
-    assert.equal(fixtureCohort.reviewedProfileCount, 38);
-    assert.equal(fixtureCohort.profileIds.length, 38);
-    assert.equal(new Set(fixtureCohort.profileIds).size, 38);
-    assert.equal(REVIEWED_FIXTURE_PROFILE_IDS.size, 38);
+  it('pins the complete reviewed 40-profile QA/demo cohort by provenance id', () => {
+    assert.equal(fixtureCohort.reviewedProfileCount, 40);
+    assert.equal(fixtureCohort.profileIds.length, 40);
+    assert.equal(new Set(fixtureCohort.profileIds).size, 40);
+    assert.equal(REVIEWED_FIXTURE_PROFILE_IDS.size, 40);
     for (const id of fixtureCohort.profileIds) {
       assert.equal(isFixtureIdentity(id), true, `${id} must remain in the reviewed fixture cohort`);
     }
@@ -41,9 +41,14 @@ describe('public traction fixture filter', () => {
       'agent_sm423064591',
       'agent_p1t897160938',
       'agent_sm816063701',
+      'agent_c07a79f1de3bf165',
+      'agent_a838d53d7b88bce8',
     ]) {
       assert.equal(REVIEWED_FIXTURE_PROFILE_IDS.has(knownQaId), true);
     }
+
+    assert.equal(isFixtureIdentity('agent_legitimate_demo', 'Demo orchestration agent'), false);
+    assert.equal(isFixtureIdentity('agent_legitimate_money', 'Not real money documentation'), false);
   });
 
   it('is wired into public stats and leaderboard', () => {

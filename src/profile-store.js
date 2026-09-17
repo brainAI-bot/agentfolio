@@ -37,6 +37,10 @@ const {
   sanitizeLegacyVerificationSummary,
 } = require('./lib/canonical-verification-providers');
 const { resolveContainedPath, writeJsonAtomicSync } = require('./lib/atomic-file');
+const {
+  normalizeRegistrationHandle,
+  findExistingWalletHandleProfile,
+} = require('./lib/registration-idempotency');
 
 function getHqPushHeaders() {
   const token = process.env.HQ_AGENT_TOKEN || process.env.HQ_KEY;
@@ -103,6 +107,14 @@ const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR ||
 const SATP_NETWORK = process.env.SATP_NETWORK || 'mainnet';
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'agentfolio.db');
+
+const registrationWriteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many registration attempts, please retry later' },
+});
 
 const profileReviewWriteLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -678,7 +690,7 @@ function enrichProfile(row) {
 
 function registerRoutes(app) {
   // ── POST /api/register ──────────────────────────────────────────
-  app.post('/api/register', (req, res) => {
+  app.post('/api/register', registrationWriteLimiter, (req, res) => {
     const { name, handle, description, bio, avatar, website, framework, capabilities, tags, wallet, wallets, skills, links, twitter, github, email, signature, signedMessage, userPaidGenesis } = req.body;
     if (!name || typeof name !== 'string' || name.trim().length < 1) {
       return res.status(400).json({ error: 'name is required (non-empty string)' });
@@ -728,6 +740,24 @@ function registerRoutes(app) {
     }
 
     const d = getDb();
+    const cols = d.prepare("PRAGMA table_info(profiles)").all().map(c => c.name);
+    const hasHandle = cols.includes('handle');
+    const h = (handle || name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_')).substring(0, 64);
+
+    // A verified wallet retry for the same normalized handle is the same
+    // registration attempt. Return the canonical profile before any DB, JSON,
+    // score, notification, email, or chain-side write can be repeated.
+    if (hasHandle) {
+      const existingRegistration = findExistingWalletHandleProfile(d, solanaWallet, h);
+      if (existingRegistration) {
+        return res.status(200).json({
+          id: existingRegistration.id,
+          alreadyRegistered: true,
+          message: 'Existing profile returned for this wallet and handle',
+        });
+      }
+    }
+
     // Allow custom profile ID from user, or auto-generate
     let id;
     const customId = req.body.customId;
@@ -746,9 +776,7 @@ function registerRoutes(app) {
       id = genId();
     }
     const apiKey = genApiKey();
-    // Detect if production schema has 'handle' column
-    const cols = d.prepare("PRAGMA table_info(profiles)").all().map(c => c.name);
-    const hasHandle = cols.includes('handle');
+    // Detect optional columns in older production schemas.
     const hasVerificationData = cols.includes('verification_data');
     const hasBio = cols.includes('bio');
     const hasSkillsCol = cols.includes('skills');
@@ -757,8 +785,7 @@ function registerRoutes(app) {
 
     try {
       const now = new Date().toISOString();
-      const h = (handle || name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_')).substring(0, 64);
-      
+
       // Build verification_data with wallet info so eligibility checks work
       const verificationData = {};
       if (solanaWallet) {
