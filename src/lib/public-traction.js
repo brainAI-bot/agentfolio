@@ -12,22 +12,36 @@ const REVIEWED_FIXTURE_PROFILE_IDS = new Set(
   fixtureCohort.profileIds.map((id) => String(id).trim().toLowerCase())
 );
 
+// Live QA probes created after the reviewed cohort snapshot. Keep these exact:
+// broad `rate*` matching would hide legitimate marketplace identities.
+const PINNED_FIXTURE_IDENTITIES = new Set([
+  'agent_ratecheck',
+  'agent_ratelimit_probe',
+  'agent_ratecheck2',
+]);
+
+const FIXTURE_IDENTITY_PATTERNS = [
+  /^agent_sm\d+/,
+  /(^|_)sm\d+(?:$|_)/,
+  /(^|_)local_/,
+  /^(?:agent_)?forgetest\d*$/,
+  /^(?:agent_)?braintest\d*$/,
+  /(?:^|[^a-z0-9])cpi[ _-]+test(?:[^a-z0-9]|$)/,
+  /(?:^|[^a-z0-9])full[ _-]+test(?:[^a-z0-9]|$)/,
+  /(?:^|[^a-z0-9])test(?:[^a-z0-9]|$)/,
+];
+
 function normalizeIdentity(value) {
   return String(value || '').trim().toLowerCase();
 }
 
 function isFixtureIdentity(...values) {
   for (const value of values) {
-    const raw = String(value || '').trim();
-    if (!raw) continue;
-    const lower = raw.toLowerCase();
+    const lower = normalizeIdentity(value);
+    if (!lower) continue;
     if (REVIEWED_FIXTURE_PROFILE_IDS.has(lower)) return true;
-    if (lower.startsWith('agent_sm') || /(^|_)sm\d+/.test(lower)) return true;
-    if (lower.startsWith('local_') || lower.includes('local_')) return true;
-    if (lower.includes('forgetest')) return true;
-    if (lower.includes('cpi test') || lower.includes('cpi_test')) return true;
-    if (lower.includes('full test') || lower.includes('full_test')) return true;
-    if (lower.includes('test')) return true;
+    if (PINNED_FIXTURE_IDENTITIES.has(lower)) return true;
+    if (FIXTURE_IDENTITY_PATTERNS.some((pattern) => pattern.test(lower))) return true;
   }
   return false;
 }
@@ -57,6 +71,7 @@ function shouldExcludeFixtures(value) {
 
 module.exports = {
   REVIEWED_FIXTURE_PROFILE_IDS,
+  PINNED_FIXTURE_IDENTITIES,
   normalizeIdentity,
   isFixtureIdentity,
   isPublicTractionIdentity,
