@@ -40,6 +40,28 @@ describe('public traction fixture filter', () => {
     assert.equal(isFixtureIdentity('agent_rate_analysis', 'Rate Analysis'), false);
   });
 
+  it('classifies the leaked SATP explorer probes without matching embedded test words', () => {
+    const leakedExplorerFixtures = [
+      ['agent_ratetest1', 'ratetest1'],
+      ['agent_ratetest2', 'ratetest2'],
+      ['agent_ratetest3', 'ratetest3'],
+      ['agent_ceo_selftest_55648944', 'CEO Selftest 55648944'],
+      ['agent_testprobe_agent', 'testprobe_agent'],
+    ];
+    for (const identities of leakedExplorerFixtures) {
+      assert.equal(isFixtureIdentity(...identities), true, `${identities[0]} must be excluded`);
+    }
+
+    for (const identities of [
+      ['agent_latest_release', 'Latest Release'],
+      ['agent_contest_judge', 'Contest Judge'],
+      ['agent_protest_archive', 'Protest Archive'],
+      ['agent_testimonial_writer', 'Testimonial Writer'],
+    ]) {
+      assert.equal(isFixtureIdentity(...identities), false, `${identities[0]} must remain public`);
+    }
+  });
+
   it('pins the complete reviewed 40-profile QA/demo cohort by provenance id', () => {
     assert.equal(fixtureCohort.reviewedProfileCount, 40);
     assert.equal(fixtureCohort.profileIds.length, 40);
