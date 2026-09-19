@@ -93,6 +93,13 @@ try {
   const canonical = await apiResponse.json();
   assert.ok(Array.isArray(canonical.jobs), 'canonical marketplace response must contain jobs');
 
+  const canonicalPageResponse = await fetch(`${siteOrigin}/marketplace`);
+  assert.equal(canonicalPageResponse.status, 200, 'canonical no-query marketplace URL must be reachable');
+  assert.match(canonicalPageResponse.headers.get('cache-control') || '', /(?:^|,\s*)no-store(?:,|$)/,
+    'canonical marketplace HTML must explicitly disable intermediary and browser storage');
+  assert.equal(canonicalPageResponse.headers.get('x-agentfolio-cache-policy'), 'marketplace-no-store-v1',
+    'canonical marketplace HTML must expose the deployed no-store routing contract');
+
   await page.goto(`${siteOrigin}/marketplace`, { waitUntil: 'networkidle' });
   const listingLinks = page.locator('a[href^="/marketplace/job/"]');
   await listingLinks.first().waitFor({ state: 'visible' });
@@ -108,7 +115,7 @@ try {
   assert.deepEqual(offSite, [], `browser marketplace requests must stay on site origin: ${offSite.join(', ')}`);
   assert.equal(marketplaceRequests.some((requestUrl) => /localhost|:3333\b/.test(requestUrl)), false, 'browser marketplace requests must never target localhost or port 3333');
 
-  console.log(`marketplace-browser: listings=${canonical.jobs.length}; rendered=${renderedListingCount}; applications_panel=loaded; browser_api_requests=${marketplaceRequests.length}; same_origin=1; localhost_requests=0`);
+  console.log(`marketplace-browser: listings=${canonical.jobs.length}; rendered=${renderedListingCount}; applications_panel=loaded; browser_api_requests=${marketplaceRequests.length}; same_origin=1; localhost_requests=0; canonical_no_store=1; cache_policy=marketplace-no-store-v1`);
 } finally {
   if (browser) await browser.close();
   if (nextServer.exitCode === null) nextServer.kill('SIGTERM');
