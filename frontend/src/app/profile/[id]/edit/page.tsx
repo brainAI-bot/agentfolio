@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Save, Loader2, Key, CheckCircle, AlertCircle } from "lucide-react";
 import { NFTAvatarPicker } from "@/components/NFTAvatarPicker";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { walletAuthenticatedProfileEdit, type ProfileEditBody } from "@/lib/profile-edit-auth";
 
 interface ProfileData {
   id: string;
@@ -41,6 +42,7 @@ export default function EditProfilePage({ params }: { params: Promise<{ id: stri
   const walletMatchesProfile = walletConnected && profile?.wallets && 
     ((Array.isArray(profile.wallets) && profile.wallets.some((w: any) => w.address === publicKey?.toBase58())) ||
      (!Array.isArray(profile.wallets) && (profile.wallets as any)?.solana === publicKey?.toBase58()));
+  const walletCanEdit = Boolean(walletMatchesProfile && signMessage);
   const [toast, setToast] = useState<Toast | null>(null);
 
   // Form state
@@ -86,32 +88,35 @@ export default function EditProfilePage({ params }: { params: Promise<{ id: stri
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    if (!apiKey && !walletMatchesProfile) return showToast("error", "API key or connected wallet required");
+    if (!apiKey && !walletCanEdit) return showToast("error", "API key or message-signing profile wallet required");
     setSaving(true);
     try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      
-      if (walletMatchesProfile && signMessage) {
-        // Use wallet signature auth
-        const msg = new TextEncoder().encode(`agentfolio-edit:${id}`);
-        const sig = await signMessage(msg);
-        headers["x-wallet-signature"] = Buffer.from(sig).toString("base64");
-        headers["x-wallet-address"] = publicKey!.toBase58();
+      const body: ProfileEditBody = {
+        bio,
+        handle,
+        links: { website, x, github, moltbook },
+      };
+      let data: { profile: ProfileData };
+
+      if (walletCanEdit) {
+        data = await walletAuthenticatedProfileEdit({
+          profileId: profile!.id,
+          walletAddress: publicKey!.toBase58(),
+          signMessage,
+          body,
+        }) as { profile: ProfileData };
       } else {
-        headers["Authorization"] = `Bearer ${apiKey}`;
+        const res = await fetch(`/api/profile/${encodeURIComponent(profile!.id)}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(body),
+        });
+        data = await res.json();
+        if (!res.ok) throw new Error((data as any).error || "Failed to save");
       }
-      
-      const res = await fetch(`/api/profile/${id}`, {
-        method: "PATCH",
-        headers,
-        body: JSON.stringify({
-          bio,
-          handle,
-          links: { website, x, github, moltbook },
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to save");
       setProfile(data.profile);
       showToast("success", "Profile updated successfully");
     } catch (err: any) {
@@ -283,14 +288,14 @@ export default function EditProfilePage({ params }: { params: Promise<{ id: stri
         {/* Save */}
         <button
           type="submit"
-          disabled={saving || (!apiKey && !walletMatchesProfile)}
+          disabled={saving || (!apiKey && !walletCanEdit)}
           className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold uppercase tracking-wider transition-opacity disabled:opacity-50"
           style={{
             fontFamily: "var(--font-mono)",
             background: "var(--accent)",
             color: "#fff",
             border: "none",
-            cursor: saving || (!apiKey && !walletMatchesProfile) ? "not-allowed" : "pointer",
+            cursor: saving || (!apiKey && !walletCanEdit) ? "not-allowed" : "pointer",
           }}
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
