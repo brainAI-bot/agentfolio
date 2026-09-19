@@ -3,8 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Rewrite API calls to the backend server
   async rewrites() {
-    const apiUrl = process.env.INTERNAL_API_URL;
-    if (!apiUrl) throw new Error('INTERNAL_API_URL is required for server-side API routing');
+    const apiUrl = process.env.INTERNAL_API_URL || 'http://127.0.0.1:3333';
     return [
       {
         source: '/api/:path*',

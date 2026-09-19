@@ -11,7 +11,9 @@ const sitePort = Number(process.env.MARKETPLACE_BROWSER_TEST_PORT || 3299);
 const apiPort = Number(process.env.MARKETPLACE_BROWSER_API_PORT || 3298);
 const siteOrigin = `http://127.0.0.1:${sitePort}`;
 const internalOrigin = `http://127.0.0.1:${apiPort}`;
-assert.equal(process.env.INTERNAL_API_URL, internalOrigin, `build and probe require INTERNAL_API_URL=${internalOrigin}`);
+const configuredInternalOrigin = process.env.INTERNAL_API_URL;
+assert.equal(configuredInternalOrigin || 'http://127.0.0.1:3333', internalOrigin,
+  `probe API must match INTERNAL_API_URL or the production fallback ${internalOrigin}`);
 
 const jobs = [
   {
@@ -51,7 +53,7 @@ await new Promise((resolve, reject) => {
 
 const nextServer = spawn(process.execPath, [nextBin, 'start', '-p', String(sitePort)], {
   cwd: frontendRoot,
-  env: { ...process.env, NODE_ENV: 'production', INTERNAL_API_URL: internalOrigin },
+  env: { ...process.env, NODE_ENV: 'production' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let serverLog = '';

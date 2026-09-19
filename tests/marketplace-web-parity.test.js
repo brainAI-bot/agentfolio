@@ -88,6 +88,7 @@ test('frontend parity surface names every P1D action and explicit failure state 
   const api = fs.readFileSync(path.join(root, 'lib', 'marketplace-api.ts'), 'utf8');
   const listingPage = fs.readFileSync(path.join(root, 'app', 'marketplace', 'page.tsx'), 'utf8');
   const detailPage = fs.readFileSync(path.join(root, 'app', 'marketplace', 'job', '[id]', 'page.tsx'), 'utf8');
+  const nextConfig = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'next.config.ts'), 'utf8');
   const combined = [workspace, list, client, apply, api, listingPage, detailPage].join('\n');
 
   for (const action of ['create', 'apply', 'select', 'accept', 'decline', 'submit', 'revise', 'approve', 'comment', 'cancel', 'expire']) {
@@ -104,6 +105,10 @@ test('frontend parity surface names every P1D action and explicit failure state 
   assert.doesNotMatch(workspace, /\/api\/marketplace\/escrow\//);
   assert.doesNotMatch(listingPage + detailPage, /from ["']@\/lib\/data["']/);
   assert.match(listingPage, /process\.env\.INTERNAL_API_URL/);
+  assert.match(listingPage, /process\.env\.INTERNAL_API_URL \|\| ["']http:\/\/127\.0\.0\.1:3333["']/);
+  assert.match(detailPage, /process\.env\.INTERNAL_API_URL \|\| ["']http:\/\/127\.0\.0\.1:3333["']/);
+  assert.match(nextConfig, /process\.env\.INTERNAL_API_URL \|\| ["']http:\/\/127\.0\.0\.1:3333["']/);
+  assert.doesNotMatch(listingPage + detailPage + nextConfig, /INTERNAL_API_URL is required/);
   assert.match(listingPage, /api\/marketplace\/jobs\?limit=100/);
   assert.match(listingPage, /jobs=\{jobs\}/);
   assert.match(api, /NEXT_PUBLIC_API_URL \|\| ""/);

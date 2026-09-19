@@ -51,8 +51,7 @@ function mapCanonicalJob(raw: Record<string, unknown>): Job {
 }
 
 async function loadCanonicalJobs(): Promise<Job[]> {
-  const internalApiUrl = process.env.INTERNAL_API_URL;
-  if (!internalApiUrl) throw new Error("INTERNAL_API_URL is required for marketplace SSR");
+  const internalApiUrl = process.env.INTERNAL_API_URL || "http://127.0.0.1:3333";
   const response = await fetch(`${internalApiUrl}/api/marketplace/jobs?limit=100`, {
     cache: "no-store",
     signal: AbortSignal.timeout(15_000),
