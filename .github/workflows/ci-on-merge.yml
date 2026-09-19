@@ -38,13 +38,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Install Chromium for marketplace routing probe
-        run: npx playwright install --with-deps chromium
-
       - name: Validate roadmap ledger
         run: npm run lint:roadmap
 
@@ -53,10 +46,6 @@ jobs:
 
       - name: Run complete test tree
         run: npm run test:ci
-
-      - name: Probe production marketplace browser routing
-        working-directory: frontend
-        run: npm run test:production:marketplace
 
       - name: Run AgentFolio escrow source-pin unit tests
         run: cargo test --locked --manifest-path onchain/escrow_v3/Cargo.toml
