@@ -180,7 +180,7 @@ function issueChallenge(db, input, now = new Date()) {
   const resourceId = cleanBoundString(input.resourceId, 'resourceId', 500);
   const method = cleanBoundString(input.method, 'method', 10).toUpperCase();
   const routePath = cleanBoundString(input.path, 'path', 2000);
-  if (!['GET', 'POST'].includes(method)) throw new Error('method must be GET or POST');
+  if (!['GET', 'POST', 'PATCH'].includes(method)) throw new Error('method must be GET, POST, or PATCH');
   if (!routePath.startsWith('/api/') || routePath.includes('?') || routePath.includes('#')) {
     throw new Error('path must be an exact API route path without query or fragment');
   }

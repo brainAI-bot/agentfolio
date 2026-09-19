@@ -41,6 +41,11 @@ const {
   normalizeRegistrationHandle,
   findExistingWalletHandleProfile,
 } = require('./lib/registration-idempotency');
+const { isFixtureIdentity } = require('./lib/public-traction');
+const {
+  createMarketplaceAuth,
+  registerMarketplaceAuthChallengeRoute,
+} = require('./lib/marketplace-wallet-auth');
 
 function getHqPushHeaders() {
   const token = process.env.HQ_AGENT_TOKEN || process.env.HQ_KEY;
@@ -106,7 +111,7 @@ const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR ||
   '/home/ubuntu/.config/solana/brainforge-personal.json';
 const SATP_NETWORK = process.env.SATP_NETWORK || 'mainnet';
 
-const DB_PATH = path.join(__dirname, '..', 'data', 'agentfolio.db');
+const DB_PATH = process.env.AGENTFOLIO_DB_PATH || path.join(__dirname, '..', 'data', 'agentfolio.db');
 
 const registrationWriteLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -156,6 +161,13 @@ function closeDb() {
   } finally {
     db = null;
   }
+}
+
+function publicEndorsements(rows) {
+  return rows.filter((row) => (
+    !isFixtureIdentity(row.endorser_id, row.endorser_name)
+    && String(row.comment || '').trim().toLowerCase() !== 'phase 1 endorsement flow test'
+  ));
 }
 
 function initSchema() {
@@ -349,7 +361,9 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
         try {
           // Build profile object for v2 engine from DB data
           const profileRow = d.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
-          const endorsements = d.prepare('SELECT * FROM endorsements WHERE profile_id = ?').all(profileId);
+          const endorsements = publicEndorsements(
+            d.prepare('SELECT * FROM endorsements WHERE profile_id = ?').all(profileId)
+          );
           const reviews = listCanonicalReviews(d, { revieweeId: profileId });
           const jobCount = (() => { try { return d.prepare("SELECT COUNT(*) as c FROM jobs WHERE selected_agent_id = ? AND status = 'completed'").get(profileId)?.c || 0; } catch { return 0; } })();
           
@@ -524,7 +538,9 @@ function addActivity(profileId, eventType, detail) {
 function enrichProfile(row) {
   if (!row) return null;
   const d = getDb();
-  const endorsements = d.prepare('SELECT * FROM endorsements WHERE profile_id = ? ORDER BY created_at DESC').all(row.id);
+  const endorsements = publicEndorsements(
+    d.prepare('SELECT * FROM endorsements WHERE profile_id = ? ORDER BY created_at DESC').all(row.id)
+  );
   const verifications = filterCanonicalTrustVerifications(
     d.prepare('SELECT * FROM verifications WHERE profile_id = ? ORDER BY verified_at DESC').all(row.id)
   );
@@ -689,6 +705,9 @@ function enrichProfile(row) {
 }
 
 function registerRoutes(app) {
+  registerMarketplaceAuthChallengeRoute(app, { getDb });
+  const authorizeProfileWrite = createMarketplaceAuth({ getDb, actorProperty: 'profileWriteActorId' });
+
   // ── POST /api/register ──────────────────────────────────────────
   app.post('/api/register', registrationWriteLimiter, (req, res) => {
     const { name, handle, description, bio, avatar, website, framework, capabilities, tags, wallet, wallets, skills, links, twitter, github, email, signature, signedMessage, userPaidGenesis } = req.body;
@@ -1397,41 +1416,19 @@ function registerRoutes(app) {
   });
 
   // ── PATCH /api/profile/:id ─────────────────────────────────────
-  app.patch('/api/profile/:id', (req, res) => {
+  app.patch(
+    '/api/profile/:id',
+    authorizeProfileWrite({ action: 'profile.edit', resourceId: (req) => req.params.id }),
+    (req, res) => {
     const d = getDb();
-    const apiKey = (req.headers['x-api-key'] || (req.headers['authorization'] || '').replace('Bearer ', '') || '').trim();
-    const walletSig = req.headers['x-wallet-signature'];
-    const walletAddr = req.headers['x-wallet-address'];
 
     let row = d.prepare('SELECT * FROM profiles WHERE id = ?').get(req.params.id);
     if (!row) row = d.prepare('SELECT * FROM profiles WHERE LOWER(name) = LOWER(?)').get(req.params.id);
     if (!row) row = d.prepare('SELECT * FROM profiles WHERE id = ?').get('agent_' + req.params.id.toLowerCase());
     if (!row) return res.status(404).json({ error: 'Profile not found' });
-
-    // Auth: API key OR wallet signature
-    let authed = false;
-    if (apiKey && row.api_key === apiKey) {
-      authed = true;
-    } else if (walletSig && walletAddr) {
-      // Verify wallet owns this profile (check wallets column)
-      try {
-        const profileWallets = typeof row.wallets === 'string' ? JSON.parse(row.wallets || '{}') : (row.wallets || {});
-        const profileSolana = profileWallets.solana || '';
-        if (profileSolana && profileSolana === walletAddr) {
-          // Verify ed25519 signature of profile ID
-          const nacl = require('tweetnacl');
-          const sigBytes = Buffer.from(walletSig, 'base64');
-          const msgBytes = Buffer.from(`agentfolio-edit:${req.params.id}`);
-          const pubBytes = bs58.decode(walletAddr);
-          if (nacl.sign.detached.verify(msgBytes, sigBytes, pubBytes)) {
-            authed = true;
-          }
-        }
-      } catch (e) {
-        console.error('[PATCH] Wallet auth failed:', e.message);
-      }
+    if (req.profileWriteActorId !== row.id) {
+      return res.status(403).json({ code: 'AUTH_INVALID', error: 'Authenticated actor does not own this profile' });
     }
-    if (!authed) return res.status(403).json({ error: 'Invalid api_key or wallet signature' });
 
     const allowed = ['name', 'bio', 'description', 'handle', 'avatar', 'website', 'framework', 'capabilities', 'tags', 'wallet', 'twitter', 'github', 'email', 'skills', 'wallets', 'links'];
     const sets = [];
@@ -1445,17 +1442,17 @@ function registerRoutes(app) {
     if (sets.length === 0) return res.status(400).json({ error: 'No updatable fields provided' });
 
     sets.push("updated_at = datetime('now')");
-    vals.push(req.params.id);
+    vals.push(row.id);
     d.prepare(`UPDATE profiles SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
 
     // Return enriched profile so frontend can update state
-    const updated = d.prepare('SELECT * FROM profiles WHERE id = ?').get(req.params.id);
+    const updated = d.prepare('SELECT * FROM profiles WHERE id = ?').get(row.id);
     const enriched = enrichProfile(updated);
 
     // Also update the JSON file for Next.js SSR
     try {
       const profilesDir = require('path').join(__dirname, '..', 'data', 'profiles');
-      const existingPath = profileJsonPathFor(profilesDir, req.params.id);
+      const existingPath = profileJsonPathFor(profilesDir, row.id);
       if (require('fs').existsSync(existingPath)) {
         const existing = JSON.parse(require('fs').readFileSync(existingPath, 'utf-8'));
         // Merge updated fields
@@ -1476,37 +1473,19 @@ function registerRoutes(app) {
   });
 
   // ── POST /api/profile/:id/endorsements ─────────────────────────
-  app.post('/api/profile/:id/endorsements', (req, res) => {
-    const { endorser_id, endorser_name, skill, comment, weight } = req.body;
-    if (!endorser_id || !skill) return res.status(400).json({ error: 'endorser_id and skill are required' });
-
-    const d = getDb();
-    const profile = d.prepare('SELECT id FROM profiles WHERE id = ?').get(req.params.id);
-    if (!profile) return res.status(404).json({ error: 'Profile not found' });
-    if (endorser_id === req.params.id) return res.status(400).json({ error: 'Cannot self-endorse' });
-
-    const id = genId('end');
-    try {
-      d.prepare(`
-        INSERT INTO endorsements (id, profile_id, endorser_id, endorser_name, skill, comment, weight)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(id, req.params.id, endorser_id, endorser_name || '', skill, comment || '', weight || 1);
-      addActivity(req.params.id, 'endorsement', { endorser_id, endorser_name, skill });
-      // Fire-and-forget: send welcome email if agent provided an email
-      if (resolvedEmail) {
-        sendWelcomeEmail(resolvedEmail, { id, name: name.trim(), handle: h });
-      }
-      res.status(201).json({ id, message: 'Endorsement added' });
-    } catch (e) {
-      if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Duplicate endorsement (same endorser + skill)' });
-      res.status(500).json({ error: e.message });
-    }
+  app.post('/api/profile/:id/endorsements', profileReviewWriteLimiter, (req, res) => {
+    res.status(403).json({
+      error: 'Endorsement writes require the signed released-escrow flow',
+      next: '/api/reviews/challenge then /api/reviews/submit',
+    });
   });
 
   // ── GET /api/profile/:id/endorsements ──────────────────────────
   app.get('/api/profile/:id/endorsements', (req, res) => {
     const d = getDb();
-    const items = d.prepare('SELECT * FROM endorsements WHERE profile_id = ? ORDER BY created_at DESC').all(req.params.id);
+    const items = publicEndorsements(
+      d.prepare('SELECT * FROM endorsements WHERE profile_id = ? ORDER BY created_at DESC').all(req.params.id)
+    );
     res.json({ endorsements: items, total: items.length });
   });
 
