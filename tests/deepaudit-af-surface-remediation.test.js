@@ -352,6 +352,7 @@ test('AF6, AF10, and AF14: CI-on-merge workflow runs complete PR and main-branch
   assert.match(workflow, /^\s{2}push:\n\s{4}branches:\n\s{6}- main\n\s{6}- master$/m);
   assert.match(workflow, /^\s{2}workflow_dispatch:$/m);
   assert.match(workflow, /name: AgentFolio complete test tree/);
+  assert.match(workflow, /uses: actions\/checkout@v4[\s\S]*?fetch-depth: 0/);
   assert.match(workflow, /npm ci/);
   assert.match(workflow, /npm run lint:roadmap/);
   assert.match(workflow, /npm run verify:satp-mainnet-programs/);
