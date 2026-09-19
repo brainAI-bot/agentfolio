@@ -129,6 +129,22 @@ const profileReviewWriteLimiter = rateLimit({
   message: { error: 'Too many review submissions, please retry later' },
 });
 
+const profileMutationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many profile update attempts, please retry later' },
+});
+
+const profileEndorsementReadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many endorsement reads, please retry later' },
+});
+
 let db;
 
 function getDb() {
@@ -1418,6 +1434,7 @@ function registerRoutes(app) {
   // ── PATCH /api/profile/:id ─────────────────────────────────────
   app.patch(
     '/api/profile/:id',
+    profileMutationLimiter,
     authorizeProfileWrite({ action: 'profile.edit', resourceId: (req) => req.params.id }),
     (req, res) => {
     const d = getDb();
@@ -1481,7 +1498,7 @@ function registerRoutes(app) {
   });
 
   // ── GET /api/profile/:id/endorsements ──────────────────────────
-  app.get('/api/profile/:id/endorsements', (req, res) => {
+  app.get('/api/profile/:id/endorsements', profileEndorsementReadLimiter, (req, res) => {
     const d = getDb();
     const items = publicEndorsements(
       d.prepare('SELECT * FROM endorsements WHERE profile_id = ? ORDER BY created_at DESC').all(req.params.id)
