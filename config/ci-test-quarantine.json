@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "entries": {
+    "tests/escrow-v3-live-fee-routing-surface.test.js": {
+      "reason": "The test still asserts the pre-recertification unsupported treasury contract while the canonical IDL now exposes writable treasury accounts.",
+      "expiresOn": "2026-10-03"
+    },
+    "tests/escrow-v3-runtime-recert.test.js": {
+      "reason": "The receipt assertion pins the prior source IDL hash and stale published-IDL status after the canonical escrow IDL changed.",
+      "expiresOn": "2026-10-03"
+    },
+    "tests/explorer-agentid-deeplink-parity.test.js": {
+      "reason": "The server route harness Express mock predates the app.set call now made during server initialization.",
+      "expiresOn": "2026-10-03"
+    },
+    "tests/fee-routing-mainnet-change-control-packet.test.js": {
+      "reason": "The historical no-go packet test pins superseded source hashes and source text after the fee-routing implementation changed.",
+      "expiresOn": "2026-10-03"
+    },
+    "tests/homepage-public-stats.test.js": {
+      "reason": "Node 20 cannot directly import the frontend TypeScript helpers; the test needs a supported transform or JavaScript boundary.",
+      "expiresOn": "2026-10-03"
+    },
+    "tests/satp-client-dependency-boundary.test.js": {
+      "reason": "src/routes/satp-auto-identity-v3.js has not yet been migrated to the AgentFolio SATP adapter boundary required by the test.",
+      "expiresOn": "2026-10-03"
+    }
+  }
+}

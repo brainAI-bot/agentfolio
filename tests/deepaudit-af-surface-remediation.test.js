@@ -341,7 +341,7 @@ test('AF9 and AF13: tracked backup artifacts are absent from repo surface', () =
   assert.deepEqual(backupArtifacts, []);
 });
 
-test('AF6, AF10, and AF14: CI-on-merge workflow runs explicit PR and main-branch merge gates', () => {
+test('AF6, AF10, and AF14: CI-on-merge workflow runs complete PR and main-branch gates', () => {
   const workflow = fs.readFileSync(
     path.join(repoRoot, '.github/workflows/ci-on-merge.yml'),
     'utf8'
@@ -351,10 +351,10 @@ test('AF6, AF10, and AF14: CI-on-merge workflow runs explicit PR and main-branch
   assert.match(workflow, /^\s{2}pull_request:$/m);
   assert.match(workflow, /^\s{2}push:\n\s{4}branches:\n\s{6}- main\n\s{6}- master$/m);
   assert.match(workflow, /^\s{2}workflow_dispatch:$/m);
-  assert.match(workflow, /name: AF6 AF10 merge gate/);
+  assert.match(workflow, /name: AgentFolio complete test tree/);
   assert.match(workflow, /npm ci/);
   assert.match(workflow, /npm run lint:roadmap/);
   assert.match(workflow, /npm run verify:satp-mainnet-programs/);
-  assert.match(workflow, /node --test tests\/deepaudit-af-surface-remediation\.test\.js tests\/satp-programs-v3-truth\.test\.js tests\/escrow-release-gate\.test\.js tests\/escrow-v3-authority\.test\.js/);
+  assert.match(workflow, /npm run test:ci/);
   assert.match(workflow, /git diff --check/);
 });

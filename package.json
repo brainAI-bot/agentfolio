@@ -14,7 +14,8 @@
     "check:public-routes": "node scripts/check-public-routes.mjs",
     "migrate:canonical-review-trust": "node scripts/migrate-canonical-review-trust.js --expect-quarantined=5",
     "test:clean-install-satp-v3": "node --test tests/satp-v3-clean-install.test.js",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "test:ci": "node scripts/run-complete-test-tree.js"
   },
   "keywords": [],
   "author": "",
