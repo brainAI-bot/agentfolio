@@ -80,7 +80,7 @@ test('AF14: copy-truth gate fails when registration program evidence is absent',
 test('AF14: pull-request CI requires the copy-truth regression', () => {
   const workflow = read('.github/workflows/ci-on-merge.yml');
   assert.match(workflow, /^\s{2}pull_request:$/m);
-  assert.match(workflow, /tests\/deepaudit-af-surface-remediation\.test\.js/);
-  assert.match(workflow, /tests\/escrow-v3-authority\.test\.js/);
+  assert.match(workflow, /name: AgentFolio complete test tree/);
+  assert.match(workflow, /npm run test:ci/);
   assert.match(workflow, /npm run verify:satp-mainnet-programs/);
 });
