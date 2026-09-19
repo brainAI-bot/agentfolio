@@ -51,36 +51,12 @@ function registerReviewsV2Routes(app, options = {}) {
     });
   });
 
-  // POST /api/reviews/:id/respond — reviewed party responds
+  // POST /api/reviews/:id/respond — responses require the canonical signed review flow.
   app.post('/api/reviews/:id/respond', (req, res) => {
-    const { id } = req.params;
-    const { responder_id, response_text } = req.body;
-    
-    if (!responder_id || !response_text) {
-      return res.status(400).json({ error: 'responder_id and response_text required' });
-    }
-    
-    try {
-      const db = getDb(false, dbPath);
-      const review = db.prepare('SELECT * FROM reviews WHERE id = ?').get(id);
-      if (!review) { db.close(); return res.status(404).json({ error: 'Review not found' }); }
-      if (review.reviewee_id !== responder_id) {
-        db.close();
-        return res.status(403).json({ error: 'Only the reviewed party can respond' });
-      }
-      if (review.has_response) {
-        db.close();
-        return res.status(400).json({ error: 'Review already has a response' });
-      }
-      
-      db.prepare('UPDATE reviews SET has_response = 1, response_text = ?, response_at = ? WHERE id = ?')
-        .run(response_text, new Date().toISOString(), id);
-      db.close();
-      
-      res.json({ id, has_response: true, response_text, response_at: new Date().toISOString() });
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
+    res.status(403).json({
+      error: 'Review responses require the signed released-escrow flow',
+      next: '/api/reviews/challenge then /api/reviews/submit',
+    });
   });
 
   // GET /api/reviews/v2?agent=<id> — get reviews with v2 fields + weighted average
