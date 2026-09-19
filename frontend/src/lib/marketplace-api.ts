@@ -1,6 +1,8 @@
 import { signMarketplaceChallenge, type MarketplaceWalletChallenge } from "@/lib/marketplace-auth";
 
-export const MARKETPLACE_API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
+// Empty means the browser's current origin. Next.js proxies /api through the
+// server-only INTERNAL_API_URL; no backend hostname is shipped to visitors.
+export const MARKETPLACE_API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 const REQUEST_TIMEOUT_MS = 15_000;
 
 export class MarketplaceApiError extends Error {

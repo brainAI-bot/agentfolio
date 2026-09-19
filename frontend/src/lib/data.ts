@@ -54,7 +54,7 @@ async function preloadOnChainIdentities(profiles: RawProfile[]) {
 }
 
 const PROFILES_DIR = "/home/ubuntu/agentfolio/data/profiles";
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 // Pre-warm V3 cache on module load (runs once at server startup)
 if (typeof (globalThis as any).__v3WarmupDone === 'undefined') {
   (globalThis as any).__v3WarmupDone = true;

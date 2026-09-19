@@ -3,7 +3,8 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Rewrite API calls to the backend server
   async rewrites() {
-    const apiUrl = process.env.API_URL || 'http://localhost:3333';
+    const apiUrl = process.env.INTERNAL_API_URL;
+    if (!apiUrl) throw new Error('INTERNAL_API_URL is required for server-side API routing');
     return [
       {
         source: '/api/:path*',
@@ -42,11 +43,7 @@ const nextConfig: NextConfig = {
     ];
   },
 
-  // Environment variables exposed to browser
-  env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || '',
-  },
-  
+
   // Optimize images
   images: {
     remotePatterns: [

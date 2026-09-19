@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import type { Job } from "@/lib/types";
 
-const MARKETPLACE_API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
+const MARKETPLACE_API_BASE = process.env.INTERNAL_API_URL;
 const JOB_STATUSES = new Set<Job["status"]>(["draft", "open", "awarded", "in_progress", "submitted", "approved", "released", "closed", "cancelled", "expired", "disputed"]);
 
 class CanonicalJobLoadError extends Error {
@@ -42,7 +42,8 @@ function mapCanonicalJob(raw: Record<string, unknown>): Job {
 
 async function getCanonicalJob(id: string): Promise<Job | null> {
   try {
-    const response = await fetch(`${MARKETPLACE_API_BASE}/api/jobs/${encodeURIComponent(id)}`, {
+    if (!MARKETPLACE_API_BASE) throw new CanonicalJobLoadError(false);
+    const response = await fetch(`${MARKETPLACE_API_BASE}/api/marketplace/jobs/${encodeURIComponent(id)}`, {
       cache: "no-store",
       signal: AbortSignal.timeout(15_000),
     });

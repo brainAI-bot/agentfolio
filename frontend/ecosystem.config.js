@@ -8,8 +8,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         PORT: 3000,
-        API_URL: 'http://localhost:3333',
-        NEXT_PUBLIC_API_URL: ''
+        INTERNAL_API_URL: 'http://127.0.0.1:3333'
       },
       instances: 1,
       autorestart: true,
