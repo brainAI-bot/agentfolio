@@ -14,7 +14,7 @@ import { Buffer } from 'buffer';
 import { Transaction, VersionedTransaction, Connection, PublicKey } from '@solana/web3.js';
 import { assertFrontendLiveEscrowEnabled, assertFrontendSolanaIrysWriteEnabled } from './write-surface-gate';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 
 interface V3EscrowCreateParams {
   clientWallet: string;

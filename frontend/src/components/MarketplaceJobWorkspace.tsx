@@ -55,7 +55,7 @@ export function MarketplaceJobWorkspace({ initialJob }: { initialJob: Job }) {
 
   const refreshJob = useCallback(async () => {
     try {
-      const raw = await marketplaceRead<Record<string, any>>(`/api/jobs/${encodeURIComponent(job.id)}`);
+      const raw = await marketplaceRead<Record<string, any>>(`/api/marketplace/jobs/${encodeURIComponent(job.id)}`);
       setJob((current) => ({ ...mapJob(raw), posterAvatar: current.posterAvatar, createdAt: raw.createdAt || raw.created_at || current.createdAt, deadline: String(raw.timeline || current.deadline).replaceAll("_", " ") }));
     } catch (failure) {
       setNotice({ kind: "error", text: marketplaceErrorMessage(failure) });

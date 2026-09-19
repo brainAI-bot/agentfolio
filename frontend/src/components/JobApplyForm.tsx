@@ -6,7 +6,7 @@ import { useSmartConnect } from "@/components/WalletProvider";
 import { Briefcase, Send, Share2, Check } from "lucide-react";
 import { marketplaceErrorMessage, signedMarketplaceRequest } from "@/lib/marketplace-api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3333";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 export function JobApplyForm({ jobId, jobStatus, onApplied }: { jobId: string; jobStatus: string; onApplied?: () => void | Promise<void> }) {
   const { connected, publicKey, signMessage } = useWallet();

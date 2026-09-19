@@ -82,7 +82,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   const refresh = useCallback(async () => {
     setListLoading(true);
     try {
-      const payload = await marketplaceRead<{ jobs: Record<string, any>[] }>("/api/jobs?limit=100");
+      const payload = await marketplaceRead<{ jobs: Record<string, any>[] }>("/api/marketplace/jobs?limit=100");
       setJobs((Array.isArray(payload.jobs) ? payload.jobs : []).map(mapJob));
       setNotice(null);
     } catch (failure) {

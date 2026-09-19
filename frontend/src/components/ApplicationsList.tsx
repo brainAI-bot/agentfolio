@@ -57,7 +57,7 @@ export function ApplicationsList({
     setLoading(true);
     setError(null);
     try {
-      const data = await marketplaceRead<{ applications: MarketplaceApplication[] }>(`/api/jobs/${jobId}/applications`);
+      const data = await marketplaceRead<{ applications: MarketplaceApplication[] }>(`/api/marketplace/jobs/${jobId}/applications`);
       setApps(Array.isArray(data.applications) ? data.applications : []);
     } catch (failure) {
       setError(marketplaceErrorMessage(failure));

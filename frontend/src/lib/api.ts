@@ -1,5 +1,5 @@
 // API client for AgentFolio backend
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 
 export interface APIProfile {
   id: string;
