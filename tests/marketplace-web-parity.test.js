@@ -103,7 +103,11 @@ test('frontend parity surface names every P1D action and explicit failure state 
   assert.doesNotMatch(combined, /Payment released|Funds released|sent to worker/i);
   assert.doesNotMatch(workspace, /\/api\/marketplace\/escrow\//);
   assert.doesNotMatch(listingPage + detailPage, /from ["']@\/lib\/data["']/);
-  assert.match(listingPage, /jobs=\{\[\]\}/);
+  assert.match(listingPage, /process\.env\.INTERNAL_API_URL/);
+  assert.match(listingPage, /api\/marketplace\/jobs\?limit=100/);
+  assert.match(listingPage, /jobs=\{jobs\}/);
+  assert.match(api, /NEXT_PUBLIC_API_URL \|\| ""/);
+  assert.doesNotMatch(api, /localhost|127\.0\.0\.1/);
   assert.match(detailPage, /getCanonicalJob/);
   assert.match(detailPage, /deployed escrow program charges 5% \(500 bps\)/i);
   assert.doesNotMatch(detailPage, /10% configured fee/i);

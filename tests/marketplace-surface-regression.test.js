@@ -121,7 +121,7 @@ test('marketplace surface regression guard', async (t) => {
   await t.test('marketplace rendering guards invalid data and uses hydrated application counts', () => {
     assert.match(clientSource, /Number\.isFinite\(then\)/);
     assert.match(clientSource, /const poster = job\.poster \|\| "Unknown client"/);
-    assert.match(applicationsSource, /api\/jobs\/\$\{jobId\}\/applications/);
+    assert.match(applicationsSource, /api\/marketplace\/jobs\/\$\{jobId\}\/applications/);
     assert.match(applicationsSource, /Number\.isFinite\(createdAt\)/);
     assert.match(clientSource, /label="Budget \(SOL\)"/);
     assert.doesNotMatch(detailSource, /API: POST \/api\/marketplace\/jobs/);
