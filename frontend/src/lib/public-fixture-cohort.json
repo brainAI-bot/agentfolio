@@ -1,8 +1,12 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "reviewedProfileCount": 40,
-  "reviewedAt": "2026-09-17",
-  "source": "TASK-545db0bf live /api/profiles provenance readback",
+  "reviewedJobCount": 1,
+  "reviewedAt": "2026-09-20",
+  "source": "TASK-545db0bf profile provenance plus TASK-5ffbc264 live marketplace provenance",
+  "jobIds": [
+    "job_b3f22a01478b8f1a"
+  ],
   "profileIds": [
     "agent_braintest",
     "agent_braintest5",

@@ -5,7 +5,7 @@ import { useWalletLoad } from "@/components/ClientProviders";
 import { MarketplaceClient } from "@/components/MarketplaceClient";
 import type { Job } from "@/lib/types";
 
-export function MarketplaceClientWrapper({ jobs }: { jobs: Job[] }) {
+export function MarketplaceClientWrapper({ jobs, total = jobs.length }: { jobs: Job[]; total?: number }) {
   const { loaded, triggerLoad } = useWalletLoad();
 
   useEffect(() => {
@@ -20,5 +20,5 @@ export function MarketplaceClientWrapper({ jobs }: { jobs: Job[] }) {
     );
   }
 
-  return <MarketplaceClient jobs={jobs} />;
+  return <MarketplaceClient jobs={jobs} total={total} />;
 }

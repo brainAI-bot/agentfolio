@@ -50,7 +50,7 @@ function mapCanonicalJob(raw: Record<string, unknown>): Job {
   };
 }
 
-async function loadCanonicalJobs(): Promise<Job[]> {
+async function loadCanonicalJobs(): Promise<{ jobs: Job[]; total: number }> {
   const internalApiUrl = process.env.INTERNAL_API_URL || "http://127.0.0.1:3333";
   const response = await fetch(`${internalApiUrl}/api/marketplace/jobs?limit=100`, {
     cache: "no-store",
@@ -59,12 +59,16 @@ async function loadCanonicalJobs(): Promise<Job[]> {
   if (!response.ok) throw new Error(`Canonical marketplace API returned ${response.status}`);
   const payload = await response.json();
   const jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
-  return jobs.map(mapCanonicalJob);
+  const total = Number(payload.total);
+  if (!Number.isSafeInteger(total) || total < 0) {
+    throw new Error("Canonical marketplace API returned an invalid total");
+  }
+  return { jobs: jobs.map(mapCanonicalJob), total };
 }
 
 export default async function MarketplacePage() {
   // SSR and the browser both read the canonical SQLite route. The server uses
   // only INTERNAL_API_URL; visitors receive same-origin /api requests.
-  const jobs = await loadCanonicalJobs();
-  return <MarketplaceClient jobs={jobs} />;
+  const { jobs, total } = await loadCanonicalJobs();
+  return <MarketplaceClient jobs={jobs} total={total} />;
 }

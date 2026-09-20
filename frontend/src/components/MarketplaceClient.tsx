@@ -54,10 +54,11 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
+export function MarketplaceClient({ jobs: initialJobs, total: initialTotal = initialJobs.length }: { jobs: Job[]; total?: number }) {
   const { connected, publicKey, signMessage } = useWallet();
   const { smartConnect } = useSmartConnect();
   const [jobs, setJobs] = useState(initialJobs);
+  const [total, setTotal] = useState(initialTotal);
   const [filter, setFilter] = useState("all");
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(blankForm);
@@ -82,8 +83,10 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   const refresh = useCallback(async () => {
     setListLoading(true);
     try {
-      const payload = await marketplaceRead<{ jobs: Record<string, any>[] }>("/api/marketplace/jobs?limit=100");
+      const payload = await marketplaceRead<{ jobs: Record<string, any>[]; total: number }>("/api/marketplace/jobs?limit=100");
       setJobs((Array.isArray(payload.jobs) ? payload.jobs : []).map(mapJob));
+      if (!Number.isSafeInteger(payload.total) || payload.total < 0) throw new Error("Canonical marketplace API returned an invalid total");
+      setTotal(payload.total);
       setNotice(null);
     } catch (failure) {
       setNotice({ error: true, text: marketplaceErrorMessage(failure) });
@@ -127,7 +130,7 @@ export function MarketplaceClient({ jobs: initialJobs }: { jobs: Job[] }) {
   return (
     <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="flex flex-wrap justify-between gap-4 mb-5">
-        <div><h1 className="text-2xl font-bold">Marketplace</h1><p className="text-sm mt-1" style={{ color: "var(--text-tertiary)" }}>{jobs.length} canonical SQLite jobs · fixed-price SOL only</p></div>
+        <div><h1 className="text-2xl font-bold">Marketplace</h1><p className="text-sm mt-1" style={{ color: "var(--text-tertiary)" }}>{total} canonical SQLite jobs · fixed-price SOL only</p></div>
         <div className="flex gap-2"><button onClick={() => void refresh()} disabled={listLoading} className="button-secondary">{listLoading ? "Loading…" : "Refresh"}</button><button onClick={() => connected ? setShowCreate(true) : smartConnect()} className="button-primary"><Briefcase size={14} /> Post a Job</button></div>
       </div>
 
