@@ -15,7 +15,7 @@
     "migrate:canonical-review-trust": "node scripts/migrate-canonical-review-trust.js --expect-quarantined=5",
     "test:clean-install-satp-v3": "node --test tests/satp-v3-clean-install.test.js",
     "test": "node --test tests/*.test.js",
-    "test:ci": "node scripts/run-complete-test-tree.js"
+    "test:ci": "node scripts/run-complete-test-tree.js && npm --prefix frontend ci && npm --prefix frontend run test:production:marketplace"
   },
   "keywords": [],
   "author": "",

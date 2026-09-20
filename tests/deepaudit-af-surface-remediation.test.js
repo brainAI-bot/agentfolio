@@ -357,5 +357,8 @@ test('AF6, AF10, and AF14: CI-on-merge workflow runs complete PR and main-branch
   assert.match(workflow, /npm run lint:roadmap/);
   assert.match(workflow, /npm run verify:satp-mainnet-programs/);
   assert.match(workflow, /npm run test:ci/);
+  const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+  assert.match(packageJson.scripts['test:ci'], /npm --prefix frontend ci/);
+  assert.match(packageJson.scripts['test:ci'], /npm --prefix frontend run test:production:marketplace/);
   assert.match(workflow, /git diff --check/);
 });
