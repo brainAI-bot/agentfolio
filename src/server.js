@@ -40,6 +40,10 @@ const {
 const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainData } = require('./scoring');
 const { computeUnifiedTrustScore } = require('./lib/unified-trust-score');
 const { isFixtureIdentity, isFixtureJob, shouldExcludeFixtures } = require('./lib/public-traction');
+const {
+  getPublicMarketplaceCohort,
+  summarizePublicMarketplaceCohort,
+} = require('./lib/public-marketplace-jobs');
 const { isOnChainIdentity } = require('./lib/onchain-identity');
 const {
   CANONICAL_TRUST_PROVIDERS,
@@ -1158,20 +1162,24 @@ function getEcosystemStatsPayload(excludeFixtures = true) {
   const allSkills = new Set();
   const verificationTypes = new Set();
 
-  let totalJobs = 0;
-  let openJobs = 0;
-  let inProgressJobs = 0;
-  let completedJobs = 0;
-  let totalVolume = 0;
+  let marketplaceSummary = {
+    totalJobs: 0,
+    openJobs: 0,
+    inProgressJobs: 0,
+    completedJobs: 0,
+    totalVolume: 0,
+  };
+  let marketplaceCohort = null;
   try {
-    const jobRows = d.prepare('SELECT client_id, agent_id, title, description, status, agreed_budget, budget_amount FROM jobs').all()
-      .filter((job) => !excludeFixtures || !isFixtureJob(job));
-    totalJobs = jobRows.length;
-    openJobs = jobRows.filter((job) => job.status === 'open').length;
-    inProgressJobs = jobRows.filter((job) => job.status === 'in_progress').length;
-    completedJobs = jobRows.filter((job) => job.status === 'completed').length;
-    totalVolume = jobRows.reduce((sum, job) => sum + (Number(job.agreed_budget ?? job.budget_amount) || 0), 0);
+    if (excludeFixtures) {
+      marketplaceCohort = getPublicMarketplaceCohort(d);
+      marketplaceSummary = summarizePublicMarketplaceCohort(marketplaceCohort);
+    } else {
+      const rows = d.prepare('SELECT * FROM jobs ORDER BY datetime(created_at) DESC LIMIT 1000').all();
+      marketplaceSummary = summarizePublicMarketplaceCohort({ rows });
+    }
   } catch {}
+  const { totalJobs, openJobs, inProgressJobs, completedJobs, totalVolume } = marketplaceSummary;
 
   // Also count from JSON files for skills
   const fs = require('fs');
@@ -1236,7 +1244,11 @@ function getEcosystemStatsPayload(excludeFixtures = true) {
     },
     verificationTypes: verificationTypes.size,
     verificationPlatforms: [...verificationTypes].sort(),
-    publicTraction: { excludedFixtures: excludeFixtures },
+    publicTraction: {
+      excludedFixtures: excludeFixtures,
+      marketplaceExcludedFixtures: marketplaceCohort?.excludedFixtures ?? 0,
+      marketplaceDatabaseBound: marketplaceCohort?.databaseBound ?? 1000,
+    },
   };
 }
 
@@ -1781,54 +1793,15 @@ function mapSqliteMarketplaceJob(row, profileMap, applicationCounts) {
   };
 }
 
-const MARKETPLACE_LIST_DATABASE_BOUND = 1000;
-const marketplacePublicReadDatabases = new WeakSet();
-
-function ensureMarketplacePublicReadFunction(d) {
-  if (marketplacePublicReadDatabases.has(d)) return;
-  d.function(
-    'is_public_marketplace_job',
-    { deterministic: true },
-    (clientId, title, description) => (
-      isFixtureJob({ client_id: clientId, title, description }) ? 0 : 1
-    )
-  );
-  marketplacePublicReadDatabases.add(d);
-}
-
 function listSqliteMarketplaceJobs(req, res) {
   try {
     const d = profileStore.getDb();
-    ensureMarketplacePublicReadFunction(d);
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
     const offset = (page - 1) * limit;
-    const stats = d.prepare(`
-      WITH bounded_jobs AS MATERIALIZED (
-        SELECT client_id, title, description
-        FROM jobs
-        ORDER BY datetime(created_at) DESC
-        LIMIT ?
-      )
-      SELECT
-        COUNT(*) AS scanned,
-        COALESCE(SUM(is_public_marketplace_job(client_id, title, description)), 0) AS total
-      FROM bounded_jobs
-    `).get(MARKETPLACE_LIST_DATABASE_BOUND);
-    const total = Number(stats.total) || 0;
-    const rows = offset >= MARKETPLACE_LIST_DATABASE_BOUND
-      ? []
-      : d.prepare(`
-          WITH bounded_jobs AS MATERIALIZED (
-            SELECT * FROM jobs
-            ORDER BY datetime(created_at) DESC
-            LIMIT ?
-          )
-          SELECT * FROM bounded_jobs
-          WHERE is_public_marketplace_job(client_id, title, description) = 1
-          ORDER BY datetime(created_at) DESC
-          LIMIT ? OFFSET ?
-        `).all(MARKETPLACE_LIST_DATABASE_BOUND, limit, offset);
+    const cohort = getPublicMarketplaceCohort(d);
+    const total = cohort.total;
+    const rows = cohort.rows.slice(offset, offset + limit);
     const profileMap = marketplaceProfileMap(d, rows.flatMap(row => [row.client_id, row.selected_agent_id]));
     const applicationCounts = marketplaceApplicationCounts(d, rows.map(row => row.id));
     const jobs = rows.map(row => mapSqliteMarketplaceJob(row, profileMap, applicationCounts));
@@ -1838,8 +1811,8 @@ function listSqliteMarketplaceJobs(req, res) {
       page,
       pages: Math.max(1, Math.ceil(total / limit)),
       publicTraction: {
-        excludedFixtures: (Number(stats.scanned) || 0) - total,
-        databaseBound: MARKETPLACE_LIST_DATABASE_BOUND,
+        excludedFixtures: cohort.excludedFixtures,
+        databaseBound: cohort.databaseBound,
       },
     });
   } catch (e) {
@@ -1920,10 +1893,8 @@ registerMarketplaceApplicationRoutes(app, {
   timeoutSweepIntervalMs: 60 * 1000,
 });
 
-const marketplace = require('./marketplace');
-marketplace.registerRoutes(app);
-
-// Jobs marketplace endpoint (legacy stub)
+// The retired JSON-file marketplace module is intentionally not mounted.
+// All public reads and marketplace mutations above are SQLite-backed.
 // ===== HARDENED VERIFICATION ENDPOINTS (Challenge-Response) =====
 const verificationChallenges = require('./verification-challenges');
 

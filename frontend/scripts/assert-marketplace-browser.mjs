@@ -40,7 +40,7 @@ function json(res, status, body) {
 
 const apiServer = http.createServer((req, res) => {
   const url = new URL(req.url || '/', internalOrigin);
-  if (url.pathname === '/api/marketplace/jobs') return json(res, 200, { jobs });
+  if (url.pathname === '/api/marketplace/jobs') return json(res, 200, { jobs, total: jobs.length, publicTraction: { excludedFixtures: 0, databaseBound: 1000 } });
   if (url.pathname === '/api/marketplace/jobs/probe-job-1') return json(res, 200, jobs[0]);
   if (url.pathname === '/api/marketplace/jobs/probe-job-1/applications') return json(res, 200, { applications });
   if (url.pathname.startsWith('/api/profile-by-wallet')) return json(res, 404, { error: 'not linked' });

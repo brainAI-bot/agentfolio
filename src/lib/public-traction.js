@@ -11,6 +11,9 @@ const fixtureCohort = require('./public-fixture-cohort.json');
 const REVIEWED_FIXTURE_PROFILE_IDS = new Set(
   fixtureCohort.profileIds.map((id) => String(id).trim().toLowerCase())
 );
+const REVIEWED_FIXTURE_JOB_IDS = new Set(
+  (fixtureCohort.jobIds || []).map((id) => String(id).trim().toLowerCase())
+);
 
 // Live QA probes created after the reviewed cohort snapshot. Keep these exact:
 // broad `rate*` matching would hide legitimate marketplace identities.
@@ -55,6 +58,7 @@ function isPublicTractionIdentity(...values) {
 
 function isFixtureJob(job) {
   if (!job) return false;
+  if (REVIEWED_FIXTURE_JOB_IDS.has(normalizeIdentity(job.id))) return true;
   return isFixtureIdentity(
     job.client_id,
     job.agent_id,
@@ -74,6 +78,7 @@ function shouldExcludeFixtures(value) {
 
 module.exports = {
   REVIEWED_FIXTURE_PROFILE_IDS,
+  REVIEWED_FIXTURE_JOB_IDS,
   PINNED_FIXTURE_IDENTITIES,
   normalizeIdentity,
   isFixtureIdentity,

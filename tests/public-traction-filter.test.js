@@ -107,8 +107,10 @@ describe('public traction fixture filter', () => {
 
     const serverSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
     assert.match(serverSource, /getEcosystemStatsPayload\(shouldExcludeFixtures\(req\.query\.excludeFixtures\)\)/);
-    assert.match(serverSource, /publicTraction: \{ excludedFixtures: excludeFixtures \}/);
+    assert.match(serverSource, /publicTraction:\s*\{[\s\S]*excludedFixtures: excludeFixtures/);
     assert.match(serverSource, /!excludeFixtures \|\| !isFixtureIdentity/);
-    assert.match(serverSource, /!excludeFixtures \|\| !isFixtureJob/);
+    assert.match(serverSource, /marketplaceCohort = getPublicMarketplaceCohort\(d\)/);
+    const marketplaceSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'public-marketplace-jobs.js'), 'utf8');
+    assert.match(marketplaceSource, /scannedRows\.filter\(\(job\) => !isFixtureJob\(job\)\)/);
   });
 });
