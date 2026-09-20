@@ -1893,8 +1893,12 @@ registerMarketplaceApplicationRoutes(app, {
   timeoutSweepIntervalMs: 60 * 1000,
 });
 
-// The retired JSON-file marketplace module is intentionally not mounted.
-// All public reads and marketplace mutations above are SQLite-backed.
+// Keep the legacy module mounted until every compatibility route is migrated.
+// The canonical SQLite routes above are registered first, so their overlapping
+// read aliases win while the remaining escrow/delivery/review contracts stay live.
+const marketplace = require('./marketplace');
+marketplace.registerRoutes(app);
+
 // ===== HARDENED VERIFICATION ENDPOINTS (Challenge-Response) =====
 const verificationChallenges = require('./verification-challenges');
 

@@ -27,14 +27,37 @@ test('marketplace surface regression guard', async (t) => {
     assert.doesNotMatch(serverSource, /jobs:\s*\[\],\s*total:\s*0,\s*page:\s*1,\s*message:\s*'Jobs marketplace endpoint active'/);
   });
 
-  await t.test('public marketplace compatibility reads cannot fall through to JSON files', () => {
+  await t.test('public marketplace compatibility reads resolve to SQLite before legacy fallbacks', () => {
     const canonicalRead = serverSource.indexOf("app.get('/api/marketplace/jobs', publicMarketplaceReadLimiter, listSqliteMarketplaceJobs)");
-    assert.ok(canonicalRead > -1);
+    const legacyMount = serverSource.indexOf('marketplace.registerRoutes(app)');
+    assert.ok(canonicalRead > -1 && canonicalRead < legacyMount);
     assert.match(serverSource, /app\.get\('\/api\/marketplace\/jobs\/:id\/applications', publicMarketplaceReadLimiter, getSqliteMarketplaceApplications\)/);
     assert.match(dataSource, /fetch\(`\$\{API_BASE\}\/api\/jobs\?limit=100`/);
     assert.doesNotMatch(dataSource, /data\/marketplace\/jobs|JOBS_DIR|DELIVERABLES_DIR/);
-    assert.doesNotMatch(serverSource, /marketplace\.registerRoutes\(app\)/);
-    assert.match(serverSource, /retired JSON-file marketplace module is intentionally not mounted/);
+  });
+
+  await t.test('unmigrated marketplace compatibility and escrow routes remain mounted', () => {
+    const registrations = new Set();
+    const capture = (method) => (route) => registrations.add(`${method} ${route}`);
+    const fakeApp = { get: capture('GET'), post: capture('POST') };
+    require('../src/marketplace').registerRoutes(fakeApp);
+
+    for (const route of [
+      'POST /api/marketplace/jobs/:id/applications',
+      'POST /api/marketplace/jobs/:id/escrow',
+      'GET /api/marketplace/escrow/:id',
+      'POST /api/marketplace/escrow/:id/release',
+      'POST /api/marketplace/escrow/:id/refund',
+      'POST /api/marketplace/jobs/:id/complete',
+      'POST /api/marketplace/jobs/:id/confirm-deposit',
+      'POST /api/marketplace/jobs/:id/v3-escrow-funded',
+      'POST /api/marketplace/jobs/:id/review',
+      'GET /api/marketplace/jobs/:id/reviews',
+      'POST /api/marketplace/deliverables/:id/revision',
+      'GET /api/marketplace/deliverables/:id',
+    ]) {
+      assert.ok(registrations.has(route), `${route} must remain registered`);
+    }
   });
 
   await t.test('one shared limiter covers every public SQLite read alias', () => {
@@ -133,11 +156,9 @@ test('marketplace surface regression guard', async (t) => {
     assert.doesNotMatch(clientSource, /\{jobs\.length\} canonical SQLite jobs/);
   });
 
-  await t.test('dead marketplace surfaces are removed or unreachable from production', () => {
+  await t.test('dead marketplace artifacts are removed', () => {
     assert.equal(fs.existsSync(path.join(__dirname, '..', 'public', 'v2', 'marketplace.html')), false);
     assert.equal(fs.existsSync(path.join(__dirname, '..', 'src', 'marketplace.js.pre-v3-escrow-wiring')), false);
-    assert.doesNotMatch(serverSource, /require\(['"]\.\/marketplace['"]\)/);
-    assert.doesNotMatch(serverSource, /marketplace\.registerRoutes\(app\)/);
   });
 
   await t.test('api/stats includes live job totals instead of hardcoded zeroes', () => {
