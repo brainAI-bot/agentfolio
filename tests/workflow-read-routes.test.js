@@ -66,7 +66,16 @@ function makeDb() {
       reason TEXT,
       created_at TEXT
     );
-    CREATE TABLE jobs (id TEXT PRIMARY KEY, status TEXT);
+    CREATE TABLE jobs (
+      id TEXT PRIMARY KEY,
+      client_id TEXT,
+      title TEXT,
+      description TEXT,
+      status TEXT,
+      budget_amount REAL,
+      agreed_budget REAL,
+      created_at TEXT
+    );
     CREATE TABLE escrows (id TEXT PRIMARY KEY, amount REAL, platform_fee REAL, status TEXT);
     CREATE TABLE applications (id TEXT PRIMARY KEY);
 
@@ -77,7 +86,10 @@ function makeDb() {
     INSERT INTO score_history (agent_id, score, tier, reason, created_at) VALUES
       ('agent_new', 81, 'Established', 'verification_bonus', '2026-05-13T10:10:00Z');
 
-    INSERT INTO jobs (id, status) VALUES ('job_1', 'open'), ('job_2', 'completed');
+    INSERT INTO jobs (id, client_id, title, description, status, budget_amount, created_at) VALUES
+      ('job_1', 'agent_customer', 'Public work', 'Production task', 'open', 10, '2026-05-13T10:03:00Z'),
+      ('job_b3f22a01478b8f1a', 'p0_audit_client_1776215395', 'P0 auth audit 1776215395', 'Temporary auth-gate verification job', 'open', 0.01, '2026-05-13T10:02:00Z'),
+      ('job_2', 'agent_customer', 'Completed work', 'Production task', 'completed', 20, '2026-05-13T10:01:00Z');
     INSERT INTO escrows (id, amount, platform_fee, status) VALUES
       ('escrow_1', 10, 0.5, 'released'), ('escrow_2', 20, 1, 'pending');
     INSERT INTO applications (id) VALUES ('app_1'), ('app_2');

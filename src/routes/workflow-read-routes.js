@@ -2,8 +2,13 @@ const path = require('path');
 const rateLimit = require('express-rate-limit');
 const Database = require('better-sqlite3');
 const fees = require('../lib/performance-fees');
+const {
+  getPublicMarketplaceCohort,
+  summarizePublicMarketplaceCohort,
+} = require('../lib/public-marketplace-jobs');
 
-const DEFAULT_DB_PATH = path.join(__dirname, '..', '..', 'data', 'agentfolio.db');
+const DEFAULT_DB_PATH = process.env.AGENTFOLIO_DB_PATH
+  || path.join(__dirname, '..', '..', 'data', 'agentfolio.db');
 const workflowReadLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
@@ -179,28 +184,21 @@ function registerWorkflowReadRoutes(app, options = {}) {
     let db;
     try {
       db = openReadOnlyDb(dbPath);
-      const jobColumns = tableColumns(db, 'jobs');
       const escrowColumns = tableColumns(db, 'escrows');
       const applicationColumns = tableColumns(db, 'applications');
 
-      const jobStats = numericSummary(db, 'jobs', jobColumns, (columns) => `
-        SELECT
-          COUNT(*) AS total_jobs,
-          ${columns.has('status') ? "SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END)" : '0'} AS open_jobs,
-          ${columns.has('status') ? "SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END)" : '0'} AS in_progress_jobs,
-          ${columns.has('status') ? "SUM(CASE WHEN status = 'awaiting_funding' THEN 1 ELSE 0 END)" : '0'} AS awaiting_funding_jobs,
-          ${columns.has('status') ? "SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END)" : '0'} AS completed_jobs,
-          ${columns.has('status') ? "SUM(CASE WHEN status = 'disputed' THEN 1 ELSE 0 END)" : '0'} AS disputed_jobs,
-          ${columns.has('status') ? "SUM(CASE WHEN status IN ('closed', 'cancelled') THEN 1 ELSE 0 END)" : '0'} AS closed_jobs
-        FROM jobs
-      `) || {
-        total_jobs: 0,
-        open_jobs: 0,
-        in_progress_jobs: 0,
-        awaiting_funding_jobs: 0,
-        completed_jobs: 0,
-        disputed_jobs: 0,
-        closed_jobs: 0,
+      const cohort = tableExists(db, 'jobs')
+        ? getPublicMarketplaceCohort(db)
+        : { rows: [], total: 0, excludedFixtures: 0, databaseBound: 1000 };
+      const publicSummary = summarizePublicMarketplaceCohort(cohort);
+      const jobStats = {
+        total_jobs: publicSummary.totalJobs,
+        open_jobs: publicSummary.openJobs,
+        in_progress_jobs: publicSummary.inProgressJobs,
+        awaiting_funding_jobs: cohort.rows.filter((job) => job.status === 'awaiting_funding').length,
+        completed_jobs: publicSummary.completedJobs,
+        disputed_jobs: cohort.rows.filter((job) => job.status === 'disputed').length,
+        closed_jobs: cohort.rows.filter((job) => ['closed', 'cancelled'].includes(job.status)).length,
       };
 
       const escrowStats = numericSummary(db, 'escrows', escrowColumns, (columns) => `
