@@ -51,7 +51,10 @@ test('canonical public marketplace cohort keeps evidence but excludes fixture jo
     totalJobs: 2,
     openJobs: 1,
     inProgressJobs: 0,
+    awaitingFundingJobs: 0,
     completedJobs: 1,
+    disputedJobs: 0,
+    closedJobs: 0,
     totalVolume: 7,
   });
 });

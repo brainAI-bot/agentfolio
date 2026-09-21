@@ -2,8 +2,13 @@ const path = require('path');
 const rateLimit = require('express-rate-limit');
 const Database = require('better-sqlite3');
 const fees = require('../lib/performance-fees');
+const {
+  getPublicMarketplaceCohort,
+  summarizePublicMarketplaceCohort,
+} = require('../lib/public-marketplace-jobs');
 
-const DEFAULT_DB_PATH = path.join(__dirname, '..', '..', 'data', 'agentfolio.db');
+const DEFAULT_DB_PATH = process.env.AGENTFOLIO_DB_PATH
+  || path.join(__dirname, '..', '..', 'data', 'agentfolio.db');
 const workflowReadLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
@@ -183,25 +188,10 @@ function registerWorkflowReadRoutes(app, options = {}) {
       const escrowColumns = tableColumns(db, 'escrows');
       const applicationColumns = tableColumns(db, 'applications');
 
-      const jobStats = numericSummary(db, 'jobs', jobColumns, (columns) => `
-        SELECT
-          COUNT(*) AS total_jobs,
-          ${columns.has('status') ? "SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END)" : '0'} AS open_jobs,
-          ${columns.has('status') ? "SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END)" : '0'} AS in_progress_jobs,
-          ${columns.has('status') ? "SUM(CASE WHEN status = 'awaiting_funding' THEN 1 ELSE 0 END)" : '0'} AS awaiting_funding_jobs,
-          ${columns.has('status') ? "SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END)" : '0'} AS completed_jobs,
-          ${columns.has('status') ? "SUM(CASE WHEN status = 'disputed' THEN 1 ELSE 0 END)" : '0'} AS disputed_jobs,
-          ${columns.has('status') ? "SUM(CASE WHEN status IN ('closed', 'cancelled') THEN 1 ELSE 0 END)" : '0'} AS closed_jobs
-        FROM jobs
-      `) || {
-        total_jobs: 0,
-        open_jobs: 0,
-        in_progress_jobs: 0,
-        awaiting_funding_jobs: 0,
-        completed_jobs: 0,
-        disputed_jobs: 0,
-        closed_jobs: 0,
-      };
+      const jobCohort = jobColumns.size > 0
+        ? getPublicMarketplaceCohort(db)
+        : { rows: [], total: 0, excludedFixtures: 0, databaseBound: 1000 };
+      const jobStats = summarizePublicMarketplaceCohort(jobCohort);
 
       const escrowStats = numericSummary(db, 'escrows', escrowColumns, (columns) => `
         SELECT
@@ -221,21 +211,25 @@ function registerWorkflowReadRoutes(app, options = {}) {
         ? db.prepare('SELECT COUNT(*) AS total_applications FROM applications').get()
         : { total_applications: 0 };
 
-      const totalJobs = Number(jobStats.total_jobs || 0);
-      const completedJobs = Number(jobStats.completed_jobs || 0);
+      const totalJobs = Number(jobStats.totalJobs || 0);
+      const completedJobs = Number(jobStats.completedJobs || 0);
       const completionRate = totalJobs > 0 ? Number(((completedJobs / totalJobs) * 100).toFixed(1)) : 0;
 
       return res.json({
         ok: true,
         jobs: {
           total_jobs: totalJobs,
-          open_jobs: Number(jobStats.open_jobs || 0),
-          in_progress_jobs: Number(jobStats.in_progress_jobs || 0),
-          awaiting_funding_jobs: Number(jobStats.awaiting_funding_jobs || 0),
+          open_jobs: Number(jobStats.openJobs || 0),
+          in_progress_jobs: Number(jobStats.inProgressJobs || 0),
+          awaiting_funding_jobs: Number(jobStats.awaitingFundingJobs || 0),
           completed_jobs: completedJobs,
-          disputed_jobs: Number(jobStats.disputed_jobs || 0),
-          closed_jobs: Number(jobStats.closed_jobs || 0),
+          disputed_jobs: Number(jobStats.disputedJobs || 0),
+          closed_jobs: Number(jobStats.closedJobs || 0),
           completion_rate: completionRate,
+          publicTraction: {
+            excludedFixtures: jobCohort.excludedFixtures,
+            databaseBound: jobCohort.databaseBound,
+          },
         },
         escrow: {
           total_escrows: Number(escrowStats.total_escrows || 0),
