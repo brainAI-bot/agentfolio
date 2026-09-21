@@ -66,7 +66,16 @@ function makeDb() {
       reason TEXT,
       created_at TEXT
     );
-    CREATE TABLE jobs (id TEXT PRIMARY KEY, status TEXT);
+    CREATE TABLE jobs (
+      id TEXT PRIMARY KEY,
+      status TEXT,
+      client_id TEXT,
+      title TEXT,
+      description TEXT,
+      budget_amount REAL,
+      agreed_budget REAL,
+      created_at TEXT
+    );
     CREATE TABLE escrows (id TEXT PRIMARY KEY, amount REAL, platform_fee REAL, status TEXT);
     CREATE TABLE applications (id TEXT PRIMARY KEY);
 
@@ -77,7 +86,10 @@ function makeDb() {
     INSERT INTO score_history (agent_id, score, tier, reason, created_at) VALUES
       ('agent_new', 81, 'Established', 'verification_bonus', '2026-05-13T10:10:00Z');
 
-    INSERT INTO jobs (id, status) VALUES ('job_1', 'open'), ('job_2', 'completed');
+    INSERT INTO jobs (id, status, client_id, title, budget_amount, created_at) VALUES
+      ('job_1', 'open', 'agent_real', 'Production listing', 10, '2026-05-13T10:00:00Z'),
+      ('job_2', 'completed', 'agent_real', 'Completed listing', 20, '2026-05-13T09:00:00Z'),
+      ('job_fixture', 'open', 'agent_sm123', 'Test marketplace fixture', 999, '2026-05-13T11:00:00Z');
     INSERT INTO escrows (id, amount, platform_fee, status) VALUES
       ('escrow_1', 10, 0.5, 'released'), ('escrow_2', 20, 1, 'pending');
     INSERT INTO applications (id) VALUES ('app_1'), ('app_2');
@@ -136,6 +148,7 @@ test('returns marketplace stats from the canonical owner route', () => {
     assert.equal(res.body.jobs.open_jobs, 1);
     assert.equal(res.body.jobs.completed_jobs, 1);
     assert.equal(res.body.jobs.completion_rate, 50);
+    assert.equal(res.body.jobs.publicTraction.excludedFixtures, 1);
     assert.equal(res.body.escrow.total_volume, 30);
     assert.equal(res.body.escrow.total_fees, 1.5);
     assert.equal(res.body.escrow.publicTraction, false);

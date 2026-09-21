@@ -30,7 +30,10 @@ function summarizePublicMarketplaceCohort(cohort) {
     totalJobs: rows.length,
     openJobs: rows.filter((job) => job.status === 'open').length,
     inProgressJobs: rows.filter((job) => job.status === 'in_progress').length,
+    awaitingFundingJobs: rows.filter((job) => job.status === 'awaiting_funding').length,
     completedJobs: rows.filter((job) => job.status === 'completed').length,
+    disputedJobs: rows.filter((job) => job.status === 'disputed').length,
+    closedJobs: rows.filter((job) => ['closed', 'cancelled'].includes(job.status)).length,
     totalVolume: rows.reduce(
       (sum, job) => sum + (Number(job.agreed_budget ?? job.budget_amount) || 0),
       0
