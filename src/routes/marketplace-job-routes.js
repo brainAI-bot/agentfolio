@@ -70,7 +70,6 @@ function jobResponse(row) {
     selectedAgentId: row.selected_agent_id || null,
     awardExpiresAt: row.award_expires_at || null,
     escrow: {
-      id: row.escrow_id || null,
       mode: 'staged',
       funded: Boolean(row.escrow_funded),
       moneyMoved: false,
