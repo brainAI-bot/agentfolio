@@ -289,11 +289,9 @@ function registerMarketplaceJobRoutes(app, { getDb, closeDb = false } = {}) {
     } finally { if (closeDb) db.close(); }
   };
   for (const route of ['/api/jobs', '/api/marketplace/jobs']) {
-    app.get(route, invoke(listJobs, 200, false));
     app.post(route, marketplaceJobMutationLimiter, authorize({ action: 'create', resourceId: (_req, actorId) => actorId }), invoke(createJob, 201));
   }
   for (const prefix of ['/api/jobs/:id', '/api/marketplace/jobs/:id']) {
-    app.get(prefix, invoke(getJob, 200, false));
     app.post(`${prefix}/fund-staged`, marketplaceJobMutationLimiter, authorize({ action: 'fund-staged', resourceId: (req) => req.params.id }), invoke(stageFunding, 201));
     app.post(`${prefix}/fund-staged/verify`, marketplaceJobMutationLimiter, authorize({ action: 'verify-funding', resourceId: (req) => req.params.id }), invoke(verifyFunding));
     app.post(`${prefix}/cancel`, marketplaceJobMutationLimiter, authorize({ action: 'cancel', resourceId: (req) => req.params.id }), invoke(cancelJob));

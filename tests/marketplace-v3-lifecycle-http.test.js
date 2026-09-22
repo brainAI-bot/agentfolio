@@ -8,12 +8,16 @@ const Database = require('better-sqlite3');
 const express = require('express');
 const { registerMarketplaceJobRoutes } = require('../src/routes/marketplace-job-routes');
 const { registerMarketplaceApplicationRoutes } = require('../src/routes/marketplace-application-routes');
+const { registerPublicMarketplaceReadRoutes } = require('../src/routes/public-marketplace-read-routes');
 
 async function createHarness() {
   const db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
   db.exec(`CREATE TABLE profiles (
     id TEXT PRIMARY KEY,
+    name TEXT,
+    wallet TEXT,
+    wallets TEXT DEFAULT '{}',
     verification_data TEXT DEFAULT '{}',
     api_key TEXT UNIQUE
   )`);
@@ -25,6 +29,7 @@ async function createHarness() {
 
   const app = express();
   app.use(express.json());
+  registerPublicMarketplaceReadRoutes(app, { getDb: () => db });
   registerMarketplaceJobRoutes(app, { getDb: () => db });
   registerMarketplaceApplicationRoutes(app, { getDb: () => db });
   const server = await new Promise((resolve) => {
@@ -109,14 +114,37 @@ test('V3 HTTP lifecycle foundation supports exact select and claim modes while l
   assert.equal(selectCreated.body.pickupMode, 'select');
   assert.equal(claimCreated.body.pickupMode, 'claim');
 
-  const listed = await request(baseUrl, 'GET', '/api/marketplace/jobs?pickupMode=claim');
+  const insertLegacy = db.prepare(`INSERT INTO jobs
+    (id, client_id, title, description, category, skills, budget_type, budget_amount,
+     budget_currency, timeline, pickup_mode, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'development', '[]', 'fixed', ?, 'SOL', '1w', ?, 'open', ?, ?)`);
+  const legacyCreatedAt = '2026-09-22T00:00:00.000Z';
+  insertLegacy.run('job_fixture_claim', 'poster', 'test fixture claim job', 'fixture row excluded from public traction', 1, 'claim', legacyCreatedAt, legacyCreatedAt);
+  insertLegacy.run('job_legacy_zero', 'poster', 'legacy zero claim job', 'legacy zero-budget row must not break public reads', 0, 'claim', legacyCreatedAt, legacyCreatedAt);
+
+  const listed = await request(baseUrl, 'GET', '/api/marketplace/jobs?pickupMode=claim&status=open');
   assert.equal(listed.status, 200);
   assert.equal(listed.body.total, 1);
   assert.equal(listed.body.jobs[0].id, claimCreated.body.id);
+  assert.equal(listed.body.publicTraction.excludedFixtures, 1);
+  assert.equal(listed.body.publicTraction.excludedInvalidBudgets, 1);
+  const selectListed = await request(baseUrl, 'GET', '/api/marketplace/jobs?pickupMode=select&status=open');
+  assert.equal(selectListed.status, 200);
+  assert.equal(selectListed.body.total, 1);
+  assert.equal(selectListed.body.jobs[0].id, selectCreated.body.id);
+  const statusFiltered = await request(baseUrl, 'GET', '/api/marketplace/jobs?status=awarded');
+  assert.equal(statusFiltered.status, 200);
+  assert.equal(statusFiltered.body.total, 0);
+
   const selectedRead = await request(baseUrl, 'GET', `/api/marketplace/jobs/${selectCreated.body.id}`);
+  const claimRead = await request(baseUrl, 'GET', `/api/marketplace/jobs/${claimCreated.body.id}`);
   assert.equal(selectedRead.status, 200);
+  assert.equal(claimRead.status, 200);
+  assert.equal(selectedRead.body.pickupMode, 'select');
+  assert.equal(claimRead.body.pickupMode, 'claim');
   assert.equal(selectedRead.body.publicMetrics.gmvMinorUnits, '0');
   assert.equal(selectedRead.body.publicMetrics.outcomeReputationEligible, false);
+  assert.equal(claimRead.body.escrow.moneyMoved, false);
 
   const prematureClaim = await request(baseUrl, 'POST', `/api/marketplace/jobs/${claimCreated.body.id}/claim`, {
     key: 'key-a', idempotencyKey: 'premature-claim', body: {},
