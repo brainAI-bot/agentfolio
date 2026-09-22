@@ -39,11 +39,12 @@ const {
 // Scoring module
 const { computeScore, computeScoreWithOnChain, computeLeaderboard, fetchOnChainData } = require('./scoring');
 const { computeUnifiedTrustScore } = require('./lib/unified-trust-score');
-const { isFixtureIdentity, isFixtureJob, shouldExcludeFixtures } = require('./lib/public-traction');
+const { isFixtureIdentity, shouldExcludeFixtures } = require('./lib/public-traction');
 const {
   getPublicMarketplaceCohort,
   summarizePublicMarketplaceCohort,
 } = require('./lib/public-marketplace-jobs');
+
 const { isOnChainIdentity } = require('./lib/onchain-identity');
 const {
   CANONICAL_TRUST_PROVIDERS,
@@ -1733,146 +1734,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// Marketplace (full job flow)
-function marketplaceProfileMap(d, profileIds) {
-  const ids = [...new Set(profileIds.filter(Boolean))];
-  if (!ids.length) return new Map();
-  const profiles = d.prepare(`SELECT id, name, wallet, wallets FROM profiles WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids);
-  return new Map(profiles.map(profile => {
-    let solanaWallet = profile.wallet || null;
-    try {
-      const wallets = typeof profile.wallets === 'string' ? JSON.parse(profile.wallets || '{}') : (profile.wallets || {});
-      if (wallets?.solana) solanaWallet = wallets.solana;
-    } catch {}
-    return [profile.id, profile.name || solanaWallet || profile.id];
-  }));
-}
-
-function marketplaceApplicationCounts(d, jobIds) {
-  if (!jobIds.length) return new Map();
-  const rows = d.prepare(`SELECT job_id, COUNT(*) AS count FROM applications WHERE job_id IN (${jobIds.map(() => '?').join(',')}) GROUP BY job_id`).all(...jobIds);
-  return new Map(rows.map(row => [row.job_id, Number(row.count) || 0]));
-}
-
-function mapSqliteMarketplaceJob(row, profileMap, applicationCounts) {
-  const budgetAmount = row.agreed_budget ?? row.budget_amount ?? 0;
-  const budgetCurrency = row.budget_currency || 'SOL';
-  let skills = [];
-  let attachments = [];
-  try { skills = JSON.parse(row.skills || '[]'); } catch {}
-  try { attachments = JSON.parse(row.attachments || '[]'); } catch {}
-  const applicationCount = applicationCounts.get(row.id) ?? (Number(row.application_count) || 0);
-  return {
-    ...row,
-    budget: `${budgetAmount} ${budgetCurrency}`,
-    budgetAmount,
-    budgetCurrency,
-    poster: profileMap.get(row.client_id) || row.client_id || 'Unknown client',
-    posterId: row.client_id,
-    clientId: row.client_id,
-    assignee: row.selected_agent_id ? (profileMap.get(row.selected_agent_id) || row.selected_agent_id) : null,
-    assigneeId: row.selected_agent_id || null,
-    selectedAgentId: row.selected_agent_id || null,
-    selectedApplicationId: row.selected_application_id || null,
-    awardExpiresAt: row.award_expires_at || null,
-    expiresAt: row.expires_at || null,
-    skills,
-    skills_required: skills,
-    attachments,
-    applicationCount,
-    proposals: applicationCount,
-    escrow: {
-      id: row.escrow_id || null,
-      required: Boolean(row.escrow_required),
-      funded: Boolean(row.escrow_funded),
-      mode: 'staged',
-      moneyMoved: false,
-    },
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function listSqliteMarketplaceJobs(req, res) {
-  try {
-    const d = profileStore.getDb();
-    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
-    const offset = (page - 1) * limit;
-    const cohort = getPublicMarketplaceCohort(d);
-    const total = cohort.total;
-    const rows = cohort.rows.slice(offset, offset + limit);
-    const profileMap = marketplaceProfileMap(d, rows.flatMap(row => [row.client_id, row.selected_agent_id]));
-    const applicationCounts = marketplaceApplicationCounts(d, rows.map(row => row.id));
-    const jobs = rows.map(row => mapSqliteMarketplaceJob(row, profileMap, applicationCounts));
-    res.json({
-      jobs,
-      total,
-      page,
-      pages: Math.max(1, Math.ceil(total / limit)),
-      publicTraction: {
-        excludedFixtures: cohort.excludedFixtures,
-        databaseBound: cohort.databaseBound,
-      },
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-}
-
-function loadSqliteMarketplaceApplications(d, jobId) {
-  const rows = d.prepare('SELECT * FROM applications WHERE job_id = ? ORDER BY datetime(created_at) DESC').all(jobId);
-  const profileMap = marketplaceProfileMap(d, rows.map(row => row.agent_id));
-  return rows.map(row => ({
-    id: row.id,
-    jobId: row.job_id,
-    applicantId: row.agent_id,
-    applicantProfileId: row.agent_id,
-    applicantName: profileMap.get(row.agent_id) || row.agent_id || 'Unknown applicant',
-    proposal: row.cover_message || '',
-    bidAmount: row.proposed_budget,
-    proposedTimeline: row.proposed_timeline,
-    status: row.status || 'pending',
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  }));
-}
-
-function getSqliteMarketplaceJob(req, res) {
-  try {
-    const d = profileStore.getDb();
-    const row = d.prepare('SELECT * FROM jobs WHERE id = ?').get(req.params.id);
-    if (!row || isFixtureJob(row)) return res.status(404).json({ error: 'Job not found' });
-    const applications = loadSqliteMarketplaceApplications(d, row.id);
-    const profileMap = marketplaceProfileMap(d, [row.client_id, row.selected_agent_id]);
-    const applicationCounts = new Map([[row.id, applications.length]]);
-    res.json({ ...mapSqliteMarketplaceJob(row, profileMap, applicationCounts), applications });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-}
-
-function getSqliteMarketplaceApplications(req, res) {
-  try {
-    const d = profileStore.getDb();
-    const job = d.prepare('SELECT * FROM jobs WHERE id = ?').get(req.params.id);
-    if (!job || isFixtureJob(job)) return res.status(404).json({ error: 'Job not found' });
-    const applications = loadSqliteMarketplaceApplications(d, job.id);
-    res.json({ applications, total: applications.length });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-}
-
 // D9 canonical reads: SQLite backs both the modern and compatibility paths.
 // The compatibility routes are registered before the legacy mutation module so
 // no public GET can fall through to the retired JSON-file read lane.
-app.get('/api/jobs', publicMarketplaceReadLimiter, listSqliteMarketplaceJobs);
-app.get('/api/jobs/:id', publicMarketplaceReadLimiter, getSqliteMarketplaceJob);
-app.get('/api/jobs/:id/applications', publicMarketplaceReadLimiter, getSqliteMarketplaceApplications);
-app.get('/api/marketplace/jobs', publicMarketplaceReadLimiter, listSqliteMarketplaceJobs);
-app.get('/api/marketplace/jobs/:id', publicMarketplaceReadLimiter, getSqliteMarketplaceJob);
-app.get('/api/marketplace/jobs/:id/applications', publicMarketplaceReadLimiter, getSqliteMarketplaceApplications);
+const { registerPublicMarketplaceReadRoutes } = require('./routes/public-marketplace-read-routes');
+registerPublicMarketplaceReadRoutes(app, {
+  getDb: () => profileStore.getDb(),
+  limiter: publicMarketplaceReadLimiter,
+});
 
 // Canonical P1 marketplace mutations. Register before the retired JSON module
 // so every fixed-price web/API path writes only to SQLite.

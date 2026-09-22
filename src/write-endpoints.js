@@ -185,7 +185,13 @@ function registerWriteEndpoints(app, options = {}) {
         completion_note: completion_note || '', funds_released: true,
         message: 'Job marked complete. Escrow funds released.'
       });
-    } catch (e) { try { db.close(); } catch(_) {} res.status(500).json({ error: e.message }); }
+    } catch (e) {
+      try { db.close(); } catch(_) {}
+      if (e instanceof marketplaceState.MarketplaceTransitionError) {
+        return res.status(409).json({ code: e.code, error: e.message, ...e.details });
+      }
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   // 6. POST /api/profile/:id/review (auth required)

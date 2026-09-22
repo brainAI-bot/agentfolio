@@ -5,11 +5,17 @@ const rateLimit = require('express-rate-limit');
 const marketplaceState = require('../lib/marketplace-state-machine');
 const { initializeMarketplaceCoreSchema } = require('../lib/marketplace-schema');
 const { hasVerifiedCanonicalTrustData } = require('../lib/canonical-verification-providers');
+const {
+  MarketplaceAmountError,
+  parseDecimalToMinorUnits,
+  formatMinorUnits,
+  exactMinorUnits,
+  normalizeCurrency,
+} = require('../lib/marketplace-money');
 const { createMarketplaceAuth, registerMarketplaceAuthChallengeRoute } = require('../lib/marketplace-wallet-auth');
 
 const AWARD_TTL_MS = 48 * 60 * 60 * 1000;
 const DAILY_APPLICATION_LIMIT = 10;
-const CURRENCY_DECIMALS = Object.freeze({ SOL: 9, USDC: 6 });
 const marketplaceMutationLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 60,
@@ -91,6 +97,29 @@ function initializeMarketplaceApplicationSchema(db) {
       FOREIGN KEY (adjustment_id) REFERENCES marketplace_escrow_adjustments(id)
     );
 
+    CREATE TABLE IF NOT EXISTS marketplace_claims (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL UNIQUE,
+      agent_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('selected', 'accepted', 'failed')),
+      idempotency_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (job_id) REFERENCES jobs(id),
+      UNIQUE (job_id, idempotency_key)
+    );
+
+    CREATE TRIGGER IF NOT EXISTS immutable_marketplace_claims_update
+    BEFORE UPDATE ON marketplace_claims
+    BEGIN
+      SELECT RAISE(ABORT, 'MARKETPLACE_CLAIM_IMMUTABLE');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS immutable_marketplace_claims_delete
+    BEFORE DELETE ON marketplace_claims
+    BEGIN
+      SELECT RAISE(ABORT, 'MARKETPLACE_CLAIM_IMMUTABLE');
+    END;
+
     CREATE TRIGGER IF NOT EXISTS immutable_application_transition_audit_update
     BEFORE UPDATE ON application_transition_audit
     BEGIN
@@ -136,6 +165,7 @@ function applicationResponse(row) {
     agentId: row.agent_id,
     coverMessage: row.cover_message || '',
     proposedBudget: row.proposed_budget,
+    proposedBudgetMinor: row.proposed_budget_minor || null,
     proposedTimeline: row.proposed_timeline,
     portfolioItems: parseJson(row.portfolio_items, []),
     status: row.status,
@@ -209,24 +239,14 @@ function fundedEscrowForJob(db, job) {
   return escrow;
 }
 
-function requiredAwardAmount(job, application) {
-  const amount = Number(application.proposed_budget ?? job.budget_amount);
-  if (!Number.isFinite(amount) || amount <= 0) {
-    throw new MarketplaceApplicationError(409, 'INVALID_AWARD_AMOUNT', 'Accepted fixed amount must be positive');
-  }
-  return amount;
-}
-
-function normalizeCurrency(value) {
-  return String(value || '').trim().toUpperCase();
-}
-
-function toMinorUnits(value, currency) {
-  const decimals = CURRENCY_DECIMALS[currency];
-  const amount = Number(value);
-  if (!Number.isInteger(decimals) || !Number.isFinite(amount)) return null;
-  const minorUnits = Math.round(amount * (10 ** decimals));
-  return Number.isSafeInteger(minorUnits) ? minorUnits : null;
+function requiredAwardAmount(job, application = null) {
+  const currency = normalizeCurrency(job.budget_currency);
+  const minor = application
+    ? (application.proposed_budget_minor
+      ? String(application.proposed_budget_minor)
+      : parseDecimalToMinorUnits(application.proposed_budget ?? job.budget_amount, currency))
+    : exactMinorUnits(job, 'budget_amount', 'budget_amount_minor');
+  return { minor, decimal: formatMinorUnits(minor, currency), currency };
 }
 
 function resolveOutstandingAdjustments(db, job, application, escrow, fundedAmount, requiredAmount, currency, now) {
@@ -258,19 +278,18 @@ function resolveOutstandingAdjustments(db, job, application, escrow, fundedAmoun
 
 function assertFundingMatches(db, job, application, now) {
   const escrow = fundedEscrowForJob(db, job);
-  const requiredAmount = requiredAwardAmount(job, application);
+  const required = requiredAwardAmount(job, application);
   if (!escrow) {
     throw new MarketplaceApplicationError(
       409,
       'ESCROW_FUNDING_REQUIRED',
       'Verified staged escrow funding is required before award',
-      { requiredAmount, currency: job.budget_currency },
+      { requiredAmount: required.decimal, requiredMinor: required.minor, currency: required.currency },
     );
   }
 
   const fundedCurrency = normalizeCurrency(escrow.currency);
-  const requiredCurrency = normalizeCurrency(job.budget_currency);
-  if (!fundedCurrency || !requiredCurrency || fundedCurrency !== requiredCurrency) {
+  if (!fundedCurrency || fundedCurrency !== required.currency) {
     throw new MarketplaceApplicationError(
       409,
       'ESCROW_CURRENCY_MISMATCH',
@@ -278,27 +297,25 @@ function assertFundingMatches(db, job, application, now) {
       {
         escrowId: escrow.id,
         jobId: job.id,
-        applicationId: application.id,
+        applicationId: application?.id || null,
         fundedCurrency: fundedCurrency || null,
-        requiredCurrency: requiredCurrency || null,
+        requiredCurrency: required.currency || null,
       },
     );
   }
 
-  const fundedAmount = Number(escrow.amount);
-  const fundedMinorUnits = toMinorUnits(fundedAmount, fundedCurrency);
-  const requiredMinorUnits = toMinorUnits(requiredAmount, requiredCurrency);
-  if (fundedMinorUnits === null || requiredMinorUnits === null
-    || fundedMinorUnits <= 0 || requiredMinorUnits <= 0) {
-    throw new MarketplaceApplicationError(
-      409,
-      'ESCROW_AMOUNT_INVALID',
-      'Escrow and award amounts must fit the supported currency minor-unit range',
-      { fundedAmount, requiredAmount, currency: fundedCurrency },
-    );
+  let fundedMinor;
+  try { fundedMinor = exactMinorUnits(escrow, 'amount', 'amount_minor', 'currency'); } catch (error) {
+    throw new MarketplaceApplicationError(409, 'ESCROW_AMOUNT_INVALID', error.message);
   }
-  if (fundedMinorUnits !== requiredMinorUnits) {
-    const adjustmentType = fundedAmount > requiredAmount ? 'refund' : 'top_up';
+  if (fundedMinor !== required.minor) {
+    if (!application) {
+      throw new MarketplaceApplicationError(409, 'ESCROW_FUNDING_MISMATCH', 'Verified funding does not exactly match the advertised amount', {
+        fundedMinor, requiredMinor: required.minor, currency: fundedCurrency,
+      });
+    }
+    const adjustmentType = BigInt(fundedMinor) > BigInt(required.minor) ? 'refund' : 'top_up';
+    const fundedAmount = formatMinorUnits(fundedMinor, fundedCurrency);
     db.prepare(`
       INSERT OR IGNORE INTO marketplace_escrow_adjustments (
         id, job_id, application_id, escrow_id, adjustment_type,
@@ -310,8 +327,8 @@ function assertFundingMatches(db, job, application, now) {
       application.id,
       escrow.id,
       adjustmentType,
-      fundedAmount,
-      requiredAmount,
+      Number(fundedAmount),
+      Number(required.decimal),
       fundedCurrency,
       now,
     );
@@ -322,7 +339,9 @@ function assertFundingMatches(db, job, application, now) {
       {
         adjustmentType,
         fundedAmount,
-        requiredAmount,
+        fundedMinor,
+        requiredAmount: required.decimal,
+        requiredMinor: required.minor,
         escrowId: escrow.id,
         jobId: job.id,
         applicationId: application.id,
@@ -330,23 +349,22 @@ function assertFundingMatches(db, job, application, now) {
       },
     );
   }
-  resolveOutstandingAdjustments(
-    db,
-    job,
-    application,
-    escrow,
-    fundedAmount,
-    requiredAmount,
-    fundedCurrency,
-    now,
-  );
-  return { escrow, requiredAmount };
+  if (application) {
+    resolveOutstandingAdjustments(
+      db, job, application, escrow,
+      Number(required.decimal), Number(required.decimal), fundedCurrency, now,
+    );
+  }
+  return { escrow, requiredAmount: required.decimal, requiredMinor: required.minor };
 }
 
 function applyToJob(db, { jobId, actorId, body = {}, now = new Date().toISOString() }) {
   const execute = db.transaction(() => {
     const job = requireJob(db, jobId);
     requireFixedPrice(job);
+    if ((job.pickup_mode || 'select') !== 'select') {
+      throw new MarketplaceApplicationError(409, 'PICKUP_MODE_MISMATCH', 'Applications are only available for select-mode jobs');
+    }
     if (job.status !== marketplaceState.JOB_STATUS.OPEN) {
       throw new MarketplaceApplicationError(409, 'JOB_NOT_OPEN', 'Job is not open for applications');
     }
@@ -372,10 +390,16 @@ function applyToJob(db, { jobId, actorId, body = {}, now = new Date().toISOStrin
     if (coverMessage.length < 10 || coverMessage.length > 5000) {
       throw new MarketplaceApplicationError(400, 'INVALID_COVER_MESSAGE', 'coverMessage must be between 10 and 5000 characters');
     }
-    const proposedBudget = Number(body.proposedBudget ?? body.proposed_budget ?? job.budget_amount);
-    if (!Number.isFinite(proposedBudget) || proposedBudget <= 0) {
-      throw new MarketplaceApplicationError(400, 'INVALID_PROPOSED_BUDGET', 'proposedBudget must be positive');
+    let proposedBudgetMinor;
+    try {
+      proposedBudgetMinor = parseDecimalToMinorUnits(
+        body.proposedBudget ?? body.proposed_budget ?? formatMinorUnits(exactMinorUnits(job, 'budget_amount', 'budget_amount_minor'), job.budget_currency),
+        job.budget_currency,
+      );
+    } catch (error) {
+      throw new MarketplaceApplicationError(400, error.code || 'INVALID_PROPOSED_BUDGET', error.message);
     }
+    const proposedBudget = formatMinorUnits(proposedBudgetMinor, job.budget_currency);
     const proposedTimeline = String(body.proposedTimeline ?? body.proposed_timeline ?? job.timeline ?? 'flexible').trim();
     const portfolioItems = body.portfolioItems ?? body.portfolio_items ?? [];
     if (!Array.isArray(portfolioItems) || portfolioItems.length > 10 || portfolioItems.some((item) => typeof item !== 'string' || !item.trim())) {
@@ -388,6 +412,7 @@ function applyToJob(db, { jobId, actorId, body = {}, now = new Date().toISOStrin
       agent_id: actorId,
       cover_message: coverMessage,
       proposed_budget: proposedBudget,
+      proposed_budget_minor: proposedBudgetMinor,
       proposed_timeline: proposedTimeline,
       portfolio_items: JSON.stringify(portfolioItems),
       status: 'pending',
@@ -398,15 +423,16 @@ function applyToJob(db, { jobId, actorId, body = {}, now = new Date().toISOStrin
     };
     db.prepare(`
       INSERT INTO applications (
-        id, job_id, agent_id, cover_message, proposed_budget, proposed_timeline,
+        id, job_id, agent_id, cover_message, proposed_budget, proposed_budget_minor, proposed_timeline,
         portfolio_items, status, status_note, accepted_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       application.id,
       application.job_id,
       application.agent_id,
       application.cover_message,
       application.proposed_budget,
+      application.proposed_budget_minor,
       application.proposed_timeline,
       application.portfolio_items,
       application.status,
@@ -454,32 +480,40 @@ function rejectApplication(db, { applicationId, jobId = null, actorId, now = new
   })();
 }
 
-function selectApplication(db, { applicationId, jobId = null, actorId, now = new Date().toISOString() }) {
+function selectApplication(db, { applicationId, jobId = null, actorId, idempotencyKey = null, now = new Date().toISOString() }) {
   const execute = db.transaction(() => {
     const application = requireApplication(db, applicationId, jobId);
     const job = requireJob(db, application.job_id);
     requireFixedPrice(job);
+    if ((job.pickup_mode || 'select') !== 'select') {
+      throw new MarketplaceApplicationError(409, 'PICKUP_MODE_MISMATCH', 'Poster selection is only available for select-mode jobs');
+    }
     if (job.client_id !== actorId) {
       throw new MarketplaceApplicationError(403, 'CLIENT_ACTION_FORBIDDEN', 'Only the job client may select an application');
+    }
+    const transitionKey = idempotencyKey ? `select:${idempotencyKey}` : `select:${application.id}`;
+    const replay = db.prepare('SELECT id FROM job_transition_audit WHERE job_id = ? AND idempotency_key = ?').get(job.id, transitionKey);
+    if (replay) {
+      return { jobId: job.id, application: applicationResponse(application), status: job.status, awardExpiresAt: job.award_expires_at, agreedBudget: String(job.agreed_budget), replayed: true };
     }
     if (job.status !== marketplaceState.JOB_STATUS.OPEN || application.status !== 'pending') {
       throw new MarketplaceApplicationError(409, 'APPLICATION_NOT_SELECTABLE', 'Application is not selectable');
     }
 
-    const { requiredAmount, escrow } = assertFundingMatches(db, job, application, now);
+    const { requiredAmount, requiredMinor, escrow } = assertFundingMatches(db, job, application, now);
     const awardExpiresAt = new Date(new Date(now).getTime() + AWARD_TTL_MS).toISOString();
     marketplaceState.transitionJobState(db, job.id, marketplaceState.JOB_STATUS.AWARDED, {
       actorId,
       reason: 'client selected funded application',
       source: 'marketplace-application-api',
-      idempotencyKey: `select:${application.id}`,
-      metadata: { applicationId: application.id, escrowId: escrow.id, agreedBudget: requiredAmount },
+      idempotencyKey: transitionKey,
+      metadata: { applicationId: application.id, escrowId: escrow.id, agreedBudget: requiredAmount, agreedBudgetMinor: requiredMinor },
       now,
     });
     transitionApplication(db, application, 'selected', actorId, 'client_selected', now, `select:${application.id}`);
     db.prepare(`
       UPDATE jobs SET selected_agent_id = ?, selected_application_id = ?, selected_at = ?,
-        award_expires_at = ?, agreed_budget = ?, agreed_timeline = ?, updated_at = ?
+        award_expires_at = ?, agreed_budget = ?, agreed_budget_minor = ?, agreed_timeline = ?, updated_at = ?
       WHERE id = ?
     `).run(
       application.agent_id,
@@ -487,6 +521,7 @@ function selectApplication(db, { applicationId, jobId = null, actorId, now = new
       now,
       awardExpiresAt,
       requiredAmount,
+      requiredMinor,
       application.proposed_timeline || job.timeline,
       now,
       job.id,
@@ -541,7 +576,7 @@ function reopenAward(db, job, application, actorId, reason, now) {
   db.prepare(`
     UPDATE jobs SET selected_agent_id = NULL, selected_application_id = NULL,
       selected_at = NULL, award_expires_at = NULL, agreed_budget = NULL,
-      agreed_timeline = NULL, updated_at = ? WHERE id = ?
+      agreed_budget_minor = NULL, agreed_timeline = NULL, updated_at = ? WHERE id = ?
   `).run(now, job.id);
   return { jobId: job.id, applicationId: application.id, status: marketplaceState.JOB_STATUS.OPEN, reason };
 }
@@ -643,6 +678,73 @@ function expireTimedOutAwards(db, { now = new Date().toISOString() } = {}) {
   return results;
 }
 
+function claimJob(db, {
+  jobId,
+  actorId,
+  idempotencyKey,
+  now = new Date().toISOString(),
+}) {
+  const requestKey = String(idempotencyKey || '').trim();
+  if (!requestKey) throw new MarketplaceApplicationError(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Idempotency-Key header is required');
+  if (requestKey.length > 200) throw new MarketplaceApplicationError(400, 'INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must be at most 200 characters');
+
+  return db.transaction(() => {
+    const prior = db.prepare('SELECT * FROM marketplace_claims WHERE job_id = ? AND idempotency_key = ? AND agent_id = ?')
+      .get(jobId, requestKey, actorId);
+    if (prior) {
+      const current = requireJob(db, jobId);
+      return { jobId, claimId: prior.id, status: current.status, awardExpiresAt: current.award_expires_at, replayed: true };
+    }
+
+    const job = requireJob(db, jobId);
+    requireFixedPrice(job);
+    if ((job.pickup_mode || 'select') !== 'claim') {
+      throw new MarketplaceApplicationError(409, 'PICKUP_MODE_MISMATCH', 'Claims are only available for claim-mode jobs');
+    }
+    if (job.status !== marketplaceState.JOB_STATUS.OPEN || job.selected_agent_id) {
+      throw new MarketplaceApplicationError(409, 'JOB_ALREADY_CLAIMED', 'Job has already been claimed', { currentState: job.status, retryable: false });
+    }
+    if (job.client_id === actorId) throw new MarketplaceApplicationError(403, 'SELF_CLAIM_FORBIDDEN', 'Posters cannot claim their own jobs');
+
+    const profile = db.prepare('SELECT id, verification_data FROM profiles WHERE id = ?').get(actorId);
+    const verificationData = parseJson(profile?.verification_data);
+    if (!profile || !hasVerifiedCanonicalTrustData(verificationData)) {
+      throw new MarketplaceApplicationError(403, 'CLAIM_INELIGIBLE_VERIFICATION', 'Claimant does not have a verified canonical identity', { predicate: 'verified_identity', retryable: false });
+    }
+    const verificationLevel = Number(verificationData.verificationLevel ?? verificationData.verification_level ?? 1);
+    const requiredLevel = Number(job.minimum_verification_level) || 1;
+    if (!Number.isInteger(verificationLevel) || verificationLevel < requiredLevel) {
+      throw new MarketplaceApplicationError(403, 'CLAIM_INELIGIBLE_VERIFICATION_LEVEL', 'Claimant does not meet the minimum verification level', { predicate: 'minimum_verification_level', required: requiredLevel, retryable: false });
+    }
+    if (job.minimum_trust_score != null) {
+      const trustScore = Number(verificationData.trustScore ?? verificationData.trust_score);
+      if (!Number.isFinite(trustScore) || trustScore < Number(job.minimum_trust_score)) {
+        throw new MarketplaceApplicationError(403, 'CLAIM_INELIGIBLE_TRUST_SCORE', 'Claimant does not meet the minimum trust score', { predicate: 'minimum_trust_score', required: Number(job.minimum_trust_score), retryable: false });
+      }
+    }
+
+    const { escrow, requiredAmount, requiredMinor } = assertFundingMatches(db, job, null, now);
+    const claimId = `clm_${crypto.randomUUID()}`;
+    const awardExpiresAt = new Date(new Date(now).getTime() + AWARD_TTL_MS).toISOString();
+    marketplaceState.transitionJobState(db, job.id, marketplaceState.JOB_STATUS.AWARDED, {
+      actorId,
+      reason: 'first eligible agent claimed funded job',
+      source: 'marketplace-claim-api',
+      idempotencyKey: `claim:${requestKey}`,
+      metadata: { claimId, escrowId: escrow.id, agreedBudget: requiredAmount, agreedBudgetMinor: requiredMinor },
+      now,
+    });
+    const result = db.prepare(`UPDATE jobs SET selected_agent_id = ?, selected_at = ?, award_expires_at = ?,
+      agreed_budget = ?, agreed_budget_minor = ?, agreed_timeline = ?, updated_at = ? WHERE id = ? AND selected_agent_id IS NULL`)
+      .run(actorId, now, awardExpiresAt, Number(requiredAmount), requiredMinor, job.timeline, now, job.id);
+    if (result.changes !== 1) throw new MarketplaceApplicationError(409, 'JOB_ALREADY_CLAIMED', 'Job has already been claimed', { currentState: 'awarded', retryable: false });
+    db.prepare(`INSERT INTO marketplace_claims (id, job_id, agent_id, status, idempotency_key, created_at)
+      VALUES (?, ?, ?, 'selected', ?, ?)`)
+      .run(claimId, job.id, actorId, requestKey, now);
+    return { jobId: job.id, claimId, status: marketplaceState.JOB_STATUS.AWARDED, awardExpiresAt, agreedBudget: requiredAmount, agreedBudgetMinor: requiredMinor, replayed: false };
+  })();
+}
+
 function registerMarketplaceApplicationRoutes(app, { getDb, closeDb = false, timeoutSweepIntervalMs = 0 } = {}) {
   if (typeof getDb !== 'function') throw new TypeError('getDb is required');
   const schemaDb = getDb();
@@ -660,6 +762,7 @@ function registerMarketplaceApplicationRoutes(app, { getDb, closeDb = false, tim
         applicationId: req.params.applicationId || null,
         actorId: req.marketplaceActorId,
         body: req.body || {},
+        idempotencyKey: req.get('Idempotency-Key'),
       });
       const responseStatus = result?._httpStatus || successStatus;
       if (result && Object.prototype.hasOwnProperty.call(result, '_httpStatus')) delete result._httpStatus;
@@ -667,6 +770,15 @@ function registerMarketplaceApplicationRoutes(app, { getDb, closeDb = false, tim
     } catch (error) {
       if (error instanceof MarketplaceApplicationError) {
         return res.status(error.status).json({ code: error.code, error: error.message, ...error.details });
+      }
+      if (error instanceof MarketplaceAmountError) {
+        return res.status(400).json({ code: error.code, error: error.message });
+      }
+      if (error instanceof marketplaceState.MarketplaceTransitionError) {
+        return res.status(409).json({ code: error.code, error: error.message, ...error.details });
+      }
+      if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' && /marketplace_claims/i.test(error.message)) {
+        return res.status(409).json({ code: 'JOB_ALREADY_CLAIMED', error: 'Job has already been claimed', retryable: false });
       }
       if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
         return res.status(409).json({ code: 'APPLICATION_ALREADY_EXISTS', error: 'Only one application per agent and job is allowed' });
@@ -685,6 +797,12 @@ function registerMarketplaceApplicationRoutes(app, { getDb, closeDb = false, tim
     'apply',
     (req) => req.params.id,
     invoke(applyToJob, 201),
+  );
+  postAliases(
+    ['/api/jobs/:id/claim', '/api/marketplace/jobs/:id/claim'],
+    'claim',
+    (req) => req.params.id,
+    invoke(claimJob),
   );
   postAliases([
     '/api/applications/:applicationId/withdraw',
@@ -745,6 +863,7 @@ module.exports = {
   withdrawApplication,
   rejectApplication,
   selectApplication,
+  claimJob,
   acceptAward,
   declineAward,
   expireAward,

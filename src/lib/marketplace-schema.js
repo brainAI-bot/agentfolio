@@ -18,9 +18,13 @@ function initializeMarketplaceCoreSchema(db) {
       skills TEXT DEFAULT '[]',
       budget_type TEXT DEFAULT 'fixed',
       budget_amount REAL DEFAULT 0,
+      budget_amount_minor TEXT,
       budget_currency TEXT DEFAULT 'SOL',
       budget_max REAL,
       timeline TEXT DEFAULT 'flexible',
+      pickup_mode TEXT NOT NULL DEFAULT 'select' CHECK(pickup_mode IN ('select', 'claim')),
+      minimum_verification_level INTEGER NOT NULL DEFAULT 1,
+      minimum_trust_score INTEGER,
       status TEXT DEFAULT 'open',
       attachments TEXT DEFAULT '[]',
       requirements TEXT DEFAULT '',
@@ -30,6 +34,7 @@ function initializeMarketplaceCoreSchema(db) {
       selected_at TEXT,
       award_expires_at TEXT,
       agreed_budget REAL,
+      agreed_budget_minor TEXT,
       agreed_timeline TEXT,
       application_count INTEGER DEFAULT 0,
       view_count INTEGER DEFAULT 0,
@@ -58,6 +63,7 @@ function initializeMarketplaceCoreSchema(db) {
       agent_id TEXT NOT NULL,
       cover_message TEXT DEFAULT '',
       proposed_budget REAL,
+      proposed_budget_minor TEXT,
       proposed_timeline TEXT,
       portfolio_items TEXT DEFAULT '[]',
       status TEXT DEFAULT 'pending',
@@ -82,6 +88,7 @@ function initializeMarketplaceCoreSchema(db) {
       agent_id TEXT,
       agent_wallet TEXT,
       amount REAL NOT NULL,
+      amount_minor TEXT,
       currency TEXT DEFAULT 'SOL',
       platform_fee REAL,
       agent_payout REAL,
@@ -117,7 +124,14 @@ function initializeMarketplaceCoreSchema(db) {
   addColumn(db, 'jobs', 'expiry_reason TEXT');
   addColumn(db, 'jobs', 'selected_application_id TEXT');
   addColumn(db, 'jobs', 'award_expires_at TEXT');
+  addColumn(db, 'jobs', 'agreed_budget_minor TEXT');
+  addColumn(db, 'jobs', 'budget_amount_minor TEXT');
+  addColumn(db, 'jobs', "pickup_mode TEXT NOT NULL DEFAULT 'select'");
+  addColumn(db, 'jobs', 'minimum_verification_level INTEGER NOT NULL DEFAULT 1');
+  addColumn(db, 'jobs', 'minimum_trust_score INTEGER');
+  addColumn(db, 'escrows', 'amount_minor TEXT');
   addColumn(db, 'applications', 'withdrawn_at TEXT');
+  addColumn(db, 'applications', 'proposed_budget_minor TEXT');
   addColumn(db, 'applications', 'rejected_at TEXT');
   addColumn(db, 'applications', 'declined_at TEXT');
   addColumn(db, 'applications', 'team_id TEXT DEFAULT NULL');

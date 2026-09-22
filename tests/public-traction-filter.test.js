@@ -88,9 +88,10 @@ describe('public traction fixture filter', () => {
 
   it('is wired into public stats, leaderboard, and SATP explorer', () => {
     const serverSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
+    const marketplaceReadSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'public-marketplace-read-routes.js'), 'utf8');
     assert.match(serverSource, /isFixtureIdentity/);
-    assert.match(serverSource, /isFixtureJob/);
-    assert.match(serverSource, /publicTraction/);
+    assert.match(marketplaceReadSource, /isFixtureJob/);
+    assert.match(marketplaceReadSource, /publicTraction/);
     const statsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'ecosystem-stats.js'), 'utf8');
     assert.match(statsSource, /isFixtureIdentity/);
     assert.match(statsSource, /isFixtureJob/);

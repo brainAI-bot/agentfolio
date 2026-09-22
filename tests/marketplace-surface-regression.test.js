@@ -13,25 +13,27 @@ const applicationsSource = fs.readFileSync(path.join(__dirname, '..', 'frontend'
 const detailSource = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'src', 'app', 'marketplace', 'job', '[id]', 'page.tsx'), 'utf8');
 const marketplacePageSource = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'src', 'app', 'marketplace', 'page.tsx'), 'utf8');
 const publicMarketplaceSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'public-marketplace-jobs.js'), 'utf8');
+const publicMarketplaceRoutesSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'public-marketplace-read-routes.js'), 'utf8');
 
 test('marketplace surface regression guard', async (t) => {
   await t.test('api/jobs is backed by the jobs table instead of a placeholder payload', () => {
-    assert.match(serverSource, /app\.get\('\/api\/jobs', publicMarketplaceReadLimiter, listSqliteMarketplaceJobs\)/);
-    assert.match(serverSource, /const cohort = getPublicMarketplaceCohort\(d\)/);
+    assert.match(serverSource, /registerPublicMarketplaceReadRoutes\(app, \{/);
+    assert.match(publicMarketplaceRoutesSource, /app\.get\('\/api\/jobs', limiter, handlers\.listSqliteMarketplaceJobs\)/);
+    assert.match(publicMarketplaceRoutesSource, /const cohort = getPublicMarketplaceCohort\(db\)/);
     assert.match(publicMarketplaceSource, /SELECT \* FROM jobs\s+ORDER BY datetime\(created_at\) DESC\s+LIMIT \?/);
     assert.match(publicMarketplaceSource, /PUBLIC_MARKETPLACE_DATABASE_BOUND = 1000/);
     assert.match(publicMarketplaceSource, /scannedRows\.filter\(\(job\) => !isFixtureJob\(job\)\)/);
     assert.doesNotMatch(serverSource, /SELECT \* FROM jobs ORDER BY datetime\(created_at\) DESC'\)\.all\(\)/);
-    assert.match(serverSource, /poster: profileMap\.get\(row\.client_id\) \|\| row\.client_id \|\| 'Unknown client'/);
-    assert.match(serverSource, /skills_required: skills/);
+    assert.match(publicMarketplaceRoutesSource, /poster: profileMap\.get\(row\.client_id\) \|\| row\.client_id \|\| 'Unknown client'/);
+    assert.match(publicMarketplaceRoutesSource, /skills_required: skills/);
     assert.doesNotMatch(serverSource, /jobs:\s*\[\],\s*total:\s*0,\s*page:\s*1,\s*message:\s*'Jobs marketplace endpoint active'/);
   });
 
   await t.test('public marketplace compatibility reads resolve to SQLite before legacy fallbacks', () => {
-    const canonicalRead = serverSource.indexOf("app.get('/api/marketplace/jobs', publicMarketplaceReadLimiter, listSqliteMarketplaceJobs)");
+    const canonicalRead = serverSource.indexOf('registerPublicMarketplaceReadRoutes(app, {');
     const legacyMount = serverSource.indexOf('marketplace.registerRoutes(app)');
     assert.ok(canonicalRead > -1 && canonicalRead < legacyMount);
-    assert.match(serverSource, /app\.get\('\/api\/marketplace\/jobs\/:id\/applications', publicMarketplaceReadLimiter, getSqliteMarketplaceApplications\)/);
+    assert.match(publicMarketplaceRoutesSource, /app\.get\('\/api\/marketplace\/jobs\/:id\/applications', limiter, handlers\.getSqliteMarketplaceApplications\)/);
     assert.match(dataSource, /fetch\(`\$\{API_BASE\}\/api\/jobs\?limit=100`/);
     assert.doesNotMatch(dataSource, /data\/marketplace\/jobs|JOBS_DIR|DELIVERABLES_DIR/);
   });
@@ -71,11 +73,12 @@ test('marketplace surface regression guard', async (t) => {
     ];
     for (const alias of aliases) {
       assert.match(
-        serverSource,
-        new RegExp(`app\\.get\\(${alias.replaceAll('/', '\\/')}, publicMarketplaceReadLimiter,`)
+        publicMarketplaceRoutesSource,
+        new RegExp(`app\\.get\\(${alias.replaceAll('/', '\\/')}, limiter,`)
       );
     }
     assert.equal((serverSource.match(/const publicMarketplaceReadLimiter = rateLimit\(/g) || []).length, 1);
+    assert.match(serverSource, /limiter: publicMarketplaceReadLimiter/);
   });
 
   await t.test('loopback proxy trust is limited to exactly one hop', () => {

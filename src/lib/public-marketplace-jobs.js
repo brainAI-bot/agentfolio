@@ -26,6 +26,11 @@ function getPublicMarketplaceCohort(db, databaseBound = PUBLIC_MARKETPLACE_DATAB
 
 function summarizePublicMarketplaceCohort(cohort) {
   const rows = cohort.rows;
+  const qualifiedOutcomes = rows.filter((job) => (
+    ['released', 'closed'].includes(job.status)
+    && (job.funds_released === 1 || job.funds_released === true)
+    && !String(job.escrow_id || '').startsWith('fixture:')
+  ));
   return {
     totalJobs: rows.length,
     openJobs: rows.filter((job) => job.status === 'open').length,
@@ -34,7 +39,8 @@ function summarizePublicMarketplaceCohort(cohort) {
     completedJobs: rows.filter((job) => job.status === 'completed').length,
     disputedJobs: rows.filter((job) => job.status === 'disputed').length,
     closedJobs: rows.filter((job) => ['closed', 'cancelled'].includes(job.status)).length,
-    totalVolume: rows.reduce(
+    qualifiedOutcomeCount: qualifiedOutcomes.length,
+    totalVolume: qualifiedOutcomes.reduce(
       (sum, job) => sum + (Number(job.agreed_budget ?? job.budget_amount) || 0),
       0
     ),

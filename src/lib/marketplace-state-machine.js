@@ -29,10 +29,6 @@ const ALLOWED_TRANSITIONS = Object.freeze({
   ]),
   [JOB_STATUS.OPEN]: Object.freeze([
     JOB_STATUS.AWARDED,
-    JOB_STATUS.ASSIGNED,
-    JOB_STATUS.AGENT_ACCEPTED,
-    JOB_STATUS.IN_PROGRESS,
-    JOB_STATUS.COMPLETED,
     JOB_STATUS.CANCELLED,
     JOB_STATUS.EXPIRED,
   ]),
@@ -144,6 +140,27 @@ function initializeMarketplaceState(db) {
     CREATE INDEX IF NOT EXISTS idx_marketplace_escrow_effects_job
       ON marketplace_escrow_effects(job_id, created_at, id);
 
+    CREATE TABLE IF NOT EXISTS marketplace_funding_effects (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL,
+      escrow_id TEXT NOT NULL,
+      event_type TEXT NOT NULL CHECK(event_type IN ('funding_staged', 'funding_verified')),
+      amount_minor TEXT NOT NULL CHECK(amount_minor GLOB '[1-9]*' AND amount_minor NOT GLOB '*[^0-9]*'),
+      currency TEXT NOT NULL,
+      execution_mode TEXT NOT NULL CHECK(execution_mode = 'staged'),
+      status TEXT NOT NULL CHECK(status IN ('staged', 'verified')),
+      verification_source TEXT,
+      verification_result TEXT,
+      gate_status TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (job_id) REFERENCES jobs(id),
+      UNIQUE (job_id, idempotency_key)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_marketplace_funding_effects_job
+      ON marketplace_funding_effects(job_id, created_at, id);
+
     CREATE TRIGGER IF NOT EXISTS guard_jobs_status_transition
     BEFORE UPDATE OF status ON jobs
     WHEN OLD.status IS NOT NEW.status
@@ -174,6 +191,18 @@ function initializeMarketplaceState(db) {
     BEFORE DELETE ON marketplace_escrow_effects
     BEGIN
       SELECT RAISE(ABORT, 'MARKETPLACE_ESCROW_EFFECT_IMMUTABLE');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS immutable_marketplace_funding_effects_update
+    BEFORE UPDATE ON marketplace_funding_effects
+    BEGIN
+      SELECT RAISE(ABORT, 'MARKETPLACE_FUNDING_EFFECT_IMMUTABLE');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS immutable_marketplace_funding_effects_delete
+    BEFORE DELETE ON marketplace_funding_effects
+    BEGIN
+      SELECT RAISE(ABORT, 'MARKETPLACE_FUNDING_EFFECT_IMMUTABLE');
     END;
   `);
   context.schemaInitialized = true;
@@ -288,8 +317,6 @@ function transitionJobState(db, jobId, toStatus, options = {}) {
       );
     }
 
-    assertTransitionAllowed(job.status, toStatus);
-
     const duplicate = db.prepare(`
       SELECT id, from_status, to_status
       FROM job_transition_audit
@@ -302,6 +329,8 @@ function transitionJobState(db, jobId, toStatus, options = {}) {
         { jobId, idempotencyKey, previous: duplicate },
       );
     }
+
+    assertTransitionAllowed(job.status, toStatus);
 
     const auditId = `jta_${crypto.randomUUID()}`;
     db.prepare(`

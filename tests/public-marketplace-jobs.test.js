@@ -23,7 +23,7 @@ function fakeDb(rows) {
   };
 }
 
-test('canonical public marketplace cohort keeps evidence but excludes fixture jobs', () => {
+test('canonical public marketplace cohort excludes fixtures and unqualified activity from GMV', () => {
   const rows = [
     {
       id: 'job_public', client_id: 'agent_customer', title: 'Implement parser', description: 'Production work',
@@ -55,7 +55,8 @@ test('canonical public marketplace cohort keeps evidence but excludes fixture jo
     completedJobs: 1,
     disputedJobs: 0,
     closedJobs: 0,
-    totalVolume: 7,
+    qualifiedOutcomeCount: 0,
+    totalVolume: 0,
   });
 });
 

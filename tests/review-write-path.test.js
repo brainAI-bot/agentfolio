@@ -219,8 +219,9 @@ test('marketplace exposes only the read route and disables job-scoped review wri
   assert.match(source, /'reviews'/);
   assert.match(source, /app\.post\('\/api\/marketplace\/jobs\/:id\/review'/);
   assert.match(source, /app\.get\('\/api\/marketplace\/jobs\/:id\/reviews'/);
-  assert.match(postRoute, /res\.status\(403\)/);
-  assert.match(postRoute, /signed released-escrow flow/);
+  assert.match(postRoute, /res\.status\(410\)/);
+  assert.match(postRoute, /MARKETPLACE_STAR_WRITES_CLOSED/);
+  assert.match(postRoute, /computed_escrow_outcomes/);
   assert.doesNotMatch(postRoute, /writeJobReviews/);
 });
 
@@ -263,7 +264,9 @@ test('marketplace review paths validate job ids before filesystem access', () =>
   assert.match(source, /function safeJobReviewPath\(jobId\)/);
   assert.match(source, /readJSON\(safeJobReviewPath\(jobId\)\)/);
   assert.match(source, /writeJSON\(safeJobReviewPath\(jobId\), reviews\)/);
-  assert.match(postRoute, /res\.status\(403\)/);
+  assert.match(postRoute, /res\.status\(410\)/);
+  assert.match(getRoute, /legacyDisplayOnly: true/);
+  assert.match(getRoute, /reputationAuthority: false/);
   assert.doesNotMatch(postRoute, /readJSON\(safeJobPath\(jobId\)\)/);
   assert.match(getRoute, /validateJobId\(jobId\)/);
   assert.match(getRoute, /safeJobPath\(jobId\)/);
