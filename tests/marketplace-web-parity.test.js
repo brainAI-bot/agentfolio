@@ -86,6 +86,7 @@ test('frontend parity surface names every P1D action and explicit failure state 
   const providers = fs.readFileSync(path.join(root, 'components', 'ClientProviders.tsx'), 'utf8');
   const apply = fs.readFileSync(path.join(root, 'components', 'JobApplyForm.tsx'), 'utf8');
   const api = fs.readFileSync(path.join(root, 'lib', 'marketplace-api.ts'), 'utf8');
+  const requestHeaders = require(path.join(root, 'lib', 'marketplace-request-headers'));
   const listingPage = fs.readFileSync(path.join(root, 'app', 'marketplace', 'page.tsx'), 'utf8');
   const detailPage = fs.readFileSync(path.join(root, 'app', 'marketplace', 'job', '[id]', 'page.tsx'), 'utf8');
   const nextConfig = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'next.config.ts'), 'utf8');
@@ -113,6 +114,11 @@ test('frontend parity surface names every P1D action and explicit failure state 
   assert.match(listingPage, /jobs=\{jobs\}/);
   assert.match(api, /NEXT_PUBLIC_API_URL \|\| ""/);
   assert.doesNotMatch(api, /localhost|127\.0\.0\.1/);
+  const generatedHeaders = requestHeaders.createMarketplaceMutationHeaders('agent-a');
+  assert.match(generatedHeaders['Idempotency-Key'], /^[0-9a-f-]{36}$/i);
+  assert.equal(requestHeaders.createMarketplaceMutationHeaders('agent-a', 'retry-key')['Idempotency-Key'], 'retry-key');
+  assert.match(api, /retryableMutationKeys\.get\(mutationFingerprint!\)/);
+  assert.match(api, /retryableMutationKeys\.delete\(mutationFingerprint\)/);
   assert.match(detailPage, /getCanonicalJob/);
   assert.match(detailPage, /deployed escrow program charges 5% \(500 bps\)/i);
   assert.doesNotMatch(detailPage, /10% configured fee/i);

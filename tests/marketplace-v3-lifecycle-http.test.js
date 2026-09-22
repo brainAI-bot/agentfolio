@@ -10,6 +10,7 @@ const { registerMarketplaceJobRoutes } = require('../src/routes/marketplace-job-
 const { registerMarketplaceApplicationRoutes } = require('../src/routes/marketplace-application-routes');
 const { registerMarketplaceDeliveryRoutes } = require('../src/routes/marketplace-delivery-routes');
 const { registerPublicMarketplaceReadRoutes } = require('../src/routes/public-marketplace-read-routes');
+const { createMarketplaceMutationHeaders } = require('../frontend/src/lib/marketplace-request-headers');
 
 async function createHarness(clockState = { now: '2026-09-22T12:00:00.000Z' }) {
   const db = new Database(':memory:');
@@ -59,12 +60,15 @@ async function createHarness(clockState = { now: '2026-09-22T12:00:00.000Z' }) {
 }
 
 async function request(baseUrl, method, path, { key, idempotencyKey, body } = {}) {
+  const browserHeaders = method === 'POST' && idempotencyKey
+    ? createMarketplaceMutationHeaders('browser-profile', idempotencyKey)
+    : {};
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: {
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...(key ? { 'X-API-Key': key } : {}),
-      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+      ...browserHeaders,
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
@@ -277,6 +281,12 @@ test('V3 HTTP tranche 2 completes select and claim lifecycles with fake-clock fa
   assert.equal(acceptedReplay.status, 200);
   assert.equal(acceptedReplay.body.replayed, true);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM job_transition_audit WHERE job_id = ? AND to_status = 'in_progress'").get(select.body.id).count, 1);
+
+  const comment = await request(baseUrl, 'POST', `/api/marketplace/jobs/${select.body.id}/comments`, {
+    key: 'key-a', idempotencyKey: 'select-comment', body: { text: 'Browser helper parity comment', attachmentLinks: [] },
+  });
+  assert.equal(comment.status, 201);
+  assert.equal(comment.body.comment.text, 'Browser helper parity comment');
 
   const submit = async (jobId, key, text, actorKey = 'key-a') => request(baseUrl, 'POST', `/api/marketplace/jobs/${jobId}/deliverables`, {
     key: actorKey, idempotencyKey: key, body: { text, links: [`https://example.com/${key}`] },
