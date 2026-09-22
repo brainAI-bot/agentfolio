@@ -200,11 +200,14 @@ function initializeMarketplaceApplicationSchema(db) {
       return columns.length === 1 && columns[0].name === 'job_id';
     });
   if (legacyUniqueJobIndex) {
-    db.exec(`
+    db.transaction(() => db.exec(`
       DROP TRIGGER IF EXISTS immutable_marketplace_claims_update;
       DROP TRIGGER IF EXISTS immutable_marketplace_claims_delete;
       DROP TRIGGER IF EXISTS immutable_marketplace_claim_outcomes_update;
       DROP TRIGGER IF EXISTS immutable_marketplace_claim_outcomes_delete;
+      CREATE TEMP TABLE marketplace_claim_outcomes_legacy AS
+        SELECT id, claim_id, job_id, outcome, actor_id, idempotency_key, created_at
+        FROM marketplace_claim_outcomes;
       DROP TABLE marketplace_claim_outcomes;
       ALTER TABLE marketplace_claims RENAME TO marketplace_claims_legacy;
       CREATE TABLE marketplace_claims (
@@ -231,6 +234,11 @@ function initializeMarketplaceApplicationSchema(db) {
         FOREIGN KEY (job_id) REFERENCES jobs(id),
         UNIQUE (job_id, idempotency_key)
       );
+      INSERT INTO marketplace_claim_outcomes
+        (id, claim_id, job_id, outcome, actor_id, idempotency_key, created_at)
+        SELECT id, claim_id, job_id, outcome, actor_id, idempotency_key, created_at
+        FROM marketplace_claim_outcomes_legacy;
+      DROP TABLE marketplace_claim_outcomes_legacy;
       CREATE TRIGGER immutable_marketplace_claims_update BEFORE UPDATE ON marketplace_claims
       BEGIN SELECT RAISE(ABORT, 'MARKETPLACE_CLAIM_IMMUTABLE'); END;
       CREATE TRIGGER immutable_marketplace_claims_delete BEFORE DELETE ON marketplace_claims
@@ -239,7 +247,7 @@ function initializeMarketplaceApplicationSchema(db) {
       BEGIN SELECT RAISE(ABORT, 'MARKETPLACE_CLAIM_OUTCOME_IMMUTABLE'); END;
       CREATE TRIGGER immutable_marketplace_claim_outcomes_delete BEFORE DELETE ON marketplace_claim_outcomes
       BEGIN SELECT RAISE(ABORT, 'MARKETPLACE_CLAIM_OUTCOME_IMMUTABLE'); END;
-    `);
+    `))();
   }
 }
 
@@ -757,9 +765,9 @@ function expireAward(db, { jobId, actorId, idempotencyKey, now = new Date().toIS
 
 function expireTimedOutAwards(db, { now = new Date().toISOString() } = {}) {
   const expiredJobs = db.prepare(`
-    SELECT id, selected_application_id
+    SELECT id, pickup_mode, selected_application_id, selected_agent_id
     FROM jobs
-    WHERE status = ? AND selected_application_id IS NOT NULL
+    WHERE status = ? AND (selected_application_id IS NOT NULL OR (pickup_mode = 'claim' AND selected_agent_id IS NOT NULL))
       AND award_expires_at IS NOT NULL AND award_expires_at <= ?
     ORDER BY award_expires_at ASC, id ASC
   `).all(marketplaceState.JOB_STATUS.AWARDED, now);
@@ -768,7 +776,14 @@ function expireTimedOutAwards(db, { now = new Date().toISOString() } = {}) {
   for (const expired of expiredJobs) {
     const execute = db.transaction(() => {
       const job = requireJob(db, expired.id);
-      if (job.status !== marketplaceState.JOB_STATUS.AWARDED || job.selected_application_id !== expired.selected_application_id) return null;
+      if (job.status !== marketplaceState.JOB_STATUS.AWARDED) return null;
+      if ((job.pickup_mode || 'select') === 'claim') {
+        if (job.selected_agent_id !== expired.selected_agent_id) return null;
+        const claim = currentClaim(db, job.id);
+        if (!claim || claim.agent_id !== job.selected_agent_id) return null;
+        return clearClaimAward(db, job, claim, 'system:award-timeout', 'timed_out', `automatic:${claim.id}`, now);
+      }
+      if (job.selected_application_id !== expired.selected_application_id) return null;
       const application = requireApplication(db, expired.selected_application_id, job.id);
       return reopenAward(db, job, application, 'system:award-timeout', 'award_timed_out', now);
     });
@@ -890,12 +905,16 @@ function clearClaimAward(db, job, claim, actorId, outcome, key, now) {
 function acceptClaimAward(db, { jobId, actorId, idempotencyKey, now = new Date().toISOString() }) {
   const key = requireIdempotencyKey(idempotencyKey);
   return db.transaction(() => {
-    const replay = claimOutcomeReplay(db, jobId, key);
-    if (replay) return { jobId, claimId: replay.claim_id, status: replay.outcome === 'accepted' ? 'in_progress' : 'open', outcome: replay.outcome, replayed: true };
     const job = requireJob(db, jobId);
     if ((job.pickup_mode || 'select') !== 'claim') throw new MarketplaceApplicationError(409, 'PICKUP_MODE_MISMATCH', 'Claim award actions are only available for claim-mode jobs');
+    const replay = claimOutcomeReplay(db, jobId, key);
+    if (replay) {
+      if (replay.agent_id !== actorId) throw new MarketplaceApplicationError(403, 'APPLICATION_ACTOR_FORBIDDEN', 'Only the claimant may accept');
+      return { jobId, claimId: replay.claim_id, status: replay.outcome === 'accepted' ? 'in_progress' : 'open', outcome: replay.outcome, replayed: true };
+    }
     const claim = currentClaim(db, jobId);
-    if (!claim || job.status !== marketplaceState.JOB_STATUS.AWARDED || job.selected_agent_id !== actorId || claim.agent_id !== actorId) {
+    if (claim && claim.agent_id !== actorId) throw new MarketplaceApplicationError(403, 'APPLICATION_ACTOR_FORBIDDEN', 'Only the claimant may accept');
+    if (!claim || job.status !== marketplaceState.JOB_STATUS.AWARDED || job.selected_agent_id !== actorId) {
       throw new MarketplaceApplicationError(409, 'AWARD_NOT_ACCEPTABLE', 'Claim does not have an active award');
     }
     if (!job.award_expires_at || new Date(now).getTime() >= new Date(job.award_expires_at).getTime()) {
@@ -919,11 +938,16 @@ function acceptClaimAward(db, { jobId, actorId, idempotencyKey, now = new Date()
 function declineClaimAward(db, { jobId, actorId, idempotencyKey, now = new Date().toISOString() }) {
   const key = requireIdempotencyKey(idempotencyKey);
   return db.transaction(() => {
-    const replay = claimOutcomeReplay(db, jobId, key);
-    if (replay) return { jobId, claimId: replay.claim_id, status: replay.outcome === 'accepted' ? 'in_progress' : 'open', outcome: replay.outcome, replayed: true };
     const job = requireJob(db, jobId);
+    if ((job.pickup_mode || 'select') !== 'claim') throw new MarketplaceApplicationError(409, 'PICKUP_MODE_MISMATCH', 'Claim award actions are only available for claim-mode jobs');
+    const replay = claimOutcomeReplay(db, jobId, key);
+    if (replay) {
+      if (replay.agent_id !== actorId) throw new MarketplaceApplicationError(403, 'APPLICATION_ACTOR_FORBIDDEN', 'Only the claimant may decline');
+      return { jobId, claimId: replay.claim_id, status: replay.outcome === 'accepted' ? 'in_progress' : 'open', outcome: replay.outcome, replayed: true };
+    }
     const claim = currentClaim(db, jobId);
-    if (!claim || job.status !== marketplaceState.JOB_STATUS.AWARDED || job.selected_agent_id !== actorId || claim.agent_id !== actorId) {
+    if (claim && claim.agent_id !== actorId) throw new MarketplaceApplicationError(403, 'APPLICATION_ACTOR_FORBIDDEN', 'Only the claimant may decline');
+    if (!claim || job.status !== marketplaceState.JOB_STATUS.AWARDED || job.selected_agent_id !== actorId) {
       throw new MarketplaceApplicationError(409, 'AWARD_NOT_DECLINABLE', 'Claim does not have an active award');
     }
     return clearClaimAward(db, job, claim, actorId, 'declined', key, now);
@@ -933,10 +957,10 @@ function declineClaimAward(db, { jobId, actorId, idempotencyKey, now = new Date(
 function expireClaimAward(db, { jobId, actorId, idempotencyKey, now = new Date().toISOString() }) {
   const key = requireIdempotencyKey(idempotencyKey);
   return db.transaction(() => {
-    const replay = claimOutcomeReplay(db, jobId, key);
-    if (replay) return { jobId, claimId: replay.claim_id, status: 'open', outcome: replay.outcome, replayed: true };
     const job = requireJob(db, jobId);
     if (job.client_id !== actorId) throw new MarketplaceApplicationError(403, 'CLIENT_ACTION_FORBIDDEN', 'Only the job client may process an award timeout');
+    const replay = claimOutcomeReplay(db, jobId, key);
+    if (replay) return { jobId, claimId: replay.claim_id, status: 'open', outcome: replay.outcome, replayed: true };
     const claim = currentClaim(db, jobId);
     if (!claim || job.status !== marketplaceState.JOB_STATUS.AWARDED) throw new MarketplaceApplicationError(409, 'NO_ACTIVE_AWARD', 'Job has no active claim award');
     if (!job.award_expires_at || new Date(now).getTime() < new Date(job.award_expires_at).getTime()) throw new MarketplaceApplicationError(409, 'AWARD_NOT_EXPIRED', 'Award has not reached its 48 hour timeout');
@@ -1061,7 +1085,7 @@ function registerMarketplaceApplicationRoutes(app, { getDb, closeDb = false, tim
     const timer = setInterval(() => {
       const db = getDb();
       try {
-        expireTimedOutAwards(db);
+        expireTimedOutAwards(db, { now: clock() });
       } catch (error) {
         console.error('[Marketplace] award timeout sweep failed:', error.message);
       } finally {

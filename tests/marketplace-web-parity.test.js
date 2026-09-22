@@ -117,8 +117,14 @@ test('frontend parity surface names every P1D action and explicit failure state 
   const generatedHeaders = requestHeaders.createMarketplaceMutationHeaders('agent-a');
   assert.match(generatedHeaders['Idempotency-Key'], /^[0-9a-f-]{36}$/i);
   assert.equal(requestHeaders.createMarketplaceMutationHeaders('agent-a', 'retry-key')['Idempotency-Key'], 'retry-key');
-  assert.match(api, /retryableMutationKeys\.get\(mutationFingerprint!\)/);
-  assert.match(api, /retryableMutationKeys\.delete\(mutationFingerprint\)/);
+  const retryKeys = requestHeaders.createMarketplaceMutationKeyStore();
+  const ambiguousKey = retryKeys.keyFor('same-browser-mutation');
+  retryKeys.settle('same-browser-mutation', 500);
+  assert.equal(retryKeys.keyFor('same-browser-mutation'), ambiguousKey, 'HTTP 5xx retries must reuse the ambiguous mutation key');
+  retryKeys.settle('same-browser-mutation', 200);
+  assert.notEqual(retryKeys.keyFor('same-browser-mutation'), ambiguousKey, 'successful replay settles the cached mutation key');
+  assert.match(api, /retryableMutationKeys\.keyFor\(mutationFingerprint!, idempotencyKey\)/);
+  assert.match(api, /retryableMutationKeys\.settle\(mutationFingerprint, response\.status\)/);
   assert.match(detailPage, /getCanonicalJob/);
   assert.match(detailPage, /deployed escrow program charges 5% \(500 bps\)/i);
   assert.doesNotMatch(detailPage, /10% configured fee/i);
