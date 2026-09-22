@@ -146,6 +146,7 @@ test('only the client can request revisions and the two-revision maximum is enfo
         deliverableId: third.deliverable.id,
         actorId: 'client',
         body: { reason: 'A third request is forbidden' },
+        idempotencyKey: 'revision-3',
       }),
       (error) => error instanceof MarketplaceDeliveryError && error.code === 'REVISION_LIMIT_REACHED',
     );
@@ -382,7 +383,7 @@ test('HTTP aliases authenticate actors and expose the SQLite job thread', async 
 
     const commented = await fetch(`${base}/api/jobs/job_route/comments`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer client-key' },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer client-key', 'Idempotency-Key': 'route-comment' },
       body: JSON.stringify({ text: 'Received for review' }),
     });
     assert.equal(commented.status, 201);

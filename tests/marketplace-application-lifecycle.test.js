@@ -36,10 +36,16 @@ function createHarness() {
   return { db, server, baseUrl };
 }
 
-async function post(baseUrl, path, apiKey, body = {}) {
+let postSequence = 0;
+async function post(baseUrl, path, apiKey, body = {}, idempotencyKey = null) {
+  postSequence += 1;
   const response = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': apiKey,
+      'Idempotency-Key': idempotencyKey || `test-${postSequence}`,
+    },
     body: JSON.stringify(body),
   });
   return { status: response.status, body: await response.json() };
@@ -295,9 +301,12 @@ test('selected agent can accept; decline and 48h timeout reject the selection an
   await post(baseUrl, '/api/applications/app_decline/select', 'key-client');
   const forgedDecline = await post(baseUrl, '/api/applications/app_decline/decline', 'key-agent-2');
   assert.equal(forgedDecline.status, 403);
-  const declined = await post(baseUrl, '/api/applications/app_decline/decline', 'key-agent');
+  const declined = await post(baseUrl, '/api/applications/app_decline/decline', 'key-agent', {}, 'decline-once');
   assert.equal(declined.status, 200);
   assert.equal(declined.body.status, 'open');
+  const declinedReplay = await post(baseUrl, '/api/applications/app_decline/decline', 'key-agent', {}, 'decline-once');
+  assert.equal(declinedReplay.status, 200);
+  assert.equal(declinedReplay.body.replayed, true);
   assert.equal(db.prepare('SELECT status_note FROM applications WHERE id = ?').get('app_decline').status_note, 'agent_declined');
 
   insertJob(db, 'job_timeout', { escrowId: 'esc_timeout', escrowFunded: true });

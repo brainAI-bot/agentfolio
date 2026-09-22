@@ -48,11 +48,11 @@ test('fixed-price create, cancel, and expiry stay SQLite-backed and escrow-stage
       (error) => error instanceof MarketplaceJobError && error.code === 'FIXED_PRICE_ONLY',
     );
     assert.throws(
-      () => cancelJob(db, { jobId: created.id, actorId: 'other', body: { reason: 'not my job' }, now: '2026-09-10T00:30:00.000Z' }),
+      () => cancelJob(db, { jobId: created.id, actorId: 'other', body: { reason: 'not my job' }, idempotencyKey: 'forged-cancel', now: '2026-09-10T00:30:00.000Z' }),
       (error) => error instanceof MarketplaceJobError && error.code === 'CLIENT_ACTION_FORBIDDEN',
     );
 
-    const cancelled = cancelJob(db, { jobId: created.id, actorId: 'client', body: { reason: 'scope changed' }, now: '2026-09-10T01:00:00.000Z' });
+    const cancelled = cancelJob(db, { jobId: created.id, actorId: 'client', body: { reason: 'scope changed' }, idempotencyKey: 'cancel-job', now: '2026-09-10T01:00:00.000Z' });
     assert.equal(cancelled.status, 'cancelled');
     assert.equal(cancelled.escrow.moneyMoved, false);
     assert.equal(listMarketplaceEscrowEffects(db, created.id).length, 0);
@@ -67,10 +67,10 @@ test('fixed-price create, cancel, and expiry stay SQLite-backed and escrow-stage
       },
     });
     assert.throws(
-      () => expireJob(db, { jobId: expiring.id, actorId: 'client', now: '2026-09-10T12:00:00.000Z' }),
+      () => expireJob(db, { jobId: expiring.id, actorId: 'client', idempotencyKey: 'expire-early', now: '2026-09-10T12:00:00.000Z' }),
       (error) => error instanceof MarketplaceJobError && error.code === 'JOB_NOT_EXPIRED',
     );
-    const expired = expireJob(db, { jobId: expiring.id, actorId: 'client', now: '2026-09-11T00:00:00.000Z' });
+    const expired = expireJob(db, { jobId: expiring.id, actorId: 'client', idempotencyKey: 'expire-due', now: '2026-09-11T00:00:00.000Z' });
     assert.equal(expired.status, 'expired');
     assert.equal(expired.escrow.moneyMoved, false);
   } finally {
@@ -86,6 +86,7 @@ test('frontend parity surface names every P1D action and explicit failure state 
   const providers = fs.readFileSync(path.join(root, 'components', 'ClientProviders.tsx'), 'utf8');
   const apply = fs.readFileSync(path.join(root, 'components', 'JobApplyForm.tsx'), 'utf8');
   const api = fs.readFileSync(path.join(root, 'lib', 'marketplace-api.ts'), 'utf8');
+  const requestHeaders = require(path.join(root, 'lib', 'marketplace-request-headers'));
   const listingPage = fs.readFileSync(path.join(root, 'app', 'marketplace', 'page.tsx'), 'utf8');
   const detailPage = fs.readFileSync(path.join(root, 'app', 'marketplace', 'job', '[id]', 'page.tsx'), 'utf8');
   const nextConfig = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'next.config.ts'), 'utf8');
@@ -113,6 +114,11 @@ test('frontend parity surface names every P1D action and explicit failure state 
   assert.match(listingPage, /jobs=\{jobs\}/);
   assert.match(api, /NEXT_PUBLIC_API_URL \|\| ""/);
   assert.doesNotMatch(api, /localhost|127\.0\.0\.1/);
+  const generatedHeaders = requestHeaders.createMarketplaceMutationHeaders('agent-a');
+  assert.match(generatedHeaders['Idempotency-Key'], /^[0-9a-f-]{36}$/i);
+  assert.equal(requestHeaders.createMarketplaceMutationHeaders('agent-a', 'retry-key')['Idempotency-Key'], 'retry-key');
+  assert.match(api, /retryableMutationKeys\.get\(mutationFingerprint!\)/);
+  assert.match(api, /retryableMutationKeys\.delete\(mutationFingerprint\)/);
   assert.match(detailPage, /getCanonicalJob/);
   assert.match(detailPage, /deployed escrow program charges 5% \(500 bps\)/i);
   assert.doesNotMatch(detailPage, /10% configured fee/i);

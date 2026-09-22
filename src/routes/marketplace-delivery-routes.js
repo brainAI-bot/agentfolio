@@ -33,6 +33,13 @@ class MarketplaceDeliveryError extends Error {
   }
 }
 
+function requireIdempotencyKey(value) {
+  const key = String(value || '').trim();
+  if (!key) throw new MarketplaceDeliveryError(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Idempotency-Key header is required');
+  if (key.length > 200) throw new MarketplaceDeliveryError(400, 'INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must be at most 200 characters');
+  return key;
+}
+
 function parseJson(value, fallback) {
   if (value === undefined || value === null || value === '') return fallback;
   if (typeof value === 'object') return value;
@@ -237,6 +244,9 @@ function submitDeliverable(db, {
     if (job.selected_agent_id !== actorId) {
       throw new MarketplaceDeliveryError(403, 'WORKER_ACTION_FORBIDDEN', 'Only the awarded worker may submit a deliverable');
     }
+    const key = requireIdempotencyKey(idempotencyKey || body.idempotencyKey);
+    const replay = db.prepare('SELECT * FROM marketplace_deliverables WHERE job_id = ? AND idempotency_key = ?').get(jobId, key);
+    if (replay) return { deliverable: deliverableResponse(replay), status: marketplaceState.JOB_STATUS.SUBMITTED, replayed: true };
     if (job.status !== marketplaceState.JOB_STATUS.IN_PROGRESS) {
       throw new MarketplaceDeliveryError(409, 'JOB_NOT_IN_PROGRESS', 'The awarded job must be in progress before delivery');
     }
@@ -249,10 +259,6 @@ function submitDeliverable(db, {
     if (body.contentHash && String(body.contentHash).toLowerCase() !== contentHash) {
       throw new MarketplaceDeliveryError(400, 'CONTENT_HASH_MISMATCH', 'contentHash does not match the canonical deliverable content');
     }
-    const key = String(idempotencyKey || body.idempotencyKey || `submit:${crypto.randomUUID()}`);
-    const replay = db.prepare('SELECT * FROM marketplace_deliverables WHERE job_id = ? AND idempotency_key = ?').get(jobId, key);
-    if (replay) return { deliverable: deliverableResponse(replay), status: marketplaceState.JOB_STATUS.SUBMITTED, replayed: true };
-
     const submissionNumber = Number(db.prepare('SELECT COUNT(*) AS count FROM marketplace_deliverables WHERE job_id = ?').get(jobId).count) + 1;
     const deliverable = {
       id: `mdl_${crypto.randomUUID()}`,
@@ -298,13 +304,13 @@ function requestRevision(db, {
     if (job.client_id !== actorId) {
       throw new MarketplaceDeliveryError(403, 'CLIENT_ACTION_FORBIDDEN', 'Only the job client may request revisions');
     }
+    const key = requireIdempotencyKey(idempotencyKey || body.idempotencyKey);
+    const replay = db.prepare('SELECT * FROM marketplace_revision_requests WHERE job_id = ? AND idempotency_key = ?').get(jobId, key);
+    if (replay) return { revision: revisionResponse(replay), status: marketplaceState.JOB_STATUS.IN_PROGRESS, replayed: true };
     if (job.status !== marketplaceState.JOB_STATUS.SUBMITTED) {
       throw new MarketplaceDeliveryError(409, 'JOB_NOT_SUBMITTED', 'A submitted deliverable is required');
     }
     const deliverable = requireCurrentDeliverable(db, jobId, deliverableId);
-    const key = String(idempotencyKey || body.idempotencyKey || `revision:${crypto.randomUUID()}`);
-    const replay = db.prepare('SELECT * FROM marketplace_revision_requests WHERE job_id = ? AND idempotency_key = ?').get(jobId, key);
-    if (replay) return { revision: revisionResponse(replay), status: marketplaceState.JOB_STATUS.IN_PROGRESS, replayed: true };
     const revisionNumber = Number(db.prepare('SELECT COUNT(*) AS count FROM marketplace_revision_requests WHERE job_id = ?').get(jobId).count) + 1;
     if (revisionNumber > MAX_REVISION_REQUESTS) {
       throw new MarketplaceDeliveryError(409, 'REVISION_LIMIT_REACHED', 'A maximum of two revision requests is allowed');
@@ -355,22 +361,55 @@ function approveDeliverable(db, {
       throw new MarketplaceDeliveryError(403, 'CLIENT_ACTION_FORBIDDEN', 'Only the job client may approve a deliverable');
     }
     const deliverable = requireCurrentDeliverable(db, jobId, deliverableId);
-    if (job.status === marketplaceState.JOB_STATUS.APPROVED) {
+    const key = requireIdempotencyKey(idempotencyKey);
+    const transitionKey = `deliverable-approve:${deliverable.id}:${key}`;
+    if (db.prepare('SELECT id FROM job_transition_audit WHERE job_id = ? AND idempotency_key = ?').get(jobId, transitionKey)) {
       return { deliverable: deliverableResponse(deliverable), status: marketplaceState.JOB_STATUS.APPROVED, replayed: true };
     }
     if (job.status !== marketplaceState.JOB_STATUS.SUBMITTED) {
       throw new MarketplaceDeliveryError(409, 'JOB_NOT_SUBMITTED', 'A submitted deliverable is required');
     }
-    const key = String(idempotencyKey || `approve:${crypto.randomUUID()}`);
     const transition = marketplaceState.transitionJobState(db, jobId, marketplaceState.JOB_STATUS.APPROVED, {
       actorId,
       reason: 'client approved deliverable',
       source: 'marketplace-delivery-api',
-      idempotencyKey: `deliverable-approve:${deliverable.id}:${key}`,
+      idempotencyKey: transitionKey,
       metadata: { deliverableId: deliverable.id, contentHash: deliverable.content_hash },
       now,
     });
     return { deliverable: deliverableResponse(deliverable), status: transition.job.status, transitionAuditId: transition.audit.id };
+  })();
+}
+
+function processApprovalTimeout(db, {
+  jobId,
+  actorId,
+  now = new Date().toISOString(),
+  idempotencyKey,
+}) {
+  initializeMarketplaceDeliverySchema(db);
+  const key = requireIdempotencyKey(idempotencyKey);
+  return db.transaction(() => {
+    const job = requireJob(db, jobId);
+    if (job.client_id !== actorId) throw new MarketplaceDeliveryError(403, 'CLIENT_ACTION_FORBIDDEN', 'Only the job client may process approval timeout');
+    const deliverable = requireCurrentDeliverable(db, jobId);
+    const transitionKey = `deliverable-auto-approve:${deliverable.id}:${key}`;
+    const prior = db.prepare('SELECT id FROM job_transition_audit WHERE job_id = ? AND idempotency_key = ?').get(jobId, transitionKey);
+    if (prior) return { jobId, deliverableId: deliverable.id, status: marketplaceState.JOB_STATUS.APPROVED, transitionAuditId: prior.id, replayed: true };
+    if (job.status !== marketplaceState.JOB_STATUS.SUBMITTED) throw new MarketplaceDeliveryError(409, 'JOB_NOT_SUBMITTED', 'A submitted deliverable is required');
+    if (new Date(now).getTime() < new Date(deliverable.auto_approve_at).getTime()) {
+      throw new MarketplaceDeliveryError(409, 'APPROVAL_TIMEOUT_NOT_REACHED', 'The seven-day approval timeout has not been reached');
+    }
+    const transition = marketplaceState.transitionJobState(db, job.id, marketplaceState.JOB_STATUS.APPROVED, {
+      actorId: 'system:marketplace-auto-approval',
+      reason: 'client silent for seven days after deliverable submission',
+      source: 'marketplace-delivery-timer',
+      idempotencyKey: transitionKey,
+      metadata: { deliverableId: deliverable.id, dueAt: deliverable.auto_approve_at, requestedBy: actorId },
+      now,
+      env: {},
+    });
+    return { jobId, deliverableId: deliverable.id, status: transition.job.status, transitionAuditId: transition.audit.id };
   })();
 }
 
@@ -481,10 +520,12 @@ function listJobThread(db, { jobId, actorId, adminIds = parseAdminIds() }) {
     deliverables: db.prepare('SELECT * FROM marketplace_deliverables WHERE job_id = ? ORDER BY submission_number ASC').all(jobId).map(deliverableResponse),
     revisions: db.prepare('SELECT * FROM marketplace_revision_requests WHERE job_id = ? ORDER BY revision_number ASC').all(jobId).map(revisionResponse),
     comments: db.prepare('SELECT * FROM marketplace_job_comments WHERE job_id = ? ORDER BY created_at ASC, rowid ASC').all(jobId).map(commentResponse),
+    transitions: marketplaceState.listJobTransitionAudit(db, jobId),
+    escrowEffects: marketplaceState.listMarketplaceEscrowEffects(db, jobId),
   };
 }
 
-function registerMarketplaceDeliveryRoutes(app, { getDb, closeDb = false, autoApprovalSweepIntervalMs = 0 } = {}) {
+function registerMarketplaceDeliveryRoutes(app, { getDb, closeDb = false, autoApprovalSweepIntervalMs = 0, clock = () => new Date().toISOString() } = {}) {
   if (typeof getDb !== 'function') throw new TypeError('getDb is required');
   const schemaDb = getDb();
   initializeMarketplaceDeliverySchema(schemaDb);
@@ -502,11 +543,15 @@ function registerMarketplaceDeliveryRoutes(app, { getDb, closeDb = false, autoAp
         actorId: req.marketplaceDeliveryActorId,
         body: req.body || {},
         idempotencyKey: req.headers['idempotency-key'] || null,
+        now: clock(),
       });
       return res.status(successStatus).json(result);
     } catch (error) {
       if (error instanceof MarketplaceDeliveryError) {
         return res.status(error.status).json({ code: error.code, error: error.message, ...error.details });
+      }
+      if (error instanceof marketplaceState.MarketplaceTransitionError) {
+        return res.status(409).json({ code: error.code, error: error.message, ...error.details });
       }
       if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
         return res.status(409).json({ code: 'IDEMPOTENCY_CONFLICT', error: 'The marketplace mutation was already recorded' });
@@ -517,9 +562,16 @@ function registerMarketplaceDeliveryRoutes(app, { getDb, closeDb = false, autoAp
     }
   };
 
+  const requireRequestIdempotency = (req, res, next) => {
+    const key = String(req.get('Idempotency-Key') || '').trim();
+    if (!key) return res.status(400).json({ code: 'IDEMPOTENCY_KEY_REQUIRED', error: 'Idempotency-Key header is required' });
+    if (key.length > 200) return res.status(400).json({ code: 'INVALID_IDEMPOTENCY_KEY', error: 'Idempotency-Key must be at most 200 characters' });
+    return next();
+  };
   const postAliases = (paths, action, resourceId, handler) => paths.forEach((routePath) => app.post(
     routePath,
     marketplaceMutationLimiter,
+    requireRequestIdempotency,
     authorize({ action, resourceId }),
     handler,
   ));
@@ -546,6 +598,10 @@ function registerMarketplaceDeliveryRoutes(app, { getDb, closeDb = false, autoAp
     '/api/jobs/:jobId/approve',
     '/api/marketplace/jobs/:jobId/approve',
   ], 'approve', (req) => req.params.deliverableId || req.body?.deliverableId, invoke(approveDeliverable));
+  postAliases([
+    '/api/jobs/:jobId/approval-timeout',
+    '/api/marketplace/jobs/:jobId/approval-timeout',
+  ], 'approval-timeout', (req) => req.params.jobId, invoke(processApprovalTimeout));
   postAliases([
     '/api/jobs/:jobId/comments',
     '/api/marketplace/jobs/:jobId/comments',
@@ -578,6 +634,7 @@ module.exports = {
   submitDeliverable,
   requestRevision,
   approveDeliverable,
+  processApprovalTimeout,
   autoApproveDueDeliverables,
   runAutoApprovalSweep,
   addJobComment,

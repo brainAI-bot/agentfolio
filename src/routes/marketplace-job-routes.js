@@ -240,19 +240,45 @@ function verifyFunding(db, options) {
 }
 
 function closeOpenJob(db, { jobId, actorId, targetStatus, reason, now = new Date().toISOString(), idempotencyKey: requestKey }) {
-  const job = requireJob(db, jobId);
-  if (job.client_id !== actorId) throw new MarketplaceJobError(403, 'CLIENT_ACTION_FORBIDDEN', 'Only the job client may perform this action');
-  if (job.status !== marketplaceState.JOB_STATUS.OPEN) throw new MarketplaceJobError(409, 'ILLEGAL_JOB_TRANSITION', `Only open jobs may become ${targetStatus}`, { fromStatus: job.status, toStatus: targetStatus });
-  if (targetStatus === marketplaceState.JOB_STATUS.EXPIRED && (!job.expires_at || new Date(now).getTime() < new Date(job.expires_at).getTime())) {
-    throw new MarketplaceJobError(409, 'JOB_NOT_EXPIRED', 'Job has not reached its expiry time');
-  }
-  const transition = marketplaceState.transitionJobState(db, jobId, targetStatus, {
-    actorId, reason, source: 'marketplace-job-api', idempotencyKey: requestKey || `${targetStatus}:${jobId}`, now,
-  });
-  const timestampColumn = targetStatus === marketplaceState.JOB_STATUS.EXPIRED ? 'expired_at' : 'cancelled_at';
-  const reasonColumn = targetStatus === marketplaceState.JOB_STATUS.EXPIRED ? 'expiry_reason' : 'cancel_reason';
-  db.prepare(`UPDATE jobs SET ${timestampColumn} = ?, ${reasonColumn} = ? WHERE id = ?`).run(now, reason, jobId);
-  return { jobId, status: targetStatus, transitionAuditId: transition.audit.id, escrow: transition.escrowEffect ? { effect: transition.escrowEffect.effectType, mode: transition.escrowEffect.executionMode, status: transition.escrowEffect.status, moneyMoved: false } : { mode: 'staged', status: 'not_funded', moneyMoved: false } };
+  const key = String(requestKey || '').trim();
+  if (!key) throw new MarketplaceJobError(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Idempotency-Key header is required');
+  if (key.length > 200) throw new MarketplaceJobError(400, 'INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must be at most 200 characters');
+  const transitionKey = `${targetStatus}:${key}`;
+  return db.transaction(() => {
+    const prior = lifecycleReplay(db, jobId, transitionKey);
+    if (prior) {
+      const current = requireJob(db, jobId);
+      const effect = db.prepare('SELECT * FROM marketplace_escrow_effects WHERE transition_audit_id = ?').get(prior.id);
+      return {
+        jobId,
+        status: current.status,
+        transitionAuditId: prior.id,
+        escrow: effect
+          ? { effect: effect.effect_type, mode: effect.execution_mode, status: effect.status, moneyMoved: false }
+          : { mode: 'staged', status: 'not_funded', moneyMoved: false },
+        replayed: true,
+      };
+    }
+    const job = requireJob(db, jobId);
+    if (job.client_id !== actorId) throw new MarketplaceJobError(403, 'CLIENT_ACTION_FORBIDDEN', 'Only the job client may perform this action');
+    if (job.status !== marketplaceState.JOB_STATUS.OPEN) throw new MarketplaceJobError(409, 'ILLEGAL_JOB_TRANSITION', `Only open jobs may become ${targetStatus}`, { fromStatus: job.status, toStatus: targetStatus });
+    if (targetStatus === marketplaceState.JOB_STATUS.EXPIRED && (!job.expires_at || new Date(now).getTime() < new Date(job.expires_at).getTime())) {
+      throw new MarketplaceJobError(409, 'JOB_NOT_EXPIRED', 'Job has not reached its expiry time');
+    }
+    const transition = marketplaceState.transitionJobState(db, jobId, targetStatus, {
+      actorId,
+      reason,
+      source: 'marketplace-job-api',
+      idempotencyKey: transitionKey,
+      metadata: { lifecycleReason: reason },
+      now,
+      env: {},
+    });
+    const timestampColumn = targetStatus === marketplaceState.JOB_STATUS.EXPIRED ? 'expired_at' : 'cancelled_at';
+    const reasonColumn = targetStatus === marketplaceState.JOB_STATUS.EXPIRED ? 'expiry_reason' : 'cancel_reason';
+    db.prepare(`UPDATE jobs SET ${timestampColumn} = ?, ${reasonColumn} = ? WHERE id = ?`).run(now, reason, jobId);
+    return { jobId, status: targetStatus, transitionAuditId: transition.audit.id, escrow: transition.escrowEffect ? { effect: transition.escrowEffect.effectType, mode: transition.escrowEffect.executionMode, status: transition.escrowEffect.status, moneyMoved: false } : { mode: 'staged', status: 'not_funded', moneyMoved: false } };
+  })();
 }
 
 function cancelJob(db, options) {
@@ -262,7 +288,71 @@ function cancelJob(db, options) {
 }
 function expireJob(db, options) { return closeOpenJob(db, { ...options, targetStatus: marketplaceState.JOB_STATUS.EXPIRED, reason: 'listing_expired' }); }
 
-function registerMarketplaceJobRoutes(app, { getDb, closeDb = false } = {}) {
+function lifecycleReplay(db, jobId, key) {
+  return db.prepare('SELECT * FROM job_transition_audit WHERE job_id = ? AND idempotency_key = ?').get(jobId, key);
+}
+
+function releaseApprovedJob(db, options) {
+  const requestKey = idempotencyKey(options);
+  return db.transaction(() => {
+    const job = requireJob(db, options.jobId);
+    if (job.client_id !== options.actorId) throw new MarketplaceJobError(403, 'CLIENT_ACTION_FORBIDDEN', 'Only the job client may stage release');
+    const transitionKey = `release:${requestKey}`;
+    const prior = lifecycleReplay(db, job.id, transitionKey);
+    if (prior) {
+      const effect = db.prepare('SELECT * FROM marketplace_escrow_effects WHERE transition_audit_id = ?').get(prior.id);
+      return { jobId: job.id, status: job.status, transitionAuditId: prior.id, effectId: effect?.id || null, executionMode: effect?.execution_mode || 'staged', moneyMoved: false, replayed: true };
+    }
+    if (job.status !== marketplaceState.JOB_STATUS.APPROVED) throw new MarketplaceJobError(409, 'ILLEGAL_JOB_TRANSITION', 'Only approved jobs may stage release', { fromStatus: job.status, toStatus: marketplaceState.JOB_STATUS.RELEASED });
+    if (!job.escrow_id || !job.escrow_funded) throw new MarketplaceJobError(409, 'ESCROW_FUNDING_REQUIRED', 'Verified staged funding is required before release');
+    const transition = marketplaceState.transitionJobState(db, job.id, marketplaceState.JOB_STATUS.RELEASED, {
+      actorId: options.actorId,
+      reason: 'client staged approved release',
+      source: 'marketplace-job-api',
+      idempotencyKey: transitionKey,
+      metadata: { stagedOnly: true },
+      now: options.now,
+      env: {},
+    });
+    db.prepare('UPDATE jobs SET released_at = ?, updated_at = ? WHERE id = ?').run(options.now, options.now, job.id);
+    return {
+      jobId: job.id,
+      status: transition.job.status,
+      transitionAuditId: transition.audit.id,
+      effectId: transition.escrowEffect.id,
+      executionMode: transition.escrowEffect.executionMode,
+      effect: transition.escrowEffect.payload,
+      moneyMoved: false,
+      publicGmvMinorUnits: '0',
+      outcomeReputationEligible: false,
+      transaction: undefined,
+    };
+  })();
+}
+
+function closeReleasedJob(db, options) {
+  const requestKey = idempotencyKey(options);
+  return db.transaction(() => {
+    const job = requireJob(db, options.jobId);
+    if (job.client_id !== options.actorId && job.selected_agent_id !== options.actorId) throw new MarketplaceJobError(403, 'JOB_PARTY_REQUIRED', 'Only a job party may close a released job');
+    const transitionKey = `close:${requestKey}`;
+    const prior = lifecycleReplay(db, job.id, transitionKey);
+    if (prior) return { jobId: job.id, status: job.status, transitionAuditId: prior.id, moneyMoved: false, replayed: true };
+    const transition = marketplaceState.transitionJobState(db, job.id, marketplaceState.JOB_STATUS.CLOSED, {
+      actorId: options.actorId,
+      reason: 'released job bookkeeping closed',
+      source: 'marketplace-job-api',
+      idempotencyKey: transitionKey,
+      metadata: { moneyAction: false },
+      now: options.now,
+      env: {},
+    });
+    db.prepare('UPDATE jobs SET closed_at = ?, updated_at = ? WHERE id = ?').run(options.now, options.now, job.id);
+    return { jobId: job.id, status: transition.job.status, transitionAuditId: transition.audit.id, moneyMoved: false };
+  })();
+}
+
+function registerMarketplaceJobRoutes(app, { getDb, closeDb = false, clock = () => new Date().toISOString() } = {}) {
   if (typeof getDb !== 'function') throw new TypeError('getDb is required');
   const schemaDb = getDb();
   initializeMarketplaceCoreSchema(schemaDb);
@@ -279,6 +369,7 @@ function registerMarketplaceJobRoutes(app, { getDb, closeDb = false } = {}) {
         body: req.body || {},
         query: req.query || {},
         idempotencyKey: req.get('Idempotency-Key'),
+        now: clock(),
       });
       return res.status(successStatus).json(result);
     } catch (error) {
@@ -296,6 +387,8 @@ function registerMarketplaceJobRoutes(app, { getDb, closeDb = false } = {}) {
     app.post(`${prefix}/fund-staged/verify`, marketplaceJobMutationLimiter, authorize({ action: 'verify-funding', resourceId: (req) => req.params.id }), invoke(verifyFunding));
     app.post(`${prefix}/cancel`, marketplaceJobMutationLimiter, authorize({ action: 'cancel', resourceId: (req) => req.params.id }), invoke(cancelJob));
     app.post(`${prefix}/expire`, marketplaceJobMutationLimiter, authorize({ action: 'expire', resourceId: (req) => req.params.id }), invoke(expireJob));
+    app.post(`${prefix}/release`, marketplaceJobMutationLimiter, authorize({ action: 'release', resourceId: (req) => req.params.id }), invoke(releaseApprovedJob));
+    app.post(`${prefix}/close`, marketplaceJobMutationLimiter, authorize({ action: 'close', resourceId: (req) => req.params.id }), invoke(closeReleasedJob));
   }
 }
 
@@ -308,5 +401,7 @@ module.exports = {
   verifyFunding,
   cancelJob,
   expireJob,
+  releaseApprovedJob,
+  closeReleasedJob,
   registerMarketplaceJobRoutes,
 };

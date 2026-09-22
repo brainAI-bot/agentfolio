@@ -1,9 +1,11 @@
 import { signMarketplaceChallenge, type MarketplaceWalletChallenge } from "@/lib/marketplace-auth";
+import { createMarketplaceMutationHeaders } from "@/lib/marketplace-request-headers";
 
 // Empty means the browser's current origin. Next.js proxies /api through the
 // server-only INTERNAL_API_URL; no backend hostname is shipped to visitors.
 export const MARKETPLACE_API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 const REQUEST_TIMEOUT_MS = 15_000;
+const retryableMutationKeys = new Map<string, string>();
 
 export class MarketplaceApiError extends Error {
   code: string;
@@ -59,6 +61,7 @@ export async function signedMarketplaceRequest<T>({
   signMessage,
   body = {},
   method = "POST",
+  idempotencyKey,
 }: {
   path: string;
   action: string;
@@ -68,8 +71,21 @@ export async function signedMarketplaceRequest<T>({
   signMessage?: (message: Uint8Array) => Promise<Uint8Array>;
   body?: Record<string, unknown>;
   method?: "GET" | "POST";
+  idempotencyKey?: string;
 }): Promise<T> {
   const requestBody = method === "GET" ? {} : { ...body, actorId };
+  const mutationFingerprint = method === "POST"
+    ? JSON.stringify([path, action, resourceId, actorId, requestBody])
+    : null;
+  const headers: Record<string, string> = method === "GET"
+    ? { "Content-Type": "application/json", "X-Marketplace-Actor": actorId }
+    : createMarketplaceMutationHeaders(
+      actorId,
+      idempotencyKey || retryableMutationKeys.get(mutationFingerprint!),
+    );
+  if (mutationFingerprint) {
+    retryableMutationKeys.set(mutationFingerprint, headers["Idempotency-Key"]);
+  }
   const issuedChallenge = await responseJson<MarketplaceWalletChallenge>(await withTimeout(
     `${MARKETPLACE_API_BASE}/api/marketplace/auth/challenge`,
     {
@@ -79,17 +95,17 @@ export async function signedMarketplaceRequest<T>({
     },
   ));
   const walletChallenge = await signMarketplaceChallenge(issuedChallenge, walletAddress, signMessage);
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "X-Marketplace-Actor": actorId,
-  };
   const init: RequestInit = { method, headers };
   if (method === "GET") {
     headers["X-Marketplace-Wallet-Challenge"] = btoa(JSON.stringify(walletChallenge));
   } else {
     init.body = JSON.stringify({ ...requestBody, walletChallenge });
   }
-  return responseJson<T>(await withTimeout(`${MARKETPLACE_API_BASE}${path}`, init));
+  const response = await withTimeout(`${MARKETPLACE_API_BASE}${path}`, init);
+  // A received HTTP response settles this attempt. Network/timeout failures
+  // leave the key cached so the same user action can safely retry it.
+  if (mutationFingerprint) retryableMutationKeys.delete(mutationFingerprint);
+  return responseJson<T>(response);
 }
 
 export function marketplaceErrorMessage(error: unknown): string {

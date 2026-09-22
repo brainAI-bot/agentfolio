@@ -5,6 +5,7 @@ const rateLimit = require('express-rate-limit');
 const marketplaceState = require('../lib/marketplace-state-machine');
 const { initializeMarketplaceCoreSchema } = require('../lib/marketplace-schema');
 const { hasVerifiedCanonicalTrustData } = require('../lib/canonical-verification-providers');
+const { computeMarketplaceClaimEligibility } = require('../lib/marketplace-claim-eligibility');
 const {
   MarketplaceAmountError,
   parseDecimalToMinorUnits,
@@ -38,6 +39,13 @@ function parseJson(value, fallback = {}) {
   if (!value) return fallback;
   if (typeof value === 'object') return value;
   try { return JSON.parse(value); } catch (_) { return fallback; }
+}
+
+function requireIdempotencyKey(value) {
+  const key = String(value || '').trim();
+  if (!key) throw new MarketplaceApplicationError(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Idempotency-Key header is required');
+  if (key.length > 200) throw new MarketplaceApplicationError(400, 'INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must be at most 200 characters');
+  return key;
 }
 
 function initializeMarketplaceApplicationSchema(db) {
@@ -99,11 +107,24 @@ function initializeMarketplaceApplicationSchema(db) {
 
     CREATE TABLE IF NOT EXISTS marketplace_claims (
       id TEXT PRIMARY KEY,
-      job_id TEXT NOT NULL UNIQUE,
+      job_id TEXT NOT NULL,
       agent_id TEXT NOT NULL,
       status TEXT NOT NULL CHECK(status IN ('selected', 'accepted', 'failed')),
       idempotency_key TEXT NOT NULL,
       created_at TEXT NOT NULL,
+      FOREIGN KEY (job_id) REFERENCES jobs(id),
+      UNIQUE (job_id, idempotency_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS marketplace_claim_outcomes (
+      id TEXT PRIMARY KEY,
+      claim_id TEXT NOT NULL UNIQUE,
+      job_id TEXT NOT NULL,
+      outcome TEXT NOT NULL CHECK(outcome IN ('accepted', 'declined', 'timed_out')),
+      actor_id TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (claim_id) REFERENCES marketplace_claims(id),
       FOREIGN KEY (job_id) REFERENCES jobs(id),
       UNIQUE (job_id, idempotency_key)
     );
@@ -118,6 +139,18 @@ function initializeMarketplaceApplicationSchema(db) {
     BEFORE DELETE ON marketplace_claims
     BEGIN
       SELECT RAISE(ABORT, 'MARKETPLACE_CLAIM_IMMUTABLE');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS immutable_marketplace_claim_outcomes_update
+    BEFORE UPDATE ON marketplace_claim_outcomes
+    BEGIN
+      SELECT RAISE(ABORT, 'MARKETPLACE_CLAIM_OUTCOME_IMMUTABLE');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS immutable_marketplace_claim_outcomes_delete
+    BEFORE DELETE ON marketplace_claim_outcomes
+    BEGIN
+      SELECT RAISE(ABORT, 'MARKETPLACE_CLAIM_OUTCOME_IMMUTABLE');
     END;
 
     CREATE TRIGGER IF NOT EXISTS immutable_application_transition_audit_update
@@ -156,6 +189,58 @@ function initializeMarketplaceApplicationSchema(db) {
       SELECT RAISE(ABORT, 'MARKETPLACE_ESCROW_ADJUSTMENT_RESOLUTION_IMMUTABLE');
     END;
   `);
+
+  // Tranche 1 briefly created a job-wide UNIQUE constraint, which prevented
+  // another eligible identity from claiming after a decline or timeout.
+  const legacyUniqueJobIndex = db.prepare("PRAGMA index_list('marketplace_claims')").all()
+    .find((index) => {
+      if (!index.unique) return false;
+      const escapedName = String(index.name).replaceAll("'", "''");
+      const columns = db.prepare(`PRAGMA index_info('${escapedName}')`).all();
+      return columns.length === 1 && columns[0].name === 'job_id';
+    });
+  if (legacyUniqueJobIndex) {
+    db.exec(`
+      DROP TRIGGER IF EXISTS immutable_marketplace_claims_update;
+      DROP TRIGGER IF EXISTS immutable_marketplace_claims_delete;
+      DROP TRIGGER IF EXISTS immutable_marketplace_claim_outcomes_update;
+      DROP TRIGGER IF EXISTS immutable_marketplace_claim_outcomes_delete;
+      DROP TABLE marketplace_claim_outcomes;
+      ALTER TABLE marketplace_claims RENAME TO marketplace_claims_legacy;
+      CREATE TABLE marketplace_claims (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('selected', 'accepted', 'failed')),
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (job_id) REFERENCES jobs(id),
+        UNIQUE (job_id, idempotency_key)
+      );
+      INSERT INTO marketplace_claims SELECT * FROM marketplace_claims_legacy;
+      DROP TABLE marketplace_claims_legacy;
+      CREATE TABLE marketplace_claim_outcomes (
+        id TEXT PRIMARY KEY,
+        claim_id TEXT NOT NULL UNIQUE,
+        job_id TEXT NOT NULL,
+        outcome TEXT NOT NULL CHECK(outcome IN ('accepted', 'declined', 'timed_out')),
+        actor_id TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (claim_id) REFERENCES marketplace_claims(id),
+        FOREIGN KEY (job_id) REFERENCES jobs(id),
+        UNIQUE (job_id, idempotency_key)
+      );
+      CREATE TRIGGER immutable_marketplace_claims_update BEFORE UPDATE ON marketplace_claims
+      BEGIN SELECT RAISE(ABORT, 'MARKETPLACE_CLAIM_IMMUTABLE'); END;
+      CREATE TRIGGER immutable_marketplace_claims_delete BEFORE DELETE ON marketplace_claims
+      BEGIN SELECT RAISE(ABORT, 'MARKETPLACE_CLAIM_IMMUTABLE'); END;
+      CREATE TRIGGER immutable_marketplace_claim_outcomes_update BEFORE UPDATE ON marketplace_claim_outcomes
+      BEGIN SELECT RAISE(ABORT, 'MARKETPLACE_CLAIM_OUTCOME_IMMUTABLE'); END;
+      CREATE TRIGGER immutable_marketplace_claim_outcomes_delete BEFORE DELETE ON marketplace_claim_outcomes
+      BEGIN SELECT RAISE(ABORT, 'MARKETPLACE_CLAIM_OUTCOME_IMMUTABLE'); END;
+    `);
+  }
 }
 
 function applicationResponse(row) {
@@ -563,12 +648,12 @@ function persistEscrowAdjustmentAfterRollback(db, error, now) {
   );
 }
 
-function reopenAward(db, job, application, actorId, reason, now) {
+function reopenAward(db, job, application, actorId, reason, now, requestKey = `${reason}:${application.id}`) {
   marketplaceState.transitionJobState(db, job.id, marketplaceState.JOB_STATUS.OPEN, {
     actorId,
     reason,
     source: 'marketplace-application-api',
-    idempotencyKey: `${reason}:${application.id}`,
+    idempotencyKey: requestKey,
     metadata: { applicationId: application.id },
     now,
   });
@@ -581,19 +666,24 @@ function reopenAward(db, job, application, actorId, reason, now) {
   return { jobId: job.id, applicationId: application.id, status: marketplaceState.JOB_STATUS.OPEN, reason };
 }
 
-function acceptAward(db, { applicationId, jobId = null, actorId, now = new Date().toISOString() }) {
+function acceptAward(db, { applicationId, jobId = null, actorId, idempotencyKey, now = new Date().toISOString() }) {
+  const key = requireIdempotencyKey(idempotencyKey);
   const execute = db.transaction(() => {
     const application = requireApplication(db, applicationId, jobId);
     const job = requireJob(db, application.job_id);
     if (application.agent_id !== actorId) {
       throw new MarketplaceApplicationError(403, 'APPLICATION_ACTOR_FORBIDDEN', 'Only the selected agent may accept');
     }
+    const transitionKey = `accept:${key}`;
+    if (db.prepare('SELECT id FROM job_transition_audit WHERE job_id = ? AND idempotency_key = ?').get(job.id, transitionKey)) {
+      return { jobId: job.id, application: applicationResponse(application), status: job.status, replayed: true };
+    }
     if (job.status !== marketplaceState.JOB_STATUS.AWARDED || job.selected_application_id !== application.id || application.status !== 'selected') {
       throw new MarketplaceApplicationError(409, 'AWARD_NOT_ACCEPTABLE', 'Application does not have an active award');
     }
     if (!job.award_expires_at || new Date(now).getTime() >= new Date(job.award_expires_at).getTime()) {
       return {
-        ...reopenAward(db, job, application, actorId, 'award_timed_out', now),
+        ...reopenAward(db, job, application, actorId, 'award_timed_out', now, `accept-timeout:${key}`),
         code: 'AWARD_TIMED_OUT',
         error: 'Award timed out and the job was reopened',
         _httpStatus: 409,
@@ -604,11 +694,11 @@ function acceptAward(db, { applicationId, jobId = null, actorId, now = new Date(
       actorId,
       reason: 'selected agent accepted award',
       source: 'marketplace-application-api',
-      idempotencyKey: `accept:${application.id}`,
+      idempotencyKey: transitionKey,
       metadata: { applicationId: application.id },
       now,
     });
-    transitionApplication(db, application, 'accepted', actorId, 'agent_accepted', now, `accept:${application.id}`);
+    transitionApplication(db, application, 'accepted', actorId, 'agent_accepted', now, transitionKey);
     const pending = db.prepare("SELECT * FROM applications WHERE job_id = ? AND id <> ? AND status = 'pending'")
       .all(job.id, application.id);
     for (const other of pending) {
@@ -624,25 +714,35 @@ function acceptAward(db, { applicationId, jobId = null, actorId, now = new Date(
   }
 }
 
-function declineAward(db, { applicationId, jobId = null, actorId, now = new Date().toISOString() }) {
+function declineAward(db, { applicationId, jobId = null, actorId, idempotencyKey, now = new Date().toISOString() }) {
+  const key = requireIdempotencyKey(idempotencyKey);
   return db.transaction(() => {
     const application = requireApplication(db, applicationId, jobId);
     const job = requireJob(db, application.job_id);
     if (application.agent_id !== actorId) {
       throw new MarketplaceApplicationError(403, 'APPLICATION_ACTOR_FORBIDDEN', 'Only the selected agent may decline');
     }
+    const transitionKey = `decline:${key}`;
+    if (db.prepare('SELECT id FROM job_transition_audit WHERE job_id = ? AND idempotency_key = ?').get(job.id, transitionKey)) {
+      return { jobId: job.id, applicationId: application.id, status: job.status, reason: 'agent_declined', replayed: true };
+    }
     if (job.status !== marketplaceState.JOB_STATUS.AWARDED || job.selected_application_id !== application.id || application.status !== 'selected') {
       throw new MarketplaceApplicationError(409, 'AWARD_NOT_DECLINABLE', 'Application does not have an active award');
     }
-    return reopenAward(db, job, application, actorId, 'agent_declined', now);
+    return reopenAward(db, job, application, actorId, 'agent_declined', now, transitionKey);
   })();
 }
 
-function expireAward(db, { jobId, actorId, now = new Date().toISOString() }) {
+function expireAward(db, { jobId, actorId, idempotencyKey, now = new Date().toISOString() }) {
+  const key = requireIdempotencyKey(idempotencyKey);
   return db.transaction(() => {
     const job = requireJob(db, jobId);
     if (job.client_id !== actorId) {
       throw new MarketplaceApplicationError(403, 'CLIENT_ACTION_FORBIDDEN', 'Only the job client may process an award timeout');
+    }
+    const transitionKey = `award-timeout:${key}`;
+    if (db.prepare('SELECT id FROM job_transition_audit WHERE job_id = ? AND idempotency_key = ?').get(job.id, transitionKey)) {
+      return { jobId: job.id, status: job.status, reason: 'award_timed_out', replayed: true };
     }
     if (job.status !== marketplaceState.JOB_STATUS.AWARDED || !job.selected_application_id) {
       throw new MarketplaceApplicationError(409, 'NO_ACTIVE_AWARD', 'Job has no active award');
@@ -651,7 +751,7 @@ function expireAward(db, { jobId, actorId, now = new Date().toISOString() }) {
       throw new MarketplaceApplicationError(409, 'AWARD_NOT_EXPIRED', 'Award has not reached its 48 hour timeout');
     }
     const application = requireApplication(db, job.selected_application_id, job.id);
-    return reopenAward(db, job, application, actorId, 'award_timed_out', now);
+    return reopenAward(db, job, application, actorId, 'award_timed_out', now, transitionKey);
   })();
 }
 
@@ -684,9 +784,7 @@ function claimJob(db, {
   idempotencyKey,
   now = new Date().toISOString(),
 }) {
-  const requestKey = String(idempotencyKey || '').trim();
-  if (!requestKey) throw new MarketplaceApplicationError(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Idempotency-Key header is required');
-  if (requestKey.length > 200) throw new MarketplaceApplicationError(400, 'INVALID_IDEMPOTENCY_KEY', 'Idempotency-Key must be at most 200 characters');
+  const requestKey = requireIdempotencyKey(idempotencyKey);
 
   return db.transaction(() => {
     const prior = db.prepare('SELECT * FROM marketplace_claims WHERE job_id = ? AND idempotency_key = ? AND agent_id = ?')
@@ -705,19 +803,21 @@ function claimJob(db, {
       throw new MarketplaceApplicationError(409, 'JOB_ALREADY_CLAIMED', 'Job has already been claimed', { currentState: job.status, retryable: false });
     }
     if (job.client_id === actorId) throw new MarketplaceApplicationError(403, 'SELF_CLAIM_FORBIDDEN', 'Posters cannot claim their own jobs');
+    if (db.prepare('SELECT id FROM marketplace_claims WHERE job_id = ? AND agent_id = ?').get(job.id, actorId)) {
+      throw new MarketplaceApplicationError(409, 'CLAIM_RETRY_FORBIDDEN', 'An identity may not reclaim a job after a failed award', { retryable: false });
+    }
 
-    const profile = db.prepare('SELECT id, verification_data FROM profiles WHERE id = ?').get(actorId);
-    const verificationData = parseJson(profile?.verification_data);
-    if (!profile || !hasVerifiedCanonicalTrustData(verificationData)) {
+    const eligibility = computeMarketplaceClaimEligibility(db, actorId);
+    if (!eligibility.eligibleIdentity) {
       throw new MarketplaceApplicationError(403, 'CLAIM_INELIGIBLE_VERIFICATION', 'Claimant does not have a verified canonical identity', { predicate: 'verified_identity', retryable: false });
     }
-    const verificationLevel = Number(verificationData.verificationLevel ?? verificationData.verification_level ?? 1);
+    const verificationLevel = eligibility.verificationLevel;
     const requiredLevel = Number(job.minimum_verification_level) || 1;
     if (!Number.isInteger(verificationLevel) || verificationLevel < requiredLevel) {
       throw new MarketplaceApplicationError(403, 'CLAIM_INELIGIBLE_VERIFICATION_LEVEL', 'Claimant does not meet the minimum verification level', { predicate: 'minimum_verification_level', required: requiredLevel, retryable: false });
     }
     if (job.minimum_trust_score != null) {
-      const trustScore = Number(verificationData.trustScore ?? verificationData.trust_score);
+      const trustScore = eligibility.trustScore;
       if (!Number.isFinite(trustScore) || trustScore < Number(job.minimum_trust_score)) {
         throw new MarketplaceApplicationError(403, 'CLAIM_INELIGIBLE_TRUST_SCORE', 'Claimant does not meet the minimum trust score', { predicate: 'minimum_trust_score', required: Number(job.minimum_trust_score), retryable: false });
       }
@@ -745,7 +845,106 @@ function claimJob(db, {
   })();
 }
 
-function registerMarketplaceApplicationRoutes(app, { getDb, closeDb = false, timeoutSweepIntervalMs = 0 } = {}) {
+function currentClaim(db, jobId) {
+  return db.prepare(`
+    SELECT claim.* FROM marketplace_claims claim
+    LEFT JOIN marketplace_claim_outcomes outcome ON outcome.claim_id = claim.id
+    WHERE claim.job_id = ? AND outcome.id IS NULL
+    ORDER BY claim.created_at DESC, claim.rowid DESC LIMIT 1
+  `).get(jobId);
+}
+
+function claimOutcomeReplay(db, jobId, key) {
+  return db.prepare(`
+    SELECT outcome.*, claim.agent_id FROM marketplace_claim_outcomes outcome
+    JOIN marketplace_claims claim ON claim.id = outcome.claim_id
+    WHERE outcome.job_id = ? AND outcome.idempotency_key = ?
+  `).get(jobId, key);
+}
+
+function recordClaimOutcome(db, claim, outcome, actorId, key, now) {
+  db.prepare(`INSERT INTO marketplace_claim_outcomes
+    (id, claim_id, job_id, outcome, actor_id, idempotency_key, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(`mco_${crypto.randomUUID()}`, claim.id, claim.job_id, outcome, actorId, key, now);
+}
+
+function clearClaimAward(db, job, claim, actorId, outcome, key, now) {
+  const reason = outcome === 'declined' ? 'claimant_declined' : 'claim_award_timed_out';
+  marketplaceState.transitionJobState(db, job.id, marketplaceState.JOB_STATUS.OPEN, {
+    actorId,
+    reason,
+    source: 'marketplace-claim-api',
+    idempotencyKey: `claim-${outcome}:${key}`,
+    metadata: { claimId: claim.id },
+    now,
+    env: {},
+  });
+  recordClaimOutcome(db, claim, outcome, actorId, key, now);
+  db.prepare(`UPDATE jobs SET selected_agent_id = NULL, selected_at = NULL,
+    award_expires_at = NULL, agreed_budget = NULL, agreed_budget_minor = NULL,
+    agreed_timeline = NULL, updated_at = ? WHERE id = ?`).run(now, job.id);
+  return { jobId: job.id, claimId: claim.id, status: marketplaceState.JOB_STATUS.OPEN, outcome };
+}
+
+function acceptClaimAward(db, { jobId, actorId, idempotencyKey, now = new Date().toISOString() }) {
+  const key = requireIdempotencyKey(idempotencyKey);
+  return db.transaction(() => {
+    const replay = claimOutcomeReplay(db, jobId, key);
+    if (replay) return { jobId, claimId: replay.claim_id, status: replay.outcome === 'accepted' ? 'in_progress' : 'open', outcome: replay.outcome, replayed: true };
+    const job = requireJob(db, jobId);
+    if ((job.pickup_mode || 'select') !== 'claim') throw new MarketplaceApplicationError(409, 'PICKUP_MODE_MISMATCH', 'Claim award actions are only available for claim-mode jobs');
+    const claim = currentClaim(db, jobId);
+    if (!claim || job.status !== marketplaceState.JOB_STATUS.AWARDED || job.selected_agent_id !== actorId || claim.agent_id !== actorId) {
+      throw new MarketplaceApplicationError(409, 'AWARD_NOT_ACCEPTABLE', 'Claim does not have an active award');
+    }
+    if (!job.award_expires_at || new Date(now).getTime() >= new Date(job.award_expires_at).getTime()) {
+      return { ...clearClaimAward(db, job, claim, actorId, 'timed_out', key, now), code: 'AWARD_TIMED_OUT', error: 'Award timed out and the job was reopened', _httpStatus: 409 };
+    }
+    assertFundingMatches(db, job, null, now);
+    const transition = marketplaceState.transitionJobState(db, job.id, marketplaceState.JOB_STATUS.IN_PROGRESS, {
+      actorId,
+      reason: 'claimant accepted award',
+      source: 'marketplace-claim-api',
+      idempotencyKey: `claim-accepted:${key}`,
+      metadata: { claimId: claim.id },
+      now,
+      env: {},
+    });
+    recordClaimOutcome(db, claim, 'accepted', actorId, key, now);
+    return { jobId, claimId: claim.id, status: transition.job.status, outcome: 'accepted' };
+  })();
+}
+
+function declineClaimAward(db, { jobId, actorId, idempotencyKey, now = new Date().toISOString() }) {
+  const key = requireIdempotencyKey(idempotencyKey);
+  return db.transaction(() => {
+    const replay = claimOutcomeReplay(db, jobId, key);
+    if (replay) return { jobId, claimId: replay.claim_id, status: replay.outcome === 'accepted' ? 'in_progress' : 'open', outcome: replay.outcome, replayed: true };
+    const job = requireJob(db, jobId);
+    const claim = currentClaim(db, jobId);
+    if (!claim || job.status !== marketplaceState.JOB_STATUS.AWARDED || job.selected_agent_id !== actorId || claim.agent_id !== actorId) {
+      throw new MarketplaceApplicationError(409, 'AWARD_NOT_DECLINABLE', 'Claim does not have an active award');
+    }
+    return clearClaimAward(db, job, claim, actorId, 'declined', key, now);
+  })();
+}
+
+function expireClaimAward(db, { jobId, actorId, idempotencyKey, now = new Date().toISOString() }) {
+  const key = requireIdempotencyKey(idempotencyKey);
+  return db.transaction(() => {
+    const replay = claimOutcomeReplay(db, jobId, key);
+    if (replay) return { jobId, claimId: replay.claim_id, status: 'open', outcome: replay.outcome, replayed: true };
+    const job = requireJob(db, jobId);
+    if (job.client_id !== actorId) throw new MarketplaceApplicationError(403, 'CLIENT_ACTION_FORBIDDEN', 'Only the job client may process an award timeout');
+    const claim = currentClaim(db, jobId);
+    if (!claim || job.status !== marketplaceState.JOB_STATUS.AWARDED) throw new MarketplaceApplicationError(409, 'NO_ACTIVE_AWARD', 'Job has no active claim award');
+    if (!job.award_expires_at || new Date(now).getTime() < new Date(job.award_expires_at).getTime()) throw new MarketplaceApplicationError(409, 'AWARD_NOT_EXPIRED', 'Award has not reached its 48 hour timeout');
+    return clearClaimAward(db, job, claim, actorId, 'timed_out', key, now);
+  })();
+}
+
+function registerMarketplaceApplicationRoutes(app, { getDb, closeDb = false, timeoutSweepIntervalMs = 0, clock = () => new Date().toISOString() } = {}) {
   if (typeof getDb !== 'function') throw new TypeError('getDb is required');
   const schemaDb = getDb();
   initializeMarketplaceApplicationSchema(schemaDb);
@@ -763,6 +962,7 @@ function registerMarketplaceApplicationRoutes(app, { getDb, closeDb = false, tim
         actorId: req.marketplaceActorId,
         body: req.body || {},
         idempotencyKey: req.get('Idempotency-Key'),
+        now: clock(),
       });
       const responseStatus = result?._httpStatus || successStatus;
       if (result && Object.prototype.hasOwnProperty.call(result, '_httpStatus')) delete result._httpStatus;
@@ -803,6 +1003,24 @@ function registerMarketplaceApplicationRoutes(app, { getDb, closeDb = false, tim
     'claim',
     (req) => req.params.id,
     invoke(claimJob),
+  );
+  postAliases(
+    ['/api/jobs/:id/claim/accept', '/api/marketplace/jobs/:id/claim/accept', '/api/jobs/:id/accept-award', '/api/marketplace/jobs/:id/accept-award'],
+    'accept',
+    (req) => req.params.id,
+    invoke(acceptClaimAward),
+  );
+  postAliases(
+    ['/api/jobs/:id/claim/decline', '/api/marketplace/jobs/:id/claim/decline', '/api/jobs/:id/decline-award', '/api/marketplace/jobs/:id/decline-award'],
+    'decline',
+    (req) => req.params.id,
+    invoke(declineClaimAward),
+  );
+  postAliases(
+    ['/api/jobs/:id/claim/award-timeout', '/api/marketplace/jobs/:id/claim/award-timeout'],
+    'award-timeout',
+    (req) => req.params.id,
+    invoke(expireClaimAward),
   );
   postAliases([
     '/api/applications/:applicationId/withdraw',
@@ -864,6 +1082,9 @@ module.exports = {
   rejectApplication,
   selectApplication,
   claimJob,
+  acceptClaimAward,
+  declineClaimAward,
+  expireClaimAward,
   acceptAward,
   declineAward,
   expireAward,
