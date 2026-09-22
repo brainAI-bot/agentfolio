@@ -7,6 +7,7 @@ const express = require('express');
 const { initializeMarketplaceCoreSchema } = require('../src/lib/marketplace-schema');
 const {
   expireTimedOutAwards,
+  initializeMarketplaceApplicationSchema,
   registerMarketplaceApplicationRoutes,
 } = require('../src/routes/marketplace-application-routes');
 
@@ -274,6 +275,112 @@ test('server marketplace registration initializes clean-database prerequisites b
   assert.equal(
     db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = 'guard_jobs_status_transition'").get().count,
     1,
+  );
+  db.close();
+});
+
+test('legacy claim migration preserves immutable claim outcomes', () => {
+  const db = new Database(':memory:');
+  db.pragma('foreign_keys = ON');
+  db.exec('CREATE TABLE profiles (id TEXT PRIMARY KEY, api_key TEXT, verification_data TEXT)');
+  initializeMarketplaceCoreSchema(db);
+  db.exec(`
+    CREATE TABLE marketplace_claims (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL UNIQUE,
+      agent_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (job_id) REFERENCES jobs(id)
+    );
+    CREATE TABLE marketplace_claim_outcomes (
+      id TEXT PRIMARY KEY,
+      claim_id TEXT NOT NULL UNIQUE,
+      job_id TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      actor_id TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (claim_id) REFERENCES marketplace_claims(id),
+      FOREIGN KEY (job_id) REFERENCES jobs(id)
+    );
+  `);
+  insertJob(db, 'job_legacy_preserved');
+  db.prepare(`INSERT INTO marketplace_claims
+    (id, job_id, agent_id, status, idempotency_key, created_at)
+    VALUES ('claim-preserved', 'job_legacy_preserved', 'verified-agent', 'selected', 'claim-key', '2026-09-05T00:00:00.000Z')`).run();
+  db.prepare(`INSERT INTO marketplace_claim_outcomes
+    (id, claim_id, job_id, outcome, actor_id, idempotency_key, created_at)
+    VALUES ('outcome-preserved', 'claim-preserved', 'job_legacy_preserved', 'declined', 'verified-agent', 'outcome-key', '2026-09-05T00:00:00.000Z')`).run();
+
+  initializeMarketplaceApplicationSchema(db);
+
+  assert.deepEqual(
+    db.prepare('SELECT id, claim_id, job_id, outcome, actor_id, idempotency_key FROM marketplace_claim_outcomes').get(),
+    {
+      id: 'outcome-preserved',
+      claim_id: 'claim-preserved',
+      job_id: 'job_legacy_preserved',
+      outcome: 'declined',
+      actor_id: 'verified-agent',
+      idempotency_key: 'outcome-key',
+    },
+  );
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_temp_master WHERE type = 'table' AND name = 'marketplace_claim_outcomes_legacy'").get().count, 0);
+  db.close();
+});
+
+test('legacy claim migration rolls back every table change when copying claims fails', () => {
+  const db = new Database(':memory:');
+  db.pragma('foreign_keys = ON');
+  db.exec('CREATE TABLE profiles (id TEXT PRIMARY KEY, api_key TEXT, verification_data TEXT)');
+  initializeMarketplaceCoreSchema(db);
+  db.exec(`
+    CREATE TABLE marketplace_claims (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL UNIQUE,
+      agent_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (job_id) REFERENCES jobs(id)
+    );
+    CREATE TABLE marketplace_claim_outcomes (
+      id TEXT PRIMARY KEY,
+      claim_id TEXT NOT NULL UNIQUE,
+      job_id TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      actor_id TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (claim_id) REFERENCES marketplace_claims(id),
+      FOREIGN KEY (job_id) REFERENCES jobs(id)
+    );
+  `);
+  insertJob(db, 'job_legacy_migration');
+  db.prepare(`INSERT INTO marketplace_claims
+    (id, job_id, agent_id, status, idempotency_key, created_at)
+    VALUES ('claim-invalid', 'job_legacy_migration', 'verified-agent', 'legacy-invalid', 'claim-key', '2026-09-05T00:00:00.000Z')`).run();
+  db.prepare(`INSERT INTO marketplace_claim_outcomes
+    (id, claim_id, job_id, outcome, actor_id, idempotency_key, created_at)
+    VALUES ('outcome-existing', 'claim-invalid', 'job_legacy_migration', 'declined', 'verified-agent', 'outcome-key', '2026-09-05T00:00:00.000Z')`).run();
+
+  assert.throws(() => initializeMarketplaceApplicationSchema(db), /CHECK constraint failed/);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'marketplace_claims_legacy'").get().count, 0);
+  assert.deepEqual(
+    db.prepare('SELECT id, status FROM marketplace_claims').get(),
+    { id: 'claim-invalid', status: 'legacy-invalid' },
+  );
+  assert.deepEqual(
+    db.prepare('SELECT id, claim_id FROM marketplace_claim_outcomes').get(),
+    { id: 'outcome-existing', claim_id: 'claim-invalid' },
+  );
+  assert.ok(
+    db.prepare("PRAGMA index_list('marketplace_claims')").all().some((index) => index.unique && (
+      db.prepare(`PRAGMA index_info('${String(index.name).replaceAll("'", "''")}')`).all().length === 1
+      && db.prepare(`PRAGMA index_info('${String(index.name).replaceAll("'", "''")}')`).all()[0].name === 'job_id'
+    )),
   );
   db.close();
 });

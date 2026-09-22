@@ -1,6 +1,6 @@
 'use strict';
 
-const { formatMinorUnits } = require('../lib/marketplace-money');
+const { exactMinorUnits, formatMinorUnits } = require('../lib/marketplace-money');
 const { getPublicMarketplaceCohort } = require('../lib/public-marketplace-jobs');
 const { isFixtureJob } = require('../lib/public-traction');
 
@@ -35,10 +35,15 @@ function hasPublicBudget(row) {
 
 function mapSqliteMarketplaceJob(row, profileMap, applicationCounts) {
   const budgetCurrency = row.budget_currency || 'SOL';
-  const budgetAmountMinor = row.agreed_budget_minor || row.budget_amount_minor || null;
-  const budgetAmount = row.agreed_budget != null
-    ? String(row.agreed_budget)
-    : (budgetAmountMinor ? formatMinorUnits(budgetAmountMinor, budgetCurrency) : String(row.budget_amount ?? 0));
+  const useAgreedAmount = row.agreed_budget != null || row.agreed_budget_minor != null;
+  const decimalField = useAgreedAmount ? 'agreed_budget' : 'budget_amount';
+  const minorField = useAgreedAmount ? 'agreed_budget_minor' : 'budget_amount_minor';
+  let budgetAmountMinor = null;
+  let budgetAmount = String(row[decimalField] ?? 0);
+  try {
+    budgetAmountMinor = exactMinorUnits(row, decimalField, minorField);
+    budgetAmount = formatMinorUnits(budgetAmountMinor, budgetCurrency);
+  } catch {}
   let skills = [];
   let attachments = [];
   try { skills = JSON.parse(row.skills || '[]'); } catch {}

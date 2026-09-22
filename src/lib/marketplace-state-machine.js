@@ -375,6 +375,7 @@ function transitionJobState(db, jobId, toStatus, options = {}) {
     if (effectType) {
       const gate = liveEscrowGateStatus(env);
       const liveEscrowEnabled = gate.enabled === true;
+      const useAgreedAmount = job.agreed_budget != null || job.agreed_budget_minor != null;
       escrowEffect = {
         id: `mee_${crypto.randomUUID()}`,
         jobId,
@@ -395,8 +396,8 @@ function transitionJobState(db, jobId, toStatus, options = {}) {
           ) ? {
             ...marketplaceFeeSplit(exactMinorUnits(
               job,
-              job.agreed_budget != null ? 'agreed_budget' : 'budget_amount',
-              job.agreed_budget_minor ? 'agreed_budget_minor' : 'budget_amount_minor',
+              useAgreedAmount ? 'agreed_budget' : 'budget_amount',
+              useAgreedAmount ? 'agreed_budget_minor' : 'budget_amount_minor',
             )),
             currency: job.budget_currency,
             payerId: job.client_id,

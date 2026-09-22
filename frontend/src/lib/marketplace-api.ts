@@ -1,11 +1,11 @@
 import { signMarketplaceChallenge, type MarketplaceWalletChallenge } from "@/lib/marketplace-auth";
-import { createMarketplaceMutationHeaders } from "@/lib/marketplace-request-headers";
+import { createMarketplaceMutationHeaders, createMarketplaceMutationKeyStore } from "@/lib/marketplace-request-headers";
 
 // Empty means the browser's current origin. Next.js proxies /api through the
 // server-only INTERNAL_API_URL; no backend hostname is shipped to visitors.
 export const MARKETPLACE_API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 const REQUEST_TIMEOUT_MS = 15_000;
-const retryableMutationKeys = new Map<string, string>();
+const retryableMutationKeys = createMarketplaceMutationKeyStore();
 
 export class MarketplaceApiError extends Error {
   code: string;
@@ -81,11 +81,8 @@ export async function signedMarketplaceRequest<T>({
     ? { "Content-Type": "application/json", "X-Marketplace-Actor": actorId }
     : createMarketplaceMutationHeaders(
       actorId,
-      idempotencyKey || retryableMutationKeys.get(mutationFingerprint!),
+      retryableMutationKeys.keyFor(mutationFingerprint!, idempotencyKey),
     );
-  if (mutationFingerprint) {
-    retryableMutationKeys.set(mutationFingerprint, headers["Idempotency-Key"]);
-  }
   const issuedChallenge = await responseJson<MarketplaceWalletChallenge>(await withTimeout(
     `${MARKETPLACE_API_BASE}/api/marketplace/auth/challenge`,
     {
@@ -102,9 +99,9 @@ export async function signedMarketplaceRequest<T>({
     init.body = JSON.stringify({ ...requestBody, walletChallenge });
   }
   const response = await withTimeout(`${MARKETPLACE_API_BASE}${path}`, init);
-  // A received HTTP response settles this attempt. Network/timeout failures
-  // leave the key cached so the same user action can safely retry it.
-  if (mutationFingerprint) retryableMutationKeys.delete(mutationFingerprint);
+  // A definitive response settles this attempt. A 5xx may have been emitted
+  // after the server committed, so retain the key just as for network errors.
+  if (mutationFingerprint) retryableMutationKeys.settle(mutationFingerprint, response.status);
   return responseJson<T>(response);
 }
 

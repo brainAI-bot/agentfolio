@@ -7,7 +7,7 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 const express = require('express');
 const { registerMarketplaceJobRoutes } = require('../src/routes/marketplace-job-routes');
-const { registerMarketplaceApplicationRoutes } = require('../src/routes/marketplace-application-routes');
+const { expireTimedOutAwards, registerMarketplaceApplicationRoutes } = require('../src/routes/marketplace-application-routes');
 const { registerMarketplaceDeliveryRoutes } = require('../src/routes/marketplace-delivery-routes');
 const { registerPublicMarketplaceReadRoutes } = require('../src/routes/public-marketplace-read-routes');
 const { createMarketplaceMutationHeaders } = require('../frontend/src/lib/marketplace-request-headers');
@@ -315,6 +315,11 @@ test('V3 HTTP tranche 2 completes select and claim lifecycles with fake-clock fa
     key: 'key-poster', idempotencyKey: 'select-approve', body: {},
   });
   assert.equal(approved.body.status, 'approved');
+  db.prepare('UPDATE jobs SET agreed_budget = ?, agreed_budget_minor = NULL WHERE id = ?')
+    .run(2.000000001, select.body.id);
+  const consistentAmount = await request(baseUrl, 'GET', `/api/marketplace/jobs/${select.body.id}`);
+  assert.equal(consistentAmount.body.budgetAmount, '2.000000001');
+  assert.equal(consistentAmount.body.budgetAmountMinor, '2000000001');
   const illegalSubmit = await submit(select.body.id, 'select-illegal-submit', 'Cannot submit after approval');
   assert.equal(illegalSubmit.status, 409);
   assert.equal(illegalSubmit.body.code, 'JOB_NOT_IN_PROGRESS');
@@ -332,10 +337,10 @@ test('V3 HTTP tranche 2 completes select and claim lifecycles with fake-clock fa
     fromStatus: 'approved',
     toStatus: 'released',
     transitionAuditId: released.body.transitionAuditId,
-    amountMinor: '1000000001',
+    amountMinor: '2000000001',
     feeBasisPoints: 500,
-    feeMinor: '50000000',
-    recipientMinor: '950000001',
+    feeMinor: '100000000',
+    recipientMinor: '1900000001',
     currency: 'SOL',
     payerId: 'poster',
     recipientId: 'agent-a',
@@ -372,6 +377,11 @@ test('V3 HTTP tranche 2 completes select and claim lifecycles with fake-clock fa
     key: 'key-b', idempotencyKey: 'claim-happy-accept', body: {},
   });
   assert.equal(claimAccepted.body.status, 'in_progress');
+  const unauthorizedAcceptReplay = await request(baseUrl, 'POST', `/api/marketplace/jobs/${claim.body.id}/claim/accept`, {
+    key: 'key-a', idempotencyKey: 'claim-happy-accept', body: {},
+  });
+  assert.equal(unauthorizedAcceptReplay.status, 403);
+  assert.equal(unauthorizedAcceptReplay.body.code, 'APPLICATION_ACTOR_FORBIDDEN');
   const claimDelivery = await submit(claim.body.id, 'claim-submit', 'Claim-mode finished delivery', 'key-b');
   assert.equal(claimDelivery.body.status, 'submitted');
   const tooEarly = await request(baseUrl, 'POST', `/api/marketplace/jobs/${claim.body.id}/approval-timeout`, {
@@ -409,6 +419,11 @@ test('V3 HTTP tranche 2 completes select and claim lifecycles with fake-clock fa
     key: 'key-a', idempotencyKey: 'reopen-decline-a', body: {},
   });
   assert.equal(declinedReplay.body.replayed, true);
+  const unauthorizedDeclineReplay = await request(baseUrl, 'POST', `/api/marketplace/jobs/${reopen.body.id}/claim/decline`, {
+    key: 'key-b', idempotencyKey: 'reopen-decline-a', body: {},
+  });
+  assert.equal(unauthorizedDeclineReplay.status, 403);
+  assert.equal(unauthorizedDeclineReplay.body.code, 'APPLICATION_ACTOR_FORBIDDEN');
   const repeatedIdentity = await request(baseUrl, 'POST', `/api/marketplace/jobs/${reopen.body.id}/claim`, {
     key: 'key-a', idempotencyKey: 'reopen-claim-a-again', body: {},
   });
@@ -424,7 +439,31 @@ test('V3 HTTP tranche 2 completes select and claim lifecycles with fake-clock fa
   });
   assert.equal(timedOut.body.status, 'open');
   assert.equal(timedOut.body.outcome, 'timed_out');
+  const unauthorizedTimeoutReplay = await request(baseUrl, 'POST', `/api/marketplace/jobs/${reopen.body.id}/claim/award-timeout`, {
+    key: 'key-a', idempotencyKey: 'reopen-timeout-b', body: {},
+  });
+  assert.equal(unauthorizedTimeoutReplay.status, 403);
+  assert.equal(unauthorizedTimeoutReplay.body.code, 'CLIENT_ACTION_FORBIDDEN');
 
+  clock.now = '2026-10-05T00:00:00.000Z';
+  const automaticTimeout = await createJob(baseUrl, 'claim');
+  await stageAndVerify(baseUrl, automaticTimeout.body.id, 'staged:claim:auto-timeout');
+  const automaticClaim = await request(baseUrl, 'POST', `/api/marketplace/jobs/${automaticTimeout.body.id}/claim`, {
+    key: 'key-a', idempotencyKey: 'automatic-timeout-claim', body: {},
+  });
+  assert.equal(automaticClaim.body.status, 'awarded');
+  clock.now = '2026-10-07T00:00:00.001Z';
+  const swept = expireTimedOutAwards(db, { now: clock.now });
+  assert.equal(swept.length, 1);
+  assert.equal(swept[0].jobId, automaticTimeout.body.id);
+  assert.equal(swept[0].outcome, 'timed_out');
+  assert.equal(db.prepare('SELECT status FROM jobs WHERE id = ?').get(automaticTimeout.body.id).status, 'open');
+  assert.deepEqual(
+    db.prepare('SELECT outcome, actor_id FROM marketplace_claim_outcomes WHERE claim_id = ?').get(automaticClaim.body.claimId),
+    { outcome: 'timed_out', actor_id: 'system:award-timeout' },
+  );
+
+  clock.now = '2026-10-03T00:00:00.001Z';
   const expiring = await createJob(baseUrl, 'select', { expiresAt: '2026-10-04T00:00:00.000Z' });
   const earlyExpiry = await request(baseUrl, 'POST', `/api/marketplace/jobs/${expiring.body.id}/expire`, {
     key: 'key-poster', idempotencyKey: 'expire-early', body: {},
