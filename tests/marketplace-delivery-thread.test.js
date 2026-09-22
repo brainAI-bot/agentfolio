@@ -146,6 +146,7 @@ test('only the client can request revisions and the two-revision maximum is enfo
         deliverableId: third.deliverable.id,
         actorId: 'client',
         body: { reason: 'A third request is forbidden' },
+        idempotencyKey: 'revision-3',
       }),
       (error) => error instanceof MarketplaceDeliveryError && error.code === 'REVISION_LIMIT_REACHED',
     );

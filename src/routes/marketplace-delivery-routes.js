@@ -304,7 +304,7 @@ function requestRevision(db, {
     if (job.client_id !== actorId) {
       throw new MarketplaceDeliveryError(403, 'CLIENT_ACTION_FORBIDDEN', 'Only the job client may request revisions');
     }
-    const key = String(idempotencyKey || body.idempotencyKey || `revision:${crypto.randomUUID()}`);
+    const key = requireIdempotencyKey(idempotencyKey || body.idempotencyKey);
     const replay = db.prepare('SELECT * FROM marketplace_revision_requests WHERE job_id = ? AND idempotency_key = ?').get(jobId, key);
     if (replay) return { revision: revisionResponse(replay), status: marketplaceState.JOB_STATUS.IN_PROGRESS, replayed: true };
     if (job.status !== marketplaceState.JOB_STATUS.SUBMITTED) {

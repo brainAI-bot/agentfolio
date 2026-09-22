@@ -21,12 +21,29 @@ async function createHarness(clockState = { now: '2026-09-22T12:00:00.000Z' }) {
     wallets TEXT DEFAULT '{}',
     verification_data TEXT DEFAULT '{}',
     api_key TEXT UNIQUE
+  );
+  CREATE TABLE verifications (
+    id TEXT PRIMARY KEY,
+    profile_id TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    identifier TEXT NOT NULL,
+    proof TEXT DEFAULT '{}',
+    verified_at TEXT NOT NULL,
+    UNIQUE(profile_id, platform)
   )`);
   const insert = db.prepare('INSERT INTO profiles (id, verification_data, api_key) VALUES (?, ?, ?)');
   insert.run('poster', '{}', 'key-poster');
   insert.run('agent-a', JSON.stringify({ github: { verified: true }, verificationLevel: 3, trustScore: 80 }), 'key-a');
   insert.run('agent-b', JSON.stringify({ solana: { verified: true }, verificationLevel: 3, trustScore: 75 }), 'key-b');
-  insert.run('agent-low', JSON.stringify({ github: { verified: true }, verificationLevel: 1, trustScore: 10 }), 'key-low');
+  insert.run('agent-low', JSON.stringify({ github: { verified: true }, verificationLevel: 5, trustScore: 100 }), 'key-low');
+  const verify = db.prepare('INSERT INTO verifications (id, profile_id, platform, identifier, proof, verified_at) VALUES (?, ?, ?, ?, ?, ?)');
+  for (const agentId of ['agent-a', 'agent-b']) {
+    verify.run(`v-${agentId}-satp`, agentId, 'satp', `${agentId}-satp`, JSON.stringify({ txSignature: `${agentId}-satp-tx` }), '2026-09-20T00:00:00.000Z');
+    verify.run(`v-${agentId}-github`, agentId, 'github', `${agentId}-github`, '{}', '2026-09-20T00:00:00.000Z');
+    verify.run(`v-${agentId}-solana`, agentId, 'solana', `${agentId}-solana`, '{}', '2026-09-20T00:00:00.000Z');
+  }
+  verify.run('v-agent-low-satp', 'agent-low', 'satp', 'agent-low-satp', '{}', '2026-09-20T00:00:00.000Z');
+  verify.run('v-agent-low-github', 'agent-low', 'github', 'agent-low-github', '{}', '2026-09-20T00:00:00.000Z');
 
   const app = express();
   app.use(express.json());
@@ -254,6 +271,12 @@ test('V3 HTTP tranche 2 completes select and claim lifecycles with fake-clock fa
   });
   assert.equal(accepted.status, 200);
   assert.equal(accepted.body.status, 'in_progress');
+  const acceptedReplay = await request(baseUrl, 'POST', `/api/marketplace/applications/${application.body.id}/accept`, {
+    key: 'key-a', idempotencyKey: 'accept-select-e2e', body: {},
+  });
+  assert.equal(acceptedReplay.status, 200);
+  assert.equal(acceptedReplay.body.replayed, true);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM job_transition_audit WHERE job_id = ? AND to_status = 'in_progress'").get(select.body.id).count, 1);
 
   const submit = async (jobId, key, text, actorKey = 'key-a') => request(baseUrl, 'POST', `/api/marketplace/jobs/${jobId}/deliverables`, {
     key: actorKey, idempotencyKey: key, body: { text, links: [`https://example.com/${key}`] },
@@ -372,6 +395,10 @@ test('V3 HTTP tranche 2 completes select and claim lifecycles with fake-clock fa
     key: 'key-a', idempotencyKey: 'reopen-decline-a', body: {},
   });
   assert.equal(declined.body.status, 'open');
+  const declinedReplay = await request(baseUrl, 'POST', `/api/marketplace/jobs/${reopen.body.id}/claim/decline`, {
+    key: 'key-a', idempotencyKey: 'reopen-decline-a', body: {},
+  });
+  assert.equal(declinedReplay.body.replayed, true);
   const repeatedIdentity = await request(baseUrl, 'POST', `/api/marketplace/jobs/${reopen.body.id}/claim`, {
     key: 'key-a', idempotencyKey: 'reopen-claim-a-again', body: {},
   });
@@ -399,6 +426,10 @@ test('V3 HTTP tranche 2 completes select and claim lifecycles with fake-clock fa
     key: 'key-poster', idempotencyKey: 'expire-due', body: {},
   });
   assert.equal(expired.body.status, 'expired');
+  const expiredReplay = await request(baseUrl, 'POST', `/api/marketplace/jobs/${expiring.body.id}/expire`, {
+    key: 'key-poster', idempotencyKey: 'expire-due', body: {},
+  });
+  assert.equal(expiredReplay.body.replayed, true);
 
   const cancellable = await createJob(baseUrl, 'select');
   await stageAndVerify(baseUrl, cancellable.body.id, 'staged:cancel:e2e');
@@ -407,6 +438,11 @@ test('V3 HTTP tranche 2 completes select and claim lifecycles with fake-clock fa
   });
   assert.equal(cancelled.body.status, 'cancelled');
   assert.deepEqual(cancelled.body.escrow, { effect: 'refund', mode: 'staged', status: 'staged', moneyMoved: false });
+  const cancelledReplay = await request(baseUrl, 'POST', `/api/marketplace/jobs/${cancellable.body.id}/cancel`, {
+    key: 'key-poster', idempotencyKey: 'cancel-funded', body: { reason: 'Poster withdrew the open listing' },
+  });
+  assert.equal(cancelledReplay.body.replayed, true);
+  assert.equal(cancelledReplay.body.transitionAuditId, cancelled.body.transitionAuditId);
   const cancelThread = await request(baseUrl, 'GET', `/api/marketplace/jobs/${cancellable.body.id}/thread`, { key: 'key-poster' });
   assert.equal(cancelThread.body.escrowEffects.length, 1);
   assert.equal(cancelThread.body.escrowEffects[0].effectType, 'refund');
