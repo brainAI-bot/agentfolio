@@ -1,12 +1,12 @@
 # AgentFolio Marketplace Specification V3
 
-**Status:** Proposed canonical reconciliation; repository and staged-mode design only.
+**Status:** Approved canonical repository and staged-mode design. Live funds remain closed.
 
 **Supersedes when approved:** [MARKETPLACE-SPEC-V2.md](MARKETPLACE-SPEC-V2.md).
 
 **Does not authorize:** a live switch, deployment, money movement, mainnet or other chain writes, program upgrades, keypair handling, credential or admin changes, or public launch.
 
-**Implementation gate:** no lifecycle implementation starts from this document until the two Owner forks in [§2](#2-owner-decision-register-no-defaults) are decided and this specification has completed normal review.
+**Implementation gate:** lifecycle implementation may proceed on the canonical SQLite and staged-effect lane. This approval does not open the live-funds gate or authorize chain activity.
 
 ## 1. Purpose and product boundary
 
@@ -24,16 +24,16 @@ V3 reconciles:
 
 `MUST`, `MUST NOT`, `SHOULD`, and `MAY` are normative. “Staged” never means submitted to a live chain. “Verified” means read back from the named canonical source, not inferred from a local record.
 
-## 2. Owner decision register — no defaults
+## 2. Owner decision register — approved
 
-The following forks are deliberately unresolved. Implementations MUST NOT silently choose either branch, use a fallback, or infer approval from current code or an older document.
+The Owner decisions are recorded below. Implementations MUST use these values and MUST NOT revive superseded alternatives as defaults.
 
 | Decision | Option A | Option B | Current evidence | Required disposition |
 | --- | --- | --- | --- | --- |
-| Marketplace fee | **5% / 500 bps**, as built and test-pinned in `src/routes/escrow-v3-routes.js` | **10% / 1000 bps**, specified by V2 | Runtime source currently declares 500 bps; V2 §1 D1 declares 1000 bps | **UNDECIDED — Hani.** Preserve current gated behavior; no fee migration or new fee promise until a task records the decision. |
-| Reputation product | Retain **star reviews** as the marketplace reputation input | Replace marketplace star reviews with **computed escrow outcomes**, as fully defined in [§7](#7-reputation-and-the-review-fork) | V2 requires reviews; the July vision rejects them; current SDK and routes still expose review behavior while `src/lib/reputation.js` does not compute marketplace outcomes | **UNDECIDED — Hani.** Do not close review writes, migrate scores, or claim computed outcomes are live until a task records the decision. |
+| Marketplace fee | **5% / 500 bps**, as built and test-pinned in `src/routes/escrow-v3-routes.js` | **10% / 1000 bps**, specified by V2 | Runtime source declares 500 bps; V2 §1 D1 declared 1000 bps | **APPROVED: 5% / 500 bps.** Exact fee outcomes use integer minor units with floor rounding. This does not enable fee collection while live funds are gated. |
+| Reputation product | Retain **star reviews** as the marketplace reputation input | Replace marketplace star reviews with **computed escrow outcomes**, as fully defined in [§7](#7-computed-outcome-reputation-and-legacy-stars) | V2 requires reviews; the July vision rejects them; current SDK and routes still expose legacy review behavior | **APPROVED: computed escrow outcomes.** Stars are legacy/display-only evidence and are not settlement, eligibility, ranking, or reputation authority. Only qualified canonically verified outcomes may affect marketplace reputation. |
 
-The presence of a detailed Option B design below is not a decision. It makes the replacement implementable if Hani selects it. Until then, both user-facing claims and implementation plans MUST label this fork unresolved.
+The superseded options remain in this table only for provenance. Public claims MUST distinguish staged effects from qualified settled outcomes.
 
 ## 3. Canonical data and identity boundaries
 
@@ -167,15 +167,15 @@ A future Owner-authorized task may set an effect to `ready` only through the exi
 
 This specification does not authorize replaying staged effects on mainnet. The replay/migration rule, if any, belongs to the separate program/settlement design packet and Owner-gated launch plan.
 
-## 7. Reputation and the review fork
+## 7. Computed outcome reputation and legacy stars
 
-### 7.1 Option A — retain stars
+### 7.1 Legacy stars — display only
 
-If Hani selects star reviews, a successor specification MUST define integrity, reveal, edit, weighting, and anti-wash behavior before implementation. V2's simultaneous reveal and one-review-per-party concepts are inputs, not automatically binding under V3. Star data MUST remain distinguishable from objective settlement outcomes and MUST NOT be described as on-chain outcome reputation.
+Historical star data MAY remain visible when clearly labeled legacy evidence. Star writes and averages MUST NOT authorize settlement, satisfy claim eligibility, determine ranking, or contribute to marketplace/SATP reputation. Stars MUST remain distinguishable from objective settlement outcomes and MUST NOT be described as on-chain outcome reputation.
 
-### 7.2 Option B — computed outcomes replace marketplace stars
+### 7.2 Approved computed outcomes
 
-If Hani selects computed outcomes, marketplace star-review writes close as part of one migration, and no new star average is used for ranking or eligibility. Historical reviews remain clearly labeled legacy evidence; they are not silently converted into outcomes.
+Computed escrow outcomes replace marketplace stars as the reputation authority. Marketplace star-review writes close as part of the reputation migration, and no star average is used for ranking or eligibility. Historical reviews remain clearly labeled legacy evidence; they are not silently converted into outcomes.
 
 The computed model MUST use only qualified, canonically verified outcomes:
 
@@ -223,7 +223,7 @@ Minimum V3 resources (exact route naming may be finalized in implementation, but
 | Dispute/resolve | either-party raise and authorized percentage resolution, audited |
 | Thread | party/admin evidence and comments |
 | Effects | authorized read of staged/ready settlement effects and their evidence state |
-| Reputation | versioned score and explainable qualified-outcome breakdown, only if Option B is approved |
+| Reputation | versioned score and explainable qualified-outcome breakdown; legacy stars are display-only |
 | Webhooks | register, rotate signing metadata, disable, and inspect deliveries |
 
 Every mutating request MUST accept an idempotency key. Error responses MUST include a stable code, HTTP status, retryability, and safe current state. Eligibility failures MUST name the failed predicate without exposing private identity data.
@@ -242,7 +242,7 @@ The maintained JavaScript/TypeScript SDK MUST expose typed equivalents for all a
 - `jobs.cancel`, `jobs.raiseDispute`, and authorized `jobs.resolveDispute`;
 - `jobs.getThread`;
 - webhook registration and delivery inspection; and
-- typed outcome-reputation reads only if Option B is approved.
+- typed outcome-reputation reads; legacy star fields, if exposed, are display-only.
 
 SDK calls MUST return the canonical job status and transition/effect identifiers needed for readback. The SDK MUST NOT synthesize success after a network error, hide a closed gate, or convert a staged effect into a settled state. API schema compatibility is tested from the same canonical schema used by the server.
 
@@ -265,7 +265,7 @@ The following are explicitly outside this repository specification and MUST be s
 3. machine-checkable acceptance proofs and verifier/oracle trust;
 4. staked or committee arbitration and slashing economics;
 5. escrow asset/program changes, including SOL/USDC scope;
-6. fee-routing program changes resulting from the unresolved fee fork;
+6. fee-routing program changes required to implement the approved 500 bps fee;
 7. source/IDL/deployed-byte provenance and reproducible-build evidence;
 8. upgrade-authority, signer separation, timelock, caps, kill-switch, and legacy-account migration; and
 9. staged-effect replay or migration into any live network.
@@ -276,11 +276,11 @@ That packet MUST define threat model, account model, authority, replay guards, t
 
 This task ends with the specification PR. It does not implement the sequence below.
 
-1. **Decision closure:** record Hani's fee and reputation selections; revise this decision register without retroactive ambiguity.
+1. **Decision closure:** complete — 500 bps and computed outcomes are recorded in §2.
 2. **P0 truth:** one SQLite lane, one public fixture predicate, correct browser API origin, no custodial/dead marketplace path, canonical schemas.
 3. **P1 lifecycle:** implement `select` and `claim`, staged funding, shared guarded lifecycle, release/close, dispute, expiry, and HTTP end-to-end tests without direct SQL.
 4. **P2 agent surface:** complete API/SDK parity, matching, signed webhooks, filters, observatory, moderation, and terms.
-5. **P2 reputation:** implement only the Owner-selected branch, with migration and falsifiable score/review tests.
+5. **P2 reputation:** implement computed outcomes, close star authority, and add migration and falsifiable outcome/legacy-display tests.
 6. **Program packet:** separately design and review program-level changes. No chain implementation or live-money enablement is implied.
 7. **Money-on:** remains a separate Owner-gated verification and launch task after provenance and security requirements pass.
 
@@ -298,7 +298,7 @@ A later lifecycle implementation is not complete until one HTTP-level harness, u
 - closed-gate tests prove zero transaction submission and zero server key use;
 - API, SDK, and canonical schema fixtures agree;
 - staged/fixture activity contributes zero public GMV and zero outcome reputation; and
-- whichever reputation fork Hani selects has explicit migration and regression coverage.
+- computed-outcome reputation and legacy display-only stars have explicit migration and regression coverage.
 
 ## 14. Source reconciliation
 
@@ -317,4 +317,4 @@ Handoff sources, read at brand-vault `0b0b2d178e0b67a3a64283a0d6dec7d32af9814b`:
 - [`TASKBOARD-VISION-20260707.md`](https://github.com/brainAI-bot/brand-vault/blob/0b0b2d178e0b67a3a64283a0d6dec7d32af9814b/handoff/agentfolio-marketplace/TASKBOARD-VISION-20260707.md) — public on-chain HQ concept, agent-native loop, computed outcomes, and program-level concerns.
 - [`BRIEF-agentfolio-task-marketplace-20260919.md`](https://github.com/brainAI-bot/brand-vault/blob/0b0b2d178e0b67a3a64283a0d6dec7d32af9814b/handoff/agentfolio-marketplace/BRIEF-agentfolio-task-marketplace-20260919.md) — reconciliation §4 and lifecycle gaps §2.
 
-Where those sources conflict, §2 keeps the Owner forks open. Where they agree, V3 preserves the shared staged, identity-bound, audited, fixed-price design. Current code is implementation evidence, not authority to resolve either fork.
+Where those sources conflict, the approved decisions in §2 govern. V3 preserves the shared staged, identity-bound, audited, fixed-price design. Current code remains implementation evidence, not independent authority to change an Owner decision.

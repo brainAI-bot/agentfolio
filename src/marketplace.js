@@ -1037,9 +1037,10 @@ function registerRoutes(app, dependencies = {}) {
 
   // POST /api/marketplace/jobs/:id/review — Leave a review after release/completion
   app.post('/api/marketplace/jobs/:id/review', (req, res) => {
-    res.status(403).json({
-      error: 'Marketplace review writes require the signed released-escrow flow',
-      next: '/api/reviews/challenge then /api/reviews/submit',
+    res.status(410).json({
+      code: 'MARKETPLACE_STAR_WRITES_CLOSED',
+      error: 'Marketplace star reviews are legacy display-only evidence',
+      reputationAuthority: 'computed_escrow_outcomes',
     });
   });
 
@@ -1050,7 +1051,14 @@ function registerRoutes(app, dependencies = {}) {
     const job = readJSON(safeJobPath(jobId));
     if (!job) return res.status(404).json({ error: 'Job not found' });
     const reviews = readJobReviews(jobId);
-    res.json({ jobId, reviews, total: reviews.length });
+    res.json({
+      jobId,
+      reviews,
+      total: reviews.length,
+      legacyDisplayOnly: true,
+      settlementAuthority: false,
+      reputationAuthority: false,
+    });
   });
 
   // POST /api/marketplace/jobs/:id/request-changes — Request revisions

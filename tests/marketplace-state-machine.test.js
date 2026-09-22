@@ -251,7 +251,7 @@ test('does not stage escrow effects for release or dispute transitions without a
   }
 });
 
-test('write complete route uses the transition guard on the real jobs table', async () => {
+test('legacy write complete route fails closed on forbidden open-to-completed transition', async () => {
   const writeEndpointsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'write-endpoints.js'), 'utf8');
   assert.match(writeEndpointsSource, /const writeEndpointMarketplaceMutationLimiter = rateLimit\(/);
   assert.match(
@@ -307,27 +307,21 @@ test('write complete route uses the transition guard on the real jobs table', as
       },
       body: JSON.stringify({ completion_note: 'accepted' }),
     });
-    assert.equal(response.status, 200);
+    assert.equal(response.status, 409);
     const body = await response.json();
-    assert.equal(body.status, JOB_STATUS.COMPLETED);
+    assert.equal(body.code, 'ILLEGAL_JOB_TRANSITION');
 
     const verifyDb = new Database(dbPath);
     try {
       const job = verifyDb.prepare('SELECT status, completed_at, completion_note, funds_released FROM jobs WHERE id = ?')
         .get('job_route_complete');
-      assert.equal(job.status, JOB_STATUS.COMPLETED);
-      assert.ok(job.completed_at);
-      assert.equal(job.completion_note, 'accepted');
-      assert.equal(job.funds_released, 1);
+      assert.equal(job.status, JOB_STATUS.OPEN);
+      assert.equal(job.completed_at, null);
+      assert.equal(job.completion_note, null);
+      assert.equal(job.funds_released, 0);
 
-      const audit = verifyDb.prepare('SELECT from_status, to_status, actor_id, source FROM job_transition_audit WHERE job_id = ?')
-        .get('job_route_complete');
-      assert.deepEqual(audit, {
-        from_status: JOB_STATUS.OPEN,
-        to_status: JOB_STATUS.COMPLETED,
-        actor_id: 'client_route',
-        source: 'write-endpoints',
-      });
+      const audit = verifyDb.prepare('SELECT id FROM job_transition_audit WHERE job_id = ?').get('job_route_complete');
+      assert.equal(audit, undefined);
     } finally {
       verifyDb.close();
     }

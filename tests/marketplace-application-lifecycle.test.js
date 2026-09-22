@@ -182,7 +182,7 @@ test('selection requires exact verified funding and records counter-offer top-up
   const selected = await post(baseUrl, '/api/marketplace/jobs/job_counter/applications/app_counter/select', 'key-client');
   assert.equal(selected.status, 200);
   assert.equal(selected.body.status, 'awarded');
-  assert.equal(selected.body.agreedBudget, 100);
+  assert.equal(selected.body.agreedBudget, '100');
   const awardWindowMs = new Date(selected.body.awardExpiresAt).getTime() - Date.now();
   assert.ok(awardWindowMs > (48 * 60 * 60 * 1000) - 5000);
   assert.ok(awardWindowMs <= 48 * 60 * 60 * 1000);
@@ -196,7 +196,7 @@ test('selection requires exact verified funding and records counter-offer top-up
   );
 });
 
-test('minor-unit funding comparison accepts a representation artifact without recording an adjustment', async (t) => {
+test('exact funding comparison rejects a binary floating-point representation artifact', async (t) => {
   const { db, server, baseUrl } = createHarness();
   t.after(() => { server.close(); db.close(); });
   insertJob(db, 'job_float_artifact', {
@@ -208,12 +208,13 @@ test('minor-unit funding comparison accepts a representation artifact without re
   insertApplication(db, 'app_float_artifact', 'job_float_artifact', 'verified-agent', 0.3);
 
   const selected = await post(baseUrl, '/api/applications/app_float_artifact/select', 'key-client');
-  assert.equal(selected.status, 200);
-  assert.equal(selected.body.status, 'awarded');
+  assert.equal(selected.status, 409);
+  assert.equal(selected.body.code, 'ESCROW_AMOUNT_INVALID');
   assert.equal(
     db.prepare('SELECT COUNT(*) AS count FROM marketplace_escrow_adjustments').get().count,
     0,
   );
+  assert.equal(db.prepare('SELECT status FROM jobs WHERE id = ?').get('job_float_artifact').status, 'open');
 });
 
 test('selection and acceptance require normalized escrow and job currency equality', async (t) => {

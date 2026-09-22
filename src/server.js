@@ -44,6 +44,7 @@ const {
   getPublicMarketplaceCohort,
   summarizePublicMarketplaceCohort,
 } = require('./lib/public-marketplace-jobs');
+const { formatMinorUnits } = require('./lib/marketplace-money');
 const { isOnChainIdentity } = require('./lib/onchain-identity');
 const {
   CANONICAL_TRUST_PROVIDERS,
@@ -1755,8 +1756,11 @@ function marketplaceApplicationCounts(d, jobIds) {
 }
 
 function mapSqliteMarketplaceJob(row, profileMap, applicationCounts) {
-  const budgetAmount = row.agreed_budget ?? row.budget_amount ?? 0;
   const budgetCurrency = row.budget_currency || 'SOL';
+  const budgetAmountMinor = row.agreed_budget_minor || row.budget_amount_minor || null;
+  const budgetAmount = row.agreed_budget != null
+    ? String(row.agreed_budget)
+    : (budgetAmountMinor ? formatMinorUnits(budgetAmountMinor, budgetCurrency) : String(row.budget_amount ?? 0));
   let skills = [];
   let attachments = [];
   try { skills = JSON.parse(row.skills || '[]'); } catch {}
@@ -1766,7 +1770,11 @@ function mapSqliteMarketplaceJob(row, profileMap, applicationCounts) {
     ...row,
     budget: `${budgetAmount} ${budgetCurrency}`,
     budgetAmount,
+    budgetAmountMinor,
     budgetCurrency,
+    pickupMode: row.pickup_mode || 'select',
+    minimumVerificationLevel: Number(row.minimum_verification_level) || 1,
+    minimumTrustScore: row.minimum_trust_score == null ? null : Number(row.minimum_trust_score),
     poster: profileMap.get(row.client_id) || row.client_id || 'Unknown client',
     posterId: row.client_id,
     clientId: row.client_id,
