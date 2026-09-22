@@ -1,6 +1,8 @@
 'use strict';
 
 const CURRENCY_DECIMALS = Object.freeze({ SOL: 9, USDC: 6 });
+const MARKETPLACE_FEE_BPS = 500n;
+const BASIS_POINTS = 10000n;
 
 class MarketplaceAmountError extends Error {
   constructor(code, message) {
@@ -54,6 +56,21 @@ function exactMinorUnits(row, decimalField, minorField, currencyField = 'budget_
   return parseDecimalToMinorUnits(row?.[decimalField], row?.[currencyField]);
 }
 
+function marketplaceFeeSplit(minorValue) {
+  const raw = String(minorValue || '');
+  if (!/^[1-9]\d*$/.test(raw)) {
+    throw new MarketplaceAmountError('INVALID_MINOR_UNITS', 'Minor units must be a positive integer string');
+  }
+  const amount = BigInt(raw);
+  const fee = (amount * MARKETPLACE_FEE_BPS) / BASIS_POINTS;
+  return {
+    amountMinor: amount.toString(),
+    feeBasisPoints: Number(MARKETPLACE_FEE_BPS),
+    feeMinor: fee.toString(),
+    recipientMinor: (amount - fee).toString(),
+  };
+}
+
 module.exports = {
   CURRENCY_DECIMALS,
   MarketplaceAmountError,
@@ -61,4 +78,6 @@ module.exports = {
   parseDecimalToMinorUnits,
   formatMinorUnits,
   exactMinorUnits,
+  MARKETPLACE_FEE_BPS: Number(MARKETPLACE_FEE_BPS),
+  marketplaceFeeSplit,
 };

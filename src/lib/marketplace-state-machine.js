@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { liveEscrowGateStatus } = require('./write-surface-gate');
+const { exactMinorUnits, marketplaceFeeSplit } = require('./marketplace-money');
 
 const JOB_STATUS = Object.freeze({
   DRAFT: 'draft',
@@ -388,6 +389,19 @@ function transitionJobState(db, jobId, toStatus, options = {}) {
           fromStatus: job.status,
           toStatus,
           transitionAuditId: auditId,
+          ...(effectType === 'release' && job.budget_currency && (
+            job.agreed_budget_minor || job.budget_amount_minor
+            || job.agreed_budget != null || job.budget_amount != null
+          ) ? {
+            ...marketplaceFeeSplit(exactMinorUnits(
+              job,
+              job.agreed_budget != null ? 'agreed_budget' : 'budget_amount',
+              job.agreed_budget_minor ? 'agreed_budget_minor' : 'budget_amount_minor',
+            )),
+            currency: job.budget_currency,
+            payerId: job.client_id,
+            recipientId: job.selected_agent_id,
+          } : {}),
         },
         createdAt: now,
       };

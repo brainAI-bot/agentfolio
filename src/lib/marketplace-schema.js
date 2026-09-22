@@ -53,6 +53,8 @@ function initializeMarketplaceCoreSchema(db) {
       dispute_id TEXT,
       expired_at TEXT,
       expiry_reason TEXT,
+      released_at TEXT,
+      closed_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -122,6 +124,8 @@ function initializeMarketplaceCoreSchema(db) {
 
   addColumn(db, 'jobs', 'expired_at TEXT');
   addColumn(db, 'jobs', 'expiry_reason TEXT');
+  addColumn(db, 'jobs', 'released_at TEXT');
+  addColumn(db, 'jobs', 'closed_at TEXT');
   addColumn(db, 'jobs', 'selected_application_id TEXT');
   addColumn(db, 'jobs', 'award_expires_at TEXT');
   addColumn(db, 'jobs', 'agreed_budget_minor TEXT');
