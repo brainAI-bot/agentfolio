@@ -6,6 +6,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const Database = require('better-sqlite3');
 const { trustLoopbackProxyHop } = require('../src/lib/loopback-proxy');
+const { API_DOCS } = require('../src/api/docs');
 
 const serverSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
 const dataSource = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'src', 'lib', 'data.ts'), 'utf8');
@@ -47,7 +48,13 @@ test('marketplace surface regression guard', async (t) => {
   await t.test('canonical route registration covers supported aliases without retired JSON or custodial routes', () => {
     const registrations = new Set();
     const capture = (method) => (route) => registrations.add(`${method} ${route}`);
-    const fakeApp = { get: capture('GET'), post: capture('POST') };
+    const fakeApp = {
+      get: capture('GET'),
+      post: capture('POST'),
+      put: capture('PUT'),
+      patch: capture('PATCH'),
+      delete: capture('DELETE'),
+    };
     const db = new Database(':memory:');
     db.exec(`
       CREATE TABLE profiles (
@@ -80,6 +87,27 @@ test('marketplace surface regression guard', async (t) => {
     ]) {
       assert.ok(registrations.has(route), `${route} must be registered by the canonical SQLite factory`);
     }
+
+    const mutationMethods = new Set(['post', 'put', 'patch', 'delete']);
+    const documentedMarketplaceMutations = Object.entries(API_DOCS.paths)
+      .filter(([route]) => route.startsWith('/api/marketplace/jobs'))
+      .flatMap(([route, operations]) => Object.keys(operations)
+        .filter((method) => mutationMethods.has(method))
+        .map((method) => `${method.toUpperCase()} ${route.replace(/\{([^}]+)\}/g, ':$1')}`));
+    for (const route of documentedMarketplaceMutations) {
+      assert.ok(registrations.has(route), `${route} must match a registered canonical SQLite route`);
+    }
+
+    for (const route of [
+      '/api/marketplace/jobs/create-onchain',
+      '/api/marketplace/jobs/{id}/select/{applicationId}',
+      '/api/marketplace/jobs/{id}/submit',
+      '/api/marketplace/jobs/{id}/cancel',
+      '/api/marketplace/jobs/{id}/dispute',
+    ]) {
+      assert.equal(API_DOCS.paths[route], undefined, `${route} must stay retired from public docs`);
+    }
+    assert.equal(API_DOCS.paths['/api/marketplace/jobs/{id}'].patch, undefined, 'unregistered job PATCH must stay retired from public docs');
 
     for (const route of [
       'POST /api/marketplace/jobs/:id/escrow',

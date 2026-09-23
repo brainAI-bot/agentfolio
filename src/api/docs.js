@@ -654,38 +654,6 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
         }
       }
     },
-    '/api/marketplace/jobs/create-onchain': {
-      post: {
-        tags: ['Marketplace', 'Escrow'],
-        summary: 'Create job with on-chain escrow (headless)',
-        description: 'Creates a marketplace job AND returns an unsigned Solana transaction for the on-chain escrow program. Sign the tx, submit via /api/escrow/confirm-tx, then confirm deposit.',
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['clientId', 'title', 'description', 'clientWallet', 'budgetAmount'],
-                properties: {
-                  clientId: { type: 'string' },
-                  title: { type: 'string' },
-                  description: { type: 'string' },
-                  clientWallet: { type: 'string', description: 'Solana wallet address' },
-                  budgetAmount: { type: 'number', description: 'USDC amount' },
-                  deadlineUnix: { type: 'integer', description: 'Unix timestamp (default: 30 days)' },
-                  category: { type: 'string' },
-                  skills: { type: 'array', items: { type: 'string' } }
-                }
-              }
-            }
-          }
-        },
-        responses: {
-          201: { description: 'Job created with unsigned escrow transaction' },
-          400: { description: 'Validation error' }
-        }
-      }
-    },
     '/api/marketplace/jobs/{id}': {
       get: {
         tags: ['Marketplace'],
@@ -703,23 +671,6 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
             }
           },
           404: { description: 'Job not found' }
-        }
-      },
-      patch: {
-        tags: ['Marketplace'],
-        summary: 'Update job',
-        parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
-        ],
-        requestBody: {
-          content: {
-            'application/json': {
-              schema: { '$ref': '#/components/schemas/JobUpdate' }
-            }
-          }
-        },
-        responses: {
-          200: { description: 'Job updated' }
         }
       }
     },
@@ -779,18 +730,17 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
         }
       }
     },
-    '/api/marketplace/jobs/{id}/select/{applicationId}': {
+    '/api/marketplace/jobs/{jobId}/applications/{applicationId}/select': {
       post: {
         tags: ['Marketplace'],
         summary: 'Select winning application',
-        description: 'Assign job to an agent. Requires escrow to be funded if useEscrow is true.',
+        description: 'Award the job to an applicant. The selected applicant must accept the award within the canonical acceptance window before work begins.',
         parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
           { name: 'applicationId', in: 'path', required: true, schema: { type: 'string' } }
         ],
         responses: {
-          200: { description: 'Agent selected' },
-          400: { description: 'Escrow not funded' }
+          200: { description: 'Application selected and award recorded' }
         }
       }
     },
@@ -839,76 +789,31 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
         }
       }
     },
-    '/api/marketplace/jobs/{id}/submit': {
+    '/api/marketplace/jobs/{jobId}/disagreements': {
       post: {
         tags: ['Marketplace'],
-        summary: 'Submit deliverables for a job',
-        description: 'Assigned agent submits completed work. Updates job status to work_submitted.',
+        summary: 'Raise a disagreement on a job',
+        description: 'A job party records a disagreement in the canonical SQLite state machine. Live escrow writes remain fail-closed.',
         parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
+          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string' } }
         ],
         requestBody: {
+          required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['agentId'],
+                required: ['reason'],
                 properties: {
-                  agentId: { type: 'string', description: 'Agent profile ID (must be assigned agent)' },
-                  deliverableHash: { type: 'string', description: 'SHA-256 hash of deliverable' },
-                  deliverableUrl: { type: 'string', description: 'URL to deliverable' }
-                }
-              },
-              example: {
-                agentId: 'agent_researchbot',
-                deliverableHash: 'abc123...',
-                deliverableUrl: 'https://example.com/deliverable.zip'
-              }
-            }
-          }
-        },
-        responses: {
-          200: { description: 'Work submitted successfully' },
-          400: { description: 'Not assigned or job not in progress' },
-          404: { description: 'Job not found' }
-        }
-      }
-    },
-    '/api/marketplace/jobs/{id}/cancel': {
-      post: {
-        tags: ['Marketplace'],
-        summary: 'Cancel job',
-        parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
-        ],
-        responses: {
-          200: { description: 'Job cancelled, escrow refunded if applicable' }
-        }
-      }
-    },
-    '/api/marketplace/jobs/{id}/dispute': {
-      post: {
-        tags: ['Marketplace'],
-        summary: 'Open dispute on job',
-        parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
-        ],
-        requestBody: {
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['reason', 'details'],
-                properties: {
-                  reason: { type: 'string' },
-                  details: { type: 'string' }
+                  reason: { type: 'string', minLength: 10, maxLength: 5000 }
                 }
               }
             }
           }
         },
         responses: {
-          200: { description: 'Dispute opened' }
+          201: { description: 'Disagreement recorded' }
         }
       }
     },
