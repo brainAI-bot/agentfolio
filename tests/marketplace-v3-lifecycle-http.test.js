@@ -36,13 +36,20 @@ function seedIdentityDatabase(dbPath) {
   const profiles = [
     ['poster', 'Poster', '{}', '{}', 'key-poster'],
     ['worker', 'Worker', '{}', JSON.stringify({ github: { verified: true }, verificationLevel: 3, trustScore: 80 }), 'key-worker'],
+    ['worker-b', 'Worker B', '{}', JSON.stringify({ solana: { verified: true }, verificationLevel: 3, trustScore: 75 }), 'key-worker-b'],
+    ['worker-low', 'Worker Low', '{}', JSON.stringify({ github: { verified: true }, verificationLevel: 5, trustScore: 100 }), 'key-worker-low'],
     ['admin', 'Admin', '{}', '{}', 'key-admin'],
   ];
   const insertProfile = db.prepare('INSERT INTO profiles (id, name, wallets, verification_data, api_key) VALUES (?, ?, ?, ?, ?)');
   for (const profile of profiles) insertProfile.run(...profile);
   const insertVerification = db.prepare('INSERT INTO verifications (id, profile_id, platform, identifier, proof, verified_at) VALUES (?, ?, ?, ?, ?, ?)');
-  for (const platform of ['satp', 'github', 'solana']) {
-    insertVerification.run(`v-worker-${platform}`, 'worker', platform, `worker-${platform}`, '{}', '2026-09-22T00:00:00.000Z');
+  for (const workerId of ['worker', 'worker-b']) {
+    for (const platform of ['satp', 'github', 'solana']) {
+      insertVerification.run(`v-${workerId}-${platform}`, workerId, platform, `${workerId}-${platform}`, '{}', '2026-09-22T00:00:00.000Z');
+    }
+  }
+  for (const platform of ['satp', 'github']) {
+    insertVerification.run(`v-worker-low-${platform}`, 'worker-low', platform, `worker-low-${platform}`, '{}', '2026-09-22T00:00:00.000Z');
   }
   db.close();
 }
@@ -152,6 +159,36 @@ test('V3 staged lifecycle uses the production route factory without live funds o
   assert.equal(rejectedStage.status, 400);
   assert.equal(rejectedStage.body.code, 'SERVER_ESCROW_REFERENCE_REQUIRED');
 
+  const happy = await createFundAccept(baseUrl, 'happy-path');
+  const happyDelivery = await api(baseUrl, 'POST', `/api/marketplace/jobs/${happy.jobId}/deliverables`, {
+    key: 'key-worker', idempotencyKey: 'deliver-happy', body: { text: 'Completed staged work for normal acceptance.', links: [] },
+  });
+  assert.equal(happyDelivery.status, 201);
+  assert.equal(happyDelivery.body.status, 'submitted');
+  const happyApproval = await api(baseUrl, 'POST', `/api/marketplace/jobs/${happy.jobId}/deliverables/${happyDelivery.body.deliverable.id}/approve`, {
+    key: 'key-poster', idempotencyKey: 'approve-happy', body: {},
+  });
+  assert.equal(happyApproval.status, 200);
+  assert.equal(happyApproval.body.status, 'approved');
+  const happyRelease = await api(baseUrl, 'POST', `/api/marketplace/jobs/${happy.jobId}/release`, {
+    key: 'key-poster', idempotencyKey: 'release-happy', body: {},
+  });
+  assert.equal(happyRelease.status, 200);
+  assert.equal(happyRelease.body.status, 'released');
+  assert.equal(happyRelease.body.executionMode, 'staged');
+  assert.equal(happyRelease.body.moneyMoved, false);
+  assert.equal(happyRelease.body.effect.amountMinor, '1000000001');
+  assert.equal(happyRelease.body.effect.feeMinor, '50000000');
+  assert.equal(happyRelease.body.effect.recipientMinor, '950000001');
+  const happyClose = await api(baseUrl, 'POST', `/api/marketplace/jobs/${happy.jobId}/close`, {
+    key: 'key-poster', idempotencyKey: 'close-happy', body: {},
+  });
+  assert.equal(happyClose.status, 200);
+  assert.equal(happyClose.body.status, 'closed');
+  assert.equal(happyClose.body.moneyMoved, false);
+  const happyRead = await api(baseUrl, 'GET', `/api/marketplace/jobs/${happy.jobId}`);
+  assert.equal(happyRead.body.status, 'closed');
+
   const disputed = await createFundAccept(baseUrl, 'dispute');
   const delivered = await api(baseUrl, 'POST', `/api/marketplace/jobs/${disputed.jobId}/deliverables`, {
     key: 'key-worker', idempotencyKey: 'deliver-dispute', body: { text: 'Completed work with evidence.', links: [] },
@@ -193,6 +230,25 @@ test('V3 staged lifecycle uses the production route factory without live funds o
   assert.equal(resolutionReplay.body.replayed, true);
   assert.equal(resolutionReplay.body.resolution.workerAmountMinor, '600000001');
 
+  for (const [outcome, expectedStatus] of [['worker', 'released'], ['poster', 'cancelled']]) {
+    const variant = await createFundAccept(baseUrl, `dispute-${outcome}`);
+    const variantDelivery = await api(baseUrl, 'POST', `/api/marketplace/jobs/${variant.jobId}/deliverables`, {
+      key: 'key-worker', idempotencyKey: `deliver-dispute-${outcome}`, body: { text: `Disputed delivery resolved for ${outcome}.`, links: [] },
+    });
+    assert.equal(variantDelivery.status, 201);
+    const raised = await api(baseUrl, 'POST', `/api/marketplace/jobs/${variant.jobId}/disagreements`, {
+      key: 'key-poster', idempotencyKey: `raise-dispute-${outcome}`, body: { reason: `Exercise the ${outcome} resolution state transition.` },
+    });
+    assert.equal(raised.body.status, 'disputed');
+    const resolved = await api(baseUrl, 'POST', `/api/marketplace/jobs/${variant.jobId}/disagreements/resolve`, {
+      key: 'key-admin', idempotencyKey: `resolve-dispute-${outcome}`, body: { resolution: outcome, reason: `Canonical evidence supports the ${outcome} outcome.` },
+    });
+    assert.equal(resolved.status, 200);
+    assert.equal(resolved.body.status, expectedStatus);
+    assert.equal(resolved.body.executionMode, 'staged');
+    assert.equal(resolved.body.moneyMoved, false);
+  }
+
   const silent = await createFundAccept(baseUrl, 'silent-poster');
   const silentDelivery = await api(baseUrl, 'POST', `/api/marketplace/jobs/${silent.jobId}/deliverables`, {
     key: 'key-worker', idempotencyKey: 'deliver-silent', body: { text: 'Accepted worker submitted final staged work.', links: [] },
@@ -224,9 +280,96 @@ test('V3 staged lifecycle uses the production route factory without live funds o
   const expiredRead = await api(baseUrl, 'GET', `/api/marketplace/jobs/${expiring.body.id}`);
   assert.equal(expiredRead.body.status, 'expired');
 
+  clock.now = '2026-10-03T00:00:00.000Z';
+  const claimRace = await api(baseUrl, 'POST', '/api/marketplace/jobs', {
+    key: 'key-poster', body: jobBody('Claim race guard', { pickupMode: 'claim' }),
+  });
+  assert.equal(claimRace.status, 201);
+  const raceStaged = await api(baseUrl, 'POST', `/api/marketplace/jobs/${claimRace.body.id}/fund-staged`, {
+    key: 'key-poster', idempotencyKey: 'stage-claim-race', body: { amount: '1.000000001' },
+  });
+  assert.equal(raceStaged.status, 201);
+  const raceVerified = await api(baseUrl, 'POST', `/api/marketplace/jobs/${claimRace.body.id}/fund-staged/verify`, {
+    key: 'key-poster', idempotencyKey: 'verify-claim-race', body: { escrowReference: raceStaged.body.escrowId },
+  });
+  assert.equal(raceVerified.status, 200);
+  const ineligibleClaim = await api(baseUrl, 'POST', `/api/marketplace/jobs/${claimRace.body.id}/claim`, {
+    key: 'key-worker-low', idempotencyKey: 'claim-low', body: {},
+  });
+  assert.equal(ineligibleClaim.status, 403);
+  assert.equal(ineligibleClaim.body.code, 'CLAIM_INELIGIBLE_VERIFICATION_LEVEL');
+  const claims = await Promise.all([
+    api(baseUrl, 'POST', `/api/marketplace/jobs/${claimRace.body.id}/claim`, { key: 'key-worker', idempotencyKey: 'claim-worker', body: {} }),
+    api(baseUrl, 'POST', `/api/marketplace/jobs/${claimRace.body.id}/claim`, { key: 'key-worker-b', idempotencyKey: 'claim-worker-b', body: {} }),
+  ]);
+  const winnerIndex = claims.findIndex((entry) => entry.status === 200);
+  const loserIndex = claims.findIndex((entry) => entry.status === 409);
+  assert.notEqual(winnerIndex, -1);
+  assert.notEqual(loserIndex, -1);
+  assert.equal(claims[loserIndex].body.code, 'JOB_ALREADY_CLAIMED');
+  assert.equal(claims[loserIndex].body.selectedAgentId, undefined);
+  assert.equal(claims[loserIndex].body.retryable, false);
+  const claimKeys = ['key-worker', 'key-worker-b'];
+  const claimIds = ['claim-worker', 'claim-worker-b'];
+  const acceptedClaim = await api(baseUrl, 'POST', `/api/marketplace/jobs/${claimRace.body.id}/claim/accept`, {
+    key: claimKeys[winnerIndex], idempotencyKey: `${claimIds[winnerIndex]}-accept`, body: {},
+  });
+  assert.equal(acceptedClaim.body.status, 'in_progress');
+  const unauthorizedAcceptReplay = await api(baseUrl, 'POST', `/api/marketplace/jobs/${claimRace.body.id}/claim/accept`, {
+    key: claimKeys[loserIndex], idempotencyKey: `${claimIds[winnerIndex]}-accept`, body: {},
+  });
+  assert.equal(unauthorizedAcceptReplay.status, 403);
+  assert.equal(unauthorizedAcceptReplay.body.code, 'APPLICATION_ACTOR_FORBIDDEN');
+
+  const reopen = await api(baseUrl, 'POST', '/api/marketplace/jobs', {
+    key: 'key-poster', body: jobBody('Claim return-path guard', { pickupMode: 'claim' }),
+  });
+  const reopenStaged = await api(baseUrl, 'POST', `/api/marketplace/jobs/${reopen.body.id}/fund-staged`, {
+    key: 'key-poster', idempotencyKey: 'stage-claim-reopen', body: { amount: '1.000000001' },
+  });
+  assert.equal(reopenStaged.status, 201);
+  const reopenVerified = await api(baseUrl, 'POST', `/api/marketplace/jobs/${reopen.body.id}/fund-staged/verify`, {
+    key: 'key-poster', idempotencyKey: 'verify-claim-reopen', body: { escrowReference: reopenStaged.body.escrowId },
+  });
+  assert.equal(reopenVerified.status, 200);
+  const firstClaim = await api(baseUrl, 'POST', `/api/marketplace/jobs/${reopen.body.id}/claim`, {
+    key: 'key-worker', idempotencyKey: 'reopen-claim-worker', body: {},
+  });
+  assert.equal(firstClaim.body.status, 'awarded');
+  const declined = await api(baseUrl, 'POST', `/api/marketplace/jobs/${reopen.body.id}/claim/decline`, {
+    key: 'key-worker', idempotencyKey: 'reopen-decline-worker', body: {},
+  });
+  assert.equal(declined.body.status, 'open');
+  const unauthorizedDeclineReplay = await api(baseUrl, 'POST', `/api/marketplace/jobs/${reopen.body.id}/claim/decline`, {
+    key: 'key-worker-b', idempotencyKey: 'reopen-decline-worker', body: {},
+  });
+  assert.equal(unauthorizedDeclineReplay.status, 403);
+  assert.equal(unauthorizedDeclineReplay.body.code, 'APPLICATION_ACTOR_FORBIDDEN');
+  const secondClaim = await api(baseUrl, 'POST', `/api/marketplace/jobs/${reopen.body.id}/claim`, {
+    key: 'key-worker-b', idempotencyKey: 'reopen-claim-worker-b', body: {},
+  });
+  assert.equal(secondClaim.body.status, 'awarded');
+  clock.now = '2026-10-05T00:00:00.001Z';
+  const timedOut = await api(baseUrl, 'POST', `/api/marketplace/jobs/${reopen.body.id}/claim/award-timeout`, {
+    key: 'key-poster', idempotencyKey: 'reopen-timeout-worker-b', body: {},
+  });
+  assert.equal(timedOut.body.status, 'open');
+  assert.equal(timedOut.body.outcome, 'timed_out');
+  const unauthorizedTimeoutReplay = await api(baseUrl, 'POST', `/api/marketplace/jobs/${reopen.body.id}/claim/award-timeout`, {
+    key: 'key-worker', idempotencyKey: 'reopen-timeout-worker-b', body: {},
+  });
+  assert.equal(unauthorizedTimeoutReplay.status, 403);
+  assert.equal(unauthorizedTimeoutReplay.body.code, 'CLIENT_ACTION_FORBIDDEN');
+
   const db = runtime.getDb();
   const transitions = db.prepare('SELECT from_status, to_status, actor_id, source FROM job_transition_audit WHERE job_id = ? ORDER BY created_at, rowid').all(expiring.body.id);
   assert.deepEqual(transitions, [{ from_status: 'open', to_status: 'expired', actor_id: 'system:job-expiry', source: 'marketplace-job-expiry-timer' }]);
-  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM marketplace_disagreement_resolutions').get().count, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM marketplace_disagreement_resolutions').get().count, 3);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM marketplace_escrow_effects WHERE execution_mode <> 'staged' OR live_escrow_enabled <> 0").get().count, 0);
+  const lifecycleSources = [
+    'marketplace-job-routes.js',
+    'marketplace-application-routes.js',
+    'marketplace-delivery-routes.js',
+  ].map((file) => fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', file), 'utf8')).join('\n');
+  assert.doesNotMatch(lifecycleSources, /\b(?:Keypair|privateKey|secretKey|sendTransaction|sendRawTransaction|signTransaction|build\w*Tx|relayTransaction)\b/);
 });

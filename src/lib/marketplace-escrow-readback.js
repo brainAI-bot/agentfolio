@@ -278,6 +278,7 @@ async function verifyEscrowFundingOnChain(
   };
 }
 
+// Staged-only readback of the server-created escrow row; live mode must use canonical on-chain readback.
 function readStagedEscrowFunding(db, { jobId, escrowReference }) {
   const escrow = db.prepare(`
     SELECT id, job_id, client_id, amount_minor, currency, status, deposit_confirmed_at
