@@ -4,6 +4,14 @@ const rateLimit = require('express-rate-limit');
 const { createMarketplaceAuth } = require('../lib/marketplace-wallet-auth');
 const webhooks = require('../lib/webhooks');
 
+const webhookReadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { code: 'WEBHOOK_RATE_LIMIT', error: 'Too many webhook read requests' },
+});
+
 const webhookMutationLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 60,
@@ -23,11 +31,11 @@ function registerWebhookRoutes(app, { getDb, closeDb = false, service = webhooks
   const authorize = createMarketplaceAuth({ getDb, closeDb, actorProperty: 'webhookActorId' });
   const auth = (action, resourceId) => authorize({ action, resourceId });
 
-  app.get('/api/webhooks/events', auth('webhooks:list-events', (_req, actorId) => actorId), (req, res) => {
+  app.get('/api/webhooks/events', webhookReadLimiter, auth('webhooks:list-events', (_req, actorId) => actorId), (req, res) => {
     res.json({ events: Object.values(service.EVENTS) });
   });
 
-  app.get('/api/webhook/events', auth('webhooks:list-events', (_req, actorId) => actorId), (req, res) => {
+  app.get('/api/webhook/events', webhookReadLimiter, auth('webhooks:list-events', (_req, actorId) => actorId), (req, res) => {
     res.json({ events: Object.values(service.EVENTS) });
   });
 
@@ -40,11 +48,11 @@ function registerWebhookRoutes(app, { getDb, closeDb = false, service = webhooks
     return res.status(201).json(result);
   });
 
-  app.get('/api/webhooks', auth('webhooks:list', (_req, actorId) => actorId), (req, res) => {
+  app.get('/api/webhooks', webhookReadLimiter, auth('webhooks:list', (_req, actorId) => actorId), (req, res) => {
     res.json({ webhooks: service.listWebhooks(false, req.webhookActorId) });
   });
 
-  app.get('/api/webhooks/dead-letters', auth('webhooks:dead-letters', (_req, actorId) => actorId), (req, res) => {
+  app.get('/api/webhooks/dead-letters', webhookReadLimiter, auth('webhooks:dead-letters', (_req, actorId) => actorId), (req, res) => {
     const owned = new Set(service.listWebhooks(false, req.webhookActorId).map((webhook) => webhook.id));
     res.json({ deadLetters: service.getDeadLetters(null, 100).filter((entry) => owned.has(entry.webhookId)) });
   });
@@ -54,7 +62,7 @@ function registerWebhookRoutes(app, { getDb, closeDb = false, service = webhooks
     res.json({ cleared: true });
   });
 
-  app.get('/api/webhooks/:id', auth('webhooks:get', (req) => req.params.id), (req, res) => {
+  app.get('/api/webhooks/:id', webhookReadLimiter, auth('webhooks:get', (req) => req.params.id), (req, res) => {
     const webhook = service.getWebhook(req.params.id, false, req.webhookActorId);
     if (!webhook) return res.status(404).json({ code: 'WEBHOOK_NOT_FOUND', error: 'Webhook not found' });
     return res.json({ webhook });
@@ -73,7 +81,7 @@ function registerWebhookRoutes(app, { getDb, closeDb = false, service = webhooks
     return res.json(result);
   });
 
-  app.get('/api/webhooks/:id/logs', auth('webhooks:logs', (req) => req.params.id), (req, res) => {
+  app.get('/api/webhooks/:id/logs', webhookReadLimiter, auth('webhooks:logs', (req) => req.params.id), (req, res) => {
     const logs = service.getWebhookLogs(req.params.id, Math.min(Number(req.query.limit) || 20, 100), req.webhookActorId);
     if (!logs) return res.status(404).json({ code: 'WEBHOOK_NOT_FOUND', error: 'Webhook not found' });
     return res.json({ logs });
