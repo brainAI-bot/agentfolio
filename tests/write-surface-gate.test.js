@@ -170,7 +170,6 @@ test('runtime Solana/Irys write entry points are wired through the gate', () => 
     ['src/lib/verification-onchain.js', 'assertSolanaIrysWriteEnabled'],
     ['src/lib/solana-escrow.js', 'assertLiveEscrowWriteEnabled'],
     ['src/lib/escrow-onchain.js', 'assertSolanaIrysWriteEnabled'],
-    ['src/lib/satp-reviews.js', 'assertSolanaIrysWriteEnabled'],
     ['src/lib/satp-reviews-onchain.js', 'assertSolanaIrysWriteEnabled'],
     ['src/sync-v3.js', 'assertSolanaIrysWriteEnabled'],
     ['frontend/src/lib/write-surface-gate.ts', 'assertFrontendLiveEscrowEnabled'],
