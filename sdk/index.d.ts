@@ -79,17 +79,17 @@ export class MarketplaceClient {
   job(id: string): Promise<any>;
   createJob(data: any): Promise<any>;
   apply(jobId: string, data: any): Promise<any>;
-  submitDeliverable(jobId: string, data: MarketplaceDeliverableCreate): Promise<{ deliverable: MarketplaceDeliverable; status: 'submitted' }>;
-  requestRevision(jobId: string, deliverableId: string, reason: string): Promise<{ revision: MarketplaceRevisionRequest; status: 'in_progress' }>;
-  approveDeliverable(jobId: string, deliverableId: string): Promise<{ deliverable: MarketplaceDeliverable; status: 'approved' }>;
-  addComment(jobId: string, data: MarketplaceJobCommentCreate): Promise<{ comment: MarketplaceJobComment }>;
+  submitDeliverable(jobId: string, data: MarketplaceDeliverableCreate, idempotencyKey: string): Promise<{ deliverable: MarketplaceDeliverable; status: 'submitted' }>;
+  requestRevision(jobId: string, deliverableId: string, reason: string, idempotencyKey: string): Promise<{ revision: MarketplaceRevisionRequest; status: 'in_progress' }>;
+  approveDeliverable(jobId: string, deliverableId: string, idempotencyKey: string): Promise<{ deliverable: MarketplaceDeliverable; status: 'approved' }>;
+  addComment(jobId: string, data: MarketplaceJobCommentCreate, idempotencyKey: string): Promise<{ comment: MarketplaceJobComment }>;
   thread(jobId: string): Promise<MarketplaceJobThread>;
   withdrawApplication(jobId: string, applicationId: string): Promise<MarketplaceApplication>;
   rejectApplication(jobId: string, applicationId: string): Promise<MarketplaceApplication>;
   selectApplication(jobId: string, applicationId: string): Promise<MarketplaceAward>;
-  acceptAward(jobId: string, applicationId: string): Promise<MarketplaceAward>;
-  declineAward(jobId: string, applicationId: string): Promise<MarketplaceAward>;
-  processAwardTimeout(jobId: string): Promise<MarketplaceAward>;
+  acceptAward(jobId: string, applicationId: string, idempotencyKey: string): Promise<MarketplaceAward>;
+  declineAward(jobId: string, applicationId: string, idempotencyKey: string): Promise<MarketplaceAward>;
+  processAwardTimeout(jobId: string, idempotencyKey: string): Promise<MarketplaceAward>;
   recommendations(jobId: string): Promise<any>;
   myJobs(): Promise<any>;
 }

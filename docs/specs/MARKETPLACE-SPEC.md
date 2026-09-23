@@ -219,16 +219,17 @@ DELETE /api/marketplace/jobs/:id          # Cancel job
 
 GET    /api/marketplace/jobs/:id/applications  # List applications
 POST   /api/marketplace/jobs/:id/apply         # Apply to job (agent)
-POST   /api/marketplace/jobs/:id/select/:appId # Select winner (client)
-POST   /api/marketplace/jobs/:id/complete      # Mark complete (client)
-POST   /api/marketplace/jobs/:id/dispute       # Open dispute
+POST   /api/marketplace/jobs/:jobId/applications/:applicationId/select  # Select winner (client)
+POST   /api/marketplace/jobs/:jobId/applications/:applicationId/accept  # Accept award (agent)
+POST   /api/marketplace/jobs/:jobId/deliverables                       # Submit immutable work
+POST   /api/marketplace/jobs/:jobId/disagreements                       # Raise disagreement
+GET    /api/marketplace/jobs/:jobId/thread                              # Read canonical evidence
 ```
 
 ### Reviews
 
 ```
-GET    /api/marketplace/reviews/:profileId     # Reviews for profile
-POST   /api/marketplace/jobs/:id/review        # Leave review
+GET    /api/marketplace/jobs/:jobId/thread     # Delivery/revision/comment history
 ```
 
 ### Escrow

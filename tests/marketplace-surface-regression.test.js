@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const http = require('node:http');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const Database = require('better-sqlite3');
@@ -20,6 +21,12 @@ const marketplaceFactorySource = fs.readFileSync(path.join(__dirname, '..', 'src
 const apiDocsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'api', 'docs.js'), 'utf8');
 const publicSkillSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'skill.md'), 'utf8');
 const sdkSource = fs.readFileSync(path.join(__dirname, '..', 'sdk', 'src', 'index.ts'), 'utf8');
+const sdkTypesSource = fs.readFileSync(path.join(__dirname, '..', 'sdk', 'src', 'types.ts'), 'utf8');
+const sdkPackageSource = fs.readFileSync(path.join(__dirname, '..', 'sdk', 'index.js'), 'utf8');
+const quickstartSource = fs.readFileSync(path.join(__dirname, '..', 'docs', 'QUICKSTART.md'), 'utf8');
+const troubleshootingSource = fs.readFileSync(path.join(__dirname, '..', 'docs', 'TROUBLESHOOTING.md'), 'utf8');
+const marketplaceSpecSource = fs.readFileSync(path.join(__dirname, '..', 'docs', 'specs', 'MARKETPLACE-SPEC.md'), 'utf8');
+const AgentFolio = require('../sdk');
 
 test('marketplace surface regression guard', async (t) => {
   await t.test('api/jobs is backed by the jobs table instead of a placeholder payload', () => {
@@ -236,7 +243,7 @@ test('marketplace surface regression guard', async (t) => {
   });
 
   await t.test('public docs and SDK expose canonical delivery routes instead of retired JSON contracts', () => {
-    for (const source of [apiDocsSource, publicSkillSource, sdkSource]) {
+    for (const source of [apiDocsSource, publicSkillSource, quickstartSource, troubleshootingSource, marketplaceSpecSource, sdkSource, sdkPackageSource]) {
       assert.doesNotMatch(source, /\/api\/marketplace\/jobs\/(?:\{id\}|:id|\$\{encodeURIComponent\(jobId\)\})\/complete/);
       assert.doesNotMatch(source, /\/api\/marketplace\/jobs\/(?:\{id\}|:id|\$\{encodeURIComponent\(jobId\)\})\/review/);
       assert.doesNotMatch(source, /\/api\/marketplace\/jobs\/(?:\{id\}|:id|\$\{encodeURIComponent\((?:jobId|data\.jobId)\)\})\/escrow/);
@@ -248,6 +255,60 @@ test('marketplace surface regression guard', async (t) => {
     assert.match(publicSkillSource, /\/api\/marketplace\/jobs\/JOB_ID\/deliverables/);
     assert.match(sdkSource, /\/api\/marketplace\/jobs\/\$\{encodeURIComponent\(jobId\)\}\/deliverables/);
     assert.match(sdkSource, /\/api\/v3\/escrow\/create/);
+    assert.doesNotMatch(publicSkillSource, /coverLetter|Job status changes to `in_progress`/);
+    assert.doesNotMatch(quickstartSource, /coverLetter|Mark complete with link\/notes|Leave reviews/);
+    assert.doesNotMatch(troubleshootingSource, /"coverLetter"|mark job complete|Payments are sent/);
+  });
+
+  await t.test('published job-create contracts match the canonical fixed-price SOL handler', () => {
+    const schema = API_DOCS.components.schemas.JobCreate;
+    const example = API_DOCS.paths['/api/marketplace/jobs'].post.requestBody.content['application/json'].example;
+    assert.deepEqual(schema.required, ['title', 'description', 'budgetAmount', 'category', 'skills']);
+    assert.deepEqual(schema.properties.budgetType.enum, ['fixed']);
+    assert.deepEqual(schema.properties.budgetCurrency.enum, ['SOL']);
+    assert.deepEqual(schema.properties.timeline.enum, ['asap', '1w', '2w', 'flexible']);
+    assert.deepEqual(schema.properties.pickupMode.enum, ['select', 'claim']);
+    assert.equal(example.budgetAmount, '25');
+    assert.equal(example.budgetCurrency, 'SOL');
+    assert.equal(example.timeline, '1w');
+    for (const legacyField of ['budget', 'currency', 'clientId', 'useEscrow']) {
+      assert.equal(schema.properties[legacyField], undefined, `${legacyField} must stay retired from JobCreate`);
+      assert.equal(example[legacyField], undefined, `${legacyField} must stay retired from the create example`);
+    }
+    assert.match(sdkTypesSource, /budgetAmount: string \| number/);
+    assert.doesNotMatch(sdkTypesSource, /export interface JobCreate[\s\S]*?\n\s*budget: number/);
+  });
+
+  await t.test('published CommonJS SDK sends caller-stable idempotency keys for required mutations', async () => {
+    const seen = [];
+    const server = http.createServer((req, res) => {
+      seen.push({ path: req.url, key: req.headers['idempotency-key'] });
+      req.resume();
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{}');
+      });
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const client = new AgentFolio({ baseUrl: `http://127.0.0.1:${server.address().port}`, apiKey: 'test-key' });
+      await client.marketplace.submitDeliverable('job', { text: 'done' }, 'sdk-submit');
+      await client.marketplace.requestRevision('job', 'deliverable', 'revise', 'sdk-revise');
+      await client.marketplace.approveDeliverable('job', 'deliverable', 'sdk-approve');
+      await client.marketplace.addComment('job', { text: 'note' }, 'sdk-comment');
+      await client.marketplace.acceptAward('job', 'application', 'sdk-accept');
+      await client.marketplace.declineAward('job', 'application', 'sdk-decline');
+      await client.marketplace.processAwardTimeout('job', 'sdk-timeout');
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+    assert.deepEqual(seen.map(({ key }) => key), [
+      'sdk-submit', 'sdk-revise', 'sdk-approve', 'sdk-comment', 'sdk-accept', 'sdk-decline', 'sdk-timeout',
+    ]);
+    await assert.rejects(
+      new AgentFolio().marketplace.submitDeliverable('job', { text: 'done' }),
+      /idempotencyKey is required/,
+    );
   });
 
   await t.test('api/stats includes live job totals instead of hardcoded zeroes', () => {

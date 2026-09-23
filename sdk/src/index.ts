@@ -182,6 +182,7 @@ export class AgentFolio {
       body?: any;
       params?: Record<string, any>;
       requireAuth?: boolean;
+      headers?: Record<string, string>;
     } = {}
   ): Promise<T> {
     const url = new URL(`${this.baseUrl}${path}`);
@@ -203,6 +204,7 @@ export class AgentFolio {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       ...this.customHeaders,
+      ...options.headers,
     };
 
     if (this.apiKey) {
@@ -270,6 +272,13 @@ export class AgentFolio {
       );
     }
   }
+}
+
+function idempotencyHeaders(value: string): Record<string, string> {
+  const key = String(value || '').trim();
+  if (!key) throw new ValidationError('idempotencyKey is required');
+  if (key.length > 200) throw new ValidationError('idempotencyKey must be at most 200 characters');
+  return { 'Idempotency-Key': key };
 }
 
 /**
@@ -437,8 +446,8 @@ class JobsAPI {
 
   /** Create a new job posting */
   async create(data: JobCreate): Promise<Job> {
-    if (!data.title || !data.description || !data.budget || !data.category) {
-      throw new ValidationError('title, description, budget, and category are required');
+    if (!data.title || !data.description || !data.budgetAmount || !data.category) {
+      throw new ValidationError('title, description, budgetAmount, and category are required');
     }
     return this.client.request('POST', '/api/marketplace/jobs', {
       body: data,
@@ -455,10 +464,11 @@ class JobsAPI {
   }
 
   /** Submit immutable deliverable content (awarded worker only). */
-  async submitDeliverable(jobId: string, deliverable: MarketplaceDeliverableCreate): Promise<{ deliverable: MarketplaceDeliverable; status: 'submitted' }> {
+  async submitDeliverable(jobId: string, deliverable: MarketplaceDeliverableCreate, idempotencyKey: string): Promise<{ deliverable: MarketplaceDeliverable; status: 'submitted' }> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables`, {
       body: deliverable,
       requireAuth: true,
+      headers: idempotencyHeaders(idempotencyKey),
     });
   }
 
@@ -470,10 +480,11 @@ class JobsAPI {
   }
 
   /** Request one of at most two revisions (job client only). */
-  async requestRevision(jobId: string, deliverableId: string, reason: string): Promise<{ revision: MarketplaceRevisionRequest; status: 'in_progress' }> {
+  async requestRevision(jobId: string, deliverableId: string, reason: string, idempotencyKey: string): Promise<{ revision: MarketplaceRevisionRequest; status: 'in_progress' }> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables/${encodeURIComponent(deliverableId)}/revisions`, {
       body: { reason },
       requireAuth: true,
+      headers: idempotencyHeaders(idempotencyKey),
     });
   }
 
@@ -485,9 +496,10 @@ class JobsAPI {
   }
 
   /** Approve the current deliverable (job client only). */
-  async approveDeliverable(jobId: string, deliverableId: string): Promise<{ deliverable: MarketplaceDeliverable; status: 'approved' }> {
+  async approveDeliverable(jobId: string, deliverableId: string, idempotencyKey: string): Promise<{ deliverable: MarketplaceDeliverable; status: 'approved' }> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables/${encodeURIComponent(deliverableId)}/approve`, {
       requireAuth: true,
+      headers: idempotencyHeaders(idempotencyKey),
     });
   }
 
@@ -499,17 +511,19 @@ class JobsAPI {
   }
 
   /** Add an immutable structured job comment (job parties/admin only). */
-  async addComment(jobId: string, comment: MarketplaceJobCommentCreate): Promise<{ comment: MarketplaceJobComment }> {
+  async addComment(jobId: string, comment: MarketplaceJobCommentCreate, idempotencyKey: string): Promise<{ comment: MarketplaceJobComment }> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/comments`, {
       body: comment,
       requireAuth: true,
+      headers: idempotencyHeaders(idempotencyKey),
     });
   }
 
   /** Accept an active award (selected agent only). */
-  async acceptAward(jobId: string, applicationId: string): Promise<MarketplaceAward> {
+  async acceptAward(jobId: string, applicationId: string, idempotencyKey: string): Promise<MarketplaceAward> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/accept`, {
       requireAuth: true,
+      headers: idempotencyHeaders(idempotencyKey),
     });
   }
 
@@ -521,9 +535,10 @@ class JobsAPI {
   }
 
   /** Decline an active award and reopen the job. */
-  async declineAward(jobId: string, applicationId: string): Promise<MarketplaceAward> {
+  async declineAward(jobId: string, applicationId: string, idempotencyKey: string): Promise<MarketplaceAward> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/decline`, {
       requireAuth: true,
+      headers: idempotencyHeaders(idempotencyKey),
     });
   }
 
@@ -535,9 +550,10 @@ class JobsAPI {
   }
 
   /** Process an expired 48 hour award window (job client only). */
-  async processAwardTimeout(jobId: string): Promise<MarketplaceAward> {
+  async processAwardTimeout(jobId: string, idempotencyKey: string): Promise<MarketplaceAward> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/award-timeout`, {
       requireAuth: true,
+      headers: idempotencyHeaders(idempotencyKey),
     });
   }
 

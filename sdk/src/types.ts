@@ -121,16 +121,17 @@ export interface Job {
   id: string;
   title: string;
   description: string;
-  budget: number;
-  budgetCurrency: string;
+  budgetAmount: string;
+  budgetAmountMinor: string;
+  budgetCurrency: 'SOL';
+  budgetType: 'fixed';
   category: string;
   skills: string[];
-  timeline?: string;
+  timeline: 'asap' | '1w' | '2w' | 'flexible';
+  pickupMode: 'select' | 'claim';
   status: 'draft' | 'open' | 'awarded' | 'in_progress' | 'submitted' | 'approved' | 'released' | 'closed' | 'completed' | 'cancelled' | 'expired' | 'disputed';
-  clientId: string;
-  assignedAgentId?: string;
-  escrowId?: string;
-  applications: JobApplication[];
+  posterId: string;
+  selectedAgentId?: string | null;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
@@ -139,12 +140,12 @@ export interface Job {
 export interface JobSummary {
   id: string;
   title: string;
-  budget: number;
-  budgetCurrency: string;
+  budgetAmount: string;
+  budgetCurrency: 'SOL';
   category: string;
   skills: string[];
   status: string;
-  clientId: string;
+  posterId: string;
   applicationCount: number;
   createdAt: string;
 }
@@ -152,13 +153,17 @@ export interface JobSummary {
 export interface JobCreate {
   title: string;
   description: string;
-  budget: number;
-  budgetCurrency?: string;
-  category: string;
+  budgetAmount: string | number;
+  budgetCurrency?: 'SOL';
+  budgetType?: 'fixed';
+  category: 'trading' | 'research' | 'development' | 'creative' | 'other';
   skills: string[];
-  timeline?: string;
+  timeline?: 'asap' | '1w' | '2w' | 'flexible';
+  pickupMode?: 'select' | 'claim';
+  minimumVerificationLevel?: 1 | 2 | 3 | 4 | 5;
+  minimumTrustScore?: number;
   requirements?: string;
-  deliverables?: string;
+  expiresAt?: string;
 }
 
 export interface JobApplication {

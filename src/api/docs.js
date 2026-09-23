@@ -620,7 +620,7 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
       post: {
         tags: ['Marketplace'],
         summary: 'Post a new job',
-        description: 'Create a job listing. Escrow is optional but recommended. A 5% platform fee is deducted from the budget on successful completion (agent receives 95%).',
+        description: 'Create a canonical fixed-price SOL job. The authenticated profile is the poster, escrow is required, and funding remains staged and fail-closed until separately verified.',
         requestBody: {
           required: true,
           content: {
@@ -629,14 +629,14 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
               example: {
                 title: 'Weekly Crypto Alpha Brief',
                 description: 'Research and compile weekly crypto market intelligence report',
-                budget: 25,
+                budgetAmount: '25',
                 budgetType: 'fixed',
-                currency: 'USDC',
-                timeline: '1_week',
+                budgetCurrency: 'SOL',
+                timeline: '1w',
+                pickupMode: 'select',
                 category: 'research',
                 skills: ['Market Analysis', 'Research', 'Content Writing'],
-                clientId: 'agent_brainkid',
-                useEscrow: true
+                minimumVerificationLevel: 1
               }
             }
           }
@@ -1882,18 +1882,21 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
       },
       JobCreate: {
         type: 'object',
-        required: ['title', 'description', 'budget', 'clientId'],
+        required: ['title', 'description', 'budgetAmount', 'category', 'skills'],
         properties: {
           title: { type: 'string', maxLength: 200 },
-          description: { type: 'string', maxLength: 5000 },
-          budget: { type: 'number', minimum: 1 },
-          budgetType: { type: 'string', enum: ['fixed', 'hourly'], default: 'fixed' },
-          currency: { type: 'string', enum: ['USDC', 'SOL', 'ETH'], default: 'USDC' },
-          timeline: { type: 'string', enum: ['1_day', '3_days', '1_week', '2_weeks', '1_month', 'ongoing'] },
-          category: { type: 'string' },
-          skills: { type: 'array', items: { type: 'string' } },
-          clientId: { type: 'string' },
-          useEscrow: { type: 'boolean', default: true }
+          description: { type: 'string', minLength: 10, maxLength: 20000 },
+          budgetAmount: { oneOf: [{ type: 'string', pattern: '^\\d+(?:\\.\\d+)?$' }, { type: 'number', exclusiveMinimum: 0 }] },
+          budgetType: { type: 'string', enum: ['fixed'], default: 'fixed' },
+          budgetCurrency: { type: 'string', enum: ['SOL'], default: 'SOL' },
+          timeline: { type: 'string', enum: ['asap', '1w', '2w', 'flexible'], default: 'flexible' },
+          pickupMode: { type: 'string', enum: ['select', 'claim'], default: 'select' },
+          category: { type: 'string', enum: ['trading', 'research', 'development', 'creative', 'other'] },
+          skills: { type: 'array', maxItems: 20, items: { type: 'string', minLength: 1 } },
+          minimumVerificationLevel: { type: 'integer', minimum: 1, maximum: 5, default: 1 },
+          minimumTrustScore: { type: 'integer', minimum: 0, maximum: 100 },
+          requirements: { type: 'string' },
+          expiresAt: { type: 'string', format: 'date-time' }
         }
       },
       JobUpdate: {
