@@ -9,6 +9,7 @@ const FORBIDDEN_PRODUCTION_PATHS = [
 const ALLOWED_LEGACY_CHANGES = new Set([
   'frontend/src/app/launch/page.tsx',
   'frontend/src/app/stats/page.tsx',
+  'frontend/src/components/ReleaseGateNotice.tsx',
   'public/v2/launch.html',
   'public/v2/index.html',
   'public/v2/rankings.html',

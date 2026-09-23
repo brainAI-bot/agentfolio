@@ -23,6 +23,8 @@ for (const nav of ['public/v2/index.html', 'public/v2/rankings.html']) {
 }
 const stats = readFileSync(resolve(root, 'frontend/src/app/stats/page.tsx'), 'utf8');
 if (/TokenStatsSection|Token Launches|api\/tokens\/stats/.test(stats)) violations.push('frontend stats still advertises token launches');
+const releaseGate = readFileSync(resolve(root, 'frontend/src/components/ReleaseGateNotice.tsx'), 'utf8');
+if (/token\s+launch/i.test(releaseGate)) violations.push('release-gate banner still advertises token launch');
 
 if (violations.length) {
   console.error(violations.join('\n'));

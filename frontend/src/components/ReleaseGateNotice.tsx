@@ -1,7 +1,7 @@
 import { AlertTriangle } from "lucide-react";
 
 const RELEASE_GATE_COPY =
-  "No completion banner is present. Escrow live-funds writes and token launch claims remain gated pending security re-review.";
+  "No completion banner is present. Escrow live-funds writes remain gated pending security re-review.";
 
 export function ReleaseGateNotice() {
   return (
