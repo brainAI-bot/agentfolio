@@ -182,7 +182,7 @@ test('client approval is audited without triggering a live escrow effect', () =>
   }
 });
 
-test('seven-day silence auto-approves once through an auditable idempotent timer seam', () => {
+test('seven-day silence stages settlement once through an auditable idempotent timer seam', () => {
   const db = createDb();
   try {
     insertJob(db, 'job_timer');
@@ -192,10 +192,13 @@ test('seven-day silence auto-approves once through an auditable idempotent timer
       { results: [], errors: [] },
     );
     const firstSweep = autoApproveDueDeliverables(db, { now: '2026-09-08T00:00:00.000Z' });
-    const [approved] = firstSweep.results;
+    const [settled] = firstSweep.results;
     assert.deepEqual(firstSweep.errors, []);
-    assert.equal(approved.deliverableId, delivery.deliverable.id);
-    assert.equal(approved.status, 'approved');
+    assert.equal(settled.deliverableId, delivery.deliverable.id);
+    assert.equal(settled.status, 'auto_released');
+    assert.equal(settled.executionMode, 'staged');
+    assert.equal(settled.moneyMoved, false);
+    assert.equal(settled.liveEscrowWritesAllowed, false);
     assert.deepEqual(
       autoApproveDueDeliverables(db, { now: '2026-09-09T00:00:00.000Z' }),
       { results: [], errors: [] },
@@ -204,7 +207,7 @@ test('seven-day silence auto-approves once through an auditable idempotent timer
     const autoAudit = audit.find((entry) => entry.idempotencyKey === `deliverable-auto-approve:${delivery.deliverable.id}`);
     assert.equal(autoAudit.actorId, 'system:marketplace-auto-approval');
     assert.equal(autoAudit.source, 'marketplace-delivery-timer');
-    assert.equal(audit.filter((entry) => entry.toStatus === 'approved').length, 1);
+    assert.equal(audit.filter((entry) => entry.toStatus === 'auto_released').length, 1);
   } finally {
     db.close();
   }
@@ -224,7 +227,7 @@ test('auto-approval isolates a poisoned candidate and reports its error without 
     assert.equal(sweep.results.length, 1);
     assert.equal(sweep.results[0].jobId, 'job_healthy');
     assert.equal(sweep.results[0].deliverableId, healthy.deliverable.id);
-    assert.equal(sweep.results[0].status, 'approved');
+    assert.equal(sweep.results[0].status, 'auto_released');
     assert.match(sweep.results[0].transitionAuditId, /^jta_/);
     assert.deepEqual(sweep.errors, [{
       jobId: 'job_poisoned',
@@ -233,7 +236,7 @@ test('auto-approval isolates a poisoned candidate and reports its error without 
       error: 'Only fixed-price jobs are supported',
     }]);
     assert.equal(db.prepare('SELECT status FROM jobs WHERE id = ?').get('job_poisoned').status, 'submitted');
-    assert.equal(db.prepare('SELECT status FROM jobs WHERE id = ?').get('job_healthy').status, 'approved');
+    assert.equal(db.prepare('SELECT status FROM jobs WHERE id = ?').get('job_healthy').status, 'auto_released');
   } finally {
     db.close();
   }
@@ -274,25 +277,24 @@ test('production auto-approval sweep logs each poisoned candidate returned by th
   }
 });
 
-test('timer-driven approval preserves the client dispute path', () => {
+test('timer-driven settlement closes the disagreement window after seven days', () => {
   const db = createDb();
   try {
     insertJob(db, 'job_auto_dispute');
     submit(db, 'job_auto_dispute', '2026-09-01T00:00:00.000Z');
     const sweep = autoApproveDueDeliverables(db, { now: '2026-09-08T00:00:00.000Z' });
-    assert.equal(sweep.results[0].status, 'approved');
+    assert.equal(sweep.results[0].status, 'auto_released');
 
-    const disputed = transitionJobState(db, 'job_auto_dispute', 'disputed', {
-      actorId: 'client',
-      reason: 'deliverable was not received',
-      source: 'marketplace-dispute-api',
-      idempotencyKey: 'post-auto-approval-dispute',
-      now: '2026-09-09T00:00:00.000Z',
-    });
-
-    assert.equal(disputed.job.status, 'disputed');
-    assert.equal(disputed.audit.fromStatus, 'approved');
-    assert.equal(disputed.audit.toStatus, 'disputed');
+    assert.throws(
+      () => transitionJobState(db, 'job_auto_dispute', 'disputed', {
+        actorId: 'client',
+        reason: 'deliverable was not received',
+        source: 'marketplace-dispute-api',
+        idempotencyKey: 'post-auto-release-dispute',
+        now: '2026-09-09T00:00:00.000Z',
+      }),
+      (error) => error.code === 'ILLEGAL_JOB_TRANSITION',
+    );
   } finally {
     db.close();
   }

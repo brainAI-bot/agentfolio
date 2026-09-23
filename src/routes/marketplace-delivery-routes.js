@@ -4,6 +4,10 @@ const crypto = require('node:crypto');
 const rateLimit = require('express-rate-limit');
 const marketplaceState = require('../lib/marketplace-state-machine');
 const { initializeMarketplaceCoreSchema } = require('../lib/marketplace-schema');
+const {
+  EscrowOnChainReadbackError,
+  readStagedEscrowFunding,
+} = require('../lib/marketplace-escrow-readback');
 const { createMarketplaceAuth, registerMarketplaceAuthChallengeRoute } = require('../lib/marketplace-wallet-auth');
 
 const AUTO_APPROVAL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -108,6 +112,35 @@ function initializeMarketplaceDeliverySchema(db) {
     CREATE INDEX IF NOT EXISTS idx_marketplace_job_comments_job
       ON marketplace_job_comments(job_id, created_at, id);
 
+    CREATE TABLE IF NOT EXISTS marketplace_disagreements (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL UNIQUE,
+      raised_by TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (job_id) REFERENCES jobs(id),
+      UNIQUE (job_id, idempotency_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS marketplace_disagreement_resolutions (
+      id TEXT PRIMARY KEY,
+      disagreement_id TEXT NOT NULL UNIQUE,
+      job_id TEXT NOT NULL UNIQUE,
+      resolved_by TEXT NOT NULL,
+      resolution TEXT NOT NULL CHECK(resolution IN ('worker', 'poster', 'split')),
+      worker_amount_minor TEXT NOT NULL,
+      poster_amount_minor TEXT NOT NULL,
+      currency TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      execution_mode TEXT NOT NULL CHECK(execution_mode = 'staged'),
+      idempotency_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (disagreement_id) REFERENCES marketplace_disagreements(id),
+      FOREIGN KEY (job_id) REFERENCES jobs(id),
+      UNIQUE (job_id, idempotency_key)
+    );
+
     CREATE TRIGGER IF NOT EXISTS immutable_marketplace_deliverables_update
     BEFORE UPDATE ON marketplace_deliverables
     BEGIN
@@ -138,6 +171,18 @@ function initializeMarketplaceDeliverySchema(db) {
     BEGIN
       SELECT RAISE(ABORT, 'MARKETPLACE_JOB_COMMENT_IMMUTABLE');
     END;
+    CREATE TRIGGER IF NOT EXISTS immutable_marketplace_disagreements_update
+    BEFORE UPDATE ON marketplace_disagreements
+    BEGIN SELECT RAISE(ABORT, 'MARKETPLACE_DISAGREEMENT_IMMUTABLE'); END;
+    CREATE TRIGGER IF NOT EXISTS immutable_marketplace_disagreements_delete
+    BEFORE DELETE ON marketplace_disagreements
+    BEGIN SELECT RAISE(ABORT, 'MARKETPLACE_DISAGREEMENT_IMMUTABLE'); END;
+    CREATE TRIGGER IF NOT EXISTS immutable_marketplace_disagreement_resolutions_update
+    BEFORE UPDATE ON marketplace_disagreement_resolutions
+    BEGIN SELECT RAISE(ABORT, 'MARKETPLACE_DISAGREEMENT_RESOLUTION_IMMUTABLE'); END;
+    CREATE TRIGGER IF NOT EXISTS immutable_marketplace_disagreement_resolutions_delete
+    BEFORE DELETE ON marketplace_disagreement_resolutions
+    BEGIN SELECT RAISE(ABORT, 'MARKETPLACE_DISAGREEMENT_RESOLUTION_IMMUTABLE'); END;
   `);
 }
 
@@ -381,6 +426,180 @@ function approveDeliverable(db, {
   })();
 }
 
+function disagreementResponse(row, resolution = null, replayed = false) {
+  return {
+    disagreementId: row.id,
+    jobId: row.job_id,
+    raisedBy: row.raised_by,
+    reason: row.reason,
+    createdAt: row.created_at,
+    resolution,
+    executionMode: 'staged',
+    moneyMoved: false,
+    liveEscrowWritesAllowed: false,
+    replayed,
+  };
+}
+
+function disagreementResolutionResponse(row, status, replayed = false, transitionAuditId = null) {
+  return {
+    jobId: row.job_id,
+    status,
+    transitionAuditId,
+    resolution: {
+      id: row.id,
+      outcome: row.resolution,
+      workerAmountMinor: row.worker_amount_minor,
+      posterAmountMinor: row.poster_amount_minor,
+      currency: row.currency,
+      reason: row.reason,
+    },
+    executionMode: row.execution_mode,
+    moneyMoved: false,
+    liveEscrowWritesAllowed: false,
+    replayed,
+  };
+}
+
+function raiseDisagreement(db, {
+  jobId,
+  actorId,
+  body = {},
+  now = new Date().toISOString(),
+  idempotencyKey,
+}) {
+  initializeMarketplaceDeliverySchema(db);
+  const key = requireIdempotencyKey(idempotencyKey);
+  return db.transaction(() => {
+    const job = requireJob(db, jobId);
+    assertParty(job, actorId, new Set());
+    const replay = db.prepare('SELECT * FROM marketplace_disagreements WHERE job_id = ? AND idempotency_key = ?').get(jobId, key);
+    if (replay) return { ...disagreementResponse(replay, null, true), status: job.status };
+    if (![marketplaceState.JOB_STATUS.IN_PROGRESS, marketplaceState.JOB_STATUS.SUBMITTED, marketplaceState.JOB_STATUS.APPROVED].includes(job.status)) {
+      throw new MarketplaceDeliveryError(409, 'DISAGREEMENT_NOT_ALLOWED', 'A disagreement may only be raised after an award is accepted and before settlement');
+    }
+    if (db.prepare('SELECT id FROM marketplace_disagreements WHERE job_id = ?').get(jobId)) {
+      throw new MarketplaceDeliveryError(409, 'DISAGREEMENT_ALREADY_RAISED', 'A disagreement has already been raised for this job');
+    }
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+    if (reason.length < 10 || reason.length > 5000) {
+      throw new MarketplaceDeliveryError(400, 'INVALID_DISAGREEMENT_REASON', 'reason must be between 10 and 5000 characters');
+    }
+    const disagreement = {
+      id: `mdg_${crypto.randomUUID()}`,
+      job_id: job.id,
+      raised_by: actorId,
+      reason,
+      idempotency_key: key,
+      created_at: now,
+    };
+    db.prepare(`INSERT INTO marketplace_disagreements
+      (id, job_id, raised_by, reason, idempotency_key, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(...Object.values(disagreement));
+    const transition = marketplaceState.transitionJobState(db, job.id, marketplaceState.JOB_STATUS.DISPUTED, {
+      actorId,
+      reason: 'job party raised disagreement',
+      source: 'marketplace-delivery-api',
+      idempotencyKey: `disagreement:${key}`,
+      metadata: { disagreementId: disagreement.id },
+      now,
+      env: {},
+    });
+    db.prepare('UPDATE jobs SET disputed_at = ?, dispute_id = ?, updated_at = ? WHERE id = ?')
+      .run(now, disagreement.id, now, job.id);
+    return { ...disagreementResponse(disagreement), status: transition.job.status, transitionAuditId: transition.audit.id };
+  })();
+}
+
+function parseResolutionAmount(value, field) {
+  const normalized = String(value ?? '').trim();
+  if (!/^\d+$/.test(normalized)) throw new MarketplaceDeliveryError(400, 'INVALID_RESOLUTION_AMOUNT', `${field} must be a non-negative minor-unit integer string`);
+  return normalized;
+}
+
+function resolveDisagreement(db, {
+  jobId,
+  actorId,
+  body = {},
+  now = new Date().toISOString(),
+  idempotencyKey,
+  adminIds = parseAdminIds(),
+}) {
+  initializeMarketplaceDeliverySchema(db);
+  const key = requireIdempotencyKey(idempotencyKey);
+  return db.transaction(() => {
+    const job = requireJob(db, jobId);
+    if (!adminIds.has(actorId)) throw new MarketplaceDeliveryError(403, 'MARKETPLACE_ADMIN_REQUIRED', 'Only a configured marketplace admin may resolve disagreements');
+    const disagreement = db.prepare('SELECT * FROM marketplace_disagreements WHERE job_id = ?').get(job.id);
+    const prior = db.prepare('SELECT * FROM marketplace_disagreement_resolutions WHERE job_id = ? AND idempotency_key = ?').get(job.id, key);
+    if (prior) return disagreementResolutionResponse(prior, job.status, true);
+    if (!disagreement || job.status !== marketplaceState.JOB_STATUS.DISPUTED) {
+      throw new MarketplaceDeliveryError(409, 'ACTIVE_DISAGREEMENT_REQUIRED', 'Job does not have an active disagreement');
+    }
+    const resolution = String(body.resolution || '').trim().toLowerCase();
+    if (!['worker', 'poster', 'split'].includes(resolution)) throw new MarketplaceDeliveryError(400, 'INVALID_DISAGREEMENT_RESOLUTION', 'resolution must be worker, poster, or split');
+    let fundedEscrow;
+    try {
+      fundedEscrow = readStagedEscrowFunding(db, { jobId: job.id, escrowReference: job.escrow_id });
+    } catch (error) {
+      if (error instanceof EscrowOnChainReadbackError) {
+        throw new MarketplaceDeliveryError(error.statusCode, 'ESCROW_FUNDING_READBACK_FAILED', error.message, { reason: error.reason });
+      }
+      throw error;
+    }
+    if (!job.escrow_funded || fundedEscrow.status !== 'funded') {
+      throw new MarketplaceDeliveryError(409, 'ESCROW_FUNDING_REQUIRED', 'Verified staged funding is required before resolving a disagreement');
+    }
+    const totalMinor = fundedEscrow.amountMinor;
+    let workerAmountMinor = resolution === 'worker' ? totalMinor : '0';
+    let posterAmountMinor = resolution === 'poster' ? totalMinor : '0';
+    if (resolution === 'split') {
+      workerAmountMinor = parseResolutionAmount(body.workerAmountMinor, 'workerAmountMinor');
+      posterAmountMinor = parseResolutionAmount(body.posterAmountMinor, 'posterAmountMinor');
+      if (BigInt(workerAmountMinor) + BigInt(posterAmountMinor) !== BigInt(totalMinor)) {
+        throw new MarketplaceDeliveryError(409, 'RESOLUTION_AMOUNT_MISMATCH', 'Resolution amounts must exactly equal the funded job amount', { expectedMinor: totalMinor });
+      }
+    }
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+    if (reason.length < 10 || reason.length > 5000) throw new MarketplaceDeliveryError(400, 'INVALID_RESOLUTION_REASON', 'reason must be between 10 and 5000 characters');
+    const targetStatus = resolution === 'worker'
+      ? marketplaceState.JOB_STATUS.RELEASED
+      : resolution === 'poster'
+        ? marketplaceState.JOB_STATUS.CANCELLED
+        : marketplaceState.JOB_STATUS.CANCELLED_WITH_COMPENSATION;
+    const transition = marketplaceState.transitionJobState(db, job.id, targetStatus, {
+      actorId,
+      reason: 'marketplace admin resolved disagreement',
+      source: 'marketplace-disagreement-resolution',
+      idempotencyKey: `disagreement-resolution:${key}`,
+      metadata: { disagreementId: disagreement.id, resolution, workerAmountMinor, posterAmountMinor },
+      now,
+      env: {},
+    });
+    const row = {
+      id: `mdr_${crypto.randomUUID()}`,
+      disagreement_id: disagreement.id,
+      job_id: job.id,
+      resolved_by: actorId,
+      resolution,
+      worker_amount_minor: workerAmountMinor,
+      poster_amount_minor: posterAmountMinor,
+      currency: fundedEscrow.currency,
+      reason,
+      execution_mode: 'staged',
+      idempotency_key: key,
+      created_at: now,
+    };
+    db.prepare(`INSERT INTO marketplace_disagreement_resolutions
+      (id, disagreement_id, job_id, resolved_by, resolution, worker_amount_minor,
+       poster_amount_minor, currency, reason, execution_mode, idempotency_key, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(...Object.values(row));
+    return disagreementResolutionResponse(row, transition.job.status, false, transition.audit.id);
+  })();
+}
+
 function processApprovalTimeout(db, {
   jobId,
   actorId,
@@ -395,12 +614,23 @@ function processApprovalTimeout(db, {
     const deliverable = requireCurrentDeliverable(db, jobId);
     const transitionKey = `deliverable-auto-approve:${deliverable.id}:${key}`;
     const prior = db.prepare('SELECT id FROM job_transition_audit WHERE job_id = ? AND idempotency_key = ?').get(jobId, transitionKey);
-    if (prior) return { jobId, deliverableId: deliverable.id, status: marketplaceState.JOB_STATUS.APPROVED, transitionAuditId: prior.id, replayed: true };
+    if (prior) {
+      return {
+        jobId,
+        deliverableId: deliverable.id,
+        status: marketplaceState.JOB_STATUS.AUTO_RELEASED,
+        transitionAuditId: prior.id,
+        executionMode: 'staged',
+        moneyMoved: false,
+        liveEscrowWritesAllowed: false,
+        replayed: true,
+      };
+    }
     if (job.status !== marketplaceState.JOB_STATUS.SUBMITTED) throw new MarketplaceDeliveryError(409, 'JOB_NOT_SUBMITTED', 'A submitted deliverable is required');
     if (new Date(now).getTime() < new Date(deliverable.auto_approve_at).getTime()) {
       throw new MarketplaceDeliveryError(409, 'APPROVAL_TIMEOUT_NOT_REACHED', 'The seven-day approval timeout has not been reached');
     }
-    const transition = marketplaceState.transitionJobState(db, job.id, marketplaceState.JOB_STATUS.APPROVED, {
+    const transition = marketplaceState.transitionJobState(db, job.id, marketplaceState.JOB_STATUS.AUTO_RELEASED, {
       actorId: 'system:marketplace-auto-approval',
       reason: 'client silent for seven days after deliverable submission',
       source: 'marketplace-delivery-timer',
@@ -409,7 +639,16 @@ function processApprovalTimeout(db, {
       now,
       env: {},
     });
-    return { jobId, deliverableId: deliverable.id, status: transition.job.status, transitionAuditId: transition.audit.id };
+    return {
+      jobId,
+      deliverableId: deliverable.id,
+      status: transition.job.status,
+      transitionAuditId: transition.audit.id,
+      effectId: transition.escrowEffect?.id || null,
+      executionMode: 'staged',
+      moneyMoved: false,
+      liveEscrowWritesAllowed: false,
+    };
   })();
 }
 
@@ -431,15 +670,25 @@ function autoApproveDueDeliverables(db, { now = new Date().toISOString() } = {})
       const job = requireJob(db, candidate.job_id);
       if (job.status !== marketplaceState.JOB_STATUS.SUBMITTED) return null;
       const current = requireCurrentDeliverable(db, job.id, candidate.id);
-      const transition = marketplaceState.transitionJobState(db, job.id, marketplaceState.JOB_STATUS.APPROVED, {
+      const transition = marketplaceState.transitionJobState(db, job.id, marketplaceState.JOB_STATUS.AUTO_RELEASED, {
         actorId: 'system:marketplace-auto-approval',
         reason: 'client silent for seven days after deliverable submission',
         source: 'marketplace-delivery-timer',
         idempotencyKey: `deliverable-auto-approve:${current.id}`,
         metadata: { deliverableId: current.id, dueAt: current.auto_approve_at },
         now,
+        env: {},
       });
-      return { jobId: job.id, deliverableId: current.id, status: transition.job.status, transitionAuditId: transition.audit.id };
+      return {
+        jobId: job.id,
+        deliverableId: current.id,
+        status: transition.job.status,
+        transitionAuditId: transition.audit.id,
+        effectId: transition.escrowEffect?.id || null,
+        executionMode: 'staged',
+        moneyMoved: false,
+        liveEscrowWritesAllowed: false,
+      };
     });
     try {
       const result = execute();
@@ -522,6 +771,8 @@ function listJobThread(db, { jobId, actorId, adminIds = parseAdminIds() }) {
     comments: db.prepare('SELECT * FROM marketplace_job_comments WHERE job_id = ? ORDER BY created_at ASC, rowid ASC').all(jobId).map(commentResponse),
     transitions: marketplaceState.listJobTransitionAudit(db, jobId),
     escrowEffects: marketplaceState.listMarketplaceEscrowEffects(db, jobId),
+    disagreement: db.prepare('SELECT * FROM marketplace_disagreements WHERE job_id = ?').get(jobId) || null,
+    disagreementResolution: db.prepare('SELECT * FROM marketplace_disagreement_resolutions WHERE job_id = ?').get(jobId) || null,
   };
 }
 
@@ -603,6 +854,14 @@ function registerMarketplaceDeliveryRoutes(app, { getDb, closeDb = false, autoAp
     '/api/marketplace/jobs/:jobId/approval-timeout',
   ], 'approval-timeout', (req) => req.params.jobId, invoke(processApprovalTimeout));
   postAliases([
+    '/api/jobs/:jobId/disagreements',
+    '/api/marketplace/jobs/:jobId/disagreements',
+  ], 'disagree', (req) => req.params.jobId, invoke(raiseDisagreement, 201));
+  postAliases([
+    '/api/jobs/:jobId/disagreements/resolve',
+    '/api/marketplace/jobs/:jobId/disagreements/resolve',
+  ], 'resolve-disagreement', (req) => req.params.jobId, invoke(resolveDisagreement));
+  postAliases([
     '/api/jobs/:jobId/comments',
     '/api/marketplace/jobs/:jobId/comments',
   ], 'comment', (req) => req.params.jobId || req.params.id, invoke(addJobComment, 201));
@@ -615,7 +874,7 @@ function registerMarketplaceDeliveryRoutes(app, { getDb, closeDb = false, autoAp
     const timer = setInterval(() => {
       const db = getDb();
       try {
-        runAutoApprovalSweep(db);
+        runAutoApprovalSweep(db, { now: clock() });
       } catch (error) {
         console.error('[Marketplace] deliverable auto-approval sweep failed:', error.message);
       } finally {
@@ -634,6 +893,8 @@ module.exports = {
   submitDeliverable,
   requestRevision,
   approveDeliverable,
+  raiseDisagreement,
+  resolveDisagreement,
   processApprovalTimeout,
   autoApproveDueDeliverables,
   runAutoApprovalSweep,
