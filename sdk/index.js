@@ -6,6 +6,7 @@
 
 const https = require('https');
 const http = require('http');
+const crypto = require('crypto');
 
 class AgentFolioError extends Error {
   constructor(message, status, body) {
@@ -44,7 +45,7 @@ class AgentFolio {
   /**
    * Make an HTTP request to the AgentFolio API
    */
-  async _request(method, path, { body, query } = {}) {
+  async _request(method, path, { body, query, headers: requestHeaders, idempotencyKey, retries = 0 } = {}) {
     let url = `${this.baseUrl}${path}`;
     if (query) {
       const params = new URLSearchParams();
@@ -59,9 +60,14 @@ class AgentFolio {
     const isHttps = parsed.protocol === 'https:';
     const lib = isHttps ? https : http;
 
-    const headers = { 'Accept': 'application/json' };
+    const headers = { 'Accept': 'application/json', ...(requestHeaders || {}) };
     if (this.apiKey) headers['X-API-Key'] = this.apiKey;
     if (this.accessToken) headers['Authorization'] = `Bearer ${this.accessToken}`;
+    if (idempotencyKey !== undefined) {
+      const stableKey = String(idempotencyKey || '').trim() || crypto.randomUUID();
+      if (stableKey.length > 200) throw new TypeError('idempotencyKey must be at most 200 characters');
+      headers['Idempotency-Key'] = stableKey;
+    }
 
     let bodyStr;
     if (body) {
@@ -70,19 +76,19 @@ class AgentFolio {
       headers['Content-Length'] = Buffer.byteLength(bodyStr);
     }
 
-    return new Promise((resolve, reject) => {
+    const requestOnce = () => new Promise((resolve, reject) => {
       const req = lib.request(url, { method, headers, timeout: this.timeout }, (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
-          let parsed;
-          try { parsed = JSON.parse(data); } catch { parsed = data; }
+          let parsedBody;
+          try { parsedBody = JSON.parse(data); } catch { parsedBody = data; }
 
           if (res.statusCode >= 400) {
-            const msg = parsed?.error || parsed?.message || `HTTP ${res.statusCode}`;
-            reject(new AgentFolioError(msg, res.statusCode, parsed));
+            const msg = parsedBody?.error || parsedBody?.message || `HTTP ${res.statusCode}`;
+            reject(new AgentFolioError(msg, res.statusCode, parsedBody));
           } else {
-            resolve(parsed);
+            resolve(parsedBody);
           }
         });
       });
@@ -92,6 +98,17 @@ class AgentFolio {
       if (bodyStr) req.write(bodyStr);
       req.end();
     });
+
+    let attempt = 0;
+    while (true) {
+      try {
+        return await requestOnce();
+      } catch (error) {
+        const retryable = !(error instanceof AgentFolioError) || error.status >= 500;
+        if (!retryable || attempt >= retries) throw error;
+        attempt += 1;
+      }
+    }
   }
 
   /** Health check */
@@ -130,6 +147,50 @@ function requireNonEmptyString(value, fieldName) {
     throw new TypeError(`${fieldName} is required`);
   }
   return value;
+}
+
+function createWebhookReplayCache({ maxEntries = 10000 } = {}) {
+  const entries = new Map();
+  return {
+    has(key) { return entries.has(key); },
+    add(key, expiresAtMs) {
+      entries.set(key, expiresAtMs);
+      while (entries.size > maxEntries) entries.delete(entries.keys().next().value);
+    },
+    prune(nowMs = Date.now()) {
+      for (const [key, expiresAt] of entries) if (expiresAt <= nowMs) entries.delete(key);
+    },
+    clear() { entries.clear(); },
+  };
+}
+
+const defaultWebhookReplayCache = createWebhookReplayCache();
+
+function verifyWebhookSignature(rawBody, headers, secret, options = {}) {
+  const body = Buffer.isBuffer(rawBody)
+    ? rawBody
+    : (ArrayBuffer.isView(rawBody) ? Buffer.from(rawBody.buffer, rawBody.byteOffset, rawBody.byteLength) : Buffer.from(String(rawBody), 'utf8'));
+  const normalized = Object.fromEntries(Object.entries(headers || {}).map(([key, value]) => [key.toLowerCase(), value]));
+  const signature = String(normalized['x-agentfolio-signature'] || '');
+  const timestamp = String(normalized['x-agentfolio-timestamp'] || '');
+  const deliveryId = String(normalized['x-agentfolio-delivery'] || '');
+  const match = /^v1=([a-f0-9]{64})$/i.exec(signature);
+  if (!match) return { valid: false, code: 'INVALID_SIGNATURE_FORMAT' };
+  if (!/^\d+$/.test(timestamp) || !Number.isSafeInteger(Number(timestamp))) return { valid: false, code: 'INVALID_TIMESTAMP' };
+  if (!deliveryId || deliveryId.length > 200) return { valid: false, code: 'INVALID_DELIVERY_ID' };
+  const toleranceSeconds = options.toleranceSeconds ?? 300;
+  const nowMs = options.now instanceof Date ? options.now.getTime() : Number(options.now ?? Date.now());
+  if (Math.abs(nowMs - Number(timestamp) * 1000) / 1000 > toleranceSeconds) return { valid: false, code: 'TIMESTAMP_OUTSIDE_TOLERANCE' };
+  const expected = crypto.createHmac('sha256', String(secret || '')).update(timestamp).update('.').update(body).digest('hex');
+  const supplied = Buffer.from(match[1], 'hex');
+  const expectedBuffer = Buffer.from(expected, 'hex');
+  if (supplied.length !== expectedBuffer.length || !crypto.timingSafeEqual(supplied, expectedBuffer)) return { valid: false, code: 'SIGNATURE_MISMATCH' };
+  const replayCache = options.replayCache || defaultWebhookReplayCache;
+  const replayKey = deliveryId;
+  replayCache.prune?.(nowMs);
+  if (replayCache.has(replayKey)) return { valid: false, code: 'REPLAY_DETECTED' };
+  replayCache.add(replayKey, nowMs + toleranceSeconds * 1000);
+  return { valid: true, code: 'VERIFIED', deliveryId, timestamp: Number(timestamp) };
 }
 
 function buildSolEscrowCreate(data) {
@@ -339,6 +400,49 @@ class MarketplaceClient {
   async myJobs() {
     return this._c._request('GET', '/api/marketplace/my-jobs');
   }
+
+  /** Atomically claim a funded pickup_mode=claim job. */
+  async claim(jobId, options = {}) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/claim`, {
+      body: options.body,
+      idempotencyKey: options.idempotencyKey || '',
+      retries: options.retries ?? 1,
+    });
+  }
+
+  /** Create a staged funding effect without moving money. */
+  async stageFunding(jobId, amount, options = {}) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/fund-staged`, {
+      body: { amount },
+      idempotencyKey: options.idempotencyKey || '',
+      retries: options.retries ?? 1,
+    });
+  }
+
+  /** Verify the server-issued staged funding reference. */
+  async verifyStagedFunding(jobId, escrowReference, options = {}) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/fund-staged/verify`, {
+      body: { escrowReference },
+      idempotencyKey: options.idempotencyKey || '',
+      retries: options.retries ?? 1,
+    });
+  }
+
+  /** Record staged settlement for an approved job; no live funds move. */
+  async settle(jobId, options = {}) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/release`, {
+      idempotencyKey: options.idempotencyKey || '',
+      retries: options.retries ?? 1,
+    });
+  }
+
+  /** Close released job bookkeeping; no live funds move. */
+  async close(jobId, options = {}) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/close`, {
+      idempotencyKey: options.idempotencyKey || '',
+      retries: options.retries ?? 1,
+    });
+  }
 }
 
 // --- Escrow ---
@@ -499,3 +603,5 @@ module.exports.AgentFolioError = AgentFolioError;
 module.exports.EscrowClient = EscrowClient;
 module.exports.buildSolEscrowCreate = buildSolEscrowCreate;
 module.exports.buildUsdcEscrowCreate = buildUsdcEscrowCreate;
+module.exports.createWebhookReplayCache = createWebhookReplayCache;
+module.exports.verifyWebhookSignature = verifyWebhookSignature;

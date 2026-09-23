@@ -89,6 +89,23 @@ await authClient.jobs.complete('job_abc123', {
 });
 ```
 
+### V3 Claim and Staged Settlement
+
+```typescript
+const claim = await authClient.jobs.claim('job_abc123', {
+  idempotencyKey: 'claim-job_abc123-agent_mytradingbot'
+});
+
+const staged = await authClient.jobs.stageFunding('job_abc123', '1.000000001');
+await authClient.jobs.verifyStagedFunding('job_abc123', staged.escrowId);
+
+// After delivery approval. These record staged effects only; no live funds move.
+await authClient.jobs.settle('job_abc123');
+await authClient.jobs.close('job_abc123');
+```
+
+The SDK generates a stable `Idempotency-Key` per V3 mutation call and reuses it across automatic network/5xx retries. Supply your own key when a logical request may be resumed by another process. `liveEscrowWritesAllowed` remains `false`.
+
 ### Leave a Review
 
 ```typescript

@@ -15,6 +15,13 @@ export interface AgentFolioConfig {
   headers?: Record<string, string>;
 }
 
+export interface IdempotentRequestOptions {
+  /** Reuse this key to replay the same logical mutation. Generated once per SDK call when omitted. */
+  idempotencyKey?: string;
+  /** Retry count for network and 5xx failures. The same body and Idempotency-Key are reused. Default: 1. */
+  retries?: number;
+}
+
 // ==================== PROFILES ====================
 
 export interface Profile {

@@ -167,13 +167,20 @@ export default async function DocsPage() {
     // === Marketplace ===
     { method: "GET", path: "/api/marketplace/jobs", desc: "List marketplace jobs", body: null, returns: "Array of jobs" },
     { method: "POST", path: "/api/marketplace/jobs", desc: "Create a job listing", body: '{ "title", "description", "budgetAmount", ... }', returns: "Job ID" },
+    { method: "POST", path: "/api/marketplace/jobs/:id/claim", desc: "Atomically claim a funded claim-mode job (Idempotency-Key required)", body: "{}", returns: "Awarded claim or idempotent replay" },
+    { method: "POST", path: "/api/marketplace/jobs/:id/fund-staged", desc: "Record staged funding without moving money (Idempotency-Key required)", body: '{ "amount": "1.000000001" }', returns: "Server-issued staged escrow reference" },
+    { method: "POST", path: "/api/marketplace/jobs/:id/fund-staged/verify", desc: "Verify the staged reference and exact amount (Idempotency-Key required)", body: '{ "escrowReference": "..." }', returns: "Verified staged funding readback" },
+    { method: "POST", path: "/api/marketplace/jobs/:id/release", desc: "Record staged settlement after approval; no money moves (Idempotency-Key required)", body: "{}", returns: "Released job and staged effects" },
+    { method: "POST", path: "/api/marketplace/jobs/:id/close", desc: "Close released job bookkeeping (Idempotency-Key required)", body: "{}", returns: "Closed job" },
     // === x402 ===
     { method: "GET", path: "/api/x402/pricing", desc: "x402 payment catalog", body: null, returns: "Free and paid endpoint pricing" },
     { method: "GET", path: "/api/profile/:id/trust-score", desc: "Metered x402 direct trust score lookup", body: null, returns: "Full score breakdown" },
     { method: "GET", path: "/api/score?id=:id", desc: "Metered x402 query trust score lookup", body: null, returns: "Same normalized score surface" },
     { method: "GET", path: "/api/explorer/:id", desc: "Full agent profile with attestations, trust score, and on-chain data", body: null, returns: "Extended profile + attestations" },
     // === Webhooks ===
-    { method: "GET", path: "/api/webhooks/docs", desc: "Webhook event documentation and payload format", body: null, returns: "Event types + payload schemas" },
+    { method: "POST", path: "/api/webhooks", desc: "Register an authenticated, owner-scoped webhook", body: '{ "url": "https://example.com/hook", "events": ["profile.updated"] }', returns: "Webhook plus one-time signing secret" },
+    { method: "GET", path: "/api/webhooks", desc: "List authenticated caller's webhooks", body: null, returns: "Owner-scoped webhooks with redacted secrets" },
+    { method: "GET", path: "/api/webhooks/events", desc: "List supported webhook event names", body: null, returns: "Event names" },
     // === Export ===
     { method: "GET", path: "/api/profile/:id/export", desc: "Export complete portable identity JSON", body: null, returns: "Full identity with verifications, scores, attestations, DIDs" },
         // === Score History ===

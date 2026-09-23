@@ -15,6 +15,27 @@ export interface AgentFolioOptions {
   timeout?: number;
 }
 
+export interface IdempotentRequestOptions {
+  /** Reuse this key to replay the same logical mutation. Generated once per SDK call when omitted. */
+  idempotencyKey?: string;
+  /** Retry count for network and 5xx failures. The same body and Idempotency-Key are reused. Default: 1. */
+  retries?: number;
+}
+
+export interface WebhookReplayCache {
+  has(key: string): boolean;
+  add(key: string, expiresAtMs: number): void;
+  prune?(nowMs?: number): void;
+  clear(): void;
+}
+
+export interface WebhookVerificationResult {
+  valid: boolean;
+  code: 'VERIFIED' | 'INVALID_SIGNATURE_FORMAT' | 'INVALID_TIMESTAMP' | 'INVALID_DELIVERY_ID' | 'TIMESTAMP_OUTSIDE_TOLERANCE' | 'SIGNATURE_MISMATCH' | 'REPLAY_DETECTED';
+  deliveryId?: string;
+  timestamp?: number;
+}
+
 export interface EscrowCreateBase {
   clientWallet: string;
   agentWallet: string;
@@ -92,6 +113,11 @@ export class MarketplaceClient {
   processAwardTimeout(jobId: string): Promise<MarketplaceAward>;
   recommendations(jobId: string): Promise<any>;
   myJobs(): Promise<any>;
+  claim(jobId: string, options?: IdempotentRequestOptions & { body?: Record<string, any> }): Promise<any>;
+  stageFunding(jobId: string, amount: string | number, options?: IdempotentRequestOptions): Promise<any>;
+  verifyStagedFunding(jobId: string, escrowReference: string, options?: IdempotentRequestOptions): Promise<any>;
+  settle(jobId: string, options?: IdempotentRequestOptions): Promise<any>;
+  close(jobId: string, options?: IdempotentRequestOptions): Promise<any>;
 }
 
 export interface MarketplaceDeliverableCreate {
@@ -176,6 +202,13 @@ export class EscrowClient {
 
 export function buildSolEscrowCreate(data: SolEscrowCreate): SolEscrowCreate & { currency: 'SOL' };
 export function buildUsdcEscrowCreate(data: UsdcEscrowCreate): UsdcEscrowCreate & { currency: 'USDC' };
+export function createWebhookReplayCache(options?: { maxEntries?: number }): WebhookReplayCache;
+export function verifyWebhookSignature(
+  rawBody: Uint8Array | string,
+  headers: Record<string, string | string[] | undefined>,
+  secret: string,
+  options?: { now?: number | Date; toleranceSeconds?: number; replayCache?: WebhookReplayCache },
+): WebhookVerificationResult;
 
 export class VerifyClient {
   github(profileId: string, username: string): Promise<any>;
