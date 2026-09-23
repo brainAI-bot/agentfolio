@@ -2,10 +2,10 @@
 
 const { computeVerificationLevel } = require('./compute-level');
 const { computeTrustScore } = require('./compute-trust-score');
-const { listCanonicalPeerReviews } = require('./canonical-review-evidence');
 const { isCanonicalTrustProvider } = require('./canonical-verification-providers');
 const { normalizeVerificationPlatform, normalizeVerifications } = require('./verification-categories');
 const { isFixtureIdentity, isFixtureJob } = require('./public-traction');
+const { summarizeMarketplaceOutcomesForSubject } = require('./marketplace-outcome-ledger');
 
 function tableExists(db, table) {
   return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
@@ -69,18 +69,6 @@ function canonicalReleasedEscrows(db, profileId) {
   }));
 }
 
-function canonicalSignedReviews(db, profileId) {
-  if (!tableExists(db, 'peer_reviews') || !tableExists(db, 'jobs')) return [];
-  return listCanonicalPeerReviews(db, { revieweeId: profileId }).filter((review) => {
-    const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(review.job_id);
-    const disputed = job && db.prepare(`
-      SELECT 1 FROM job_transition_audit WHERE job_id = ? AND to_status = 'disputed'
-    `).get(job.id);
-    return job && String(job.status || '').toLowerCase() !== 'disputed' && !disputed && !isFixtureJob(job)
-      && !isFixtureIdentity(review.reviewer_id, review.reviewee_id);
-  });
-}
-
 function computeMarketplaceClaimEligibility(db, profileId) {
   const profile = db.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
   if (!profile || isFixtureIdentity(profile.id, profile.name, profile.handle)) {
@@ -88,24 +76,26 @@ function computeMarketplaceClaimEligibility(db, profileId) {
       eligibleIdentity: false,
       verificationLevel: 0,
       trustScore: 0,
-      source: 'canonical-marketplace-evidence-v1',
+      source: 'canonical-marketplace-evidence-v2',
       verifications: [],
       releasedEscrowCount: 0,
-      signedReviewCount: 0,
+      outcomeCount: 0,
+      positiveOutcomeCount: 0,
+      negativeOutcomeCount: 0,
     };
   }
 
   const verifications = canonicalVerificationRecords(db, profileId);
   const releasedEscrows = canonicalReleasedEscrows(db, profileId);
-  const signedReviews = canonicalSignedReviews(db, profileId);
+  const outcomes = summarizeMarketplaceOutcomesForSubject(db, profileId);
   const hasSatpIdentity = verifications.some((entry) => ['satp', 'satp_v3'].includes(normalizeVerificationPlatform(entry.platform)));
   const level = computeVerificationLevel({
     profile: { ...profile, verification_data: undefined, verification: undefined },
     verifications,
     hasSatpIdentity,
     activity: {
-      completedEscrowJobs: releasedEscrows.length,
-      reviewsReceived: signedReviews,
+      completedEscrowJobs: outcomes.positiveOutcomeCount,
+      receivedReviewCount: outcomes.positiveOutcomeCount,
     },
   });
   const trust = computeTrustScore({
@@ -113,7 +103,6 @@ function computeMarketplaceClaimEligibility(db, profileId) {
     verifications,
     hasSatpIdentity,
     releasedEscrows,
-    reviewsReceived: signedReviews,
   });
   const canonicalIdentity = verifications.some((entry) => isCanonicalTrustProvider(entry.platform));
 
@@ -121,16 +110,17 @@ function computeMarketplaceClaimEligibility(db, profileId) {
     eligibleIdentity: canonicalIdentity,
     verificationLevel: level.level,
     trustScore: trust.trustScore,
-    source: 'canonical-marketplace-evidence-v1',
+    source: 'canonical-marketplace-evidence-v2',
     verifications,
     releasedEscrowCount: releasedEscrows.length,
-    signedReviewCount: signedReviews.length,
+    outcomeCount: outcomes.outcomeCount,
+    positiveOutcomeCount: outcomes.positiveOutcomeCount,
+    negativeOutcomeCount: outcomes.negativeOutcomeCount,
   };
 }
 
 module.exports = {
   canonicalVerificationRecords,
   canonicalReleasedEscrows,
-  canonicalSignedReviews,
   computeMarketplaceClaimEligibility,
 };

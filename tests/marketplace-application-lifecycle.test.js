@@ -436,6 +436,18 @@ test('selected agent can accept; decline and 48h timeout reject the selection an
   assert.equal(sweep.length, 1);
   assert.equal(db.prepare('SELECT status FROM jobs WHERE id = ?').get('job_auto_timeout').status, 'open');
   assert.equal(db.prepare('SELECT status FROM applications WHERE id = ?').get('app_auto_timeout').status, 'rejected');
+  assert.deepEqual(
+    db.prepare(`
+      SELECT outcome_type, polarity, settled_amount_minor
+      FROM marketplace_outcome_ledger
+      ORDER BY outcome_type, rowid
+    `).all(),
+    [
+      { outcome_type: 'application_award_declined', polarity: 'negative', settled_amount_minor: null },
+      { outcome_type: 'application_award_timed_out', polarity: 'negative', settled_amount_minor: null },
+      { outcome_type: 'application_award_timed_out', polarity: 'negative', settled_amount_minor: null },
+    ],
+  );
 });
 
 test('SDK exposes the complete application award lifecycle on canonical routes', async () => {

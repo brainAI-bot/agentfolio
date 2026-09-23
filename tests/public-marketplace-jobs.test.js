@@ -7,9 +7,15 @@ const {
   summarizePublicMarketplaceCohort,
 } = require('../src/lib/public-marketplace-jobs');
 
-function fakeDb(rows) {
+function fakeDb(rows, outcomes = []) {
   return {
     prepare(sql) {
+      if (/sqlite_master/.test(sql)) {
+        return { get: () => (outcomes.length ? { 1: 1 } : undefined) };
+      }
+      if (/FROM marketplace_outcome_ledger/.test(sql)) {
+        return { all: () => outcomes };
+      }
       assert.match(sql, /SELECT \* FROM jobs/);
       assert.match(sql, /ORDER BY datetime\(created_at\) DESC/);
       assert.match(sql, /LIMIT \?/);
@@ -56,6 +62,52 @@ test('canonical public marketplace cohort excludes fixtures and unqualified acti
     disputedJobs: 0,
     closedJobs: 0,
     qualifiedOutcomeCount: 0,
+    outcomeEventCount: 0,
+    positiveOutcomeCount: 0,
+    negativeOutcomeCount: 0,
+    totalVolume: 0,
+  });
+});
+
+test('public outcome aggregation excludes fixture workers and separates distinct jobs from raw events', () => {
+  const rows = [{
+    id: 'job_outcome', client_id: 'poster', title: 'Public work', description: 'Production work',
+    status: 'closed', funds_released: 1, agreed_budget: 999, created_at: '2026-09-20T00:00:00Z',
+  }];
+  const outcomes = [{
+    id: 'mol_negative_1', job_id: 'job_outcome', subject_id: 'agent', counterparty_id: 'poster',
+    subject_role: 'agent', outcome_type: 'application_award_declined', polarity: 'negative',
+    model_version: 'marketplace-outcomes-v1', source_transition_audit_id: 'jta_negative_1',
+    source: 'marketplace-application-api', settled_amount_minor: null, currency: null,
+    metadata: '{}', created_at: '2026-09-20T01:00:00Z',
+  }, {
+    id: 'mol_negative_2', job_id: 'job_outcome', subject_id: 'agent', counterparty_id: 'poster',
+    subject_role: 'claimant', outcome_type: 'claim_award_declined', polarity: 'negative',
+    model_version: 'marketplace-outcomes-v1', source_transition_audit_id: 'jta_negative_2',
+    source: 'marketplace-claim-api', settled_amount_minor: null, currency: null,
+    metadata: '{}', created_at: '2026-09-20T02:00:00Z',
+  }, {
+    id: 'mol_fixture_worker', job_id: 'job_outcome', subject_id: 'agent_sm123', counterparty_id: 'poster',
+    subject_role: 'agent', outcome_type: 'application_award_declined', polarity: 'negative',
+    model_version: 'marketplace-outcomes-v1', source_transition_audit_id: 'jta_fixture_worker',
+    source: 'marketplace-application-api', settled_amount_minor: null, currency: null,
+    metadata: '{}', created_at: '2026-09-20T03:00:00Z',
+  }];
+
+  const cohort = getPublicMarketplaceCohort(fakeDb(rows, outcomes));
+  assert.deepEqual(cohort.outcomes.map((outcome) => outcome.id), ['mol_negative_1', 'mol_negative_2']);
+  assert.deepEqual(summarizePublicMarketplaceCohort(cohort), {
+    totalJobs: 1,
+    openJobs: 0,
+    inProgressJobs: 0,
+    awaitingFundingJobs: 0,
+    completedJobs: 0,
+    disputedJobs: 0,
+    closedJobs: 1,
+    qualifiedOutcomeCount: 1,
+    outcomeEventCount: 2,
+    positiveOutcomeCount: 0,
+    negativeOutcomeCount: 2,
     totalVolume: 0,
   });
 });

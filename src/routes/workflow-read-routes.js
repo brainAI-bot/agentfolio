@@ -225,6 +225,10 @@ function registerWorkflowReadRoutes(app, options = {}) {
           completed_jobs: completedJobs,
           disputed_jobs: Number(jobStats.disputedJobs || 0),
           closed_jobs: Number(jobStats.closedJobs || 0),
+          qualified_outcomes: Number(jobStats.qualifiedOutcomeCount || 0),
+          outcome_events: Number(jobStats.outcomeEventCount || 0),
+          positive_outcomes: Number(jobStats.positiveOutcomeCount || 0),
+          negative_outcomes: Number(jobStats.negativeOutcomeCount || 0),
           completion_rate: completionRate,
           publicTraction: {
             excludedFixtures: jobCohort.excludedFixtures,

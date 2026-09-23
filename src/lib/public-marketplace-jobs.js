@@ -1,6 +1,10 @@
 'use strict';
 
-const { isFixtureJob } = require('./public-traction');
+const { isFixtureIdentity, isFixtureJob } = require('./public-traction');
+const {
+  listMarketplaceOutcomes,
+  summarizeMarketplaceOutcomes,
+} = require('./marketplace-outcome-ledger');
 
 // Keep the public read bounded while making this exact SQLite cohort the single
 // source for list pagination and advertised marketplace totals.
@@ -14,9 +18,12 @@ function getPublicMarketplaceCohort(db, databaseBound = PUBLIC_MARKETPLACE_DATAB
     LIMIT ?
   `).all(bound);
   const rows = scannedRows.filter((job) => !isFixtureJob(job));
+  const outcomes = listMarketplaceOutcomes(db, { jobIds: rows.map((job) => job.id) })
+    .filter((outcome) => !isFixtureIdentity(outcome.subjectId, outcome.counterpartyId));
 
   return {
     rows,
+    outcomes,
     total: rows.length,
     scanned: scannedRows.length,
     excludedFixtures: scannedRows.length - rows.length,
@@ -26,11 +33,7 @@ function getPublicMarketplaceCohort(db, databaseBound = PUBLIC_MARKETPLACE_DATAB
 
 function summarizePublicMarketplaceCohort(cohort) {
   const rows = cohort.rows;
-  const qualifiedOutcomes = rows.filter((job) => (
-    ['released', 'closed'].includes(job.status)
-    && (job.funds_released === 1 || job.funds_released === true)
-    && !String(job.escrow_id || '').startsWith('fixture:')
-  ));
+  const outcomeSummary = summarizeMarketplaceOutcomes(cohort.outcomes || []);
   return {
     totalJobs: rows.length,
     openJobs: rows.filter((job) => job.status === 'open').length,
@@ -39,11 +42,11 @@ function summarizePublicMarketplaceCohort(cohort) {
     completedJobs: rows.filter((job) => job.status === 'completed').length,
     disputedJobs: rows.filter((job) => job.status === 'disputed').length,
     closedJobs: rows.filter((job) => ['closed', 'cancelled'].includes(job.status)).length,
-    qualifiedOutcomeCount: qualifiedOutcomes.length,
-    totalVolume: qualifiedOutcomes.reduce(
-      (sum, job) => sum + (Number(job.agreed_budget ?? job.budget_amount) || 0),
-      0
-    ),
+    qualifiedOutcomeCount: outcomeSummary.qualifiedOutcomeCount,
+    outcomeEventCount: outcomeSummary.outcomeEventCount,
+    positiveOutcomeCount: outcomeSummary.positiveOutcomeCount,
+    negativeOutcomeCount: outcomeSummary.negativeOutcomeCount,
+    totalVolume: outcomeSummary.settledVolume,
   };
 }
 

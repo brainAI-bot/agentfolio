@@ -44,6 +44,7 @@ const {
   getPublicMarketplaceCohort,
   summarizePublicMarketplaceCohort,
 } = require('./lib/public-marketplace-jobs');
+const { listMarketplaceOutcomes } = require('./lib/marketplace-outcome-ledger');
 
 const { isOnChainIdentity } = require('./lib/onchain-identity');
 const {
@@ -1168,6 +1169,10 @@ function getEcosystemStatsPayload(excludeFixtures = true) {
     openJobs: 0,
     inProgressJobs: 0,
     completedJobs: 0,
+    qualifiedOutcomeCount: 0,
+    outcomeEventCount: 0,
+    positiveOutcomeCount: 0,
+    negativeOutcomeCount: 0,
     totalVolume: 0,
   };
   let marketplaceCohort = null;
@@ -1177,10 +1182,21 @@ function getEcosystemStatsPayload(excludeFixtures = true) {
       marketplaceSummary = summarizePublicMarketplaceCohort(marketplaceCohort);
     } else {
       const rows = d.prepare('SELECT * FROM jobs ORDER BY datetime(created_at) DESC LIMIT 1000').all();
-      marketplaceSummary = summarizePublicMarketplaceCohort({ rows });
+      const outcomes = listMarketplaceOutcomes(d, { jobIds: rows.map((job) => job.id) });
+      marketplaceSummary = summarizePublicMarketplaceCohort({ rows, outcomes });
     }
   } catch {}
-  const { totalJobs, openJobs, inProgressJobs, completedJobs, totalVolume } = marketplaceSummary;
+  const {
+    totalJobs,
+    openJobs,
+    inProgressJobs,
+    completedJobs,
+    qualifiedOutcomeCount,
+    outcomeEventCount,
+    positiveOutcomeCount,
+    negativeOutcomeCount,
+    totalVolume,
+  } = marketplaceSummary;
 
   // Also count from JSON files for skills
   const fs = require('fs');
@@ -1239,6 +1255,10 @@ function getEcosystemStatsPayload(excludeFixtures = true) {
       openJobs,
       inProgress: inProgressJobs,
       completed: completedJobs,
+      qualifiedOutcomes: qualifiedOutcomeCount,
+      outcomeEvents: outcomeEventCount,
+      positiveOutcomes: positiveOutcomeCount,
+      negativeOutcomes: negativeOutcomeCount,
     },
     economy: {
       totalVolume,

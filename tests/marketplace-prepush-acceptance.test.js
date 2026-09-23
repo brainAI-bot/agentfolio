@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const Database = require('better-sqlite3');
 const { initializeMarketplaceCoreSchema } = require('../src/lib/marketplace-schema');
-const { initializeMarketplaceState } = require('../src/lib/marketplace-state-machine');
+const { initializeMarketplaceState, transitionJobState } = require('../src/lib/marketplace-state-machine');
 const { computeMarketplaceClaimEligibility } = require('../src/lib/marketplace-claim-eligibility');
 const { cancelJob, expireJob } = require('../src/routes/marketplace-job-routes');
 
@@ -90,14 +90,35 @@ test('claim eligibility ignores free-form scores and only counts canonical non-f
     insertEscrow(db, 'esc-disputed', 'job-disputed', 'agent-real', {
       status: 'released', releaseTx: 'disputed-release-tx', releasedAt: '2026-09-03T00:00:00.000Z',
     });
+    insertJob(db, 'job-declined', { agentId: 'agent-real', status: 'awarded' });
+    db.prepare(`INSERT INTO applications
+      (id, job_id, agent_id, status, created_at, updated_at)
+      VALUES ('application-declined', 'job-declined', 'agent-real', 'selected', ?, ?)`)
+      .run('2026-09-03T00:00:00.000Z', '2026-09-03T00:00:00.000Z');
+    transitionJobState(db, 'job-declined', 'open', {
+      actorId: 'agent-real',
+      reason: 'agent_declined',
+      source: 'marketplace-application-api',
+      idempotencyKey: 'decline-outcome',
+      metadata: { applicationId: 'application-declined' },
+      now: '2026-09-03T00:00:00.000Z',
+      env: {},
+    });
 
     const computed = computeMarketplaceClaimEligibility(db, 'agent-real');
-    assert.equal(computed.source, 'canonical-marketplace-evidence-v1');
+    assert.equal(computed.source, 'canonical-marketplace-evidence-v2');
     assert.equal(computed.eligibleIdentity, true);
     assert.equal(computed.verificationLevel, 2);
     assert.equal(computed.releasedEscrowCount, 1);
-    assert.equal(computed.signedReviewCount, 0);
+    assert.equal(computed.outcomeCount, 1);
+    assert.equal(computed.positiveOutcomeCount, 0);
+    assert.equal(computed.negativeOutcomeCount, 1);
     assert.equal(computed.trustScore, 360);
+    const eligibilitySource = fs.readFileSync(
+      path.join(__dirname, '..', 'src', 'lib', 'marketplace-claim-eligibility.js'),
+      'utf8',
+    );
+    assert.doesNotMatch(eligibilitySource, /canonicalSignedReviews|peer_reviews|rating|reviewsReceived/);
   } finally {
     db.close();
   }

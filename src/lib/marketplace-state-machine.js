@@ -1,6 +1,10 @@
 const crypto = require('crypto');
 const { liveEscrowGateStatus } = require('./write-surface-gate');
 const { exactMinorUnits, marketplaceFeeSplit } = require('./marketplace-money');
+const {
+  initializeMarketplaceOutcomeLedger,
+  recordDerivedMarketplaceOutcomeForAudit,
+} = require('./marketplace-outcome-ledger');
 
 const JOB_STATUS = Object.freeze({
   DRAFT: 'draft',
@@ -207,6 +211,7 @@ function initializeMarketplaceState(db) {
       SELECT RAISE(ABORT, 'MARKETPLACE_FUNDING_EFFECT_IMMUTABLE');
     END;
   `);
+  initializeMarketplaceOutcomeLedger(db);
   context.schemaInitialized = true;
 }
 
@@ -353,6 +358,19 @@ function transitionJobState(db, jobId, toStatus, options = {}) {
       now,
     );
 
+    const audit = {
+      id: auditId,
+      jobId,
+      fromStatus: job.status,
+      toStatus,
+      actorId,
+      reason,
+      source,
+      idempotencyKey,
+      metadata,
+      createdAt: now,
+    };
+
     context.authorizedDepth += 1;
     try {
       const result = db.prepare(`
@@ -370,6 +388,8 @@ function transitionJobState(db, jobId, toStatus, options = {}) {
     } finally {
       context.authorizedDepth -= 1;
     }
+
+    const outcome = recordDerivedMarketplaceOutcomeForAudit(db, auditId);
 
     let escrowEffect = null;
     const effectType = escrowEffectFor(job, job.status, toStatus);
@@ -429,18 +449,8 @@ function transitionJobState(db, jobId, toStatus, options = {}) {
 
     return {
       job: { ...job, status: toStatus, updated_at: now },
-      audit: {
-        id: auditId,
-        jobId,
-        fromStatus: job.status,
-        toStatus,
-        actorId,
-        reason,
-        source,
-        idempotencyKey,
-        metadata,
-        createdAt: now,
-      },
+      audit,
+      outcome,
       escrowEffect,
     };
   });

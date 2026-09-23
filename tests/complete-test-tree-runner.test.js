@@ -8,13 +8,14 @@ const {
   validateQuarantine,
 } = require('../scripts/run-complete-test-tree');
 
-test('complete-tree discovery includes all ten marketplace tests', () => {
+test('complete-tree discovery includes all eleven marketplace tests', () => {
   const discovered = discoverTestFiles();
   const marketplace = discovered.filter((file) => /^tests\/marketplace-.*\.test\.js$/.test(file));
   assert.deepEqual(marketplace, [
     'tests/marketplace-application-lifecycle.test.js',
     'tests/marketplace-delivery-thread.test.js',
     'tests/marketplace-escrow-readback.test.js',
+    'tests/marketplace-outcome-ledger.test.js',
     'tests/marketplace-prepush-acceptance.test.js',
     'tests/marketplace-state-machine.test.js',
     'tests/marketplace-surface-regression.test.js',

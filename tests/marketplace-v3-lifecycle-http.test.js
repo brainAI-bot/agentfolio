@@ -366,6 +366,30 @@ test('V3 staged lifecycle uses the production route factory without live funds o
   assert.deepEqual(transitions, [{ from_status: 'open', to_status: 'expired', actor_id: 'system:job-expiry', source: 'marketplace-job-expiry-timer' }]);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM marketplace_disagreement_resolutions').get().count, 3);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM marketplace_escrow_effects WHERE execution_mode <> 'staged' OR live_escrow_enabled <> 0").get().count, 0);
+  assert.deepEqual(
+    db.prepare(`
+      SELECT subject_id, subject_role, outcome_type, polarity, settled_amount_minor
+      FROM marketplace_outcome_ledger
+      WHERE job_id = ?
+      ORDER BY created_at, rowid
+    `).all(reopen.body.id),
+    [
+      {
+        subject_id: 'worker',
+        subject_role: 'claimant',
+        outcome_type: 'claim_award_declined',
+        polarity: 'negative',
+        settled_amount_minor: null,
+      },
+      {
+        subject_id: 'worker-b',
+        subject_role: 'claimant',
+        outcome_type: 'claim_award_timed_out',
+        polarity: 'negative',
+        settled_amount_minor: null,
+      },
+    ],
+  );
   const lifecycleSources = [
     'marketplace-job-routes.js',
     'marketplace-application-routes.js',

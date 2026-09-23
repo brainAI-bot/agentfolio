@@ -101,6 +101,10 @@ test('public HTTP stats and jobs endpoints share the fixture-free marketplace co
     assert.equal(marketplaceStats.jobs.open_jobs, 1);
     assert.equal(stats.marketplace.completed, 1);
     assert.equal(marketplaceStats.jobs.completed_jobs, 1);
+    assert.equal(marketplaceStats.jobs.qualified_outcomes, 0);
+    assert.equal(marketplaceStats.jobs.outcome_events, 0);
+    assert.equal(marketplaceStats.jobs.positive_outcomes, 0);
+    assert.equal(marketplaceStats.jobs.negative_outcomes, 0);
     assert.equal(stats.publicTraction.marketplaceExcludedFixtures, 1);
     assert.equal(marketplaceStats.jobs.publicTraction.excludedFixtures, 1);
     assert.deepEqual(jobs.jobs.map((job) => job.id).sort(), ['real-complete', 'real-open']);
