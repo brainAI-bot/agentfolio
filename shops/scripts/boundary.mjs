@@ -14,6 +14,7 @@ const ALLOWED_LEGACY_CHANGES = new Set([
   'public/v2/index.html',
   'public/v2/rankings.html',
   'scripts/check-public-routes.mjs',
+  'tests/release-gate-truth.test.js',
   'package.json',
 ]);
 
