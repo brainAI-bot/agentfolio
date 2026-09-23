@@ -15,7 +15,8 @@ const layoutSource = fs.readFileSync(
 
 test('public shell carries release-gate truth copy for live verification', () => {
   assert.match(noticeSource, /No completion banner is present\./);
-  assert.match(noticeSource, /Escrow live-funds writes and token launch claims remain gated pending security re-review\./);
+  assert.match(noticeSource, /Escrow live-funds writes remain gated pending security re-review\./);
+  assert.doesNotMatch(noticeSource, /token\s+launch/i);
   assert.match(layoutSource, /<ReleaseGateNotice \/>/);
 });
 

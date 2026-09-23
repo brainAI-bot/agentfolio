@@ -8,8 +8,12 @@ const routes = [
   { label: 'SATP overview', path: '/satp' },
   { label: 'SATP explorer', path: '/satp/explorer' },
   { label: 'verify', path: '/verify' },
-  { label: 'launch', path: '/launch' },
   { label: 'leaderboard', path: '/leaderboard' },
+];
+
+const retiredRoutes = [
+  { label: 'token launch', path: '/launch' },
+  { label: 'legacy token launch', path: '/v2/launch' },
 ];
 
 const baseUrl = (process.env.AGENTFOLIO_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, '');
@@ -56,6 +60,30 @@ for (const route of routes) {
     failures.push(`${route.label}: ${message}`);
   } finally {
     clearTimeout(timer);
+  }
+}
+
+for (const route of retiredRoutes) {
+  const url = new URL(route.path, `${baseUrl}/`);
+  try {
+    const response = await fetch(url, {
+      redirect: 'manual',
+      headers: {
+        accept: 'text/html,application/xhtml+xml',
+        'user-agent': 'agentfolio-public-route-sweep/1.0',
+      },
+    });
+    const body = await response.text();
+    console.log(`${response.status} | retired ${route.label} | ${url.toString()} | bytes=${body.length}`);
+    if (![404, 410].includes(response.status)) {
+      failures.push(`${route.label}: expected HTTP 404/410, received ${response.status} at ${url.toString()}`);
+    }
+    if (/launch\s+(?:an?\s+)?(?:agent\s+)?token|token\s+launch/i.test(body)) {
+      failures.push(`${route.label}: retired route still advertises token launch copy`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    failures.push(`${route.label}: ${message}`);
   }
 }
 

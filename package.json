@@ -12,6 +12,7 @@
     "verify:satp-mainnet-programs": "node scripts/verify-satp-mainnet-programs.mjs --strict",
     "lint:roadmap": "node scripts/lint-roadmap.js",
     "check:public-routes": "node scripts/check-public-routes.mjs",
+    "test:shops-boundary": "npm --prefix shops test",
     "migrate:canonical-review-trust": "node scripts/migrate-canonical-review-trust.js --expect-quarantined=5",
     "test:clean-install-satp-v3": "node --test tests/satp-v3-clean-install.test.js",
     "smoke:marketplace-v3:production": "node scripts/marketplace-v3-production-smoke.js",
