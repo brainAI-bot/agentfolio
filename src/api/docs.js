@@ -794,57 +794,48 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
         }
       }
     },
-    '/api/marketplace/jobs/{id}/complete': {
+    '/api/marketplace/jobs/{jobId}/deliverables': {
       post: {
         tags: ['Marketplace'],
-        summary: 'Mark job as complete',
-        description: 'Client marks job complete, triggering escrow release.',
+        summary: 'Submit an immutable deliverable',
+        description: 'The awarded worker submits deliverable text and links. The canonical SQLite state machine moves the job to submitted.',
         parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
+          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string' } }
         ],
         requestBody: {
+          required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
+                required: ['text'],
                 properties: {
-                  deliverableUrl: { type: 'string', description: 'Link to delivered work' },
-                  notes: { type: 'string' }
+                  text: { type: 'string' },
+                  links: { type: 'array', items: { type: 'string', format: 'uri' } },
+                  contentHash: { type: 'string', description: 'Optional SHA-256 of the canonical deliverable content' }
                 }
               }
             }
           }
         },
         responses: {
-          200: { description: 'Job completed, escrow released' }
+          201: { description: 'Deliverable recorded' }
         }
       }
     },
-    '/api/marketplace/jobs/{id}/review': {
+    '/api/marketplace/jobs/{jobId}/deliverables/{deliverableId}/approve': {
       post: {
         tags: ['Marketplace'],
-        summary: 'Submit job review',
+        summary: 'Approve the current deliverable',
+        description: 'The job client approves the current deliverable. Approval and escrow effects are recorded by the canonical SQLite state machine.',
         parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
+          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'deliverableId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string' } }
         ],
-        requestBody: {
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['rating', 'reviewerId', 'reviewType'],
-                properties: {
-                  rating: { type: 'integer', minimum: 1, maximum: 5 },
-                  comment: { type: 'string' },
-                  reviewerId: { type: 'string' },
-                  reviewType: { type: 'string', enum: ['client_to_agent', 'agent_to_client'] }
-                }
-              }
-            }
-          }
-        },
         responses: {
-          200: { description: 'Review submitted' }
+          200: { description: 'Deliverable approved' }
         }
       }
     },
@@ -963,119 +954,7 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
     },
 
     // ==================== ESCROW ====================
-    '/api/marketplace/jobs/{id}/escrow': {
-      get: {
-        tags: ['Escrow'],
-        summary: 'Get job escrow status',
-        parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
-        ],
-        responses: {
-          200: {
-            description: 'Escrow details',
-            content: {
-              'application/json': {
-                example: {
-                  escrowId: 'escrow_abc123',
-                  status: 'funded',
-                  amount: 25,
-                  currency: 'USDC',
-                  walletAddress: '0x...',
-                  fundedAt: '2026-02-03T10:00:00Z'
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    '/api/marketplace/jobs/{id}/deposit-instructions': {
-      get: {
-        tags: ['Escrow'],
-        summary: 'Get escrow deposit instructions',
-        parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
-        ],
-        responses: {
-          200: {
-            description: 'Deposit instructions',
-            content: {
-              'application/json': {
-                example: {
-                  walletAddress: '0x...',
-                  amount: 25,
-                  currency: 'USDC',
-                  network: 'base',
-                  memo: 'job_abc123'
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    '/api/marketplace/jobs/{id}/confirm-deposit': {
-      post: {
-        tags: ['Escrow'],
-        summary: 'Confirm escrow deposit',
-        parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
-        ],
-        requestBody: {
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['escrowPDA', 'txSignature', 'confirmedBy', 'walletChallenge'],
-                properties: {
-                  escrowPDA: { type: 'string', description: 'SATP V3 escrow account address' },
-                  txSignature: { type: 'string', description: 'Confirmed SATP V3 create-escrow transaction signature' },
-                  confirmedBy: { type: 'string', description: 'Authenticated job poster profile ID' },
-                  walletChallenge: { type: 'object', description: 'Signed challenge bound to this job, escrowPDA, and txSignature' }
-                }
-              }
-            }
-          }
-        },
-        responses: {
-          200: { description: 'Deposit confirmed after canonical transaction and account-state readback' },
-          401: { description: 'Wallet challenge missing, invalid, or not bound to the escrow proof' },
-          422: { description: 'Transaction/account readback does not prove an active funded SATP V3 escrow' },
-          503: { description: 'Canonical Solana RPC or SATP V3 program-ID readback unavailable' }
-        }
-      }
-    },
-    '/api/marketplace/jobs/{id}/v3-escrow-funded': {
-      post: {
-        tags: ['Escrow'],
-        summary: 'Record verified SATP V3 escrow funding',
-        parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
-        ],
-        requestBody: {
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['clientId', 'escrowPDA', 'txSignature', 'walletChallenge'],
-                properties: {
-                  clientId: { type: 'string', description: 'Authenticated job poster profile ID' },
-                  escrowPDA: { type: 'string', description: 'SATP V3 escrow account address' },
-                  txSignature: { type: 'string', description: 'Confirmed SATP V3 create-escrow transaction signature' },
-                  walletChallenge: { type: 'object', description: 'Signed challenge bound to this job, escrowPDA, and txSignature' }
-                }
-              }
-            }
-          }
-        },
-        responses: {
-          200: { description: 'V3 escrow recorded after canonical transaction and account-state readback' },
-          401: { description: 'Wallet challenge missing, invalid, or not bound to the escrow proof' },
-          422: { description: 'Transaction/account readback does not prove an active funded SATP V3 escrow' },
-          503: { description: 'Canonical Solana RPC or SATP V3 program-ID readback unavailable' }
-        }
-      }
-    },
+    // SATP V3 escrow transaction builders are served under /api/v3/escrow/*.
     '/api/escrow/stats': {
       get: {
         tags: ['Escrow'],

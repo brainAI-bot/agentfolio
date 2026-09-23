@@ -16,6 +16,9 @@ const marketplacePageSource = fs.readFileSync(path.join(__dirname, '..', 'fronte
 const publicMarketplaceSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'public-marketplace-jobs.js'), 'utf8');
 const publicMarketplaceRoutesSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'public-marketplace-read-routes.js'), 'utf8');
 const marketplaceFactorySource = fs.readFileSync(path.join(__dirname, '..', 'src', 'marketplace-v3-server.js'), 'utf8');
+const apiDocsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'api', 'docs.js'), 'utf8');
+const publicSkillSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'skill.md'), 'utf8');
+const sdkSource = fs.readFileSync(path.join(__dirname, '..', 'sdk', 'src', 'index.ts'), 'utf8');
 
 test('marketplace surface regression guard', async (t) => {
   await t.test('api/jobs is backed by the jobs table instead of a placeholder payload', () => {
@@ -202,6 +205,21 @@ test('marketplace surface regression guard', async (t) => {
       .map((name) => fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', name), 'utf8'))
       .join('\n');
     assert.doesNotMatch(libSource, /SATP_WALLET_PATH|brainchain-personal\.json/);
+  });
+
+  await t.test('public docs and SDK expose canonical delivery routes instead of retired JSON contracts', () => {
+    for (const source of [apiDocsSource, publicSkillSource, sdkSource]) {
+      assert.doesNotMatch(source, /\/api\/marketplace\/jobs\/(?:\{id\}|:id|\$\{encodeURIComponent\(jobId\)\})\/complete/);
+      assert.doesNotMatch(source, /\/api\/marketplace\/jobs\/(?:\{id\}|:id|\$\{encodeURIComponent\(jobId\)\})\/review/);
+      assert.doesNotMatch(source, /\/api\/marketplace\/jobs\/(?:\{id\}|:id|\$\{encodeURIComponent\((?:jobId|data\.jobId)\)\})\/escrow/);
+      assert.doesNotMatch(source, /\/api\/marketplace\/jobs\/(?:\{id\}|:id|\$\{encodeURIComponent\(jobId\)\})\/(?:confirm-deposit|v3-escrow-funded)/);
+    }
+
+    assert.match(apiDocsSource, /\/api\/marketplace\/jobs\/\{jobId\}\/deliverables/);
+    assert.match(apiDocsSource, /\/api\/marketplace\/jobs\/\{jobId\}\/deliverables\/\{deliverableId\}\/approve/);
+    assert.match(publicSkillSource, /\/api\/marketplace\/jobs\/JOB_ID\/deliverables/);
+    assert.match(sdkSource, /\/api\/marketplace\/jobs\/\$\{encodeURIComponent\(jobId\)\}\/deliverables/);
+    assert.match(sdkSource, /\/api\/v3\/escrow\/create/);
   });
 
   await t.test('api/stats includes live job totals instead of hardcoded zeroes', () => {

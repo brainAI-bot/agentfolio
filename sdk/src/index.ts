@@ -25,14 +25,10 @@ import {
   MarketplaceJobThread,
   MarketplaceAward,
   JobSearchParams,
-  Escrow,
-  EscrowCreate,
   V3SolEscrowCreate,
   V3UsdcEscrowCreate,
   Endorsement,
   EndorsementCreate,
-  Review,
-  ReviewCreate,
   Project,
   ProjectCreate,
   ProjectUpdate,
@@ -545,24 +541,6 @@ class JobsAPI {
     });
   }
 
-  /** Mark job as complete (client or agent) */
-  async complete(jobId: string): Promise<void> {
-    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/complete`, {
-      requireAuth: true,
-    });
-  }
-
-  /** Submit a review for completed job */
-  async review(jobId: string, review: ReviewCreate): Promise<Review> {
-    if (!review.rating || review.rating < 1 || review.rating > 5) {
-      throw new ValidationError('rating must be between 1 and 5');
-    }
-    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/review`, {
-      body: review,
-      requireAuth: true,
-    });
-  }
-
   /** Cancel a job (client only, before assignment) */
   async cancel(jobId: string): Promise<void> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/cancel`, {
@@ -577,41 +555,6 @@ class JobsAPI {
 class EscrowAPI {
   constructor(private client: AgentFolio) {}
 
-  /** Get escrow details for a job */
-  async get(jobId: string): Promise<Escrow> {
-    return this.client.request('GET', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/escrow`);
-  }
-
-  /** Create escrow for a job */
-  async create(data: EscrowCreate): Promise<Escrow> {
-    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(data.jobId)}/escrow`, {
-      body: data,
-      requireAuth: true,
-    });
-  }
-
-  /** Confirm deposit for escrow */
-  async confirmDeposit(jobId: string, transactionHash?: string): Promise<void> {
-    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/confirm-deposit`, {
-      body: { transactionHash },
-      requireAuth: true,
-    });
-  }
-
-  /** Release escrow funds (client only) */
-  async release(jobId: string): Promise<void> {
-    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/escrow/release`, {
-      requireAuth: true,
-    });
-  }
-
-  /** Request refund (before work started) */
-  async refund(jobId: string, reason?: string): Promise<void> {
-    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/escrow/refund`, {
-      body: { reason },
-      requireAuth: true,
-    });
-  }
 
   /** Build request body for a SOL-backed V3 escrow create transaction. */
   buildSolCreate(data: V3SolEscrowCreate): V3SolEscrowCreate & { currency: 'SOL' } {
