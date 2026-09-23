@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
+const Database = require('better-sqlite3');
 const { trustLoopbackProxyHop } = require('../src/lib/loopback-proxy');
 
 const serverSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
@@ -31,28 +32,57 @@ test('marketplace surface regression guard', async (t) => {
     assert.doesNotMatch(serverSource, /jobs:\s*\[\],\s*total:\s*0,\s*page:\s*1,\s*message:\s*'Jobs marketplace endpoint active'/);
   });
 
-  await t.test('public marketplace compatibility reads resolve to SQLite before legacy fallbacks', () => {
-    const canonicalRead = serverSource.indexOf('registerMarketplaceV3Routes(app, {');
-    const legacyMount = serverSource.indexOf('marketplace.registerRoutes(app)');
-    assert.ok(canonicalRead > -1 && canonicalRead < legacyMount);
+  await t.test('public marketplace compatibility reads resolve only to SQLite routes', () => {
+    assert.match(serverSource, /registerMarketplaceV3Routes\(app, \{/);
+    assert.doesNotMatch(serverSource, /require\(['"]\.\/marketplace['"]\)/);
+    assert.doesNotMatch(serverSource, /marketplace\.registerRoutes\(app\)/);
     assert.match(publicMarketplaceRoutesSource, /app\.get\('\/api\/marketplace\/jobs\/:id\/applications', limiter, handlers\.getSqliteMarketplaceApplications\)/);
     assert.match(dataSource, /fetch\(`\$\{API_BASE\}\/api\/jobs\?limit=100`/);
     assert.doesNotMatch(dataSource, /data\/marketplace\/jobs|JOBS_DIR|DELIVERABLES_DIR/);
   });
 
-  await t.test('unmigrated marketplace compatibility and escrow routes remain mounted', () => {
+  await t.test('canonical route registration covers supported aliases without retired JSON or custodial routes', () => {
     const registrations = new Set();
     const capture = (method) => (route) => registrations.add(`${method} ${route}`);
     const fakeApp = { get: capture('GET'), post: capture('POST') };
-    require('../src/marketplace').registerRoutes(fakeApp);
+    const db = new Database(':memory:');
+    db.exec(`
+      CREATE TABLE profiles (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        api_key TEXT,
+        wallet TEXT,
+        wallets TEXT DEFAULT '{}',
+        verification_data TEXT DEFAULT '{}'
+      )
+    `);
+    try {
+      require('../src/marketplace-v3-server').registerMarketplaceV3Routes(fakeApp, { getDb: () => db });
+    } finally {
+      db.close();
+    }
 
     for (const route of [
-      'POST /api/marketplace/jobs/:id/applications',
+      'GET /api/marketplace/jobs',
+      'GET /api/marketplace/jobs/:id',
+      'GET /api/marketplace/jobs/:id/applications',
+      'POST /api/marketplace/jobs',
+      'POST /api/marketplace/jobs/:id/apply',
+      'POST /api/marketplace/jobs/:id/claim',
+      'POST /api/marketplace/jobs/:id/fund-staged',
+      'POST /api/marketplace/jobs/:id/fund-staged/verify',
+      'POST /api/marketplace/jobs/:jobId/deliverables',
+      'POST /api/marketplace/jobs/:jobId/disagreements',
+      'GET /api/marketplace/jobs/:jobId/thread',
+    ]) {
+      assert.ok(registrations.has(route), `${route} must be registered by the canonical SQLite factory`);
+    }
+
+    for (const route of [
       'POST /api/marketplace/jobs/:id/escrow',
       'GET /api/marketplace/escrow/:id',
       'POST /api/marketplace/escrow/:id/release',
       'POST /api/marketplace/escrow/:id/refund',
-      'POST /api/marketplace/jobs/:id/complete',
       'POST /api/marketplace/jobs/:id/confirm-deposit',
       'POST /api/marketplace/jobs/:id/v3-escrow-funded',
       'POST /api/marketplace/jobs/:id/review',
@@ -60,7 +90,7 @@ test('marketplace surface regression guard', async (t) => {
       'POST /api/marketplace/deliverables/:id/revision',
       'GET /api/marketplace/deliverables/:id',
     ]) {
-      assert.ok(registrations.has(route), `${route} must remain registered`);
+      assert.equal(registrations.has(route), false, `${route} must stay retired`);
     }
   });
 
@@ -165,6 +195,13 @@ test('marketplace surface regression guard', async (t) => {
   await t.test('dead marketplace artifacts are removed', () => {
     assert.equal(fs.existsSync(path.join(__dirname, '..', 'public', 'v2', 'marketplace.html')), false);
     assert.equal(fs.existsSync(path.join(__dirname, '..', 'src', 'marketplace.js.pre-v3-escrow-wiring')), false);
+    assert.equal(fs.existsSync(path.join(__dirname, '..', 'src', 'lib', 'satp-reviews.js')), false);
+
+    const libSource = fs.readdirSync(path.join(__dirname, '..', 'src', 'lib'))
+      .filter((name) => name.endsWith('.js'))
+      .map((name) => fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', name), 'utf8'))
+      .join('\n');
+    assert.doesNotMatch(libSource, /SATP_WALLET_PATH|brainchain-personal\.json/);
   });
 
   await t.test('api/stats includes live job totals instead of hardcoded zeroes', () => {
