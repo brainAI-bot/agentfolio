@@ -8,6 +8,7 @@ const satpClient = require('@brainai/satp-client');
 const bs58 = bs58Module.default || bs58Module;
 const ESCROW_V3_ACCOUNT_DISCRIMINATOR = Buffer.from([145, 108, 37, 52, 197, 162, 232, 59]);
 const READBACK_ERROR_CODE = 'ESCROW_ONCHAIN_READBACK_FAILED';
+const STAGED_READBACK_SOURCE = 'server_staged_escrow_readback';
 const CREATE_ESCROW_DISCRIMINATORS = [
   'create_escrow',
   'create_usdc_escrow',
@@ -277,13 +278,48 @@ async function verifyEscrowFundingOnChain(
   };
 }
 
+function readStagedEscrowFunding(db, { jobId, escrowReference }) {
+  const escrow = db.prepare(`
+    SELECT id, job_id, client_id, amount_minor, currency, status, deposit_confirmed_at
+    FROM escrows
+    WHERE id = ? AND job_id = ?
+  `).get(escrowReference, jobId);
+  if (!escrow) {
+    throw new EscrowOnChainReadbackError(
+      'Funding reference does not resolve to the staged escrow for this job',
+      409,
+      'staged_escrow_reference_mismatch',
+    );
+  }
+  if (!/^[1-9]\d*$/.test(String(escrow.amount_minor || ''))) {
+    throw new EscrowOnChainReadbackError(
+      'Staged escrow amount is missing or malformed',
+      409,
+      'staged_escrow_amount_invalid',
+    );
+  }
+  return {
+    verified: true,
+    source: STAGED_READBACK_SOURCE,
+    escrowReference: escrow.id,
+    jobId: escrow.job_id,
+    clientId: escrow.client_id,
+    amountMinor: String(escrow.amount_minor),
+    currency: escrow.currency,
+    status: escrow.status,
+    depositConfirmedAt: escrow.deposit_confirmed_at || null,
+  };
+}
+
 module.exports = {
   ESCROW_V3_ACCOUNT_DISCRIMINATOR,
   READBACK_ERROR_CODE,
+  STAGED_READBACK_SOURCE,
   EscrowOnChainReadbackError,
   escrowProgramIdForNetwork,
   transactionAccountKeys,
   transactionCreatesEscrow,
   validateEscrowAccount,
+  readStagedEscrowFunding,
   verifyEscrowFundingOnChain,
 };

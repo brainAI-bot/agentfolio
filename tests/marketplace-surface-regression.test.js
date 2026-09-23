@@ -14,10 +14,12 @@ const detailSource = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'src
 const marketplacePageSource = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'src', 'app', 'marketplace', 'page.tsx'), 'utf8');
 const publicMarketplaceSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'public-marketplace-jobs.js'), 'utf8');
 const publicMarketplaceRoutesSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'public-marketplace-read-routes.js'), 'utf8');
+const marketplaceFactorySource = fs.readFileSync(path.join(__dirname, '..', 'src', 'marketplace-v3-server.js'), 'utf8');
 
 test('marketplace surface regression guard', async (t) => {
   await t.test('api/jobs is backed by the jobs table instead of a placeholder payload', () => {
-    assert.match(serverSource, /registerPublicMarketplaceReadRoutes\(app, \{/);
+    assert.match(serverSource, /registerMarketplaceV3Routes\(app, \{/);
+    assert.match(marketplaceFactorySource, /registerPublicMarketplaceReadRoutes\(app, \{ getDb,/);
     assert.match(publicMarketplaceRoutesSource, /app\.get\('\/api\/jobs', limiter, handlers\.listSqliteMarketplaceJobs\)/);
     assert.match(publicMarketplaceRoutesSource, /const cohort = getPublicMarketplaceCohort\(db\)/);
     assert.match(publicMarketplaceSource, /SELECT \* FROM jobs\s+ORDER BY datetime\(created_at\) DESC\s+LIMIT \?/);
@@ -30,7 +32,7 @@ test('marketplace surface regression guard', async (t) => {
   });
 
   await t.test('public marketplace compatibility reads resolve to SQLite before legacy fallbacks', () => {
-    const canonicalRead = serverSource.indexOf('registerPublicMarketplaceReadRoutes(app, {');
+    const canonicalRead = serverSource.indexOf('registerMarketplaceV3Routes(app, {');
     const legacyMount = serverSource.indexOf('marketplace.registerRoutes(app)');
     assert.ok(canonicalRead > -1 && canonicalRead < legacyMount);
     assert.match(publicMarketplaceRoutesSource, /app\.get\('\/api\/marketplace\/jobs\/:id\/applications', limiter, handlers\.getSqliteMarketplaceApplications\)/);
@@ -78,7 +80,8 @@ test('marketplace surface regression guard', async (t) => {
       );
     }
     assert.equal((serverSource.match(/const publicMarketplaceReadLimiter = rateLimit\(/g) || []).length, 1);
-    assert.match(serverSource, /limiter: publicMarketplaceReadLimiter/);
+    assert.match(serverSource, /publicReadLimiter: publicMarketplaceReadLimiter/);
+    assert.match(marketplaceFactorySource, /limiter: publicReadLimiter/);
   });
 
   await t.test('loopback proxy trust is limited to exactly one hop', () => {

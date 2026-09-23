@@ -1734,32 +1734,15 @@ app.use((req, res, next) => {
   next();
 });
 
-// D9 canonical reads: SQLite backs both the modern and compatibility paths.
-// The compatibility routes are registered before the legacy mutation module so
-// no public GET can fall through to the retired JSON-file read lane.
-const { registerPublicMarketplaceReadRoutes } = require('./routes/public-marketplace-read-routes');
-registerPublicMarketplaceReadRoutes(app, {
+// Canonical V3 marketplace routes share one production/test factory so staged E2E
+// exercises the same registration order and timers used by the live server.
+const { registerMarketplaceV3Routes } = require('./marketplace-v3-server');
+registerMarketplaceV3Routes(app, {
   getDb: () => profileStore.getDb(),
-  limiter: publicMarketplaceReadLimiter,
-});
-
-// Canonical P1 marketplace mutations. Register before the retired JSON module
-// so every fixed-price web/API path writes only to SQLite.
-const { registerMarketplaceJobRoutes } = require('./routes/marketplace-job-routes');
-registerMarketplaceJobRoutes(app, { getDb: () => profileStore.getDb() });
-
-const { registerMarketplaceDeliveryRoutes } = require('./routes/marketplace-delivery-routes');
-registerMarketplaceDeliveryRoutes(app, {
-  getDb: () => profileStore.getDb(),
+  publicReadLimiter: publicMarketplaceReadLimiter,
+  expirySweepIntervalMs: 60 * 1000,
+  awardTimeoutSweepIntervalMs: 60 * 1000,
   autoApprovalSweepIntervalMs: 60 * 1000,
-});
-
-// Canonical P1 marketplace application mutations. Register before the retired
-// JSON mutation module so both compatibility and marketplace paths use SQLite.
-const { registerMarketplaceApplicationRoutes } = require('./routes/marketplace-application-routes');
-registerMarketplaceApplicationRoutes(app, {
-  getDb: () => profileStore.getDb(),
-  timeoutSweepIntervalMs: 60 * 1000,
 });
 
 // Keep the legacy module mounted until every compatibility route is migrated.
