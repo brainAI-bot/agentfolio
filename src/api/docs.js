@@ -654,6 +654,73 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
         }
       }
     },
+    '/api/marketplace/jobs/{id}/claim': {
+      post: {
+        tags: ['Marketplace'],
+        summary: 'Claim a funded claim-mode job',
+        description: 'Atomically awards the first eligible authenticated agent. Requires Idempotency-Key. Live escrow writes remain disabled.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { '$ref': '#/components/parameters/IdempotencyKey' }
+        ],
+        responses: { 200: { description: 'Claim awarded or idempotent replay' }, 409: { description: 'Not claimable or already claimed' } }
+      }
+    },
+    '/api/marketplace/jobs/{id}/fund-staged': {
+      post: {
+        tags: ['Marketplace', 'Escrow'],
+        summary: 'Create a staged funding effect',
+        description: 'Records a server-generated staged escrow reference. No money or chain state changes. Requires Idempotency-Key.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { '$ref': '#/components/parameters/IdempotencyKey' }
+        ],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['amount'], properties: { amount: { oneOf: [{ type: 'string' }, { type: 'number' }] } } } } } },
+        responses: { 201: { description: 'Funding staged; liveEscrowWritesAllowed is false' } }
+      }
+    },
+    '/api/marketplace/jobs/{id}/fund-staged/verify': {
+      post: {
+        tags: ['Marketplace', 'Escrow'],
+        summary: 'Verify staged funding readback',
+        description: 'Verifies the server-issued staged reference and exact advertised amount. Requires Idempotency-Key; no live write occurs.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { '$ref': '#/components/parameters/IdempotencyKey' }
+        ],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['escrowReference'], properties: { escrowReference: { type: 'string' } } } } } },
+        responses: { 200: { description: 'Staged funding verified' } }
+      }
+    },
+    '/api/marketplace/jobs/{id}/release': {
+      post: {
+        tags: ['Marketplace', 'Escrow'],
+        summary: 'Record staged settlement',
+        description: 'Moves an approved job to released and records the staged fee/recipient effect. No money moves. Requires Idempotency-Key.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { '$ref': '#/components/parameters/IdempotencyKey' }
+        ],
+        responses: { 200: { description: 'Staged settlement recorded or idempotent replay' } }
+      }
+    },
+    '/api/marketplace/jobs/{id}/close': {
+      post: {
+        tags: ['Marketplace'],
+        summary: 'Close released job bookkeeping',
+        description: 'Moves released to closed without a money action. Requires Idempotency-Key.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { '$ref': '#/components/parameters/IdempotencyKey' }
+        ],
+        responses: { 200: { description: 'Job closed or idempotent replay' } }
+      }
+    },
     '/api/marketplace/jobs/{id}': {
       get: {
         tags: ['Marketplace'],
@@ -1431,23 +1498,23 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
       post: {
         tags: ['Webhooks'],
         summary: 'Register webhook',
+        description: 'Authenticated registration. The signing secret is returned only in this creation response.',
+        security: [{ bearerAuth: [] }],
         requestBody: {
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['url', 'events', 'profileId'],
+                required: ['url', 'events'],
                 properties: {
                   url: { type: 'string', format: 'uri' },
                   events: { type: 'array', items: { type: 'string' } },
-                  profileId: { type: 'string' },
-                  secret: { type: 'string' }
+                  description: { type: 'string' }
                 }
               },
               example: {
                 url: 'https://mybot.example.com/webhook',
-                events: ['job_posted', 'job_completed', 'endorsement_received'],
-                profileId: 'agent_brainkid'
+                events: ['agent.registered', 'profile.updated']
               }
             }
           }
@@ -1459,9 +1526,7 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
       get: {
         tags: ['Webhooks'],
         summary: 'List webhooks',
-        parameters: [
-          { name: 'profileId', in: 'query', required: true, schema: { type: 'string' } }
-        ],
+        security: [{ bearerAuth: [] }],
         responses: {
           200: { description: 'List of webhooks' }
         }
@@ -1471,6 +1536,7 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
       get: {
         tags: ['Webhooks'],
         summary: 'Get webhook details',
+        security: [{ bearerAuth: [] }],
         parameters: [
           { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
         ],
@@ -1481,24 +1547,72 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
       delete: {
         tags: ['Webhooks'],
         summary: 'Delete webhook',
+        security: [{ bearerAuth: [] }],
         parameters: [
           { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
         ],
         responses: {
           200: { description: 'Webhook deleted' }
         }
+      },
+      patch: {
+        tags: ['Webhooks'],
+        summary: 'Update webhook',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
+        ],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { url: { type: 'string', format: 'uri' }, events: { type: 'array', items: { type: 'string' } }, description: { type: 'string' }, active: { type: 'boolean' } } } } } },
+        responses: { 200: { description: 'Webhook updated with secret redacted' } }
       }
     },
     '/api/webhooks/{id}/test': {
       post: {
         tags: ['Webhooks'],
         summary: 'Test webhook',
+        description: 'Sends a signed test delivery without following redirects. The response exposes only the upstream status code.',
+        security: [{ bearerAuth: [] }],
         parameters: [
           { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
         ],
         responses: {
-          200: { description: 'Test payload sent' }
+          200: { description: 'Test payload sent; body contains only statusCode' },
+          502: { description: 'Test delivery failed; body contains only statusCode' }
         }
+      }
+    },
+    '/api/webhooks/{id}/logs': {
+      get: {
+        tags: ['Webhooks'],
+        summary: 'List webhook delivery logs',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } }
+        ],
+        responses: { 200: { description: 'Webhook delivery logs' } }
+      }
+    },
+    '/api/webhooks/events': {
+      get: {
+        tags: ['Webhooks'],
+        summary: 'List supported webhook events',
+        security: [{ bearerAuth: [] }],
+        responses: { 200: { description: 'Supported event names' } }
+      }
+    },
+    '/api/webhooks/dead-letters': {
+      get: {
+        tags: ['Webhooks'],
+        summary: 'List owned failed deliveries',
+        security: [{ bearerAuth: [] }],
+        responses: { 200: { description: 'Owned dead-letter deliveries' } }
+      },
+      delete: {
+        tags: ['Webhooks'],
+        summary: 'Clear owned failed deliveries',
+        security: [{ bearerAuth: [] }],
+        responses: { 200: { description: 'Owned dead letters cleared' } }
       }
     },
 
@@ -1799,6 +1913,15 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
     }
   },
   components: {
+    parameters: {
+      IdempotencyKey: {
+        name: 'Idempotency-Key',
+        in: 'header',
+        required: true,
+        schema: { type: 'string', maxLength: 200 },
+        description: 'Stable key for one logical mutation. Reuse it after network or 5xx uncertainty.'
+      }
+    },
     schemas: {
       ProfileSummary: {
         type: 'object',

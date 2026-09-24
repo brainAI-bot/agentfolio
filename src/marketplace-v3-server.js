@@ -7,6 +7,7 @@ const { registerPublicMarketplaceReadRoutes } = require('./routes/public-marketp
 const { registerMarketplaceJobRoutes } = require('./routes/marketplace-job-routes');
 const { registerMarketplaceApplicationRoutes } = require('./routes/marketplace-application-routes');
 const { registerMarketplaceDeliveryRoutes } = require('./routes/marketplace-delivery-routes');
+const { registerWebhookRoutes } = require('./routes/webhook-routes');
 
 function registerMarketplaceV3Routes(app, {
   getDb,
@@ -22,6 +23,7 @@ function registerMarketplaceV3Routes(app, {
   registerMarketplaceJobRoutes(app, { getDb, closeDb, clock, expirySweepIntervalMs });
   registerMarketplaceDeliveryRoutes(app, { getDb, closeDb, clock, autoApprovalSweepIntervalMs });
   registerMarketplaceApplicationRoutes(app, { getDb, closeDb, clock, timeoutSweepIntervalMs: awardTimeoutSweepIntervalMs });
+  registerWebhookRoutes(app, { getDb, closeDb });
   app.get('/api/marketplace/v3/smoke', (_req, res) => {
     const db = getDb();
     try {

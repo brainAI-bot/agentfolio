@@ -49,6 +49,7 @@ import {
   AuthenticationError,
   RateLimitError,
   VerificationType,
+  IdempotentRequestOptions,
 } from './types';
 
 // Re-export all types
@@ -183,6 +184,8 @@ export class AgentFolio {
       params?: Record<string, any>;
       requireAuth?: boolean;
       headers?: Record<string, string>;
+      idempotencyKey?: string;
+      retries?: number;
     } = {}
   ): Promise<T> {
     const url = new URL(`${this.baseUrl}${path}`);
@@ -204,8 +207,14 @@ export class AgentFolio {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       ...this.customHeaders,
-      ...options.headers,
+      ...(options.headers || {}),
     };
+
+    if (options.idempotencyKey !== undefined) {
+      const key = String(options.idempotencyKey || '').trim() || crypto.randomUUID();
+      if (key.length > 200) throw new ValidationError('idempotencyKey must be at most 200 characters');
+      headers['Idempotency-Key'] = key;
+    }
 
     if (this.apiKey) {
       headers['Authorization'] = `Bearer ${this.apiKey}`;
@@ -217,12 +226,18 @@ export class AgentFolio {
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      const response = await fetch(url.toString(), {
-        method,
-        headers,
-        body: options.body ? JSON.stringify(options.body) : undefined,
-        signal: controller.signal,
-      });
+      const body = options.body ? JSON.stringify(options.body) : undefined;
+      let response: Response;
+      let attempt = 0;
+      while (true) {
+        try {
+          response = await fetch(url.toString(), { method, headers, body, signal: controller.signal });
+          if (response.status < 500 || attempt >= (options.retries || 0)) break;
+        } catch (error) {
+          if (attempt >= (options.retries || 0)) throw error;
+        }
+        attempt += 1;
+      }
 
       clearTimeout(timeoutId);
 
@@ -562,6 +577,54 @@ class JobsAPI {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/cancel`, {
       body: { reason },
       requireAuth: true,
+    });
+  }
+
+  /** Atomically claim a funded pickup_mode=claim job. */
+  async claim(jobId: string, options: IdempotentRequestOptions & { body?: Record<string, unknown> } = {}): Promise<unknown> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/claim`, {
+      body: options.body,
+      requireAuth: true,
+      idempotencyKey: options.idempotencyKey || '',
+      retries: options.retries ?? 1,
+    });
+  }
+
+  /** Create a staged funding effect without moving money. */
+  async stageFunding(jobId: string, amount: string | number, options: IdempotentRequestOptions = {}): Promise<unknown> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/fund-staged`, {
+      body: { amount },
+      requireAuth: true,
+      idempotencyKey: options.idempotencyKey || '',
+      retries: options.retries ?? 1,
+    });
+  }
+
+  /** Verify the server-issued staged funding reference. */
+  async verifyStagedFunding(jobId: string, escrowReference: string, options: IdempotentRequestOptions = {}): Promise<unknown> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/fund-staged/verify`, {
+      body: { escrowReference },
+      requireAuth: true,
+      idempotencyKey: options.idempotencyKey || '',
+      retries: options.retries ?? 1,
+    });
+  }
+
+  /** Record staged settlement for an approved job; no live funds move. */
+  async settle(jobId: string, options: IdempotentRequestOptions = {}): Promise<unknown> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/release`, {
+      requireAuth: true,
+      idempotencyKey: options.idempotencyKey || '',
+      retries: options.retries ?? 1,
+    });
+  }
+
+  /** Close released job bookkeeping; no live funds move. */
+  async close(jobId: string, options: IdempotentRequestOptions = {}): Promise<unknown> {
+    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/close`, {
+      requireAuth: true,
+      idempotencyKey: options.idempotencyKey || '',
+      retries: options.retries ?? 1,
     });
   }
 }
