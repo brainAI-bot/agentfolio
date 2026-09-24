@@ -442,21 +442,21 @@ test('SDK exposes the complete application award lifecycle on canonical routes',
   const { AgentFolio } = require('../sdk');
   const sdk = new AgentFolio({ apiKey: 'not-used' });
   const calls = [];
-  sdk._request = async (method, path) => { calls.push([method, path]); return {}; };
+  sdk._request = async (method, path, options = {}) => { calls.push([method, path, options.headers?.['Idempotency-Key'] || null]); return {}; };
 
   await sdk.marketplace.withdrawApplication('job/1', 'app/1');
   await sdk.marketplace.rejectApplication('job/1', 'app/1');
   await sdk.marketplace.selectApplication('job/1', 'app/1');
-  await sdk.marketplace.acceptAward('job/1', 'app/1');
-  await sdk.marketplace.declineAward('job/1', 'app/1');
-  await sdk.marketplace.processAwardTimeout('job/1');
+  await sdk.marketplace.acceptAward('job/1', 'app/1', 'accept-key');
+  await sdk.marketplace.declineAward('job/1', 'app/1', 'decline-key');
+  await sdk.marketplace.processAwardTimeout('job/1', 'timeout-key');
 
   assert.deepEqual(calls, [
-    ['POST', '/api/marketplace/jobs/job%2F1/applications/app%2F1/withdraw'],
-    ['POST', '/api/marketplace/jobs/job%2F1/applications/app%2F1/reject'],
-    ['POST', '/api/marketplace/jobs/job%2F1/applications/app%2F1/select'],
-    ['POST', '/api/marketplace/jobs/job%2F1/applications/app%2F1/accept'],
-    ['POST', '/api/marketplace/jobs/job%2F1/applications/app%2F1/decline'],
-    ['POST', '/api/marketplace/jobs/job%2F1/award-timeout'],
+    ['POST', '/api/marketplace/jobs/job%2F1/applications/app%2F1/withdraw', null],
+    ['POST', '/api/marketplace/jobs/job%2F1/applications/app%2F1/reject', null],
+    ['POST', '/api/marketplace/jobs/job%2F1/applications/app%2F1/select', null],
+    ['POST', '/api/marketplace/jobs/job%2F1/applications/app%2F1/accept', 'accept-key'],
+    ['POST', '/api/marketplace/jobs/job%2F1/applications/app%2F1/decline', 'decline-key'],
+    ['POST', '/api/marketplace/jobs/job%2F1/award-timeout', 'timeout-key'],
   ]);
 });

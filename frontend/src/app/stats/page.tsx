@@ -547,85 +547,9 @@ export default async function StatsPage() {
           ))}
         </div>
       </div>
-      {/* ══════ TOKEN LAUNCHES ══════ */}
-      <TokenStatsSection />
-    </main>
-  );
-}
 
-async function TokenStatsSection() {
-  let tokenStats: any = null;
-  try {
-    const res = await fetch("https://agentfolio.bot/api/tokens/stats", { next: { revalidate: 60 } });
-    tokenStats = await res.json();
-  } catch {}
-
-  if (!tokenStats) return null;
-
-  const platformColors: Record<string, string> = {
-    pumpfun: "#22c55e",
-    virtuals: "#8b5cf6",
-    existing: "#3b82f6",
-  };
-
-  const total = tokenStats.totalTokens || 0;
-
-  return (
-    <div className="mb-8">
-      <h2 className="text-lg font-bold mb-4" style={{ color: "var(--text-primary)" }}>
-        🚀 Token Launches
-      </h2>
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-        <div className="rounded-lg p-4" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
-          <div className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "var(--text-tertiary)" }}>Tokens Launched</div>
-          <div className="text-2xl font-bold" style={{ color: "var(--accent)" }}>{total}</div>
-        </div>
-        <div className="rounded-lg p-4" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
-          <div className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "var(--text-tertiary)" }}>Total Burned</div>
-          <div className="text-2xl font-bold" style={{ color: "#f59e0b" }}>{(tokenStats.totalBurned || 0).toLocaleString()}</div>
-        </div>
-        <div className="rounded-lg p-4" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
-          <div className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "var(--text-tertiary)" }}>Platforms</div>
-          <div className="flex gap-3 mt-1">
-            {Object.entries(tokenStats.platformBreakdown || {}).map(([p, count]) => (
-              <div key={p} className="text-center">
-                <div className="text-lg font-bold" style={{ color: platformColors[p] || "var(--text-primary)" }}>{count as number}</div>
-                <div className="text-[9px] uppercase" style={{ color: "var(--text-muted)" }}>{p}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Recent launches table */}
-      {tokenStats.recentLaunches?.length > 0 && (
-        <div className="rounded-lg overflow-hidden" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
-          <div className="px-4 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
-            <span className="text-xs font-bold uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>Recent Launches</span>
-          </div>
-          <div className="divide-y" style={{ borderColor: "var(--border)" }}>
-            {tokenStats.recentLaunches.map((l: any) => (
-              <div key={l.id} className="px-4 py-3 flex items-center justify-between">
-                <div>
-                  <span className="font-bold text-sm" style={{ color: "var(--text-primary)" }}>${l.symbol}</span>
-                  <span className="text-xs ml-2" style={{ color: "var(--text-muted)" }}>{l.name}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-[10px] uppercase px-2 py-0.5 rounded" style={{ background: `${platformColors[l.platform]}20`, color: platformColors[l.platform] }}>
-                    {l.platform}
-                  </span>
-                  <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-                    {l.chain}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* On-Chain Receipts */}
-      <div className="rounded-lg overflow-hidden" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
+      {/* Public chain receipts are independent of the retired token-launch surface. */}
+      <div className="rounded-lg overflow-hidden mt-8" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
         <div className="px-4 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
           <span className="text-xs font-bold uppercase tracking-wider" style={{ color: "var(--text-tertiary)" }}>On-Chain Receipts</span>
         </div>
@@ -650,7 +574,6 @@ async function TokenStatsSection() {
           ))}
         </div>
       </div>
-
-    </div>
+    </main>
   );
 }

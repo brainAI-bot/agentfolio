@@ -1745,12 +1745,6 @@ registerMarketplaceV3Routes(app, {
   autoApprovalSweepIntervalMs: 60 * 1000,
 });
 
-// Keep the legacy module mounted until every compatibility route is migrated.
-// The canonical SQLite routes above are registered first, so their overlapping
-// read aliases win while the remaining escrow/delivery/review contracts stay live.
-const marketplace = require('./marketplace');
-marketplace.registerRoutes(app);
-
 // ===== HARDENED VERIFICATION ENDPOINTS (Challenge-Response) =====
 const verificationChallenges = require('./verification-challenges');
 
