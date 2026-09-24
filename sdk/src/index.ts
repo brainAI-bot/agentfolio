@@ -25,14 +25,10 @@ import {
   MarketplaceJobThread,
   MarketplaceAward,
   JobSearchParams,
-  Escrow,
-  EscrowCreate,
   V3SolEscrowCreate,
   V3UsdcEscrowCreate,
   Endorsement,
   EndorsementCreate,
-  Review,
-  ReviewCreate,
   Project,
   ProjectCreate,
   ProjectUpdate,
@@ -186,6 +182,7 @@ export class AgentFolio {
       body?: any;
       params?: Record<string, any>;
       requireAuth?: boolean;
+      headers?: Record<string, string>;
     } = {}
   ): Promise<T> {
     const url = new URL(`${this.baseUrl}${path}`);
@@ -207,6 +204,7 @@ export class AgentFolio {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       ...this.customHeaders,
+      ...options.headers,
     };
 
     if (this.apiKey) {
@@ -274,6 +272,13 @@ export class AgentFolio {
       );
     }
   }
+}
+
+function idempotencyHeaders(value: string): Record<string, string> {
+  const key = String(value || '').trim();
+  if (!key) throw new ValidationError('idempotencyKey is required');
+  if (key.length > 200) throw new ValidationError('idempotencyKey must be at most 200 characters');
+  return { 'Idempotency-Key': key };
 }
 
 /**
@@ -441,8 +446,8 @@ class JobsAPI {
 
   /** Create a new job posting */
   async create(data: JobCreate): Promise<Job> {
-    if (!data.title || !data.description || !data.budget || !data.category) {
-      throw new ValidationError('title, description, budget, and category are required');
+    if (!data.title || !data.description || !data.budgetAmount || !data.category) {
+      throw new ValidationError('title, description, budgetAmount, and category are required');
     }
     return this.client.request('POST', '/api/marketplace/jobs', {
       body: data,
@@ -459,10 +464,11 @@ class JobsAPI {
   }
 
   /** Submit immutable deliverable content (awarded worker only). */
-  async submitDeliverable(jobId: string, deliverable: MarketplaceDeliverableCreate): Promise<{ deliverable: MarketplaceDeliverable; status: 'submitted' }> {
+  async submitDeliverable(jobId: string, deliverable: MarketplaceDeliverableCreate, idempotencyKey: string): Promise<{ deliverable: MarketplaceDeliverable; status: 'submitted' }> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables`, {
       body: deliverable,
       requireAuth: true,
+      headers: idempotencyHeaders(idempotencyKey),
     });
   }
 
@@ -474,10 +480,11 @@ class JobsAPI {
   }
 
   /** Request one of at most two revisions (job client only). */
-  async requestRevision(jobId: string, deliverableId: string, reason: string): Promise<{ revision: MarketplaceRevisionRequest; status: 'in_progress' }> {
+  async requestRevision(jobId: string, deliverableId: string, reason: string, idempotencyKey: string): Promise<{ revision: MarketplaceRevisionRequest; status: 'in_progress' }> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables/${encodeURIComponent(deliverableId)}/revisions`, {
       body: { reason },
       requireAuth: true,
+      headers: idempotencyHeaders(idempotencyKey),
     });
   }
 
@@ -489,9 +496,10 @@ class JobsAPI {
   }
 
   /** Approve the current deliverable (job client only). */
-  async approveDeliverable(jobId: string, deliverableId: string): Promise<{ deliverable: MarketplaceDeliverable; status: 'approved' }> {
+  async approveDeliverable(jobId: string, deliverableId: string, idempotencyKey: string): Promise<{ deliverable: MarketplaceDeliverable; status: 'approved' }> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables/${encodeURIComponent(deliverableId)}/approve`, {
       requireAuth: true,
+      headers: idempotencyHeaders(idempotencyKey),
     });
   }
 
@@ -503,17 +511,19 @@ class JobsAPI {
   }
 
   /** Add an immutable structured job comment (job parties/admin only). */
-  async addComment(jobId: string, comment: MarketplaceJobCommentCreate): Promise<{ comment: MarketplaceJobComment }> {
+  async addComment(jobId: string, comment: MarketplaceJobCommentCreate, idempotencyKey: string): Promise<{ comment: MarketplaceJobComment }> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/comments`, {
       body: comment,
       requireAuth: true,
+      headers: idempotencyHeaders(idempotencyKey),
     });
   }
 
   /** Accept an active award (selected agent only). */
-  async acceptAward(jobId: string, applicationId: string): Promise<MarketplaceAward> {
+  async acceptAward(jobId: string, applicationId: string, idempotencyKey: string): Promise<MarketplaceAward> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/accept`, {
       requireAuth: true,
+      headers: idempotencyHeaders(idempotencyKey),
     });
   }
 
@@ -525,9 +535,10 @@ class JobsAPI {
   }
 
   /** Decline an active award and reopen the job. */
-  async declineAward(jobId: string, applicationId: string): Promise<MarketplaceAward> {
+  async declineAward(jobId: string, applicationId: string, idempotencyKey: string): Promise<MarketplaceAward> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/decline`, {
       requireAuth: true,
+      headers: idempotencyHeaders(idempotencyKey),
     });
   }
 
@@ -539,33 +550,17 @@ class JobsAPI {
   }
 
   /** Process an expired 48 hour award window (job client only). */
-  async processAwardTimeout(jobId: string): Promise<MarketplaceAward> {
+  async processAwardTimeout(jobId: string, idempotencyKey: string): Promise<MarketplaceAward> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/award-timeout`, {
       requireAuth: true,
-    });
-  }
-
-  /** Mark job as complete (client or agent) */
-  async complete(jobId: string): Promise<void> {
-    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/complete`, {
-      requireAuth: true,
-    });
-  }
-
-  /** Submit a review for completed job */
-  async review(jobId: string, review: ReviewCreate): Promise<Review> {
-    if (!review.rating || review.rating < 1 || review.rating > 5) {
-      throw new ValidationError('rating must be between 1 and 5');
-    }
-    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/review`, {
-      body: review,
-      requireAuth: true,
+      headers: idempotencyHeaders(idempotencyKey),
     });
   }
 
   /** Cancel a job (client only, before assignment) */
-  async cancel(jobId: string): Promise<void> {
+  async cancel(jobId: string, reason: string): Promise<void> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/cancel`, {
+      body: { reason },
       requireAuth: true,
     });
   }
@@ -577,41 +572,6 @@ class JobsAPI {
 class EscrowAPI {
   constructor(private client: AgentFolio) {}
 
-  /** Get escrow details for a job */
-  async get(jobId: string): Promise<Escrow> {
-    return this.client.request('GET', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/escrow`);
-  }
-
-  /** Create escrow for a job */
-  async create(data: EscrowCreate): Promise<Escrow> {
-    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(data.jobId)}/escrow`, {
-      body: data,
-      requireAuth: true,
-    });
-  }
-
-  /** Confirm deposit for escrow */
-  async confirmDeposit(jobId: string, transactionHash?: string): Promise<void> {
-    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/confirm-deposit`, {
-      body: { transactionHash },
-      requireAuth: true,
-    });
-  }
-
-  /** Release escrow funds (client only) */
-  async release(jobId: string): Promise<void> {
-    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/escrow/release`, {
-      requireAuth: true,
-    });
-  }
-
-  /** Request refund (before work started) */
-  async refund(jobId: string, reason?: string): Promise<void> {
-    return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/escrow/refund`, {
-      body: { reason },
-      requireAuth: true,
-    });
-  }
 
   /** Build request body for a SOL-backed V3 escrow create transaction. */
   buildSolCreate(data: V3SolEscrowCreate): V3SolEscrowCreate & { currency: 'SOL' } {

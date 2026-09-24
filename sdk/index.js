@@ -44,7 +44,7 @@ class AgentFolio {
   /**
    * Make an HTTP request to the AgentFolio API
    */
-  async _request(method, path, { body, query } = {}) {
+  async _request(method, path, { body, query, headers: requestHeaders } = {}) {
     let url = `${this.baseUrl}${path}`;
     if (query) {
       const params = new URLSearchParams();
@@ -59,7 +59,7 @@ class AgentFolio {
     const isHttps = parsed.protocol === 'https:';
     const lib = isHttps ? https : http;
 
-    const headers = { 'Accept': 'application/json' };
+    const headers = { 'Accept': 'application/json', ...(requestHeaders || {}) };
     if (this.apiKey) headers['X-API-Key'] = this.apiKey;
     if (this.accessToken) headers['Authorization'] = `Bearer ${this.accessToken}`;
 
@@ -130,6 +130,12 @@ function requireNonEmptyString(value, fieldName) {
     throw new TypeError(`${fieldName} is required`);
   }
   return value;
+}
+
+function idempotencyHeaders(value) {
+  const key = requireNonEmptyString(value, 'idempotencyKey').trim();
+  if (key.length > 200) throw new TypeError('idempotencyKey must be at most 200 characters');
+  return { 'Idempotency-Key': key };
 }
 
 function buildSolEscrowCreate(data) {
@@ -276,23 +282,34 @@ class MarketplaceClient {
   }
 
   /** Submit immutable deliverable content (awarded worker only). */
-  async submitDeliverable(jobId, data) {
-    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables`, { body: data });
+  async submitDeliverable(jobId, data, idempotencyKey) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables`, {
+      body: data,
+      headers: idempotencyHeaders(idempotencyKey),
+    });
   }
 
   /** Request one of at most two revisions (job client only). */
-  async requestRevision(jobId, deliverableId, reason) {
-    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables/${encodeURIComponent(deliverableId)}/revisions`, { body: { reason } });
+  async requestRevision(jobId, deliverableId, reason, idempotencyKey) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables/${encodeURIComponent(deliverableId)}/revisions`, {
+      body: { reason },
+      headers: idempotencyHeaders(idempotencyKey),
+    });
   }
 
   /** Approve the current deliverable (job client only). */
-  async approveDeliverable(jobId, deliverableId) {
-    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables/${encodeURIComponent(deliverableId)}/approve`);
+  async approveDeliverable(jobId, deliverableId, idempotencyKey) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/deliverables/${encodeURIComponent(deliverableId)}/approve`, {
+      headers: idempotencyHeaders(idempotencyKey),
+    });
   }
 
   /** Add an immutable structured comment to the job evidence thread. */
-  async addComment(jobId, data) {
-    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/comments`, { body: data });
+  async addComment(jobId, data, idempotencyKey) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/comments`, {
+      body: data,
+      headers: idempotencyHeaders(idempotencyKey),
+    });
   }
 
   /** Read the structured delivery/revision/comment evidence thread. */
@@ -316,18 +333,31 @@ class MarketplaceClient {
   }
 
   /** Accept an active award (selected agent only). */
-  async acceptAward(jobId, applicationId) {
-    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/accept`);
+  async acceptAward(jobId, applicationId, idempotencyKey) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/accept`, {
+      headers: idempotencyHeaders(idempotencyKey),
+    });
   }
 
   /** Decline an active award and reopen the job (selected agent only). */
-  async declineAward(jobId, applicationId) {
-    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/decline`);
+  async declineAward(jobId, applicationId, idempotencyKey) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/applications/${encodeURIComponent(applicationId)}/decline`, {
+      headers: idempotencyHeaders(idempotencyKey),
+    });
   }
 
   /** Process an expired 48 hour award window (job client only). */
-  async processAwardTimeout(jobId) {
-    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/award-timeout`);
+  async processAwardTimeout(jobId, idempotencyKey) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/award-timeout`, {
+      headers: idempotencyHeaders(idempotencyKey),
+    });
+  }
+
+  /** Cancel an open job (job client only). */
+  async cancel(jobId, reason) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/cancel`, {
+      body: { reason },
+    });
   }
 
   /** Get job recommendations for agents */

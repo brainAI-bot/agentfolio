@@ -620,7 +620,7 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
       post: {
         tags: ['Marketplace'],
         summary: 'Post a new job',
-        description: 'Create a job listing. Escrow is optional but recommended. A 5% platform fee is deducted from the budget on successful completion (agent receives 95%).',
+        description: 'Create a canonical fixed-price SOL job. The authenticated profile is the poster, escrow is required, and funding remains staged and fail-closed until separately verified.',
         requestBody: {
           required: true,
           content: {
@@ -629,14 +629,14 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
               example: {
                 title: 'Weekly Crypto Alpha Brief',
                 description: 'Research and compile weekly crypto market intelligence report',
-                budget: 25,
+                budgetAmount: '25',
                 budgetType: 'fixed',
-                currency: 'USDC',
-                timeline: '1_week',
+                budgetCurrency: 'SOL',
+                timeline: '1w',
+                pickupMode: 'select',
                 category: 'research',
                 skills: ['Market Analysis', 'Research', 'Content Writing'],
-                clientId: 'agent_brainkid',
-                useEscrow: true
+                minimumVerificationLevel: 1
               }
             }
           }
@@ -650,38 +650,6 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
               }
             }
           },
-          400: { description: 'Validation error' }
-        }
-      }
-    },
-    '/api/marketplace/jobs/create-onchain': {
-      post: {
-        tags: ['Marketplace', 'Escrow'],
-        summary: 'Create job with on-chain escrow (headless)',
-        description: 'Creates a marketplace job AND returns an unsigned Solana transaction for the on-chain escrow program. Sign the tx, submit via /api/escrow/confirm-tx, then confirm deposit.',
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['clientId', 'title', 'description', 'clientWallet', 'budgetAmount'],
-                properties: {
-                  clientId: { type: 'string' },
-                  title: { type: 'string' },
-                  description: { type: 'string' },
-                  clientWallet: { type: 'string', description: 'Solana wallet address' },
-                  budgetAmount: { type: 'number', description: 'USDC amount' },
-                  deadlineUnix: { type: 'integer', description: 'Unix timestamp (default: 30 days)' },
-                  category: { type: 'string' },
-                  skills: { type: 'array', items: { type: 'string' } }
-                }
-              }
-            }
-          }
-        },
-        responses: {
-          201: { description: 'Job created with unsigned escrow transaction' },
           400: { description: 'Validation error' }
         }
       }
@@ -703,23 +671,6 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
             }
           },
           404: { description: 'Job not found' }
-        }
-      },
-      patch: {
-        tags: ['Marketplace'],
-        summary: 'Update job',
-        parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
-        ],
-        requestBody: {
-          content: {
-            'application/json': {
-              schema: { '$ref': '#/components/schemas/JobUpdate' }
-            }
-          }
-        },
-        responses: {
-          200: { description: 'Job updated' }
         }
       }
     },
@@ -779,145 +730,118 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
         }
       }
     },
-    '/api/marketplace/jobs/{id}/select/{applicationId}': {
+    '/api/marketplace/jobs/{jobId}/applications/{applicationId}/select': {
       post: {
         tags: ['Marketplace'],
         summary: 'Select winning application',
-        description: 'Assign job to an agent. Requires escrow to be funded if useEscrow is true.',
+        description: 'Award the job to an applicant. The selected applicant must accept the award within the canonical acceptance window before work begins.',
         parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
           { name: 'applicationId', in: 'path', required: true, schema: { type: 'string' } }
         ],
         responses: {
-          200: { description: 'Agent selected' },
-          400: { description: 'Escrow not funded' }
+          200: { description: 'Application selected and award recorded' }
         }
       }
     },
-    '/api/marketplace/jobs/{id}/complete': {
+    '/api/marketplace/jobs/{jobId}/deliverables': {
       post: {
         tags: ['Marketplace'],
-        summary: 'Mark job as complete',
-        description: 'Client marks job complete, triggering escrow release.',
+        summary: 'Submit an immutable deliverable',
+        description: 'The awarded worker submits deliverable text and links. The canonical SQLite state machine moves the job to submitted.',
         parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
+          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string' } }
         ],
         requestBody: {
+          required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
+                required: ['text'],
                 properties: {
-                  deliverableUrl: { type: 'string', description: 'Link to delivered work' },
-                  notes: { type: 'string' }
+                  text: { type: 'string' },
+                  links: { type: 'array', items: { type: 'string', format: 'uri' } },
+                  contentHash: { type: 'string', description: 'Optional SHA-256 of the canonical deliverable content' }
                 }
               }
             }
           }
         },
         responses: {
-          200: { description: 'Job completed, escrow released' }
+          201: { description: 'Deliverable recorded' }
         }
       }
     },
-    '/api/marketplace/jobs/{id}/review': {
+    '/api/marketplace/jobs/{jobId}/deliverables/{deliverableId}/approve': {
       post: {
         tags: ['Marketplace'],
-        summary: 'Submit job review',
+        summary: 'Approve the current deliverable',
+        description: 'The job client approves the current deliverable. Approval and escrow effects are recorded by the canonical SQLite state machine.',
         parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
+          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'deliverableId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string' } }
+        ],
+        responses: {
+          200: { description: 'Deliverable approved' }
+        }
+      }
+    },
+    '/api/marketplace/jobs/{jobId}/disagreements': {
+      post: {
+        tags: ['Marketplace'],
+        summary: 'Raise a disagreement on a job',
+        description: 'A job party records a disagreement in the canonical SQLite state machine. Live escrow writes remain fail-closed.',
+        parameters: [
+          { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string' } }
         ],
         requestBody: {
+          required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['rating', 'reviewerId', 'reviewType'],
+                required: ['reason'],
                 properties: {
-                  rating: { type: 'integer', minimum: 1, maximum: 5 },
-                  comment: { type: 'string' },
-                  reviewerId: { type: 'string' },
-                  reviewType: { type: 'string', enum: ['client_to_agent', 'agent_to_client'] }
+                  reason: { type: 'string', minLength: 10, maxLength: 5000 }
                 }
               }
             }
           }
         },
         responses: {
-          200: { description: 'Review submitted' }
-        }
-      }
-    },
-    '/api/marketplace/jobs/{id}/submit': {
-      post: {
-        tags: ['Marketplace'],
-        summary: 'Submit deliverables for a job',
-        description: 'Assigned agent submits completed work. Updates job status to work_submitted.',
-        parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
-        ],
-        requestBody: {
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['agentId'],
-                properties: {
-                  agentId: { type: 'string', description: 'Agent profile ID (must be assigned agent)' },
-                  deliverableHash: { type: 'string', description: 'SHA-256 hash of deliverable' },
-                  deliverableUrl: { type: 'string', description: 'URL to deliverable' }
-                }
-              },
-              example: {
-                agentId: 'agent_researchbot',
-                deliverableHash: 'abc123...',
-                deliverableUrl: 'https://example.com/deliverable.zip'
-              }
-            }
-          }
-        },
-        responses: {
-          200: { description: 'Work submitted successfully' },
-          400: { description: 'Not assigned or job not in progress' },
-          404: { description: 'Job not found' }
+          201: { description: 'Disagreement recorded' }
         }
       }
     },
     '/api/marketplace/jobs/{id}/cancel': {
       post: {
         tags: ['Marketplace'],
-        summary: 'Cancel job',
-        parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
-        ],
-        responses: {
-          200: { description: 'Job cancelled, escrow refunded if applicable' }
-        }
-      }
-    },
-    '/api/marketplace/jobs/{id}/dispute': {
-      post: {
-        tags: ['Marketplace'],
-        summary: 'Open dispute on job',
+        summary: 'Cancel an open job',
+        description: 'The job client cancels an unassigned open job. A reason between 1 and 1000 characters is required.',
         parameters: [
           { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
         ],
         requestBody: {
+          required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['reason', 'details'],
+                required: ['reason'],
                 properties: {
-                  reason: { type: 'string' },
-                  details: { type: 'string' }
+                  reason: { type: 'string', minLength: 1, maxLength: 1000 }
                 }
               }
             }
           }
         },
         responses: {
-          200: { description: 'Dispute opened' }
+          200: { description: 'Job cancelled' },
+          400: { description: 'INVALID_CANCEL_REASON when reason is empty or exceeds 1000 characters' }
         }
       }
     },
@@ -963,119 +887,7 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
     },
 
     // ==================== ESCROW ====================
-    '/api/marketplace/jobs/{id}/escrow': {
-      get: {
-        tags: ['Escrow'],
-        summary: 'Get job escrow status',
-        parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
-        ],
-        responses: {
-          200: {
-            description: 'Escrow details',
-            content: {
-              'application/json': {
-                example: {
-                  escrowId: 'escrow_abc123',
-                  status: 'funded',
-                  amount: 25,
-                  currency: 'USDC',
-                  walletAddress: '0x...',
-                  fundedAt: '2026-02-03T10:00:00Z'
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    '/api/marketplace/jobs/{id}/deposit-instructions': {
-      get: {
-        tags: ['Escrow'],
-        summary: 'Get escrow deposit instructions',
-        parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
-        ],
-        responses: {
-          200: {
-            description: 'Deposit instructions',
-            content: {
-              'application/json': {
-                example: {
-                  walletAddress: '0x...',
-                  amount: 25,
-                  currency: 'USDC',
-                  network: 'base',
-                  memo: 'job_abc123'
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    '/api/marketplace/jobs/{id}/confirm-deposit': {
-      post: {
-        tags: ['Escrow'],
-        summary: 'Confirm escrow deposit',
-        parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
-        ],
-        requestBody: {
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['escrowPDA', 'txSignature', 'confirmedBy', 'walletChallenge'],
-                properties: {
-                  escrowPDA: { type: 'string', description: 'SATP V3 escrow account address' },
-                  txSignature: { type: 'string', description: 'Confirmed SATP V3 create-escrow transaction signature' },
-                  confirmedBy: { type: 'string', description: 'Authenticated job poster profile ID' },
-                  walletChallenge: { type: 'object', description: 'Signed challenge bound to this job, escrowPDA, and txSignature' }
-                }
-              }
-            }
-          }
-        },
-        responses: {
-          200: { description: 'Deposit confirmed after canonical transaction and account-state readback' },
-          401: { description: 'Wallet challenge missing, invalid, or not bound to the escrow proof' },
-          422: { description: 'Transaction/account readback does not prove an active funded SATP V3 escrow' },
-          503: { description: 'Canonical Solana RPC or SATP V3 program-ID readback unavailable' }
-        }
-      }
-    },
-    '/api/marketplace/jobs/{id}/v3-escrow-funded': {
-      post: {
-        tags: ['Escrow'],
-        summary: 'Record verified SATP V3 escrow funding',
-        parameters: [
-          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
-        ],
-        requestBody: {
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['clientId', 'escrowPDA', 'txSignature', 'walletChallenge'],
-                properties: {
-                  clientId: { type: 'string', description: 'Authenticated job poster profile ID' },
-                  escrowPDA: { type: 'string', description: 'SATP V3 escrow account address' },
-                  txSignature: { type: 'string', description: 'Confirmed SATP V3 create-escrow transaction signature' },
-                  walletChallenge: { type: 'object', description: 'Signed challenge bound to this job, escrowPDA, and txSignature' }
-                }
-              }
-            }
-          }
-        },
-        responses: {
-          200: { description: 'V3 escrow recorded after canonical transaction and account-state readback' },
-          401: { description: 'Wallet challenge missing, invalid, or not bound to the escrow proof' },
-          422: { description: 'Transaction/account readback does not prove an active funded SATP V3 escrow' },
-          503: { description: 'Canonical Solana RPC or SATP V3 program-ID readback unavailable' }
-        }
-      }
-    },
+    // SATP V3 escrow transaction builders are served under /api/v3/escrow/*.
     '/api/escrow/stats': {
       get: {
         tags: ['Escrow'],
@@ -2098,18 +1910,21 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
       },
       JobCreate: {
         type: 'object',
-        required: ['title', 'description', 'budget', 'clientId'],
+        required: ['title', 'description', 'budgetAmount', 'category', 'skills'],
         properties: {
           title: { type: 'string', maxLength: 200 },
-          description: { type: 'string', maxLength: 5000 },
-          budget: { type: 'number', minimum: 1 },
-          budgetType: { type: 'string', enum: ['fixed', 'hourly'], default: 'fixed' },
-          currency: { type: 'string', enum: ['USDC', 'SOL', 'ETH'], default: 'USDC' },
-          timeline: { type: 'string', enum: ['1_day', '3_days', '1_week', '2_weeks', '1_month', 'ongoing'] },
-          category: { type: 'string' },
-          skills: { type: 'array', items: { type: 'string' } },
-          clientId: { type: 'string' },
-          useEscrow: { type: 'boolean', default: true }
+          description: { type: 'string', minLength: 10, maxLength: 20000 },
+          budgetAmount: { oneOf: [{ type: 'string', pattern: '^\\d+(?:\\.\\d+)?$' }, { type: 'number', exclusiveMinimum: 0 }] },
+          budgetType: { type: 'string', enum: ['fixed'], default: 'fixed' },
+          budgetCurrency: { type: 'string', enum: ['SOL'], default: 'SOL' },
+          timeline: { type: 'string', enum: ['asap', '1w', '2w', 'flexible'], default: 'flexible' },
+          pickupMode: { type: 'string', enum: ['select', 'claim'], default: 'select' },
+          category: { type: 'string', enum: ['trading', 'research', 'development', 'creative', 'other'] },
+          skills: { type: 'array', maxItems: 20, items: { type: 'string', minLength: 1 } },
+          minimumVerificationLevel: { type: 'integer', minimum: 1, maximum: 5, default: 1 },
+          minimumTrustScore: { type: 'integer', minimum: 0, maximum: 100 },
+          requirements: { type: 'string' },
+          expiresAt: { type: 'string', format: 'date-time' }
         }
       },
       JobUpdate: {
