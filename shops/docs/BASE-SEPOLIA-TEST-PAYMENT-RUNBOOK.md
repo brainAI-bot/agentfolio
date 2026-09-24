@@ -27,23 +27,25 @@ Hosting selection, wallet provisioning, credential delivery, funding, and any pa
 1. `POST /api/shops/v1/quotes` returns an immutable quote bound to product version, artifact SHA-256/length/media type, `eip155:84532`, asset, integer minor-unit amount, recipient, and expiry.
 2. `POST /api/shops/v1/purchases` without valid payment proof returns the quote as an x402 `402 Payment Required` challenge.
 3. A paid retry uses the same quote and a required `Idempotency-Key`. The key is bound to the canonical request hash before facilitator activity.
-4. Shops independently checks the facilitator result against quote id/hash, network, asset, amount, recipient, expiry, payment fingerprint, expected facilitator, settlement id, and transaction hash.
+4. Shops derives the payment fingerprint from the submitted payment envelope; it never accepts a caller-supplied fingerprint. Shops independently checks the facilitator result against quote id/hash, network, asset, amount, recipient, expiry, that derived payment fingerprint, expected facilitator, settlement id, and transaction hash.
 5. A timeout, connection loss, malformed response, or facilitator 5xx becomes `SETTLEMENT_UNKNOWN` and returns an in-progress response. It must never trigger an automatic resubmission.
-6. Reconciliation may resolve the same payment fingerprint exactly once to `PAID` or `REJECTED`. Reuse on another quote is rejected as `PAYMENT_REPLAY`.
-7. Only `PAID` may mint an immutable receipt. Only a valid receipt plus matching artifact bytes may become `READY` for download.
+6. Reconciliation may resolve the same payment fingerprint exactly once to `PAID` or `REJECTED`. `PAID` requires a settlement for the original derived fingerprint. `REJECTED` requires stored terminal evidence that the original authorization cannot settle and no successful matching transfer exists; timeout, missing receipt, or failed HTTP alone is insufficient. Reuse on another quote is rejected as `PAYMENT_REPLAY`.
+7. Only `PAID` may mint an immutable receipt. Only a receipt bound to the server-side paid purchase record plus matching artifact bytes may become `READY` for download.
 
 ## Receipt and download verification
 
-A receipt binds the quote hash, payment fingerprint, settlement/transaction identity, network, asset, amount, recipient, paid time, and artifact metadata. The receipt hash is SHA-256 over canonical JSON excluding the receipt hash itself.
+A receipt binds the quote hash, payment fingerprint, settlement/transaction identity, network, asset, amount, recipient, paid time, and artifact metadata. The receipt hash is SHA-256 over canonical JSON excluding the receipt hash itself, which detects mutation but does not prove Shops issued the receipt. The server-side purchase/entitlement record is authoritative.
 
 Before a future download response:
 
-1. Verify the receipt hash.
-2. Read the artifact from the Shops-owned isolated object prefix.
-3. Verify exact byte length and SHA-256 before sending any bytes.
-4. Return explicit `Content-Length`, `Content-Type`, immutable SHA-256 `ETag`, and `Content-Digest` headers.
-5. Do not expose object-store keys or accept artifact metadata/download locations from the facilitator.
-6. On mismatch, return `ARTIFACT_INTEGRITY_FAILED` without partial content.
+1. Look up the Shops-owned purchase/entitlement snapshot by the authenticated request's server-side identifier; never accept that snapshot from the request.
+2. Require the snapshot to be `PAID` or `READY`, and bind every receipt commerce, payment, settlement, and artifact field to that snapshot. A self-hashed receipt without this record is refused.
+3. Verify the receipt hash.
+4. Read the artifact from the Shops-owned isolated object prefix.
+5. Verify exact byte length and SHA-256 before sending any bytes.
+6. Return explicit `Content-Length`, `Content-Type`, immutable SHA-256 `ETag`, and `Content-Digest` headers.
+7. Do not expose object-store keys or accept artifact metadata/download locations from the facilitator.
+8. On snapshot/receipt mismatch, refuse entitlement; on byte mismatch, return `ARTIFACT_INTEGRITY_FAILED` without partial content.
 
 Operator verification for downloaded test artifacts must independently calculate SHA-256 and compare it with the immutable receipt. A receipt or generated packet proves repository behavior only; it does not prove a chain transaction or payment occurred.
 

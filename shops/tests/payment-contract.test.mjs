@@ -64,6 +64,15 @@ function terms(quote, overrides = {}) {
   };
 }
 
+function paymentEnvelope(overrides = {}) {
+  return {
+    network: BASE_SEPOLIA,
+    payer: 'test-payer',
+    signature: 'test-signature',
+    ...overrides,
+  };
+}
+
 function errorCode(code) {
   return (error) => error?.code === code;
 }
@@ -76,7 +85,8 @@ function paidSnapshot() {
     at: '2026-09-24T01:01:00.000Z',
     terms: terms(quote),
     facilitatorId: 'qualified-facilitator-config-v1',
-    paymentFingerprint: paymentFingerprint({ network: BASE_SEPOLIA, payer: 'test-payer', signature: 'test-signature' }),
+    paymentEnvelope: paymentEnvelope(),
+    paymentFingerprint: paymentFingerprint(paymentEnvelope()),
   });
   snapshot = applyPaymentEvent(snapshot, {
     type: 'verification_accepted',
@@ -87,6 +97,7 @@ function paidSnapshot() {
     type: 'settled',
     at: '2026-09-24T01:03:00.000Z',
     terms: terms(quote),
+    paymentFingerprint: snapshot.paymentFingerprint,
     settlementId: 'settlement-001',
     transactionHash: '0xtest-transaction-hash',
   });
@@ -169,7 +180,7 @@ test('timeout or facilitator failure becomes settlement unknown without automati
     at: '2026-09-24T01:01:00.000Z',
     terms: terms(quote),
     facilitatorId: 'qualified-facilitator-config-v1',
-    paymentFingerprint: 'fingerprint',
+    paymentEnvelope: paymentEnvelope(),
   });
   snapshot = applyPaymentEvent(snapshot, { type: 'settlement_unknown', at: '2026-09-24T01:02:00.000Z' });
   assert.equal(snapshot.state, PAYMENT_STATES.SETTLEMENT_UNKNOWN);
@@ -181,15 +192,15 @@ test('reconciliation resolves unknown settlement exactly once', () => {
   const quote = createQuote(quoteInput(), now);
   let snapshot = initialPaymentState(quote);
   snapshot = applyPaymentEvent(snapshot, {
-    type: 'begin_verification', at: '2026-09-24T01:01:00.000Z', terms: terms(quote), facilitatorId: 'qualified-facilitator-config-v1', paymentFingerprint: 'fingerprint',
+    type: 'begin_verification', at: '2026-09-24T01:01:00.000Z', terms: terms(quote), facilitatorId: 'qualified-facilitator-config-v1', paymentEnvelope: paymentEnvelope(),
   });
   snapshot = applyPaymentEvent(snapshot, { type: 'settlement_unknown', at: '2026-09-24T01:02:00.000Z' });
   snapshot = applyPaymentEvent(snapshot, {
-    type: 'settled', at: '2026-09-24T01:03:00.000Z', terms: terms(quote), settlementId: 'settlement-001', transactionHash: '0xtest',
+    type: 'settled', at: '2026-09-24T01:03:00.000Z', terms: terms(quote), paymentFingerprint: snapshot.paymentFingerprint, settlementId: 'settlement-001', transactionHash: '0xtest',
   });
   assert.equal(snapshot.state, PAYMENT_STATES.PAID);
   assert.throws(() => applyPaymentEvent(snapshot, {
-    type: 'settled', at: '2026-09-24T01:04:00.000Z', terms: terms(quote), settlementId: 'settlement-001', transactionHash: '0xtest',
+    type: 'settled', at: '2026-09-24T01:04:00.000Z', terms: terms(quote), paymentFingerprint: snapshot.paymentFingerprint, settlementId: 'settlement-001', transactionHash: '0xtest',
   }), errorCode('INVALID_PAYMENT_TRANSITION'));
 });
 
@@ -197,7 +208,7 @@ test('rejected payment creates no receipt or entitlement', () => {
   const quote = createQuote(quoteInput(), now);
   let snapshot = initialPaymentState(quote);
   snapshot = applyPaymentEvent(snapshot, {
-    type: 'begin_verification', at: '2026-09-24T01:01:00.000Z', terms: terms(quote), facilitatorId: 'qualified-facilitator-config-v1', paymentFingerprint: 'fingerprint',
+    type: 'begin_verification', at: '2026-09-24T01:01:00.000Z', terms: terms(quote), facilitatorId: 'qualified-facilitator-config-v1', paymentEnvelope: paymentEnvelope(),
   });
   snapshot = applyPaymentEvent(snapshot, { type: 'verification_rejected', at: '2026-09-24T01:02:00.000Z' });
   assert.equal(snapshot.state, PAYMENT_STATES.REJECTED);
@@ -205,15 +216,107 @@ test('rejected payment creates no receipt or entitlement', () => {
 });
 
 test('receipt hash and artifact download contract detect mutation', () => {
-  const receipt = createReceipt(paidSnapshot(), artifactBytes, '2026-09-24T01:04:00.000Z');
+  const paid = paidSnapshot();
+  const receipt = createReceipt(paid, artifactBytes, '2026-09-24T01:04:00.000Z');
   assert.equal(verifyReceipt(receipt), true);
-  assert.equal(verifyDownload(receipt, artifactBytes), true);
-  const headers = buildDownloadHeaders(receipt);
+  assert.equal(verifyDownload(paid, receipt, artifactBytes), true);
+  const headers = buildDownloadHeaders(paid, receipt);
   assert.equal(headers['Content-Length'], String(artifactBytes.length));
   assert.equal(headers['Content-Type'], 'application/octet-stream');
   assert.match(headers['Content-Digest'], /^sha-256=:/);
   assert.throws(() => verifyReceipt({ ...receipt, amountMinor: '999' }), errorCode('RECEIPT_HASH_MISMATCH'));
-  assert.throws(() => verifyDownload(receipt, Buffer.from('wrong bytes')), errorCode('ARTIFACT_INTEGRITY_FAILED'));
+  assert.throws(() => verifyDownload(paid, receipt, Buffer.from('wrong bytes')), errorCode('ARTIFACT_INTEGRITY_FAILED'));
+});
+
+test('download requires the Shops server-side paid or ready snapshot', () => {
+  const paid = paidSnapshot();
+  const legitimate = createReceipt(paid, artifactBytes, '2026-09-24T01:04:00.000Z');
+  const forgedUnsigned = {
+    ...legitimate,
+    receiptId: 'attacker-minted-receipt',
+    quoteId: 'made-up',
+    settlementId: 'none',
+    transactionHash: 'none',
+    amountMinor: '1',
+    payTo: 'nobody',
+  };
+  delete forgedUnsigned.receiptHash;
+  const forged = { ...forgedUnsigned, receiptHash: sha256Hex(canonicalJson(forgedUnsigned)) };
+  assert.equal(verifyReceipt(forged), true);
+  assert.throws(() => (
+    verifyDownload.length === 2
+      ? verifyDownload(forged, artifactBytes)
+      : verifyDownload(paid, forged, artifactBytes)
+  ), errorCode('RECEIPT_HASH_MISMATCH'));
+  assert.throws(() => (
+    buildDownloadHeaders.length === 1
+      ? buildDownloadHeaders(forged)
+      : buildDownloadHeaders(paid, forged)
+  ), errorCode('RECEIPT_HASH_MISMATCH'));
+  if (verifyDownload.length === 3) {
+    assert.throws(() => verifyDownload(undefined, forged, artifactBytes), errorCode('INVALID_PAYMENT_TRANSITION'));
+  }
+});
+
+test('payment fingerprint is derived from the envelope and reconciliation must match it', () => {
+  const quote = createQuote(quoteInput(), now);
+  const envelope = paymentEnvelope();
+  let snapshot = applyPaymentEvent(initialPaymentState(quote), {
+    type: 'begin_verification',
+    at: '2026-09-24T01:01:00.000Z',
+    terms: terms(quote),
+    paymentEnvelope: envelope,
+    paymentFingerprint: 'caller-controlled-value',
+  });
+  assert.equal(snapshot.paymentFingerprint, paymentFingerprint(envelope));
+  snapshot = applyPaymentEvent(snapshot, { type: 'settlement_unknown', at: '2026-09-24T01:02:00.000Z' });
+  assert.throws(() => applyPaymentEvent(snapshot, {
+    type: 'settled',
+    at: '2026-09-24T01:03:00.000Z',
+    terms: terms(quote),
+    paymentFingerprint: paymentFingerprint(paymentEnvelope({ signature: 'different-payment' })),
+    settlementId: 'settlement-other',
+    transactionHash: '0xother',
+  }), errorCode('PAYMENT_FINGERPRINT_MISMATCH'));
+});
+
+test('reconciliation rejection requires terminal evidence for the original payment', () => {
+  const quote = createQuote(quoteInput(), now);
+  let snapshot = applyPaymentEvent(initialPaymentState(quote), {
+    type: 'begin_verification',
+    at: '2026-09-24T01:01:00.000Z',
+    terms: terms(quote),
+    paymentEnvelope: paymentEnvelope(),
+    paymentFingerprint: paymentFingerprint(paymentEnvelope()),
+  });
+  snapshot = applyPaymentEvent(snapshot, { type: 'settlement_unknown', at: '2026-09-24T01:02:00.000Z' });
+  assert.throws(() => applyPaymentEvent(snapshot, {
+    type: 'reconciliation_rejected', at: '2026-09-24T01:03:00.000Z',
+  }), errorCode('RECONCILIATION_EVIDENCE_REQUIRED'));
+  assert.throws(() => applyPaymentEvent(snapshot, {
+    type: 'reconciliation_rejected',
+    at: '2026-09-24T01:03:00.000Z',
+    evidence: {
+      originalAuthorizationCannotSettle: true,
+      matchingSuccessfulTransferFound: false,
+      reasonCode: 'HTTP_TIMEOUT',
+      checkedAt: '2026-09-24T01:03:00.000Z',
+      paymentFingerprint: snapshot.paymentFingerprint,
+    },
+  }), errorCode('RECONCILIATION_EVIDENCE_REQUIRED'));
+  const rejected = applyPaymentEvent(snapshot, {
+    type: 'reconciliation_rejected',
+    at: '2026-09-24T01:03:00.000Z',
+    evidence: {
+      originalAuthorizationCannotSettle: true,
+      matchingSuccessfulTransferFound: false,
+      reasonCode: 'AUTHORIZATION_REJECTED',
+      checkedAt: '2026-09-24T01:03:00.000Z',
+      paymentFingerprint: snapshot.paymentFingerprint,
+    },
+  });
+  assert.equal(rejected.state, PAYMENT_STATES.REJECTED);
+  assert.equal(rejected.reconciliationEvidence.reasonCode, 'AUTHORIZATION_REJECTED');
 });
 
 test('quote terms are deeply immutable after hashing', () => {

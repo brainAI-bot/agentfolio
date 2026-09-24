@@ -192,6 +192,36 @@ function requireState(snapshot, ...states) {
   if (!states.includes(snapshot?.state)) fail('INVALID_PAYMENT_TRANSITION', `${snapshot?.state ?? 'missing'} cannot perform this transition`);
 }
 
+function requireReconciliationRejectionEvidence(snapshot, evidence) {
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
+    fail('RECONCILIATION_EVIDENCE_REQUIRED', 'reconciliation rejection requires structured evidence');
+  }
+  if (evidence.originalAuthorizationCannotSettle !== true || evidence.matchingSuccessfulTransferFound !== false) {
+    fail('RECONCILIATION_EVIDENCE_REQUIRED', 'evidence must prove the original authorization cannot settle and no successful matching transfer exists');
+  }
+  const reasonCode = requireString(evidence.reasonCode, 'RECONCILIATION_EVIDENCE_REQUIRED', 'evidence.reasonCode');
+  if (!['AUTHORIZATION_REJECTED', 'AUTHORIZATION_EXPIRED', 'AUTHORIZATION_CANCELLED', 'PAYMENT_INVALID'].includes(reasonCode)) {
+    fail('RECONCILIATION_EVIDENCE_REQUIRED', 'evidence.reasonCode must be a non-transient terminal result');
+  }
+  const checkedAt = new Date(evidence.checkedAt);
+  if (Number.isNaN(checkedAt.valueOf())) {
+    fail('RECONCILIATION_EVIDENCE_REQUIRED', 'evidence.checkedAt must be an ISO timestamp');
+  }
+  if (checkedAt < new Date(snapshot.updatedAt)) {
+    fail('RECONCILIATION_EVIDENCE_REQUIRED', 'evidence cannot predate settlement uncertainty');
+  }
+  if (evidence.paymentFingerprint !== snapshot.paymentFingerprint) {
+    fail('PAYMENT_FINGERPRINT_MISMATCH', 'reconciliation evidence is not for the original payment');
+  }
+  return {
+    originalAuthorizationCannotSettle: true,
+    matchingSuccessfulTransferFound: false,
+    reasonCode,
+    checkedAt: checkedAt.toISOString(),
+    paymentFingerprint: snapshot.paymentFingerprint,
+  };
+}
+
 export function initialPaymentState(quote) {
   verifyQuote(quote);
   return {
@@ -222,8 +252,11 @@ export function applyPaymentEvent(snapshot, event) {
       requireState(snapshot, PAYMENT_STATES.QUOTED);
       if (at > new Date(snapshot.quote.expiresAt)) fail('QUOTE_EXPIRED', 'expired quote cannot be verified');
       assertFacilitatorTerms(snapshot.quote, event.terms);
+      if (event.paymentEnvelope?.network !== snapshot.quote.payment.network) {
+        fail('QUOTE_BINDING_MISMATCH', 'payment envelope network differs from the immutable quote');
+      }
       return withHistory(snapshot, normalizedEvent, PAYMENT_STATES.VERIFYING, {
-        paymentFingerprint: requireString(event.paymentFingerprint, 'QUOTE_BINDING_MISMATCH', 'paymentFingerprint'),
+        paymentFingerprint: paymentFingerprint(event.paymentEnvelope),
         facilitatorId: snapshot.quote.facilitator.id,
       });
     case 'verification_rejected':
@@ -242,6 +275,9 @@ export function applyPaymentEvent(snapshot, event) {
     case 'settled':
       requireState(snapshot, PAYMENT_STATES.SETTLING, PAYMENT_STATES.SETTLEMENT_UNKNOWN);
       assertFacilitatorTerms(snapshot.quote, event.terms);
+      if (requireString(event.paymentFingerprint, 'PAYMENT_FINGERPRINT_MISMATCH', 'paymentFingerprint') !== snapshot.paymentFingerprint) {
+        fail('PAYMENT_FINGERPRINT_MISMATCH', 'settlement is not for the original payment');
+      }
       return withHistory(snapshot, normalizedEvent, PAYMENT_STATES.PAID, {
         settlementId: requireString(event.settlementId, 'QUOTE_BINDING_MISMATCH', 'settlementId'),
         transactionHash: requireString(event.transactionHash, 'QUOTE_BINDING_MISMATCH', 'transactionHash'),
@@ -251,11 +287,14 @@ export function applyPaymentEvent(snapshot, event) {
       });
     case 'reconciliation_rejected':
       requireState(snapshot, PAYMENT_STATES.SETTLEMENT_UNKNOWN);
-      return withHistory(snapshot, normalizedEvent, PAYMENT_STATES.REJECTED, { failureCode: event.failureCode ?? 'PAYMENT_REJECTED' });
+      return withHistory(snapshot, normalizedEvent, PAYMENT_STATES.REJECTED, {
+        failureCode: event.failureCode ?? 'PAYMENT_REJECTED',
+        reconciliationEvidence: requireReconciliationRejectionEvidence(snapshot, event.evidence),
+      });
     case 'artifact_ready':
       requireState(snapshot, PAYMENT_STATES.PAID);
       assertReceiptBoundToSnapshot(snapshot, event.receipt);
-      verifyDownload(event.receipt, event.artifactBytes);
+      verifyDownload(snapshot, event.receipt, event.artifactBytes);
       return withHistory(snapshot, normalizedEvent, PAYMENT_STATES.READY, { receipt: event.receipt });
     default:
       fail('INVALID_PAYMENT_TRANSITION', `unknown event ${event.type}`);
@@ -310,7 +349,7 @@ export function verifyReceipt(receipt) {
 }
 
 export function assertReceiptBoundToSnapshot(paidSnapshot, receipt) {
-  requireState(paidSnapshot, PAYMENT_STATES.PAID);
+  requireState(paidSnapshot, PAYMENT_STATES.PAID, PAYMENT_STATES.READY);
   verifyQuote(paidSnapshot.quote);
   verifyReceipt(receipt);
   const expected = {
@@ -335,8 +374,8 @@ export function assertReceiptBoundToSnapshot(paidSnapshot, receipt) {
   return true;
 }
 
-export function verifyDownload(receipt, artifactBytes) {
-  verifyReceipt(receipt);
+export function verifyDownload(paidOrReadySnapshot, receipt, artifactBytes) {
+  assertReceiptBoundToSnapshot(paidOrReadySnapshot, receipt);
   const bytes = Buffer.from(artifactBytes);
   if (bytes.length !== receipt.artifact.bytes || sha256Hex(bytes) !== receipt.artifact.sha256) {
     fail('ARTIFACT_INTEGRITY_FAILED', 'download bytes do not match the receipt');
@@ -344,8 +383,8 @@ export function verifyDownload(receipt, artifactBytes) {
   return true;
 }
 
-export function buildDownloadHeaders(receipt) {
-  verifyReceipt(receipt);
+export function buildDownloadHeaders(paidOrReadySnapshot, receipt) {
+  assertReceiptBoundToSnapshot(paidOrReadySnapshot, receipt);
   return {
     'Content-Type': receipt.artifact.mediaType,
     'Content-Length': String(receipt.artifact.bytes),
