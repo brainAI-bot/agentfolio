@@ -353,6 +353,13 @@ class MarketplaceClient {
     });
   }
 
+  /** Cancel an open job (job client only). */
+  async cancel(jobId, reason) {
+    return this._c._request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/cancel`, {
+      body: { reason },
+    });
+  }
+
   /** Get job recommendations for agents */
   async recommendations(jobId) {
     return this._c._request('GET', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/agent-recommendations`);

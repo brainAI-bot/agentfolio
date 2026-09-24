@@ -28,6 +28,35 @@ const troubleshootingSource = fs.readFileSync(path.join(__dirname, '..', 'docs',
 const marketplaceSpecSource = fs.readFileSync(path.join(__dirname, '..', 'docs', 'specs', 'MARKETPLACE-SPEC.md'), 'utf8');
 const AgentFolio = require('../sdk');
 
+function captureCanonicalMarketplaceRegistrations() {
+  const registrations = new Set();
+  const capture = (method) => (route) => registrations.add(`${method} ${route}`);
+  const fakeApp = {
+    get: capture('GET'),
+    post: capture('POST'),
+    put: capture('PUT'),
+    patch: capture('PATCH'),
+    delete: capture('DELETE'),
+  };
+  const db = new Database(':memory:');
+  db.exec(`
+    CREATE TABLE profiles (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      api_key TEXT,
+      wallet TEXT,
+      wallets TEXT DEFAULT '{}',
+      verification_data TEXT DEFAULT '{}'
+    )
+  `);
+  try {
+    require('../src/marketplace-v3-server').registerMarketplaceV3Routes(fakeApp, { getDb: () => db });
+  } finally {
+    db.close();
+  }
+  return registrations;
+}
+
 test('marketplace surface regression guard', async (t) => {
   await t.test('api/jobs is backed by the jobs table instead of a placeholder payload', () => {
     assert.match(serverSource, /registerMarketplaceV3Routes\(app, \{/);
@@ -53,31 +82,7 @@ test('marketplace surface regression guard', async (t) => {
   });
 
   await t.test('canonical route registration covers supported aliases without retired JSON or custodial routes', () => {
-    const registrations = new Set();
-    const capture = (method) => (route) => registrations.add(`${method} ${route}`);
-    const fakeApp = {
-      get: capture('GET'),
-      post: capture('POST'),
-      put: capture('PUT'),
-      patch: capture('PATCH'),
-      delete: capture('DELETE'),
-    };
-    const db = new Database(':memory:');
-    db.exec(`
-      CREATE TABLE profiles (
-        id TEXT PRIMARY KEY,
-        name TEXT,
-        api_key TEXT,
-        wallet TEXT,
-        wallets TEXT DEFAULT '{}',
-        verification_data TEXT DEFAULT '{}'
-      )
-    `);
-    try {
-      require('../src/marketplace-v3-server').registerMarketplaceV3Routes(fakeApp, { getDb: () => db });
-    } finally {
-      db.close();
-    }
+    const registrations = captureCanonicalMarketplaceRegistrations();
 
     for (const route of [
       'GET /api/marketplace/jobs',
@@ -109,12 +114,15 @@ test('marketplace surface regression guard', async (t) => {
       '/api/marketplace/jobs/create-onchain',
       '/api/marketplace/jobs/{id}/select/{applicationId}',
       '/api/marketplace/jobs/{id}/submit',
-      '/api/marketplace/jobs/{id}/cancel',
       '/api/marketplace/jobs/{id}/dispute',
     ]) {
       assert.equal(API_DOCS.paths[route], undefined, `${route} must stay retired from public docs`);
     }
     assert.equal(API_DOCS.paths['/api/marketplace/jobs/{id}'].patch, undefined, 'unregistered job PATCH must stay retired from public docs');
+    const cancelSchema = API_DOCS.paths['/api/marketplace/jobs/{id}/cancel'].post.requestBody.content['application/json'].schema;
+    assert.deepEqual(cancelSchema.required, ['reason']);
+    assert.equal(cancelSchema.properties.reason.minLength, 1);
+    assert.equal(cancelSchema.properties.reason.maxLength, 1000);
 
     for (const route of [
       'POST /api/marketplace/jobs/:id/escrow',
@@ -255,6 +263,8 @@ test('marketplace surface regression guard', async (t) => {
     assert.match(publicSkillSource, /\/api\/marketplace\/jobs\/JOB_ID\/deliverables/);
     assert.match(sdkSource, /\/api\/marketplace\/jobs\/\$\{encodeURIComponent\(jobId\)\}\/deliverables/);
     assert.match(sdkSource, /\/api\/v3\/escrow\/create/);
+    assert.match(sdkSource, /async cancel\(jobId: string, reason: string\): Promise<void>[\s\S]*?body: \{ reason \}/);
+    assert.doesNotMatch(publicSkillSource, /Authorization: Bearer \*\*\*/);
     assert.doesNotMatch(publicSkillSource, /coverLetter|Job status changes to `in_progress`/);
     assert.doesNotMatch(quickstartSource, /coverLetter|Mark complete with link\/notes|Leave reviews/);
     assert.doesNotMatch(troubleshootingSource, /"coverLetter"|mark job complete|Payments are sent/);
@@ -279,12 +289,14 @@ test('marketplace surface regression guard', async (t) => {
     assert.doesNotMatch(sdkTypesSource, /export interface JobCreate[\s\S]*?\n\s*budget: number/);
   });
 
-  await t.test('published CommonJS SDK sends caller-stable idempotency keys for required mutations', async () => {
+  await t.test('published CommonJS SDK mutations match registered routes and required payloads', async () => {
     const seen = [];
     const server = http.createServer((req, res) => {
-      seen.push({ path: req.url, key: req.headers['idempotency-key'] });
-      req.resume();
+      const chunks = [];
+      req.on('data', (chunk) => chunks.push(chunk));
       req.on('end', () => {
+        const rawBody = Buffer.concat(chunks).toString('utf8');
+        seen.push({ method: req.method, path: req.url, key: req.headers['idempotency-key'], body: rawBody ? JSON.parse(rawBody) : undefined });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end('{}');
       });
@@ -299,12 +311,39 @@ test('marketplace surface regression guard', async (t) => {
       await client.marketplace.acceptAward('job', 'application', 'sdk-accept');
       await client.marketplace.declineAward('job', 'application', 'sdk-decline');
       await client.marketplace.processAwardTimeout('job', 'sdk-timeout');
+      await client.marketplace.createJob({ title: 't' });
+      await client.marketplace.apply('job', { proposal: 'p' });
+      await client.marketplace.withdrawApplication('job', 'application');
+      await client.marketplace.rejectApplication('job', 'application');
+      await client.marketplace.selectApplication('job', 'application');
+      await client.marketplace.cancel('job', 'No longer needed');
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
-    assert.deepEqual(seen.map(({ key }) => key), [
+    assert.deepEqual(seen.slice(0, 7).map(({ key }) => key), [
       'sdk-submit', 'sdk-revise', 'sdk-approve', 'sdk-comment', 'sdk-accept', 'sdk-decline', 'sdk-timeout',
     ]);
+    const registrations = captureCanonicalMarketplaceRegistrations();
+    const sdkMutationRoutes = [
+      ['POST /api/marketplace/jobs/job/deliverables', 'POST /api/marketplace/jobs/:jobId/deliverables'],
+      ['POST /api/marketplace/jobs/job/deliverables/deliverable/revisions', 'POST /api/marketplace/jobs/:jobId/deliverables/:deliverableId/revisions'],
+      ['POST /api/marketplace/jobs/job/deliverables/deliverable/approve', 'POST /api/marketplace/jobs/:jobId/deliverables/:deliverableId/approve'],
+      ['POST /api/marketplace/jobs/job/comments', 'POST /api/marketplace/jobs/:jobId/comments'],
+      ['POST /api/marketplace/jobs/job/applications/application/accept', 'POST /api/marketplace/jobs/:jobId/applications/:applicationId/accept'],
+      ['POST /api/marketplace/jobs/job/applications/application/decline', 'POST /api/marketplace/jobs/:jobId/applications/:applicationId/decline'],
+      ['POST /api/marketplace/jobs/job/award-timeout', 'POST /api/marketplace/jobs/:jobId/award-timeout'],
+      ['POST /api/marketplace/jobs', 'POST /api/marketplace/jobs'],
+      ['POST /api/marketplace/jobs/job/apply', 'POST /api/marketplace/jobs/:id/apply'],
+      ['POST /api/marketplace/jobs/job/applications/application/withdraw', 'POST /api/marketplace/jobs/:jobId/applications/:applicationId/withdraw'],
+      ['POST /api/marketplace/jobs/job/applications/application/reject', 'POST /api/marketplace/jobs/:jobId/applications/:applicationId/reject'],
+      ['POST /api/marketplace/jobs/job/applications/application/select', 'POST /api/marketplace/jobs/:jobId/applications/:applicationId/select'],
+      ['POST /api/marketplace/jobs/job/cancel', 'POST /api/marketplace/jobs/:id/cancel'],
+    ];
+    assert.deepEqual(seen.map(({ method, path }) => `${method} ${path}`), sdkMutationRoutes.map(([actual]) => actual));
+    for (const [, registered] of sdkMutationRoutes) {
+      assert.ok(registrations.has(registered), `${registered} used by the published SDK must be registered`);
+    }
+    assert.deepEqual(seen.at(-1).body, { reason: 'No longer needed' });
     await assert.rejects(
       new AgentFolio().marketplace.submitDeliverable('job', { text: 'done' }),
       /idempotencyKey is required/,

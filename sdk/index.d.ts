@@ -90,6 +90,7 @@ export class MarketplaceClient {
   acceptAward(jobId: string, applicationId: string, idempotencyKey: string): Promise<MarketplaceAward>;
   declineAward(jobId: string, applicationId: string, idempotencyKey: string): Promise<MarketplaceAward>;
   processAwardTimeout(jobId: string, idempotencyKey: string): Promise<MarketplaceAward>;
+  cancel(jobId: string, reason: string): Promise<any>;
   recommendations(jobId: string): Promise<any>;
   myJobs(): Promise<any>;
 }

@@ -558,8 +558,9 @@ class JobsAPI {
   }
 
   /** Cancel a job (client only, before assignment) */
-  async cancel(jobId: string): Promise<void> {
+  async cancel(jobId: string, reason: string): Promise<void> {
     return this.client.request('POST', `/api/marketplace/jobs/${encodeURIComponent(jobId)}/cancel`, {
+      body: { reason },
       requireAuth: true,
     });
   }

@@ -817,6 +817,34 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
         }
       }
     },
+    '/api/marketplace/jobs/{id}/cancel': {
+      post: {
+        tags: ['Marketplace'],
+        summary: 'Cancel an open job',
+        description: 'The job client cancels an unassigned open job. A reason between 1 and 1000 characters is required.',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['reason'],
+                properties: {
+                  reason: { type: 'string', minLength: 1, maxLength: 1000 }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: { description: 'Job cancelled' },
+          400: { description: 'INVALID_CANCEL_REASON when reason is empty or exceeds 1000 characters' }
+        }
+      }
+    },
     '/api/marketplace/stats/{id}': {
       get: {
         tags: ['Marketplace'],
