@@ -7,7 +7,10 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const http = require('http');
+const dns = require('dns');
+const net = require('net');
 const crypto = require('crypto');
+const ipaddr = require('ipaddr.js');
 const { signWebhookBody, verifyWebhookSignature, createWebhookReplayCache } = require('./webhook-signing');
 
 const WEBHOOKS_FILE = process.env.AGENTFOLIO_WEBHOOKS_FILE || path.join(__dirname, '../../data/webhooks.json');
@@ -72,6 +75,65 @@ function generateId() {
   return 'wh_' + crypto.randomBytes(12).toString('hex');
 }
 
+const PRIVATE_DESTINATIONS = new net.BlockList();
+for (const [network, prefix] of [
+  ['0.0.0.0', 8],
+  ['10.0.0.0', 8],
+  ['100.64.0.0', 10],
+  ['127.0.0.0', 8],
+  ['169.254.0.0', 16],
+  ['172.16.0.0', 12],
+  ['192.0.0.0', 24],
+  ['192.0.2.0', 24],
+  ['192.168.0.0', 16],
+  ['198.18.0.0', 15],
+  ['198.51.100.0', 24],
+  ['203.0.113.0', 24],
+  ['224.0.0.0', 4],
+  ['240.0.0.0', 4],
+]) PRIVATE_DESTINATIONS.addSubnet(network, prefix, 'ipv4');
+
+for (const [network, prefix] of [
+  ['::', 128],
+  ['::1', 128],
+  ['fc00::', 7],
+  ['fe80::', 10],
+  ['ff00::', 8],
+  ['2001:db8::', 32],
+]) PRIVATE_DESTINATIONS.addSubnet(network, prefix, 'ipv6');
+
+function normalizeAddress(value) {
+  const address = String(value || '').replace(/^\[|\]$/g, '').split('%')[0];
+  if (!ipaddr.isValid(address)) return null;
+  const parsed = ipaddr.parse(address);
+  if (parsed.kind() === 'ipv6' && parsed.isIPv4MappedAddress()) {
+    return { address: parsed.toIPv4Address().toString(), family: 'ipv4', mapped: true };
+  }
+  return { address: parsed.toNormalizedString(), family: parsed.kind(), mapped: false };
+}
+
+function isPublicAddress(value) {
+  const normalized = normalizeAddress(value);
+  if (!normalized || normalized.mapped) return false;
+  return !PRIVATE_DESTINATIONS.check(normalized.address, normalized.family);
+}
+
+function createSafeLookup(dnsLookup = dns.lookup) {
+  return (hostname, options, callback) => {
+    const lookupOptions = typeof options === 'object' && options !== null ? options : {};
+    const done = typeof options === 'function' ? options : callback;
+    dnsLookup(hostname, { ...lookupOptions, all: true }, (error, addresses, family) => {
+      if (error) return done(error);
+      const resolved = Array.isArray(addresses) ? addresses : [{ address: addresses, family }];
+      if (resolved.length === 0) return done(new Error('Webhook destination did not resolve'));
+      if (resolved.some(({ address }) => !isPublicAddress(address))) {
+        return done(new Error('Webhook URL must use a public destination'));
+      }
+      return done(null, resolved[0].address, resolved[0].family);
+    });
+  };
+}
+
 function validateWebhookUrl(value) {
   let parsedUrl;
   try { parsedUrl = new URL(value); } catch (_) { parsedUrl = null; }
@@ -80,17 +142,9 @@ function validateWebhookUrl(value) {
   const hostname = parsedUrl.hostname.replace(/^\[|\]$/g, '').toLowerCase();
   const blockedHostname = hostname === 'localhost'
     || hostname.endsWith('.localhost')
-    || hostname === '0.0.0.0'
-    || hostname === '::'
-    || hostname === '::1'
-    || /^127\./.test(hostname)
-    || /^10\./.test(hostname)
-    || /^169\.254\./.test(hostname)
-    || /^192\.168\./.test(hostname)
-    || /^172\.(1[6-9]|2\d|3[01])\./.test(hostname)
-    || /^fc/i.test(hostname)
-    || /^fd/i.test(hostname)
-    || /^fe[89ab]/i.test(hostname);
+    || hostname === 'localtest.me'
+    || hostname.endsWith('.localtest.me')
+    || (ipaddr.isValid(hostname) && !isPublicAddress(hostname));
   if (blockedHostname) return { error: 'Webhook URL must use a public destination' };
   return { url: parsedUrl.toString() };
 }
@@ -260,15 +314,20 @@ function createDelivery(event, payload, now = new Date()) {
   return { deliveryId, timestamp, body };
 }
 
-function singleDeliver(webhook, event, delivery) {
+function singleDeliver(webhook, event, delivery, options = {}) {
   const { deliveryId, timestamp, body } = delivery;
   const signature = delivery.signature || signWebhookBody(body, webhook.secret, timestamp);
+
+  const validatedUrl = validateWebhookUrl(webhook.url);
+  if (validatedUrl.error) {
+    return Promise.resolve({ success: false, statusCode: 0, error: validatedUrl.error });
+  }
   
-  const url = new URL(webhook.url);
+  const url = new URL(validatedUrl.url);
   const isHttps = url.protocol === 'https:';
   const httpModule = isHttps ? https : http;
   
-  const options = {
+  const requestOptions = {
     hostname: url.hostname,
     port: url.port || (isHttps ? 443 : 80),
     path: url.pathname + url.search,
@@ -282,18 +341,18 @@ function singleDeliver(webhook, event, delivery) {
       'X-AgentFolio-Event': event,
       'X-AgentFolio-Delivery': deliveryId
     },
-    timeout: 10000
+    timeout: 10000,
+    lookup: createSafeLookup(options.dnsLookup),
   };
   
   return new Promise((resolve) => {
-    const req = httpModule.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
+    const request = options.request || httpModule.request;
+    const req = request(requestOptions, (res) => {
+      res.resume();
       res.on('end', () => {
         resolve({
           success: res.statusCode >= 200 && res.statusCode < 300,
           statusCode: res.statusCode,
-          response: data.slice(0, 200)
         });
       });
     });
@@ -329,7 +388,7 @@ async function deliverWebhook(webhook, event, payload, options = {}) {
       console.log(`[Webhooks] Retry ${attempt}/${MAX_RETRIES - 1} for ${webhook.url} (${event})`);
     }
     
-    lastResult = await singleDeliver(webhook, event, delivery);
+    lastResult = await singleDeliver(webhook, event, delivery, options);
     
     if (lastResult.success) return lastResult;
     
@@ -488,5 +547,6 @@ module.exports = {
   createDelivery,
   singleDeliver,
   deliverWebhook,
+  createSafeLookup,
   validateWebhookUrl,
 };

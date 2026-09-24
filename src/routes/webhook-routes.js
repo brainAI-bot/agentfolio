@@ -90,7 +90,9 @@ function registerWebhookRoutes(app, { getDb, closeDb = false, service = webhooks
   app.post('/api/webhooks/:id/test', webhookMutationLimiter, auth('webhooks:test', (req) => req.params.id), async (req, res) => {
     const result = await service.testWebhook(req.params.id, req.webhookActorId);
     if (result.error) return res.status(404).json({ code: 'WEBHOOK_NOT_FOUND', error: result.error });
-    return res.status(result.result?.success ? 200 : 502).json(result);
+    const statusCode = Number(result.result?.statusCode) || 0;
+    const success = statusCode >= 200 && statusCode < 300;
+    return res.status(success ? 200 : 502).json({ statusCode });
   });
 }
 

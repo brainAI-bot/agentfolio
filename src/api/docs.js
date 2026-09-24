@@ -1570,13 +1570,14 @@ Events: \`activity\`, \`job_posted\`, \`job_applied\`, \`job_completed\`, \`new_
       post: {
         tags: ['Webhooks'],
         summary: 'Test webhook',
-        description: 'Sends a signed test delivery. Retries preserve the exact body, delivery ID, timestamp, and signature.',
+        description: 'Sends a signed test delivery without following redirects. The response exposes only the upstream status code.',
         security: [{ bearerAuth: [] }],
         parameters: [
           { name: 'id', in: 'path', required: true, schema: { type: 'string' } }
         ],
         responses: {
-          200: { description: 'Test payload sent' }
+          200: { description: 'Test payload sent; body contains only statusCode' },
+          502: { description: 'Test delivery failed; body contains only statusCode' }
         }
       }
     },

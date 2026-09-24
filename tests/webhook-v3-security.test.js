@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const { EventEmitter } = require('node:events');
 const express = require('express');
 const Database = require('better-sqlite3');
 const { registerWebhookRoutes } = require('../src/routes/webhook-routes');
@@ -108,62 +109,64 @@ test('webhook registration rejects credential-bearing and private callback URLs'
 
 test('signed webhook retries preserve exact body, delivery ID, timestamp, and signature', async () => {
   const attempts = [];
-  const receiver = http.createServer((req, res) => {
+  const request = (options, onResponse) => {
     const chunks = [];
-    req.on('data', (chunk) => chunks.push(chunk));
-    req.on('end', () => {
-      attempts.push({ headers: req.headers, body: Buffer.concat(chunks) });
+    const req = new EventEmitter();
+    req.write = (chunk) => chunks.push(Buffer.from(chunk));
+    req.end = () => {
+      const headers = Object.fromEntries(Object.entries(options.headers).map(([key, value]) => [key.toLowerCase(), value]));
+      attempts.push({ headers, body: Buffer.concat(chunks) });
+      const res = new EventEmitter();
       res.statusCode = attempts.length < 3 ? 500 : 204;
-      res.end();
-    });
-  });
-  await listen(receiver);
-  try {
-    const webhook = {
-      id: 'wh_retry',
-      url: `http://127.0.0.1:${receiver.address().port}/receiver`,
-      secret: 'whsec_retry_test',
+      res.resume = () => {};
+      onResponse(res);
+      queueMicrotask(() => res.emit('end'));
     };
-    const result = await deliverWebhook(webhook, 'profile.updated', { text: 'spacing matters', nested: { value: 1 } }, { baseDelayMs: 1 });
-    assert.equal(result.success, true);
-    assert.equal(attempts.length, 3);
-    for (const attempt of attempts.slice(1)) {
-      assert.deepEqual(attempt.body, attempts[0].body);
-      assert.equal(attempt.headers['x-agentfolio-delivery'], attempts[0].headers['x-agentfolio-delivery']);
-      assert.equal(attempt.headers['x-agentfolio-timestamp'], attempts[0].headers['x-agentfolio-timestamp']);
-      assert.equal(attempt.headers['x-agentfolio-signature'], attempts[0].headers['x-agentfolio-signature']);
-    }
-
-    const headers = attempts[0].headers;
-    const now = Number(headers['x-agentfolio-timestamp']) * 1000;
-    const verified = verifyWebhookSignature({
-      rawBody: attempts[0].body,
-      secret: webhook.secret,
-      signature: headers['x-agentfolio-signature'],
-      timestamp: headers['x-agentfolio-timestamp'],
-      deliveryId: headers['x-agentfolio-delivery'],
-    }, { now, replayCache: createWebhookReplayCache() });
-    assert.equal(verified.valid, true);
-
-    const replayCache = createWebhookReplayCache();
-    const verificationInput = {
-      rawBody: attempts[0].body,
-      secret: webhook.secret,
-      signature: headers['x-agentfolio-signature'],
-      timestamp: headers['x-agentfolio-timestamp'],
-      deliveryId: headers['x-agentfolio-delivery'],
-    };
-    assert.equal(verifyWebhookSignature(verificationInput, { now, replayCache }).valid, true);
-    assert.equal(verifyWebhookSignature(verificationInput, { now, replayCache }).code, 'REPLAY_DETECTED');
-    assert.equal(verifyWebhookSignature({ ...verificationInput, signature: '' }, { now, replayCache: createWebhookReplayCache() }).code, 'INVALID_SIGNATURE_FORMAT');
-    assert.equal(verifyWebhookSignature({ ...verificationInput, rawBody: Buffer.from(`${attempts[0].body.toString()} `) }, { now, replayCache: createWebhookReplayCache() }).code, 'SIGNATURE_MISMATCH');
-    assert.equal(verifyWebhookSignature(verificationInput, { now: now + 301_000, replayCache: createWebhookReplayCache() }).code, 'TIMESTAMP_OUTSIDE_TOLERANCE');
-
-    const sdkReplayCache = createSdkReplayCache();
-    assert.equal(verifySdkWebhookSignature(attempts[0].body, headers, webhook.secret, { now, replayCache: sdkReplayCache }).valid, true);
-    assert.equal(verifySdkWebhookSignature(attempts[0].body, headers, webhook.secret, { now, replayCache: sdkReplayCache }).code, 'REPLAY_DETECTED');
-    assert.equal(verifySdkWebhookSignature(Buffer.from('{}'), headers, webhook.secret, { now, replayCache: createSdkReplayCache() }).code, 'SIGNATURE_MISMATCH');
-  } finally {
-    await close(receiver);
+    req.destroy = () => {};
+    return req;
+  };
+  const webhook = {
+    id: 'wh_retry',
+    url: 'https://example.com/receiver',
+    secret: 'whsec_retry_test',
+  };
+  const result = await deliverWebhook(webhook, 'profile.updated', { text: 'spacing matters', nested: { value: 1 } }, { baseDelayMs: 1, request });
+  assert.equal(result.success, true);
+  assert.equal(attempts.length, 3);
+  for (const attempt of attempts.slice(1)) {
+    assert.deepEqual(attempt.body, attempts[0].body);
+    assert.equal(attempt.headers['x-agentfolio-delivery'], attempts[0].headers['x-agentfolio-delivery']);
+    assert.equal(attempt.headers['x-agentfolio-timestamp'], attempts[0].headers['x-agentfolio-timestamp']);
+    assert.equal(attempt.headers['x-agentfolio-signature'], attempts[0].headers['x-agentfolio-signature']);
   }
+
+  const headers = attempts[0].headers;
+  const now = Number(headers['x-agentfolio-timestamp']) * 1000;
+  const verified = verifyWebhookSignature({
+    rawBody: attempts[0].body,
+    secret: webhook.secret,
+    signature: headers['x-agentfolio-signature'],
+    timestamp: headers['x-agentfolio-timestamp'],
+    deliveryId: headers['x-agentfolio-delivery'],
+  }, { now, replayCache: createWebhookReplayCache() });
+  assert.equal(verified.valid, true);
+
+  const replayCache = createWebhookReplayCache();
+  const verificationInput = {
+    rawBody: attempts[0].body,
+    secret: webhook.secret,
+    signature: headers['x-agentfolio-signature'],
+    timestamp: headers['x-agentfolio-timestamp'],
+    deliveryId: headers['x-agentfolio-delivery'],
+  };
+  assert.equal(verifyWebhookSignature(verificationInput, { now, replayCache }).valid, true);
+  assert.equal(verifyWebhookSignature(verificationInput, { now, replayCache }).code, 'REPLAY_DETECTED');
+  assert.equal(verifyWebhookSignature({ ...verificationInput, signature: '' }, { now, replayCache: createWebhookReplayCache() }).code, 'INVALID_SIGNATURE_FORMAT');
+  assert.equal(verifyWebhookSignature({ ...verificationInput, rawBody: Buffer.from(`${attempts[0].body.toString()} `) }, { now, replayCache: createWebhookReplayCache() }).code, 'SIGNATURE_MISMATCH');
+  assert.equal(verifyWebhookSignature(verificationInput, { now: now + 301_000, replayCache: createWebhookReplayCache() }).code, 'TIMESTAMP_OUTSIDE_TOLERANCE');
+
+  const sdkReplayCache = createSdkReplayCache();
+  assert.equal(verifySdkWebhookSignature(attempts[0].body, headers, webhook.secret, { now, replayCache: sdkReplayCache }).valid, true);
+  assert.equal(verifySdkWebhookSignature(attempts[0].body, headers, webhook.secret, { now, replayCache: sdkReplayCache }).code, 'REPLAY_DETECTED');
+  assert.equal(verifySdkWebhookSignature(Buffer.from('{}'), headers, webhook.secret, { now, replayCache: createSdkReplayCache() }).code, 'SIGNATURE_MISMATCH');
 });
