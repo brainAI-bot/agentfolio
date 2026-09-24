@@ -31,11 +31,29 @@ function close(server) {
   return new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 }
 
-function lookupResult(lookup, hostname) {
+function lookupResult(lookup, hostname, options = {}) {
   return new Promise((resolve) => {
-    lookup(hostname, {}, (error, address, family) => resolve({ error, address, family }));
+    lookup(hostname, options, (error, address, family) => resolve({ error, address, family }));
   });
 }
+
+test('guarded lookup preserves the all-addresses DNS contract', async () => {
+  const lookup = createSafeLookup((_hostname, options, callback) => {
+    assert.equal(options.all, true);
+    callback(null, [
+      { address: '1.1.1.1', family: 4 },
+      { address: '2606:4700:4700::1111', family: 6 },
+    ]);
+  });
+
+  const result = await lookupResult(lookup, 'delivery.example', { all: true });
+  assert.equal(result.error, null);
+  assert.deepEqual(result.address, [
+    { address: '1.1.1.1', family: 4 },
+    { address: '2606:4700:4700::1111', family: 6 },
+  ]);
+  assert.equal(result.family, undefined);
+});
 
 test('registration rejects literal, mapped, CGNAT, and loopback-alias SSRF bypasses', () => {
   for (const [url] of SSRF_BYPASSES) {
@@ -73,6 +91,37 @@ test('single delivery wires the guarded lookup into the HTTP request', async () 
   assert.equal(resolverCalls, 1);
   assert.equal(result.success, false);
   assert.match(result.error, /public destination/);
+});
+
+test('single delivery preserves Node all-address lookup through a real HTTP request', async () => {
+  const http = require('node:http');
+  const server = await listen(http.createServer((request, response) => {
+    assert.equal(request.url, '/hook');
+    response.writeHead(204);
+    response.end();
+  }));
+
+  try {
+    const result = await singleDeliver({
+      id: 'wh_real_request',
+      url: `http://delivery.example:${server.address().port}/hook`,
+      secret: 'whsec_real_request_test',
+    }, 'profile.updated', {
+      deliveryId: 'evt_real_request',
+      timestamp: 1,
+      body: '{}',
+    }, {
+      dnsLookup(_hostname, options, callback) {
+        assert.equal(options.all, true);
+        callback(null, [{ address: '127.0.0.1', family: 4 }]);
+      },
+      isAddressAllowed: () => true,
+    });
+
+    assert.deepEqual(result, { success: true, statusCode: 204 });
+  } finally {
+    await close(server);
+  }
 });
 
 test('single delivery does not follow redirect responses', async (t) => {

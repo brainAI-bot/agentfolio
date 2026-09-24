@@ -96,6 +96,7 @@ for (const [network, prefix] of [
 for (const [network, prefix] of [
   ['::', 128],
   ['::1', 128],
+  ['64:ff9b::', 96],
   ['fc00::', 7],
   ['fe80::', 10],
   ['ff00::', 8],
@@ -118,17 +119,22 @@ function isPublicAddress(value) {
   return !PRIVATE_DESTINATIONS.check(normalized.address, normalized.family);
 }
 
-function createSafeLookup(dnsLookup = dns.lookup) {
+function createSafeLookup(dnsLookup = dns.lookup, isAddressAllowed = isPublicAddress) {
   return (hostname, options, callback) => {
     const lookupOptions = typeof options === 'object' && options !== null ? options : {};
     const done = typeof options === 'function' ? options : callback;
     dnsLookup(hostname, { ...lookupOptions, all: true }, (error, addresses, family) => {
       if (error) return done(error);
-      const resolved = Array.isArray(addresses) ? addresses : [{ address: addresses, family }];
+      const resolved = (Array.isArray(addresses) ? addresses : [{ address: addresses, family }])
+        .map(({ address, family: resolvedFamily }) => ({
+          address,
+          family: typeof resolvedFamily === 'number' ? resolvedFamily : (net.isIP(address) || 4),
+        }));
       if (resolved.length === 0) return done(new Error('Webhook destination did not resolve'));
-      if (resolved.some(({ address }) => !isPublicAddress(address))) {
+      if (resolved.some(({ address }) => !isAddressAllowed(address))) {
         return done(new Error('Webhook URL must use a public destination'));
       }
+      if (lookupOptions.all) return done(null, resolved);
       return done(null, resolved[0].address, resolved[0].family);
     });
   };
@@ -342,7 +348,7 @@ function singleDeliver(webhook, event, delivery, options = {}) {
       'X-AgentFolio-Delivery': deliveryId
     },
     timeout: 10000,
-    lookup: createSafeLookup(options.dnsLookup),
+    lookup: createSafeLookup(options.dnsLookup, options.isAddressAllowed),
   };
   
   return new Promise((resolve) => {
