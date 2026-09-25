@@ -22,6 +22,9 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "devDependencies": {
+    "acorn": "^8.15.0"
+  },
   "dependencies": {
     "@avilabs/ghost-cursor-playwright": "^2.1.5",
     "@brainai/satp-client": "github:brainAI-bot/satp#91455b6824798c9993c29816acca7d394ae39365",

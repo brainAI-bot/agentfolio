@@ -173,7 +173,8 @@ async function refreshIdentities() {
 async function refreshAttestationsFromChain() {
   try {
     const conn = getConnection();
-    const keypairPath = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/.config/solana/brainforge-personal.json';
+    const keypairPath = process.env.SATP_PLATFORM_KEYPAIR;
+    if (!keypairPath) throw new Error('SATP_PLATFORM_KEYPAIR is required');
     const raw = JSON.parse(require('fs').readFileSync(keypairPath, 'utf-8'));
     const { Keypair } = require('@solana/web3.js');
     const kp = Keypair.fromSecretKey(Uint8Array.from(raw));

@@ -50,10 +50,10 @@ describe('Makings P6 legacy link migration', () => {
     }
   });
 
-  it('returns Discord verification errors to the legacy leaderboard', () => {
-    const routes = read('src/routes/restored-verify-routes.js');
-    assert.doesNotMatch(routes, /['"]\/\?discord_error=/);
-    assert.match(routes, /\/leaderboard\?discord_error=/);
-    assert.match(routes, /href="\/leaderboard">Back to AgentFolio/);
+  it('does not resurrect the retired Discord verification route', () => {
+    assert.equal(
+      fs.existsSync(path.join(repoRoot, 'src/routes/restored-verify-routes.js')),
+      false,
+    );
   });
 });

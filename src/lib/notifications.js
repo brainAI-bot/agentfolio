@@ -36,7 +36,8 @@ const DEFAULT_PREFERENCES = {
  * Generate unsubscribe token for a profile
  */
 function generateUnsubscribeToken(profileId) {
-  const secret = process.env.NOTIFICATION_SECRET || 'agentfolio-notifications-secret';
+  const secret = process.env.NOTIFICATION_SECRET;
+  if (!secret) throw new Error('NOTIFICATION_SECRET is required');
   return crypto.createHmac('sha256', secret)
     .update(profileId)
     .digest('hex')
