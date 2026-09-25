@@ -9,9 +9,13 @@ const { sendSolanaIrysWriteGateResponse } = require('../lib/write-surface-gate')
 const { buildCreateIdentityV3Tx, SATP_V3_IDENTITY_PROGRAM } = require('./satp-auto-identity-v3');
 
 // Platform keypair for server-signed operations
-const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || 
-  '/home/ubuntu/.config/solana/brainforge-personal.json';
+const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR;
 const NETWORK = process.env.SATP_NETWORK || 'mainnet';
+
+function requirePlatformKeypairPath() {
+  if (!PLATFORM_KEYPAIR_PATH) throw new Error('SATP_PLATFORM_KEYPAIR is required');
+  return PLATFORM_KEYPAIR_PATH;
+}
 
 function registerSATPWriteRoutes(app) {
 
@@ -35,7 +39,7 @@ function registerSATPWriteRoutes(app) {
       if (name.length > 32) return res.status(400).json({ error: 'Name must be 32 chars or less' });
       if (description.length > 256) return res.status(400).json({ error: 'Description must be 256 chars or less' });
       
-      const signer = satpWrite.loadKeypair(PLATFORM_KEYPAIR_PATH);
+      const signer = satpWrite.loadKeypair(requirePlatformKeypairPath());
       
       const result = await satpWrite.registerIdentity(
         { name, description, category, capabilities: capabilities || [], metadataUri: metadataUri || '' },
@@ -135,7 +139,7 @@ function registerSATPWriteRoutes(app) {
         return res.status(400).json({ error: 'Missing agentWallet' });
       }
       
-      const caller = satpWrite.loadKeypair(PLATFORM_KEYPAIR_PATH);
+      const caller = satpWrite.loadKeypair(requirePlatformKeypairPath());
       
       const result = await satpWrite.recomputeReputation(agentWallet, caller, NETWORK);
       

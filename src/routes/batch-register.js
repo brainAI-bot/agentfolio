@@ -30,8 +30,9 @@ const crypto = require('crypto');
 
 // Platform API keys for trusted batch imports (skip wallet signature verification)
 // Set via BATCH_API_KEYS env var (comma-separated)
+const configuredBatchApiKeys = process.env.BATCH_API_KEYS;
 const TRUSTED_API_KEYS = new Set(
-  (process.env.BATCH_API_KEYS || '').split(',').filter(k => k.length > 0)
+  configuredBatchApiKeys ? configuredBatchApiKeys.split(',').filter(k => k.length > 0) : []
 );
 
 const MAX_BATCH_SIZE = 100;
