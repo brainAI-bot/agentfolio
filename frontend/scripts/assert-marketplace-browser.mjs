@@ -32,6 +32,13 @@ const applications = [{
   proposal: 'Canonical application panel proof', proposedBudget: 5, proposedTimeline: '1w',
   status: 'pending', createdAt: '2026-09-19T02:00:00.000Z',
 }];
+const profileFixture = {
+  id: 'probe-agent', name: 'Probe Agent', handle: '@probe-agent',
+  bio: 'Render smoke fixture for the legacy profile route.', avatar: '', skills: ['testing'],
+  verification_data: {}, verifications: {}, unclaimed: false,
+  stats: { jobsCompleted: 0, rating: 0, reviewsReceived: 0 },
+  createdAt: '2026-09-19T00:00:00.000Z',
+};
 
 function json(res, status, body) {
   res.writeHead(status, { 'content-type': 'application/json' });
@@ -43,6 +50,7 @@ const apiServer = http.createServer((req, res) => {
   if (url.pathname === '/api/marketplace/jobs') return json(res, 200, { jobs, total: jobs.length, publicTraction: { excludedFixtures: 0, databaseBound: 1000 } });
   if (url.pathname === '/api/marketplace/jobs/probe-job-1') return json(res, 200, jobs[0]);
   if (url.pathname === '/api/marketplace/jobs/probe-job-1/applications') return json(res, 200, { applications });
+  if (url.pathname === '/api/profile/probe-agent') return json(res, 200, profileFixture);
   if (url.pathname.startsWith('/api/profile-by-wallet')) return json(res, 404, { error: 'not linked' });
   return json(res, 404, { error: `Unhandled probe route: ${url.pathname}` });
 });
@@ -80,6 +88,17 @@ async function waitForSite() {
 let browser;
 try {
   await waitForSite();
+  for (const [pathname, expectedTitle] of [
+    ['/', 'AgentFolio — Build Your AI Agent&#x27;s Trust Score'],
+    ['/profile/probe-agent', 'Probe Agent — AgentFolio'],
+  ]) {
+    const response = await fetch(`${siteOrigin}${pathname}`);
+    assert.equal(response.status, 200, `${pathname} render smoke must return HTTP 200`);
+    const html = await response.text();
+    assert.ok(html.includes(`<title>${expectedTitle}</title>`), `${pathname} must render the expected title metadata`);
+    assert.ok(html.includes('property="og:site_name" content="AgentFolio"'), `${pathname} must retain AgentFolio Open Graph metadata`);
+    assert.ok(html.includes('property="og:image" content="https://agentfolio.bot/og.png"'), `${pathname} must retain the static AgentFolio card`);
+  }
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   const marketplaceRequests = [];
@@ -115,7 +134,7 @@ try {
   assert.deepEqual(offSite, [], `browser marketplace requests must stay on site origin: ${offSite.join(', ')}`);
   assert.equal(marketplaceRequests.some((requestUrl) => /localhost|:3333\b/.test(requestUrl)), false, 'browser marketplace requests must never target localhost or port 3333');
 
-  console.log(`marketplace-browser: listings=${canonical.jobs.length}; rendered=${renderedListingCount}; applications_panel=loaded; browser_api_requests=${marketplaceRequests.length}; same_origin=1; localhost_requests=0; canonical_no_store=1; cache_policy=marketplace-no-store-v1`);
+  console.log(`marketplace-browser: listings=${canonical.jobs.length}; rendered=${renderedListingCount}; applications_panel=loaded; browser_api_requests=${marketplaceRequests.length}; same_origin=1; localhost_requests=0; canonical_no_store=1; cache_policy=marketplace-no-store-v1; home_render=200; profile_render=200; static_metadata=1`);
 } finally {
   if (browser) await browser.close();
   if (nextServer.exitCode === null) nextServer.kill('SIGTERM');

@@ -1,14 +1,10 @@
 export const dynamic = "force-dynamic";
 
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import { fetchHomepageStats, getPublicStatCounters } from "@/lib/api";
 import { getHomepageLeaderboard } from "@/lib/homepage";
-import { resolveSiteOrigin } from "@/lib/site-origin.mjs";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const requestHeaders = await headers();
-  const origin = resolveSiteOrigin(requestHeaders.get("x-forwarded-host"), requestHeaders.get("host"));
   const stats = await fetchHomepageStats();
   const liveRegistrationSummary = stats
     ? ` ${stats.totalAgents} agents currently registered on Solana.`
@@ -17,10 +13,8 @@ export async function generateMetadata(): Promise<Metadata> {
     title: "AgentFolio — Build Your AI Agent's Trust Score",
     description: `Register your AI agent, verify identity on-chain via SATP, and get discovered by clients. Free to join.${liveRegistrationSummary}`,
     alternates: {
-      canonical: origin,
+      canonical: "https://agentfolio.bot",
     },
-    openGraph: { url: origin, images: [`${origin}/og.png`] },
-    twitter: { images: [`${origin}/og.png`] },
   };
 }
 

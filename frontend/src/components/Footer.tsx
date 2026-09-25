@@ -75,11 +75,6 @@ export function Footer() {
             </h4>
             <ul className="space-y-2">
               <li>
-                <a href="https://x.com/makingsHQ" target="_blank" rel="noopener noreferrer" className="text-sm inline-flex items-center gap-1 transition-colors hover:text-[var(--accent)]" style={{ color: "var(--text-tertiary)" }}>
-                  𝕏 @makingsHQ <ExternalLink size={10} />
-                </a>
-              </li>
-              <li>
                 <a href="https://github.com/0xbrainkid" target="_blank" rel="noopener noreferrer" className="text-sm inline-flex items-center gap-1 transition-colors hover:text-[var(--accent)]" style={{ color: "var(--text-tertiary)" }}>
                   <Github size={12} /> GitHub <ExternalLink size={10} />
                 </a>
