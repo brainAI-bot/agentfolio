@@ -111,11 +111,6 @@ try {
 const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR;
 const SATP_NETWORK = process.env.SATP_NETWORK || 'mainnet';
 
-function requirePlatformKeypairPath() {
-  if (!PLATFORM_KEYPAIR_PATH) throw new Error('SATP_PLATFORM_KEYPAIR is required');
-  return PLATFORM_KEYPAIR_PATH;
-}
-
 const DB_PATH = process.env.AGENTFOLIO_DB_PATH || path.join(__dirname, '..', 'data', 'agentfolio.db');
 
 const registrationWriteLimiter = rateLimit({
@@ -339,7 +334,7 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
     (async () => {
       try {
         const { Keypair } = require('@solana/web3.js');
-        const signerKey = JSON.parse(require('fs').readFileSync(requirePlatformKeypairPath(), 'utf-8'));
+        const signerKey = JSON.parse(require('fs').readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'));
         const signer = Keypair.fromSecretKey(Uint8Array.from(signerKey));
         
         // Check if genesis record exists first
@@ -491,7 +486,7 @@ function addVerification(profileId, platform, identifier, proof, userPaidGenesis
         if (newLevel > record.verificationLevel) {
           assertSolanaIrysWriteEnabled('SATP V3 verification level update');
           const { Keypair } = require('@solana/web3.js');
-          const signer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(require('fs').readFileSync(requirePlatformKeypairPath(), 'utf-8'))));
+          const signer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(require('fs').readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'))));
           const { transaction } = await satpV3.client.buildUpdateVerification(signer.publicKey, profileId, newLevel);
           transaction.sign(signer);
           const sig = await satpV3.client.connection.sendRawTransaction(transaction.serialize());
@@ -921,7 +916,7 @@ function registerRoutes(app) {
       if (satpV3 && !userPaidGenesis) {
         (async () => {
           const { Keypair } = require('@solana/web3.js');
-          const signerKey = JSON.parse(require('fs').readFileSync(requirePlatformKeypairPath(), 'utf-8'));
+          const signerKey = JSON.parse(require('fs').readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'));
           const signer = Keypair.fromSecretKey(Uint8Array.from(signerKey));
           const hashBuf = satpV3.agentIdHash(id);
           try {
@@ -967,7 +962,7 @@ function registerRoutes(app) {
       if (solanaWallet && satpWrite) {
         (async () => {
           try {
-            const signer = satpWrite.loadKeypair(requirePlatformKeypairPath());
+            const signer = satpWrite.loadKeypair(PLATFORM_KEYPAIR_PATH);
             const result = await satpWrite.registerIdentity(
               {
                 name: name.trim().substring(0, 32),
@@ -1142,7 +1137,7 @@ function registerRoutes(app) {
       // Build TX with deployer as creator/authority, user as feePayer
       const fs = require('fs');
       const { Keypair } = require('@solana/web3.js');
-      const deployerKey = JSON.parse(fs.readFileSync(requirePlatformKeypairPath(), 'utf-8'));
+      const deployerKey = JSON.parse(fs.readFileSync(PLATFORM_KEYPAIR_PATH, 'utf-8'));
       const deployer = Keypair.fromSecretKey(Uint8Array.from(deployerKey));
 
       const { transaction, genesisPda } = await satpV3.client.buildCreateGenesisRecord(
