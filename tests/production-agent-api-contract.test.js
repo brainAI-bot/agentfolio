@@ -22,10 +22,10 @@ function createJsonResponse() {
   };
 }
 
-function extractProfileHandler() {
+function extractRouteCallback(routeLiteral) {
   const source = fs.readFileSync(path.resolve(__dirname, '../src/profile-store.js'), 'utf8');
-  const routeStart = source.indexOf("app.get('/api/profile/:id', async (req, res) => {");
-  assert.notStrictEqual(routeStart, -1, 'expected /api/profile/:id route');
+  const routeStart = source.indexOf(routeLiteral);
+  assert.notStrictEqual(routeStart, -1, `expected ${routeLiteral} route`);
 
   const callbackStart = source.indexOf('async (req, res) => {', routeStart);
   assert.notStrictEqual(callbackStart, -1, 'expected async profile callback');
@@ -35,25 +35,60 @@ function extractProfileHandler() {
   for (let index = openBrace; index < source.length; index += 1) {
     if (source[index] === '{') depth += 1;
     if (source[index] === '}') depth -= 1;
-    if (depth === 0) {
-      const handlerSource = source.slice(callbackStart, index + 1);
-      return new Function('getDb', 'v3ScoreService', 'enrichProfile', 'buildReputationSurface', 'sanitizePublicProfile', `return ${handlerSource};`);
-    }
+    if (depth === 0) return source.slice(callbackStart, index + 1);
   }
 
-  assert.fail('expected /api/profile/:id callback to terminate');
+  assert.fail(`expected ${routeLiteral} callback to terminate`);
+}
+
+function extractProfileHandler() {
+  const handlerSource = extractRouteCallback("app.get('/api/profile/:id', async (req, res) => {");
+  return new Function('getDb', 'v3ScoreService', 'enrichProfile', 'buildReputationSurface', 'sanitizePublicProfile', `return ${handlerSource};`);
+}
+
+function extractProfilesHandler() {
+  const handlerSource = extractRouteCallback("app.get('/api/profiles', async (req, res) => {");
+  return new Function(
+    'getDb',
+    'v3ScoreService',
+    'sanitizePublicProfile',
+    'parseJsonField',
+    'filterCanonicalTrustData',
+    'sanitizeLegacyVerificationSummary',
+    'buildReputationSurface',
+    'isCanonicalTrustProvider',
+    'filterCanonicalTrustVerifications',
+    'require',
+    `return ${handlerSource};`
+  );
 }
 
 function buildProfileDb() {
   const row = {
     id: KNOWN_AGENT_ID,
     name: KNOWN_AGENT_NAME,
+    claimed: 0,
+    claimed_at: null,
+    claimed_by: null,
+    unclaimed: true,
+    publicKey: 'public-identifier',
+    email: 'private@example.invalid',
     api_key: 'private-write-key',
     claim_token: 'private-claim-capability',
+    ClaimToken: 'private-claim-capability-cased',
+    api_keys: 'private-write-keys',
+    github_token: 'private-github-token',
+    webhook_secret: 'private-webhook-secret',
     avatar: 'https://agentfolio.bot/avatar.png',
     links: JSON.stringify({ x: '@brainTEST007', github: 'brainAI-bot' }),
     wallets: JSON.stringify({ solana: 'AuthBrain' }),
     skills: JSON.stringify([{ name: 'code', category: 'engineering' }]),
+    metadata: JSON.stringify({
+      visible: 'detail',
+      unclaimed: true,
+      Contact_Email: 'private@example.invalid',
+      nested: { 'refresh-token': 'private-refresh-token', retained: true },
+    }),
     verification_data: JSON.stringify({
       github: { verified: true, identifier: 'brainAI-bot' },
       solana: { verified: true, address: 'AuthBrain' },
@@ -131,6 +166,7 @@ describe('known production agent API contracts', () => {
       links: JSON.parse(row.links),
       wallets: JSON.parse(row.wallets),
       skills: JSON.parse(row.skills),
+      metadata: JSON.parse(row.metadata),
       verification_data: JSON.parse(row.verification_data),
     });
     const { buildReputationSurface } = require('../src/lib/reputation-surface');
@@ -145,7 +181,18 @@ describe('known production agent API contracts', () => {
     assert.strictEqual(res.body.id, KNOWN_AGENT_ID);
     assert.strictEqual(res.body.name, KNOWN_AGENT_NAME);
     assert.strictEqual(res.body.api_key, undefined);
+    assert.strictEqual(res.body.api_keys, undefined);
     assert.strictEqual(res.body.claim_token, undefined);
+    assert.strictEqual(res.body.ClaimToken, undefined);
+    assert.strictEqual(res.body.email, undefined);
+    assert.strictEqual(res.body.github_token, undefined);
+    assert.strictEqual(res.body.webhook_secret, undefined);
+    assert.strictEqual(res.body.claimed, 0);
+    assert.strictEqual(res.body.claimed_at, null);
+    assert.strictEqual(res.body.claimed_by, null);
+    assert.strictEqual(res.body.unclaimed, true);
+    assert.strictEqual(res.body.publicKey, 'public-identifier');
+    assert.deepStrictEqual(res.body.metadata, { visible: 'detail', unclaimed: true, nested: { retained: true } });
     assert.deepStrictEqual(res.body.wallets, { solana: 'AuthBrain' });
     assert.strictEqual(res.body.verification_data.github.verified, true);
     assert.deepStrictEqual(res.body.trust_score, {
@@ -161,6 +208,91 @@ describe('known production agent API contracts', () => {
     assert.strictEqual(res.body.levelName, 'Verified');
     assert.strictEqual(res.body.verificationLevel, 2);
     assert.strictEqual(res.body.tier, 'Verified');
+  });
+
+  it('redacts seeded rows through the real /api/profiles handler', async () => {
+    const row = {
+      id: 'agent_list_redaction',
+      name: 'List Redaction',
+      claimed: 0,
+      claimed_at: null,
+      claimed_by: null,
+      unclaimed: true,
+      publicKey: 'public-identifier',
+      email: 'private@example.invalid',
+      API_Key: 'private-write-key',
+      api_keys: 'private-write-keys',
+      claim_token: 'private-claim-capability',
+      ClaimToken: 'private-claim-capability-cased',
+      github_token: 'private-github-token',
+      webhook_secret: 'private-webhook-secret',
+      status: 'active',
+      hidden: 0,
+      capabilities: '[]',
+      tags: '[]',
+      links: JSON.stringify({ website: 'https://example.invalid', 'access-token': 'private-access-token' }),
+      wallets: '{}',
+      skills: '[]',
+      verification_data: '{}',
+      metadata: JSON.stringify({ visible: 'list', unclaimed: true, CLIENT_SECRET: 'private-client-secret' }),
+      created_at: '2026-09-25T12:00:00.000Z',
+      _trust_score: 0,
+    };
+    const db = {
+      prepare(sql) {
+        if (sql.includes('COUNT(*)')) return { get: () => ({ c: 1 }) };
+        if (sql.includes('FROM profiles p')) return { all: () => [row] };
+        throw new Error(`unexpected SQL: ${sql}`);
+      },
+    };
+    const parseJsonField = (value, fallback = []) => {
+      if (value === null || value === undefined || value === '') return fallback;
+      if (typeof value === 'object') return value;
+      try { return JSON.parse(value); } catch { return fallback; }
+    };
+    const chainCache = {
+      getScore: () => null,
+      getVerifiedPlatforms: () => [],
+      getVerifications: () => [],
+    };
+    const { buildReputationSurface } = require('../src/lib/reputation-surface');
+    const { sanitizePublicProfile } = require('../src/lib/public-profile');
+    const handler = extractProfilesHandler()(
+      () => db,
+      null,
+      sanitizePublicProfile,
+      parseJsonField,
+      (value) => value,
+      (_legacy, value) => value,
+      buildReputationSurface,
+      () => true,
+      (value) => value,
+      (request) => {
+        if (request === './lib/chain-cache') return chainCache;
+        return require(request);
+      }
+    );
+    const res = createJsonResponse();
+
+    await handler({ query: { page: '1', limit: '20' } }, res);
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(res.body.profiles.length, 1);
+    assert.strictEqual(res.body.profiles[0].email, undefined);
+    assert.strictEqual(res.body.profiles[0].API_Key, undefined);
+    assert.strictEqual(res.body.profiles[0].api_keys, undefined);
+    assert.strictEqual(res.body.profiles[0].claim_token, undefined);
+    assert.strictEqual(res.body.profiles[0].ClaimToken, undefined);
+    assert.strictEqual(res.body.profiles[0].github_token, undefined);
+    assert.strictEqual(res.body.profiles[0].webhook_secret, undefined);
+    assert.ok(Object.hasOwn(res.body.profiles[0], 'claimed'));
+    assert.strictEqual(res.body.profiles[0].claimed, false);
+    assert.strictEqual(res.body.profiles[0].claimed_at, null);
+    assert.strictEqual(res.body.profiles[0].claimed_by, null);
+    assert.strictEqual(res.body.profiles[0].unclaimed, true);
+    assert.strictEqual(res.body.profiles[0].publicKey, 'public-identifier');
+    assert.deepStrictEqual(res.body.profiles[0].links, { website: 'https://example.invalid' });
+    assert.deepStrictEqual(res.body.profiles[0].metadata, { visible: 'list', unclaimed: true });
   });
 
   it('keeps /api/trust-credential/:agentId JSON response stable for brainTEST007', async () => {
