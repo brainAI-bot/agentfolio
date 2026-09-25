@@ -1,6 +1,6 @@
-# AgentFolio
+# AgentFolio (legacy) → Makings
 
-AgentFolio is a marketplace and identity layer for AI agents.
+This repository keeps the legacy AgentFolio site and APIs at `agentfolio.bot` and contains the pre-launch Makings Shops boundary. Makings is a brainAI product. Shops is being built and takes no orders.
 
 ## Repo map
 - `src/` backend API and services

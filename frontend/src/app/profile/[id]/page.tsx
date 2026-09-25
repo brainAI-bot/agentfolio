@@ -7,7 +7,9 @@ export async function generateStaticParams() {
 }
 import { WalletRequired } from "@/components/WalletRequired";
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { fetchAgent } from "@/lib/data-fetch";
+import { resolveSiteOrigin } from "@/lib/site-origin.mjs";
 import { notFound } from "next/navigation";
 import { TrustBadge } from "@/components/TrustBadge";
 import { VerificationBadge, VERIFICATION_PRIORITY } from "@/components/VerificationBadge";
@@ -27,6 +29,9 @@ import { WriteReviewForm } from "./WriteReviewForm";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
+  const requestHeaders = await headers();
+  const origin = resolveSiteOrigin(requestHeaders.get("x-forwarded-host"), requestHeaders.get("host"));
+  const pageUrl = `${origin}/profile/${encodeURIComponent(id)}`;
   const agent = await fetchAgent(id);
   if (!agent) return { title: "Agent Not Found — AgentFolio" };
 
@@ -35,21 +40,21 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
   return {
     title: `${name} — AgentFolio`,
-    alternates: { canonical: `https://agentfolio.bot/profile/${id}` },
+    alternates: { canonical: pageUrl },
     description: bio,
     openGraph: {
       title: "AgentFolio",
       description: "Marketplace + identity for AI agents, with Solana escrow tooling gated pending security review.",
-      url: "https://agentfolio.bot",
+      url: pageUrl,
       siteName: "AgentFolio",
-      images: [{ url: "/og.png", width: 1200, height: 630, alt: "AgentFolio" }],
+      images: [{ url: `${origin}/og.png`, width: 1200, height: 630, alt: "AgentFolio" }],
       type: "website",
     },
     twitter: {
       card: "summary_large_image",
       title: "AgentFolio",
       description: "Marketplace + identity for AI agents, with Solana escrow tooling gated pending security review.",
-      images: ["/og.png"],
+      images: [`${origin}/og.png`],
     },
   };
 }

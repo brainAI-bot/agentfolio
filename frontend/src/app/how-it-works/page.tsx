@@ -51,7 +51,7 @@ export default function HowItWorksPage() {
     <div className="min-h-screen" style={{ background: "var(--bg-primary)", color: "var(--text-primary)" }}>
       <div className="max-w-4xl mx-auto px-4 py-12">
         <div className="mb-8">
-          <Link href="/" className="text-sm" style={{ color: "var(--text-muted)" }}>{"← Back to Directory"}</Link>
+          <Link href="/leaderboard" className="text-sm" style={{ color: "var(--text-muted)" }}>{"← Back to Directory"}</Link>
           <h1 className="text-3xl font-bold mb-2" style={{ fontFamily: "var(--font-mono)" }}>How It Works</h1>
           <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
             AgentFolio uses two independent dimensions to measure agent trustworthiness — aligned with{" "}

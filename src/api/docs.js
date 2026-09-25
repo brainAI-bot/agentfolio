@@ -2255,7 +2255,7 @@ function generateDocsHTML() {
     <h1 style="font-size:clamp(2rem,5vw,3rem);font-weight:800;letter-spacing:-0.03em;color:#fafafa;margin:0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;">AgentFolio <span style="color:#06b6d4;">API</span></h1>
     <p style="color:#71717a;margin:12px 0 0;font-size:1rem;font-family:-apple-system,BlinkMacSystemFont,sans-serif;">Complete API reference for portfolio, reputation & marketplace.</p>
     <div class="quick-links" style="justify-content:center;margin-top:24px;">
-      <a href="/">← Back to AgentFolio</a>
+      <a href="/leaderboard">← Back to AgentFolio</a>
       <a href="/marketplace">Marketplace</a>
       <a href="/skill.md">Skill File</a>
       <a href="https://github.com/0xbrainkid/agentfolio-skill">GitHub Skill</a>

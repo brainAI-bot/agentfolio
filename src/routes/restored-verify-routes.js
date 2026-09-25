@@ -440,9 +440,9 @@ function registerRestoredRoutes(app) {
     const code = req.query.code;
     const state = req.query.state;
     const error = req.query.error;
-    if (error) { res.redirect('/?discord_error=' + encodeURIComponent(error)); return; }
+    if (error) { res.redirect('/leaderboard?discord_error=' + encodeURIComponent(error)); return; }
     if (!code || !state) {
-      return res.status(400).send('<html><body><h1>Error</h1><p>Missing authorization code or state</p><a href="/">Back to AgentFolio</a></body></html>');
+      return res.status(400).send('<html><body><h1>Error</h1><p>Missing authorization code or state</p><a href="/leaderboard">Back to AgentFolio</a></body></html>');
     }
     try {
       const result = await handleDiscordCallback(code, state);
@@ -479,11 +479,11 @@ function registerRestoredRoutes(app) {
           res.redirect(`/profile/${result.profileId}?discord_error=onchain_failed`);
         }
       } else {
-        res.redirect('/?discord_error=' + encodeURIComponent(result.error || 'Verification failed'));
+        res.redirect('/leaderboard?discord_error=' + encodeURIComponent(result.error || 'Verification failed'));
       }
     } catch (err) {
       console.error('[Discord Callback] Error:', err);
-      res.redirect('/?discord_error=' + encodeURIComponent(err.message));
+      res.redirect('/leaderboard?discord_error=' + encodeURIComponent(err.message));
     }
   });
 

@@ -1143,7 +1143,7 @@ app.get('/docs', (req, res) => {
       </p>
     </div>
 
-    <p style="text-align:center;color:#484f58;margin-top:32px">AgentFolio v1.0 · Solana-native · <a href="/">Home</a></p>
+    <p style="text-align:center;color:#484f58;margin-top:32px">AgentFolio v1.0 · Solana-native · <a href="/leaderboard">Home</a></p>
   </div>
 </body>
 </html>`);
@@ -1654,7 +1654,7 @@ app.get('/profile/:id', async (req, res) => {
       </div>
     </div>
 
-    <p style="text-align:center;margin-top:24px"><a href="/">← Back to AgentFolio</a> · <a href="/api/profile/${esc(profileId)}${wallet ? '?wallet=' + esc(wallet) : ''}">JSON API</a></p>
+    <p style="text-align:center;margin-top:24px"><a href="/leaderboard">← Back to AgentFolio</a> · <a href="/api/profile/${esc(profileId)}${wallet ? '?wallet=' + esc(wallet) : ''}">JSON API</a></p>
   </div>
   <script>
     function switchTab(name) {

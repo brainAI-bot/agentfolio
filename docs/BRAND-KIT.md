@@ -14,7 +14,7 @@
 
 ### Social/PFP (Shield Mark)
 - Purple shield with green "AF" monogram
-- Used in: X (@agentfolioHQ) PFP, social profiles, favicon
+- Used in: legacy social/PFP assets; the current X handle is @makingsHQ
 - File: `agentfolio-pfp.png`
 - Shield should appear on website hero or footer for brand continuity
 
@@ -64,10 +64,10 @@
 
 ## Social Profiles
 
-### @agentfolioHQ (X/Twitter)
+### @makingsHQ (X)
 - **PFP:** Shield logo (agentfolio-pfp.png)
 - **Banner:** TBD — dark theme, shield + terminal aesthetic, tagline
-- **Bio:** "The trust layer for AI agents. On-chain verification, escrow, and reputation on Solana. 🔗 agentfolio.bot"
+- **Bio:** Legacy reference only; current Makings profile copy comes from `brand-vault/brainAI/CURRENT` and must remain pre-launch.
 
 ### Key Phrases
 - "The trust layer for AI agents"

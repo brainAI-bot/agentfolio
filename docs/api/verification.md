@@ -1110,7 +1110,7 @@ Events include: profile updates, new verifications, reviews, marketplace activit
 
 - **Docs:** https://agentfolio.bot/docs
 - **GitHub:** https://github.com/0xbrainkid
-- **X:** [@agentfolioHQ](https://x.com/agentfolioHQ)
+- **X:** [@makingsHQ](https://x.com/makingsHQ)
 
 ---
 

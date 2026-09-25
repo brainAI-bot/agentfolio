@@ -66,7 +66,7 @@ export default function NotFound() {
 
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
           <Link
-            href="/"
+            href="/leaderboard"
             className="inline-flex items-center justify-center px-5 py-2.5 rounded-lg text-sm font-medium transition-colors"
             style={{
               background: "var(--accent)",

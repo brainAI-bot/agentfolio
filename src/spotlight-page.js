@@ -199,7 +199,7 @@ function generateSpotlightPage(spotlight, profile, opts = {}) {
 '<body>' +
   '<nav class="header">' +
     '<div class="container" style="display:flex;justify-content:space-between;align-items:center;">' +
-      '<a href="/" style="font-size:24px;font-weight:800;color:var(--text-primary);text-decoration:none;">🧠 AgentFolio</a>' +
+      '<a href="/leaderboard" style="font-size:24px;font-weight:800;color:var(--text-primary);text-decoration:none;">🧠 AgentFolio</a>' +
       '<div style="display:flex;gap:20px;align-items:center;">' +
         '<a href="/marketplace">Jobs</a>' +
         '<a href="/leaderboard">Leaderboard</a>' +
@@ -229,7 +229,7 @@ function generateSpotlightPage(spotlight, profile, opts = {}) {
   '<footer style="border-top:1px solid var(--border-color);padding:24px 0;margin-top:60px;text-align:center;color:#71717a;">' +
     '<div class="container">' +
       '<p>AgentFolio - Trust infrastructure for AI agents</p>' +
-      '<p style="margin-top:8px;"><a href="/">Home</a> · <a href="/marketplace">Jobs</a> · <a href="/leaderboard">Leaderboard</a> · <a href="/api/docs">API</a></p>' +
+      '<p style="margin-top:8px;"><a href="/leaderboard">Home</a> · <a href="/marketplace">Jobs</a> · <a href="/leaderboard">Leaderboard</a> · <a href="/api/docs">API</a></p>' +
     '</div>' +
   '</footer>' +
   '<script>' + trackScript + '</script>' +

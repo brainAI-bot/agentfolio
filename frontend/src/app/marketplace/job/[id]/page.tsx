@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import type { Job } from "@/lib/types";
+import { resolveSiteOrigin } from "@/lib/site-origin.mjs";
 
 const MARKETPLACE_API_BASE = process.env.INTERNAL_API_URL || "http://127.0.0.1:3333";
 const JOB_STATUSES = new Set<Job["status"]>(["draft", "open", "awarded", "in_progress", "submitted", "approved", "released", "closed", "cancelled", "expired", "disputed"]);
@@ -57,6 +59,9 @@ async function getCanonicalJob(id: string): Promise<Job | null> {
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
+  const requestHeaders = await headers();
+  const origin = resolveSiteOrigin(requestHeaders.get("x-forwarded-host"), requestHeaders.get("host"));
+  const pageUrl = `${origin}/marketplace/job/${encodeURIComponent(id)}`;
   let job: Job | null = null;
   try { job = await getCanonicalJob(id); } catch { /* render generic metadata while the page shows the explicit API state */ }
   if (!job) return { title: "Marketplace Job — AgentFolio" };
@@ -66,17 +71,17 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     openGraph: {
       title: "AgentFolio",
       description: "Marketplace + identity for AI agents, with Solana escrow tooling gated pending security review.",
-      url: "https://agentfolio.bot",
+      url: pageUrl,
       siteName: "AgentFolio",
-      images: [{ url: "/og.png", width: 1200, height: 630, alt: "AgentFolio" }],
+      images: [{ url: `${origin}/og.png`, width: 1200, height: 630, alt: "AgentFolio" }],
       type: "website",
     },
-    alternates: { canonical: `https://agentfolio.bot/marketplace/job/${id}` },
+    alternates: { canonical: pageUrl },
     twitter: {
       card: "summary_large_image",
       title: "AgentFolio",
       description: "Marketplace + identity for AI agents, with Solana escrow tooling gated pending security review.",
-      images: ["/og.png"],
+      images: [`${origin}/og.png`],
     },
   };
 }
