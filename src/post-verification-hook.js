@@ -43,12 +43,12 @@ function getProfileStore() {
   return profileStore;
 }
 
-const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR || '/home/ubuntu/agentfolio/config/platform-keypair.json';
+const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR;
 
 function getPlatformKeypair() {
   if (!keypair) {
-    if (!fs.existsSync(PLATFORM_KEYPAIR_PATH)) {
-      console.warn('[PostVerify] No platform keypair at', PLATFORM_KEYPAIR_PATH, '— on-chain skipped');
+    if (!PLATFORM_KEYPAIR_PATH || !fs.existsSync(PLATFORM_KEYPAIR_PATH)) {
+      console.warn('[PostVerify] SATP_PLATFORM_KEYPAIR is unavailable — on-chain skipped');
       return null;
     }
     const { Keypair } = require('@solana/web3.js');

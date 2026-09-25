@@ -108,8 +108,7 @@ try {
   console.warn('[ProfileStore] Memo attestation not available:', e.message);
 }
 
-const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR ||
-  '/home/ubuntu/.config/solana/brainforge-personal.json';
+const PLATFORM_KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR;
 const SATP_NETWORK = process.env.SATP_NETWORK || 'mainnet';
 
 const DB_PATH = process.env.AGENTFOLIO_DB_PATH || path.join(__dirname, '..', 'data', 'agentfolio.db');

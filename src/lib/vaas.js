@@ -84,10 +84,16 @@ function initVaasTable() {
 
 try { initVaasTable(); } catch(e) { /* table may already exist */ }
 
+function requireAttestationHmacKey() {
+  const key = process.env.AGENTFOLIO_ADMIN_KEY;
+  if (!key) throw new Error('AGENTFOLIO_ADMIN_KEY is required for VaaS attestations');
+  return key;
+}
+
 // Generate attestation hash for a verification result
 function generateAttestation(reportId, type, subject, result) {
   const payload = JSON.stringify({ reportId, type, subject, result, timestamp: new Date().toISOString() });
-  const hmac = crypto.createHmac('sha256', process.env.AGENTFOLIO_ADMIN_KEY || 'agentfolio-vaas-secret');
+  const hmac = crypto.createHmac('sha256', requireAttestationHmacKey());
   hmac.update(payload);
   return {
     hash: hmac.digest('hex'),
@@ -370,7 +376,7 @@ function getUsageStats(apiKeyHash) {
 
 // Verify attestation
 function verifyAttestation(attestationHash, payload) {
-  const hmac = crypto.createHmac('sha256', process.env.AGENTFOLIO_ADMIN_KEY || 'agentfolio-vaas-secret');
+  const hmac = crypto.createHmac('sha256', requireAttestationHmacKey());
   hmac.update(payload);
   return hmac.digest('hex') === attestationHash;
 }

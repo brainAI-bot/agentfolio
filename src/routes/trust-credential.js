@@ -21,7 +21,7 @@ const path = require('path');
 
 // ─── Key Management ─────────────────────────────────────
 const KEYPAIR_PATH = process.env.SATP_PLATFORM_KEYPAIR ||
-  process.env.SATP_KEYPAIR_PATH || './config/platform-keypair.json';
+  process.env.SATP_KEYPAIR_PATH;
 
 let cachedKeyPair = null;
 
@@ -29,6 +29,7 @@ function getSigningKey() {
   if (cachedKeyPair) return cachedKeyPair;
 
   try {
+    if (!KEYPAIR_PATH) throw new Error('SATP_PLATFORM_KEYPAIR or SATP_KEYPAIR_PATH is required');
     const raw = JSON.parse(fs.readFileSync(KEYPAIR_PATH, 'utf8'));
     const fullKey = Uint8Array.from(raw);
     // Solana keypair: first 32 bytes = secret, last 32 = public

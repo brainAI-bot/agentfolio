@@ -139,7 +139,6 @@ test('escrow and profile genesis paths use extracted SATP package name', () => {
     'src/routes/escrow-v3-routes.js',
     'src/routes/escrow-routes.js',
     'src/profile-store.js',
-    'src/routes/restored-verify-routes.js',
     'src/routes/burn-to-become-public.js',
     'src/lib/wallet.js',
     'src/routes/prepare-birth-endpoint.js',
