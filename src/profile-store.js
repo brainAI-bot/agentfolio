@@ -22,6 +22,7 @@ const rateLimit = require('express-rate-limit');
 const { sendWelcomeEmail } = require('./lib/welcome-email');
 const { assertSolanaIrysWriteEnabled, sendSolanaIrysWriteGateResponse } = require('./lib/write-surface-gate');
 const { buildReputationSurface, normalizeTrustScoreValue } = require('./lib/reputation-surface');
+const { sanitizePublicProfile } = require('./lib/public-profile');
 const {
   listCanonicalReviews,
   summarizeCanonicalReviews,
@@ -1194,9 +1195,10 @@ function registerRoutes(app) {
       rows = d.prepare('SELECT * FROM profiles WHERE status = ? AND (hidden = 0 OR hidden IS NULL) ORDER BY created_at DESC').all(status);
     }
 
-    // Strip api_key from list responses
+    // Strip all bearer credentials/capabilities from public list, directory,
+    // search-consumer, export, and embed payloads.
     const profiles = rows.map(r => {
-      const { api_key, ...rest } = r;
+      const rest = sanitizePublicProfile(r);
       // Resolve avatar: nft_avatar.image takes priority over avatar
       let resolvedAvatar = rest.avatar;
       if (rest.nft_avatar) {
@@ -1354,7 +1356,7 @@ function registerRoutes(app) {
       });
     }
 
-    const paginatedProfiles = profiles.slice(offset, offset + limit);
+    const paginatedProfiles = sanitizePublicProfile(profiles.slice(offset, offset + limit));
     res.json({ profiles: paginatedProfiles, total, page, limit, pages: Math.ceil(total / limit) });
   });
 
@@ -1371,7 +1373,7 @@ function registerRoutes(app) {
     }
     if (!row) return res.status(404).json({ error: 'Profile not found' });
 
-    const { api_key, ...safe } = row;
+    const safe = sanitizePublicProfile(row);
     // Warm V3 cache for BOTH request param AND resolved row.id
     // (enrichProfile reads cache by row.id, which may differ from req.params.id)
     if (v3ScoreService) {
@@ -1428,7 +1430,7 @@ function registerRoutes(app) {
         reputation_score: surface.reputationScore,
       });
     }
-    res.json(enriched);
+    res.json(sanitizePublicProfile(enriched));
   });
 
   // ── PATCH /api/profile/:id ─────────────────────────────────────
@@ -1486,7 +1488,7 @@ function registerRoutes(app) {
       console.error('[PATCH] Failed to update JSON file:', jsonErr.message);
     }
 
-    res.json({ updated: true, profile: enriched });
+    res.json({ updated: true, profile: sanitizePublicProfile(enriched) });
   });
 
   // ── POST /api/profile/:id/endorsements ─────────────────────────
