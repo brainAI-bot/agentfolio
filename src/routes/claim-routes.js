@@ -120,8 +120,13 @@ function registerClaimRoutes(app, getDb) {
 
   // GET /api/claims/urls — Generate claim URLs for all unclaimed profiles (internal use by brainGrowth)
   app.get('/api/claims/urls', (req, res) => {
+    const configuredAdminKey = process.env.ADMIN_KEY;
+    if (!configuredAdminKey) {
+      return res.status(503).json({ error: 'Admin key is not configured' });
+    }
+
     const adminKey = req.headers['x-admin-key'];
-    if (!adminKey || adminKey !== (process.env.ADMIN_KEY || 'bf-admin-2026')) {
+    if (!adminKey || adminKey !== configuredAdminKey) {
       return res.status(401).json({ error: 'Admin key required' });
     }
 

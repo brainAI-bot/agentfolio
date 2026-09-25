@@ -8,12 +8,19 @@ Source review shows that a valid claim token is a bearer capability for an uncla
 
 Because tokens were included in public profile serializers, every token for an unclaimed profile must be treated as compromised even after serializers stop returning it.
 
+## Claim-capability exposure map
+
+- `GET /claim/:id` consumes a claim token from the query string to render the claim page.
+- `POST /api/claim/:id` consumes a claim token from the JSON body to execute a claim.
+- `GET /api/claims/urls` returns complete claim links for unclaimed profiles and is therefore a bulk capability-distribution route. It must fail closed unless `ADMIN_KEY` is configured and the request presents that configured key.
+
 ## Preconditions
 
 1. Merge and deploy the serializer fix first.
 2. Verify that both `GET /api/profiles` and `GET /api/profile/:id` omit all claim/API capability keys without logging any values.
-3. Pause outbound claim-link distribution for the migration window.
-4. Take the standard restricted production database backup and record only its path, size, checksum, and permissions in the operator receipt.
+3. Confirm `ADMIN_KEY` is set in production without printing, exporting, or logging its value; verify the bulk claim-link route rejects an unauthenticated request before using it for reissue.
+4. Pause outbound claim-link distribution for the migration window.
+5. Take the standard restricted production database backup and record only its path, size, checksum, and permissions in the operator receipt.
 
 ## Proposed one-time transaction
 
