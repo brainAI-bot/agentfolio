@@ -59,10 +59,6 @@ test('retired claim and admin-key modules are absent and unreachable from server
   }
 });
 
-function lineNumberAt(source, index) {
-  return source.slice(0, index).split(/\r?\n/).length;
-}
-
 function credentialEnvName(name) {
   const normalized = String(name).replace(/[^a-z0-9]/gi, '').toLowerCase();
   const authority = /(admin|internal|auth|authorization|api)/.test(normalized);
@@ -70,69 +66,133 @@ function credentialEnvName(name) {
   return authority && credential;
 }
 
-function credentialIdentifier(name) {
+function credentialHeaderName(name) {
   const normalized = String(name).replace(/[^a-z0-9]/gi, '').toLowerCase();
-  return /(admin|internal|auth|authorization|api)/.test(normalized)
-    && /(key|secret|token|credential)/.test(normalized);
+  return normalized === 'authorization' || normalized === 'xapikey';
 }
 
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function unwrapChain(node) {
+  return node && node.type === 'ChainExpression' ? node.expression : node;
 }
 
-function authorizationSource(expression, tainted) {
-  const compact = expression.replace(/\s+/g, ' ');
-  if (/\b[A-Za-z_$][\w$]*\.headers(?:\.authorization|\[\s*['"](?:authorization|x-api-key)['"]\s*\])/i.test(compact)) return true;
-  if (/\b[A-Za-z_$][\w$]*\.(?:get|header)\(\s*['"]authorization['"]\s*\)/i.test(compact)) return true;
-
-  const env = compact.match(/\bprocess\.env(?:\.([A-Za-z0-9_]+)|\[\s*['"]([^'"]+)['"]\s*\])/);
-  if (env && credentialEnvName(env[1] || env[2])) return true;
-
-  return [...tainted].some((name) => new RegExp(`\\b${escapeRegExp(name)}\\b`).test(compact));
+function staticPropertyName(node) {
+  node = unwrapChain(node);
+  if (!node) return null;
+  if (node.type === 'Identifier') return node.name;
+  if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
+  return null;
 }
 
-function directAuthorizationExpression(expression) {
-  return /^(?:[A-Za-z_$][\w$]*\.headers(?:\.authorization|\[\s*['"](?:authorization|x-api-key)['"]\s*\])|[A-Za-z_$][\w$]*\.(?:get|header)\(\s*['"]authorization['"]\s*\))$/i.test(expression);
+function memberPropertyName(node) {
+  node = unwrapChain(node);
+  if (!node || node.type !== 'MemberExpression') return null;
+  return node.computed ? staticPropertyName(node.property) : node.property.name;
+}
+
+function stringLiteralValue(node) {
+  node = unwrapChain(node);
+  if (node?.type === 'Literal' && typeof node.value === 'string') return node.value;
+  if (node?.type === 'TemplateLiteral' && node.expressions.length === 0) {
+    return node.quasis.map((part) => part.value.cooked).join('');
+  }
+  return null;
+}
+
+function isStringLiteral(node) {
+  return stringLiteralValue(node) !== null;
+}
+
+function walkAst(node, visit) {
+  if (!node || typeof node !== 'object') return;
+  visit(node);
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'loc' || key === 'start' || key === 'end') continue;
+    if (Array.isArray(value)) value.forEach((child) => walkAst(child, visit));
+    else if (value && typeof value.type === 'string') walkAst(value, visit);
+  }
 }
 
 function findAuthorizationLiteralViolations(source, relativePath) {
-  const violations = [];
+  const acorn = require('acorn');
+  let ast;
+  try {
+    ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'script', locations: true, allowHashBang: true });
+  } catch {
+    ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true });
+  }
+
   const tainted = new Set();
-  const assignments = [...source.matchAll(/(?:\b(?:const|let|var)\s+)?\b([A-Za-z_$][\w$]*)\s*=\s*([^;\n]+)/g)];
+  const nodes = [];
+  walkAst(ast, (node) => nodes.push(node));
+
+  function isHeadersObject(node) {
+    node = unwrapChain(node);
+    return node?.type === 'MemberExpression' && String(memberPropertyName(node)).toLowerCase() === 'headers';
+  }
+
+  function isProcessEnvCredential(node) {
+    node = unwrapChain(node);
+    if (node?.type !== 'MemberExpression' || !credentialEnvName(memberPropertyName(node))) return false;
+    const object = unwrapChain(node.object);
+    return object?.type === 'MemberExpression'
+      && object.object?.type === 'Identifier'
+      && object.object.name === 'process'
+      && String(memberPropertyName(object)).toLowerCase() === 'env';
+  }
+
+  function isCredentialSource(node) {
+    node = unwrapChain(node);
+    if (!node) return false;
+    if (node.type === 'Identifier') return tainted.has(node.name);
+    if (isProcessEnvCredential(node)) return true;
+    if (node.type === 'MemberExpression') {
+      return isHeadersObject(node.object) && credentialHeaderName(memberPropertyName(node));
+    }
+    if (node.type === 'CallExpression') {
+      const callee = unwrapChain(node.callee);
+      const method = callee?.type === 'MemberExpression' && String(memberPropertyName(callee)).toLowerCase();
+      return (method === 'get' || method === 'header')
+        && credentialHeaderName(staticPropertyName(node.arguments[0]));
+    }
+    return false;
+  }
 
   let changed = true;
   while (changed) {
     changed = false;
-    for (const assignment of assignments) {
-      if (!tainted.has(assignment[1]) && authorizationSource(assignment[2], tainted)) {
-        tainted.add(assignment[1]);
-        changed = true;
+    for (const node of nodes) {
+      if (node.type === 'VariableDeclarator' || node.type === 'AssignmentExpression') {
+        const target = node.type === 'VariableDeclarator' ? node.id : node.left;
+        const value = node.type === 'VariableDeclarator' ? node.init : node.right;
+        if (target?.type === 'Identifier' && isCredentialSource(value) && !tainted.has(target.name)) {
+          tainted.add(target.name);
+          changed = true;
+        }
+        if (target?.type === 'ObjectPattern' && isHeadersObject(value)) {
+          for (const property of target.properties) {
+            if (property.type !== 'Property' || !credentialHeaderName(staticPropertyName(property.key))) continue;
+            const local = property.value?.type === 'AssignmentPattern' ? property.value.left : property.value;
+            if (local?.type === 'Identifier' && !tainted.has(local.name)) {
+              tainted.add(local.name);
+              changed = true;
+            }
+          }
+        }
       }
     }
   }
 
-  const envFallback = /\bprocess\.env(?:\.([A-Za-z0-9_]+)|\[\s*['"]([^'"]+)['"]\s*\])\s*\|\|\s*(['"])(?:\\.|(?!\3).)+\3/g;
-  for (const match of source.matchAll(envFallback)) {
-    if (credentialEnvName(match[1] || match[2])) {
-      violations.push(`${relativePath}:${lineNumberAt(source, match.index)}`);
+  const violations = [];
+  for (const node of nodes) {
+    if (node.type === 'LogicalExpression' && node.operator === '||'
+        && isProcessEnvCredential(node.left) && stringLiteralValue(node.right)) {
+      violations.push(`${relativePath}:${node.loc.start.line}`);
     }
-  }
-
-  const comparisonPatterns = [
-    /([^;\n]+?)\s*(===|!==|==|!=)\s*(['"])(?:\\.|(?!\3).)*\3/g,
-    /(['"])(?:\\.|(?!\1).)*\1\s*(===|!==|==|!=)\s*([^;\n]+)/g,
-  ];
-  for (const [patternIndex, pattern] of comparisonPatterns.entries()) {
-    for (const match of source.matchAll(pattern)) {
-      const expression = (patternIndex === 0 ? match[1] : match[3]).trim()
-        .replace(/^.*(?:\bif|\bwhile)\s*\(/, '')
-        .replace(/[),}\s]+$/, '');
-      const directPrefix = expression.match(/^(?:[A-Za-z_$][\w$]*\.headers(?:\.authorization|\[\s*['"](?:authorization|x-api-key)['"]\s*\])|[A-Za-z_$][\w$]*\.(?:get|header)\(\s*['"]authorization['"]\s*\))/i);
-      const sinkExpression = directPrefix ? directPrefix[0] : expression;
-      const identifier = sinkExpression.match(/^([A-Za-z_$][\w$]*)$/);
-      const credentialSink = directAuthorizationExpression(sinkExpression)
-        || (identifier && (tainted.has(identifier[1]) || credentialIdentifier(identifier[1])));
-      if (credentialSink) violations.push(`${relativePath}:${lineNumberAt(source, match.index)}`);
+    if (node.type === 'BinaryExpression' && ['===', '!==', '==', '!='].includes(node.operator)) {
+      const credentialSide = isStringLiteral(node.left) ? node.right : isStringLiteral(node.right) ? node.left : null;
+      if (credentialSide && isCredentialSource(credentialSide)) {
+        violations.push(`${relativePath}:${node.loc.start.line}`);
+      }
     }
   }
 
@@ -144,9 +204,15 @@ test('authorization-literal scanner rejects direct, aliased, generic-key, and em
     "if (req.headers.authorization === 'fixture-only') deny();",
     "if (req.headers['authorization'] !== 'fixture-only') deny();",
     "if ('fixture-only' === req.headers.Authorization) deny();",
+    "if (req.headers?.authorization === 'fixture-only') deny();",
+    "if (req.get('x-api-key') === 'fixture-only') deny();",
+    "if (req.header('x-api-key') !== 'fixture-only') deny();",
     "const supplied = req.get('authorization'); if (supplied === 'fixture-only') deny();",
-    "const key = req.headers['x-api-key']; if (key == 'fixture-only') deny();",
+    "const key = req.headers['x-api-key']; const alias = key; if (alias == 'fixture-only') deny();",
+    "const { authorization } = req.headers; if (authorization === 'fixture-only') deny();",
+    "const { 'x-api-key': suppliedKey } = req.headers; if (suppliedKey === 'fixture-only') deny();",
     "const candidate = process.env.SERVICE_ADMIN_API_KEY || 'fixture-only';",
+    "const candidate = process.env['PREFIX_AUTH_TOKEN_SUFFIX'] || 'fixture-only';",
   ];
 
   unsafeFixtures.forEach((fixture, index) => {
