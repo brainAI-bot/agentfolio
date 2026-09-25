@@ -1,5 +1,7 @@
 # Makings PR Watch List
 
+Mode: paused per the principal's decision of 2026-09-25; no engagement on any channel until Makings launches and the lane is re-authorized.
+
 Source authority: `brand-vault/brainAI/CURRENT`. Legacy AgentFolio identifiers and pages remain in this repository, but new public positioning follows the Makings pre-launch board.
 
 Scope: organic listening, owned-account replies, GitHub/Moltbook responses, and in-thread engagement for Makings and clearly labelled legacy AgentFolio surfaces. This board is separate from scheduled marketing posts.

@@ -1,3 +1,5 @@
+Mode: paused per the principal's decision of 2026-09-25; no engagement on any channel until Makings launches and the lane is re-authorized.
+
 # Makings PR Guardrails
 
 ## Mode

@@ -34,9 +34,10 @@ describe('Makings P6 legacy link migration', () => {
     }
   });
 
-  it('keeps the logo at root but moves directory and return links to leaderboard', () => {
+  it('keeps the logo at root and one leaderboard navigation entry', () => {
     const navbar = read('frontend/src/components/Navbar.tsx');
-    assert.match(navbar, /\{ href: "\/leaderboard", label: "Directory" \}/);
+    assert.doesNotMatch(navbar, /\{ href: "\/leaderboard", label: "Directory" \}/);
+    assert.match(navbar, /\{ href: "\/leaderboard", label: "Leaderboard" \}/);
     assert.match(navbar, /<Link href="\/" className="flex items-center gap-2">/);
 
     for (const relativePath of [
