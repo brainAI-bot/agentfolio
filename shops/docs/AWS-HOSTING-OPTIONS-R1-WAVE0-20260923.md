@@ -1,10 +1,10 @@
-# AgentFolio Shops R1 Wave 0 — isolated AWS hosting options
+# Makings Shops R1 Wave 0 — isolated AWS hosting options
 
 **Pricing basis:** September 23, 2026; USD; `us-east-1`; Linux/x86; 730 hours/month. Estimates exclude tax, AWS Support, domain/DNS, WAF, CI build minutes, and unusual outbound traffic. No free-tier credits, Spot, or Savings Plans are assumed. Prices are planning estimates, not AWS quotes.
 
 ## Wave 0 constraint and recommendation
 
-**Provision/spend: none.** This document authorizes no AWS account, resource, DNS, credential, deployment, or purchase action. The top-level `shops/` tree remains inert. Do not attach Shops to, deploy it on, or share data paths/secrets with the legacy AgentFolio AWS Server 1 / PM2 runtime.
+**Provision/spend: none.** This document authorizes no AWS account, resource, DNS, credential, deployment, or purchase action. The top-level `shops/` tree remains inert. Scope is the Shops runtime; the static Makings landing is served separately. Do not attach Shops to, deploy it on, or share data paths/secrets with the legacy AgentFolio AWS Server 1 / PM2 runtime.
 
 For a reviewed pilot, **Option 1** is the lowest-change, lowest-cost starting point. If container operations and horizontal scaling are requirements at first release, select **Option 2**. Treat **Option 3** as the availability-oriented baseline after demand or SLOs justify roughly $107/month.
 

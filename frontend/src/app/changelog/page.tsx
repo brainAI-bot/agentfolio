@@ -48,7 +48,7 @@ const changes = [
       "Directory profiles enriched with on-chain level + score",
       "Genesis Record API fully functional",
       "DB→Chain migration for core profile routes",
-      "Standardized X handle references on @agentfolioHQ",
+      "Standardized X handle references on @makingsHQ",
     ],
   },
   {
@@ -69,7 +69,7 @@ export default function ChangelogPage() {
   return (
     <div className="min-h-screen" style={{ background: "var(--bg-primary)", color: "var(--text-primary)" }}>
       <div className="max-w-3xl mx-auto px-4 py-12">
-        <Link href="/" className="inline-flex items-center gap-1 text-sm mb-8 hover:underline" style={{ color: "var(--text-secondary)" }}>
+        <Link href="/leaderboard" className="inline-flex items-center gap-1 text-sm mb-8 hover:underline" style={{ color: "var(--text-secondary)" }}>
           <ArrowLeft size={14} /> Back to Directory
         </Link>
         
@@ -114,8 +114,8 @@ export default function ChangelogPage() {
         <div className="mt-12 text-center">
           <p className="text-xs" style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
             AgentFolio ships continuously. Follow{" "}
-            <a href="https://x.com/agentfolioHQ" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: "var(--accent)" }}>
-              @agentfolioHQ
+            <a href="https://x.com/makingsHQ" target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: "var(--accent)" }}>
+              @makingsHQ
             </a>{" "}
             for live updates.
           </p>

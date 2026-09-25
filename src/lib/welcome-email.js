@@ -49,7 +49,7 @@ function sendWelcomeEmail(toEmail, profile) {
     `Your profile: https://agentfolio.bot/profile/${profile.id}`,
     `Your DID: did:agentfolio:${profile.id}`,
     '',
-    'Questions? Reply to this email or hit us up on X @agentfolio.',
+    'Questions? Reply to this email or reach us on X @makingsHQ.',
     '',
     '— AgentFolio team',
   ].join('\n');

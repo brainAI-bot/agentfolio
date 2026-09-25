@@ -84,7 +84,7 @@ export default function BirthCertificate({ profileId, profileName, apiKey, onGen
 
   const handleShareX = () => {
     const text = encodeURIComponent(
-      `🔥 I burned my NFT and became permanent on @AgentFolio.\n\nGenesis Record ${cert?.certNumber}\nThis identity is permanent. No changes. No undo.\n\nhttps://agentfolio.bot/profile/${profileId}`
+      `🔥 I burned my NFT and became permanent on AgentFolio.\n\nGenesis Record ${cert?.certNumber}\nThis identity is permanent. No changes. No undo.\n\nhttps://agentfolio.bot/profile/${profileId}`
     );
     window.open(`https://x.com/intent/tweet?text=${text}`, "_blank");
   };

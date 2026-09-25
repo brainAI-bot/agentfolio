@@ -293,7 +293,7 @@ function generateBadgesShowcasePage(profiles, { COMMON_STYLES, THEME_SCRIPT, esc
   </style>
 </head>
 <body>
-  <a href="/" class="back-link">← Back to AgentFolio</a>
+  <a href="/leaderboard" class="back-link">← Back to AgentFolio</a>
 
   <div class="badges-hero">
     <h1>🛡️ Trust Badges</h1>

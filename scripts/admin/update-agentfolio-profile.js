@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Update @agentfolioHQ X/Twitter profile
+ * Update the legacy AgentFolio account now known as @makingsHQ
  * Usage: node update-agentfolio-profile.js picture <image_path>
  *        node update-agentfolio-profile.js banner <image_path>
  *        node update-agentfolio-profile.js bio "description" [--name "Name"] [--url "https://..."]

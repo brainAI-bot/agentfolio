@@ -1,6 +1,8 @@
-# AgentFolio Shops R1 boundary (Wave 0)
+# Makings Shops R1 boundary (Wave 0)
 
 This directory is an **inert, independently locked boundary** for Shops work. It does not start a production process, register a route, change a database, provision infrastructure, or add a deploy hook.
+
+Scope is the Shops runtime. The static Makings landing is served separately and is not deployed from this boundary.
 
 Wave 0 provides only:
 

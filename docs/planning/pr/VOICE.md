@@ -1,13 +1,13 @@
-# AgentFolio PR Voice
+# Makings PR Voice
 
-This file is pointer-only. It does not redefine AgentFolio voice.
+This file is pointer-only. It does not redefine Makings voice or rewrite legacy AgentFolio history.
 
 ## Source Of Truth
 
-- brainAI shared marketing board and social asset board: `brand-vault/brainAI/marketing-v3`.
-- AgentFolio brand guide: `brand-kit/BRAND-GUIDE.md`.
+- brainAI current Makings board and social assets: `brand-vault/brainAI/CURRENT`.
+- `brand-kit/BRAND-GUIDE.md` is legacy AgentFolio reference material only.
 - Reply register: `docs/planning/pr/ENGAGEMENT-LOG.md`.
 
 ## Reply Rule
 
-Use the board and brand guide. Do not invent install commands, claims, launch state, partnerships, token details, or unsupported numbers. The valid install target is `agentfolio-mcp-server`; there is no `@agentfolio/sdk`.
+Use `brand-vault/brainAI/CURRENT`. Do not invent install commands, claims, launch state, partnerships, token details, or unsupported numbers. Makings is pre-launch; do not pitch trust, reputation, escrow, or a live marketplace. Legacy package identifiers remain historical and are not Makings install instructions.

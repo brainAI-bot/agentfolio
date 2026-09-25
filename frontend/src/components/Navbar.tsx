@@ -6,7 +6,6 @@ import { useState, useCallback } from "react";
 import { NavbarWalletButton, MobileWalletSection } from "@/components/NavbarWalletButton";
 
 const staticNavLinks = [
-  { href: "/", label: "Directory" },
   { href: "/marketplace", label: "Marketplace" },
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/satp/explorer", label: "SATP" },

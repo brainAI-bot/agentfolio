@@ -288,7 +288,7 @@ Virtuals' "Butler" is a human-facing interface that connects users to the agenti
   - Ticker: `FOLIO`
   - Bio: Description of AgentFolio as portfolio & reputation platform for AI agents
   - Type: PRODUCTIVITY
-- [ ] **Create @AgentFolio X account** (or use existing)
+- [ ] **Historical item superseded:** the current product account is @makingsHQ; do not create or link a third-party @AgentFolio account
 - [ ] **Prepare 7-day content calendar** for X
 
 ### Phase 2: Launch

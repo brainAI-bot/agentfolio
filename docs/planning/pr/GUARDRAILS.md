@@ -1,4 +1,6 @@
-# AgentFolio PR Guardrails
+Mode: paused per the principal's decision of 2026-09-25; no engagement on any channel until Makings launches and the lane is re-authorized.
+
+# Makings PR Guardrails
 
 ## Mode
 
@@ -14,7 +16,7 @@ Organic only. No paid spend, cold DMs, cold email, public-launch claims, partner
 
 | Channel family | Daily cap | Notes |
 | --- | ---: | --- |
-| X | 5 replies, 3 reposts | Repost only board-flagged AgentFolio/SATP `@brainAI_` posts. |
+| X | 5 replies, 3 reposts | Repost only items explicitly allowed by `brand-vault/brainAI/CURRENT`; do not imply that Makings is live. |
 | GitHub | 8 comments | Only relevant issues, PRs, or discussions. |
 | Moltbook | 5 comments | Founder/launch/agent-builder relevance required. |
 
