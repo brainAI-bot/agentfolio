@@ -2,8 +2,32 @@
 
 // Credentials, contact addresses, and bearer-style claim capabilities must never
 // cross a public profile serializer. Matching is case-insensitive and ignores
-// underscore/hyphen separators so schema/casing drift cannot reopen the leak.
-const PRIVATE_PROFILE_FIELDS = new Set(['email', 'token', 'key', 'secret', 'claim']);
+// underscore/hyphen separators so schema/casing drift cannot reopen the leak,
+// while explicit product status/public identifier fields remain available.
+const PRIVATE_PROFILE_FIELDS = new Set([
+  'apikey',
+  'apikeys',
+  'claimtoken',
+  'claimcode',
+  'claimurl',
+  'adminkey',
+  'admintoken',
+  'githubtoken',
+  'accesstoken',
+  'refreshtoken',
+  'token',
+  'secret',
+  'clientsecret',
+  'webhooksecret',
+  'secretkey',
+  'privatekey',
+  'password',
+  'seed',
+  'mnemonic',
+  'email',
+]);
+const PRIVATE_PROFILE_FIELD_SUFFIXES = ['token', 'secret', 'apikey', 'privatekey', 'password'];
+const PUBLIC_PROFILE_FIELDS = new Set(['claimed', 'claimedat', 'claimedby', 'unclaimed']);
 
 function normalizedProfileFieldName(key) {
   return String(key).toLowerCase().replace(/[_-]/g, '');
@@ -11,7 +35,10 @@ function normalizedProfileFieldName(key) {
 
 function isPrivateProfileField(key) {
   const normalized = normalizedProfileFieldName(key);
-  return [...PRIVATE_PROFILE_FIELDS].some((marker) => normalized.includes(marker));
+  if (PUBLIC_PROFILE_FIELDS.has(normalized)) return false;
+  if (PRIVATE_PROFILE_FIELDS.has(normalized)) return true;
+  if (normalized.endsWith('email')) return true;
+  return PRIVATE_PROFILE_FIELD_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
 }
 
 function sanitizeJsonObjectString(value) {
@@ -48,6 +75,8 @@ function sanitizePublicProfile(value) {
 
 module.exports = {
   PRIVATE_PROFILE_FIELDS,
+  PRIVATE_PROFILE_FIELD_SUFFIXES,
+  PUBLIC_PROFILE_FIELDS,
   isPrivateProfileField,
   normalizedProfileFieldName,
   sanitizePublicProfile,
