@@ -37,7 +37,7 @@ function extractProfileHandler() {
     if (source[index] === '}') depth -= 1;
     if (depth === 0) {
       const handlerSource = source.slice(callbackStart, index + 1);
-      return new Function('getDb', 'v3ScoreService', 'enrichProfile', 'buildReputationSurface', `return ${handlerSource};`);
+      return new Function('getDb', 'v3ScoreService', 'enrichProfile', 'buildReputationSurface', 'sanitizePublicProfile', `return ${handlerSource};`);
     }
   }
 
@@ -49,6 +49,7 @@ function buildProfileDb() {
     id: KNOWN_AGENT_ID,
     name: KNOWN_AGENT_NAME,
     api_key: 'private-write-key',
+    claim_token: 'private-claim-capability',
     avatar: 'https://agentfolio.bot/avatar.png',
     links: JSON.stringify({ x: '@brainTEST007', github: 'brainAI-bot' }),
     wallets: JSON.stringify({ solana: 'AuthBrain' }),
@@ -133,8 +134,9 @@ describe('known production agent API contracts', () => {
       verification_data: JSON.parse(row.verification_data),
     });
     const { buildReputationSurface } = require('../src/lib/reputation-surface');
+    const { sanitizePublicProfile } = require('../src/lib/public-profile');
 
-    const handler = buildHandler(() => buildProfileDb(), v3ScoreService, enrichProfile, buildReputationSurface);
+    const handler = buildHandler(() => buildProfileDb(), v3ScoreService, enrichProfile, buildReputationSurface, sanitizePublicProfile);
     const res = createJsonResponse();
 
     await handler({ params: { id: KNOWN_AGENT_NAME } }, res);
@@ -143,6 +145,7 @@ describe('known production agent API contracts', () => {
     assert.strictEqual(res.body.id, KNOWN_AGENT_ID);
     assert.strictEqual(res.body.name, KNOWN_AGENT_NAME);
     assert.strictEqual(res.body.api_key, undefined);
+    assert.strictEqual(res.body.claim_token, undefined);
     assert.deepStrictEqual(res.body.wallets, { solana: 'AuthBrain' });
     assert.strictEqual(res.body.verification_data.github.verified, true);
     assert.deepStrictEqual(res.body.trust_score, {
