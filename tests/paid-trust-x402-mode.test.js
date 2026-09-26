@@ -52,6 +52,12 @@ const concretePaidPaths = [
   '/api/leaderboard/scores',
 ];
 
+const mixedCasePaidPaths = [
+  '/API/Score',
+  '/api/Profile/agent-123/Trust-Score',
+  '/api/Leaderboard/Scores',
+];
+
 test('allowlist covers exactly the three paid trust-score contracts', () => {
   assert.deepEqual(PAID_TRUST_X402_ROUTES.map(({ method, path }) => `${method} ${path}`), [
     'GET /api/score',
@@ -84,6 +90,15 @@ test('drain suppresses new challenges on every paid route but passes receipt aut
   }
 });
 
+test('drain suppresses new challenges for mixed-case paths routed by Express', () => {
+  for (const pathname of mixedCasePaidPaths) {
+    const result = invokeGate(pathname, 'drain');
+    assert.equal(result.nextCalls, 0, `${pathname} must not bypass the drain gate`);
+    assert.equal(result.res.statusCode, 503);
+    assert.equal(result.res.body.code, 'PAID_TRUST_DRAINING');
+  }
+});
+
 test('disabled retires every paid route before payment middleware or transfer initiation', () => {
   for (const pathname of concretePaidPaths) {
     let paymentMiddlewareCalls = 0;
@@ -96,6 +111,15 @@ test('disabled retires every paid route before payment middleware or transfer in
     assert.equal(paymentMiddlewareCalls, 0);
     assert.equal(res.statusCode, 410);
     assert.equal(res.body.code, 'PAID_TRUST_RETIRED');
+  }
+});
+
+test('disabled retires mixed-case paths before payment middleware or transfer initiation', () => {
+  for (const pathname of mixedCasePaidPaths) {
+    const result = invokeGate(pathname, 'disabled', { 'payment-signature': 'must-not-be-processed' });
+    assert.equal(result.nextCalls, 0, `${pathname} must not bypass the disabled gate`);
+    assert.equal(result.res.statusCode, 410);
+    assert.equal(result.res.body.code, 'PAID_TRUST_RETIRED');
   }
 });
 

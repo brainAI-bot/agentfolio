@@ -1,9 +1,9 @@
 'use strict';
 
 const PAID_TRUST_X402_ROUTES = Object.freeze([
-  Object.freeze({ method: 'GET', path: '/api/score', matcher: /^\/api\/score\/?$/ }),
-  Object.freeze({ method: 'GET', path: '/api/profile/:id/trust-score', matcher: /^\/api\/profile\/[^/]+\/trust-score\/?$/ }),
-  Object.freeze({ method: 'GET', path: '/api/leaderboard/scores', matcher: /^\/api\/leaderboard\/scores\/?$/ }),
+  Object.freeze({ method: 'GET', path: '/api/score', matcher: /^\/api\/score\/?$/i }),
+  Object.freeze({ method: 'GET', path: '/api/profile/:id/trust-score', matcher: /^\/api\/profile\/[^/]+\/trust-score\/?$/i }),
+  Object.freeze({ method: 'GET', path: '/api/leaderboard/scores', matcher: /^\/api\/leaderboard\/scores\/?$/i }),
 ]);
 
 const ALLOWED_MODES = new Set(['enabled', 'drain', 'disabled']);
