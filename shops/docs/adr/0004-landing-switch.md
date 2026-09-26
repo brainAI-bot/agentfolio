@@ -8,18 +8,22 @@ When the reviewed Shops landing release is ready, paid trust-score x402 endpoint
 
 ## Mechanism
 
-Introduce a future server-side allowlisted setting named `PAID_TRUST_X402_MODE` for the two existing metered contracts:
+Introduce a server-side allowlisted setting named `PAID_TRUST_X402_MODE` for the three existing metered contracts:
 
 - `GET /api/score?id=<profileId>`;
-- `GET /api/profile/:id/trust-score`.
+- `GET /api/profile/:id/trust-score`;
+- `GET /api/leaderboard/scores`.
 
 The setting has these values:
 
-- `enabled` — current behavior;
-- `drain` — reject new payment challenges with HTTP 503 and a stable `PAID_TRUST_DRAINING` code while allowing already-authorized receipts to complete idempotently;
-- `disabled` — return HTTP 410 and stable `PAID_TRUST_RETIRED`, with no payment challenge or transfer initiation.
+- `enabled` (or absent) — current behavior;
+- `drain` — reject requests without a payment authorization with HTTP 503 and a stable `PAID_TRUST_DRAINING` code, while passing supplied authorizations to the existing verifier so proven receipts remain idempotent;
+- `disabled` — return HTTP 410 and stable `PAID_TRUST_RETIRED` before payment middleware, omit all three routes from the pricing catalogue, and initiate no payment challenge or transfer;
+- any other value — fail closed with HTTP 503 and stable `PAID_TRUST_MODE_INVALID` before payment middleware.
 
-The setting must be read only by the shared paid trust-score route adapter, default to `enabled` until an independently reviewed release changes it, and emit value-free state/metrics. It must not alter unpaid profile, marketplace, SATP, pricing-catalogue, or receipt-read paths. Activation requires exact-head review, rollback instructions, proof that unpaid trust/SATP reads remain reachable, and canonical live readback. Wave 0 adds no setting to production and disables nothing.
+`src/server.js` is the canonical runtime. The unused `src/x402-payments.js` compatibility installer imports the same allowlist, gate, and pricing filter so it cannot drift open.
+
+The setting is read only by the shared paid trust-score route adapter, defaults to `enabled` until an independently reviewed release changes it, and must not expose credential or payment values in logs or metrics. It must not alter unpaid profile, marketplace, SATP, or receipt-read paths. Activation requires exact-head review, rollback instructions, proof that unpaid trust/SATP reads remain reachable, and canonical live readback. Wave 0 adds no setting to production and disables nothing.
 
 ## Follow-on carriers (do not duplicate automatically)
 

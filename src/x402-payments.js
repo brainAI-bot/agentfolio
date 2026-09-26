@@ -10,6 +10,10 @@
 const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
 const { HTTPFacilitatorClient } = require('@x402/core/server');
 const { ExactSvmScheme } = require('@x402/svm/exact/server');
+const {
+  paidTrustPricingEntries,
+  paidTrustX402ModeGate,
+} = require('./lib/paid-trust-x402-mode');
 
 const SCHEME = process.env.X402_SCHEME || 'svm';
 const PAY_TO_ADDRESS = process.env.X402_RECEIVE_ADDRESS || process.env.X402_PAY_TO || 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
@@ -73,6 +77,9 @@ function setupX402(app) {
     resourceServer,
   );
 
+  // Compatibility adapter only. src/server.js is canonical; keep this legacy
+  // installer on the same central cut-over gate so it cannot drift open.
+  app.use(paidTrustX402ModeGate);
   app.use(middleware);
 
   // x402 pricing endpoint (free) — shows pricing info
@@ -92,11 +99,11 @@ function setupX402(app) {
           { path: '/api/leaderboard', method: 'GET', price: 'free', description: 'Public ranked leaderboard' },
           { path: '/api/x402/pricing', method: 'GET', price: 'free', description: 'Payment pricing catalog' },
         ],
-        paid: [
+        paid: paidTrustPricingEntries([
           { path: '/api/score?id=<profileId>', method: 'GET', price: '$0.01', description: 'Agent reputation score' },
           { path: '/api/profile/:id/trust-score', method: 'GET', price: '$0.01', description: 'Direct profile trust score alias' },
           { path: '/api/leaderboard/scores', method: 'GET', price: '$0.05', description: 'Full scored leaderboard' },
-        ],
+        ]),
       },
       howToPay: 'Send request with x402 payment header. See https://docs.x402.org for client SDK.',
     });

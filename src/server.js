@@ -239,6 +239,15 @@ const trustScoreLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Share one budget across the two root-level paid trust routes so callers
+// cannot multiply facilitator verification attempts by alternating paths.
+const paidTrustScoreLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 const didDirectoryLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
@@ -268,6 +277,10 @@ const publicMarketplaceReadLimiter = rateLimit({
 const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
 const { HTTPFacilitatorClient } = require('@x402/core/server');
 const { ExactSvmScheme } = require('@x402/svm/exact/server');
+const {
+  paidTrustPricingEntries,
+  paidTrustX402ModeGate,
+} = require('./lib/paid-trust-x402-mode');
 
 const X402_SCHEME = process.env.X402_SCHEME || 'svm';
 const X402_RECEIVE_ADDRESS = process.env.X402_RECEIVE_ADDRESS || process.env.X402_PAY_TO || 'FriU1FEpWbdgVrTcS49YV5mVv2oqN6poaVQjzq2BS5be';
@@ -812,7 +825,7 @@ app.get('/api/explorer/:agentId', async (req, res) => {
 
 
 // ─── Trust Score API (dedicated endpoint, x402-protected for API traffic) ────────────────
-app.get('/api/profile/:id/trust-score', trustScoreLimiter, trustScorePaymentMiddleware, async (req, res) => {
+app.get('/api/profile/:id/trust-score', trustScoreLimiter, paidTrustX402ModeGate, trustScorePaymentMiddleware, async (req, res) => {
   const profileId = req.params.id;
   try {
     const surface = await loadTrustScoreSurface(profileId);
@@ -2208,7 +2221,12 @@ app.get('/api/satp/score/:id', async (req, res) => {
 
 // x402 payment middleware — protects paid routes
 // NOTE: Express parameterized routes use [id] syntax in the x402 route matcher.
+// Keep the limiter mounted separately: mounting the gate or payment middleware
+// below either route would rewrite req.path to "/" and bypass their full-path
+// matchers.
+app.use(['/api/score', '/api/leaderboard/scores'], paidTrustScoreLimiter);
 app.use(
+  paidTrustX402ModeGate,
   paymentMiddleware(
     {
       'GET /api/score': X402_SCORE_PAYMENT_CONFIG,
@@ -2370,11 +2388,11 @@ app.get('/api/x402/pricing', (req, res) => {
         { path: '/api/leaderboard', method: 'GET', price: 'free', description: 'Public ranked leaderboard' },
         { path: '/api/x402/pricing', method: 'GET', price: 'free' },
       ],
-      paid: [
+      paid: paidTrustPricingEntries([
         { path: '/api/score?id=<profileId>', method: 'GET', price: '$0.01', description: 'Agent reputation score' },
         { path: '/api/profile/:id/trust-score', method: 'GET', price: '$0.01', description: 'Direct profile trust score alias' },
         { path: '/api/leaderboard/scores', method: 'GET', price: '$0.05', description: 'Full scored leaderboard' },
-      ],
+      ]),
     },
     facilitator: X402_FACILITATOR,
     docs: 'https://x402.org',
