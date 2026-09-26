@@ -12,11 +12,11 @@ This document replaces the earlier SQLite/DynamoDB comparison. Every option belo
 
 ## Decision summary
 
-| Option | Planning total/month | Database | Availability profile | Planning recovery profile | Disposition |
-|---|---:|---|---|---|---|
-| 1. One EC2 host, self-managed PostgreSQL | **$21.88 (~$22)** | PostgreSQL on encrypted gp3 | Lowest cost; one host/AZ | RPO ≤5 min only with continuously verified WAL archive; projected RTO 1–4 h | **Cheapest potentially compliant pilot**; requires the most operational discipline |
-| 2. ECS Fargate + single-AZ RDS PostgreSQL | **$64.33 (~$64)** | Managed `db.t4g.micro`, 20 GB gp3 | Managed DB/backups, but DB and each service have a single active instance | Native RDS PITR supports the five-minute RPO; projected RTO 1–4 h for PITR/redeploy | **Cheapest managed-database option** |
-| 3. Two-service-pair ECS + Multi-AZ RDS PostgreSQL | **$127.30 (~$127)** | Managed Multi-AZ `db.t4g.small`, 20 GB gp3 | Two web/API tasks, two worker/scanner tasks, DB standby in another AZ | Five-minute PITR plus typical 60–120 s DB failover; projected full restore RTO 1–4 h | Availability-oriented R1 baseline |
+| Option | Planning total/month | Database | Availability profile | 99.9% catalogue/entitlement read target (`03-SYSTEM-DESIGN.md:117`) | Planning recovery profile | Disposition |
+|---|---:|---|---|---|---|---|
+| 1. One EC2 host, self-managed PostgreSQL | **$21.88 (~$22)** | PostgreSQL on encrypted gp3 | Lowest cost; one host/AZ | **No** | RPO ≤5 min only with continuously verified WAL archive; projected RTO 1–4 h | **Cheapest pilot positioned for the RPO ≤5 min / RTO ≤4 h gate only**; requires the most operational discipline |
+| 2. ECS Fargate + single-AZ RDS PostgreSQL | **$64.33 (~$64)** | Managed `db.t4g.micro`, 20 GB gp3 | Managed DB/backups, but DB and each service have a single active instance | **No** | Native RDS PITR supports the five-minute RPO; projected RTO 1–4 h for PITR/redeploy | **Cheapest managed-database option** |
+| 3. Two-service-pair ECS + Multi-AZ RDS PostgreSQL | **$127.30 (~$127)** | Managed Multi-AZ `db.t4g.small`, 20 GB gp3 | Two web/API tasks, two worker/scanner tasks, DB standby in another AZ | **Only listed shape positioned for it; not yet measured** | Five-minute PITR plus typical 60–120 s DB failover; projected full restore RTO 1–4 h | Availability-oriented R1 baseline |
 
 **Achieved RTO is not yet available for any option.** No infrastructure may be created under this document, so no restore rehearsal has run. The numbers above are planning objectives, not achieved results. An option is not release-compliant until an isolated restore rehearsal records the database recovery point, elapsed restore time, object inventory/digest match, outbox state, and disabled payment dispatch. The release gate is **measured RPO ≤5 minutes and achieved end-to-end RTO ≤4 hours**.
 
@@ -156,6 +156,9 @@ This is the only listed shape with redundant application tasks and managed datab
 1. Use **Option 1** only for a cheapest qualification pilot after the WAL-age alarm and timed restore prove the recovery contract.
 2. Prefer **Option 2** when managed PostgreSQL and native five-minute PITR are worth the ~$42/month premium over Option 1 and single-AZ downtime is acceptable.
 3. Prefer **Option 3** when the release requires an AZ-tolerant service/database baseline and accepts the ~$63/month premium over Option 2.
+
+Choosing Option 1 or Option 2 for launch means the principal explicitly accepts an availability target below the 99.9% monthly catalogue and entitlement read target in `03-SYSTEM-DESIGN.md:117`.
+
 4. Before any provisioning, obtain a separate explicit approval for the monthly ceiling, availability profile, backup retention, account/VPC boundary, IAM/KMS ownership, DNS, credentials, and deployment. Reprice in AWS Pricing Calculator at that gate.
 
 ## Official sources and rate evidence
