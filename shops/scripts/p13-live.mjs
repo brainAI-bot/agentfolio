@@ -89,13 +89,22 @@ function facilitatorRequestBody(quote, paymentEnvelope) {
   };
 }
 
-export function createP13LiveAdapter({ payer, request }) {
-  normalizedAddress(payer, 'payer');
+export function createP13LiveAdapter({ payer, feeRecipient, productRecipient, request }) {
+  const recipients = assertRecipientBindings({ payer, feeRecipient, productRecipient });
   if (typeof request !== 'function') fail('FACILITATOR_REQUEST_REQUIRED', 'request callback is required');
+  const expectedRecipients = Object.freeze({
+    fee: recipients.feeRecipient,
+    product: recipients.productRecipient,
+  });
   const boundPayments = new Map();
   return {
     verify: async ({ leg, quote, paymentEnvelope }) => {
-      assertEip3009EnvelopeBinding({ payer, quote, paymentEnvelope });
+      if (!(leg in expectedRecipients)) fail('INVALID_P13_LEG', 'P13 leg must be fee or product');
+      const quotedRecipient = normalizedAddress(quote?.payment?.payTo, 'quote.payment.payTo');
+      if (quotedRecipient !== expectedRecipients[leg]) {
+        fail('P13_RECIPIENT_BINDING_MISMATCH', `${leg} quote recipient differs from the configured public test recipient`);
+      }
+      assertEip3009EnvelopeBinding({ payer: recipients.payer, quote, paymentEnvelope });
       const body = facilitatorRequestBody(quote, paymentEnvelope);
       if (normalizedAddress(body.paymentRequirements.payTo, 'paymentRequirements.payTo')
         !== normalizedAddress(paymentEnvelope.authorization.to, 'paymentEnvelope.authorization.to')) {
@@ -107,7 +116,7 @@ export function createP13LiveAdapter({ payer, request }) {
     settle: async ({ leg, quote, authorization }) => {
       const bound = boundPayments.get(quote.quoteHash);
       if (!bound) fail('UNVERIFIED_SETTLEMENT_FORBIDDEN', `${leg} settlement has no verified bound payment`);
-      assertEip3009EnvelopeBinding({ payer, quote, paymentEnvelope: bound.paymentEnvelope });
+      assertEip3009EnvelopeBinding({ payer: recipients.payer, quote, paymentEnvelope: bound.paymentEnvelope });
       return request({
         operation: 'settle',
         facilitator: quote.facilitator.id,

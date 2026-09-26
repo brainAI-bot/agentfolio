@@ -169,6 +169,8 @@ test('reviewed live adapter binds quote payTo through EIP-3009 and facilitator r
   const requests = [];
   const liveAdapter = createP13LiveAdapter({
     payer,
+    feeRecipient,
+    productRecipient,
     request: async (request) => {
       requests.push(request);
       if (request.operation === 'verify') {
@@ -215,6 +217,53 @@ test('reviewed live adapter binds quote payTo through EIP-3009 and facilitator r
     quote: pair.legs.fee.quote,
     paymentEnvelope: eip3009Envelope({ to: productRecipient }),
   }), errorCode('EIP3009_RECIPIENT_MISMATCH'));
+});
+
+test('reviewed live adapter rejects direct payer-to-self quotes before facilitator dispatch', async () => {
+  const requests = [];
+  const liveAdapter = createP13LiveAdapter({
+    payer,
+    feeRecipient,
+    productRecipient,
+    request: async (request) => {
+      requests.push(request);
+      return { status: 'verified' };
+    },
+  });
+  const selfPair = createTwoExchangePair({
+    orderId: 'direct-adapter-payer-to-self',
+    fee: {
+      productId: 'shops-p13-fee',
+      productVersion: 'r1',
+      artifact,
+      payment: {
+        network: 'eip155:84532',
+        asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        amountMinor: '10000',
+        payTo: payer,
+      },
+      facilitator: { id: 'https://x402.org/facilitator' },
+    },
+    product: {
+      productId: 'shops-p13-product',
+      productVersion: 'r1',
+      artifact,
+      payment: {
+        network: 'eip155:84532',
+        asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+        amountMinor: '10000',
+        payTo: productRecipient,
+      },
+      facilitator: { id: 'https://x402.org/facilitator' },
+    },
+  }, issuedAt);
+
+  await assert.rejects(() => liveAdapter.verify({
+    leg: 'fee',
+    quote: selfPair.legs.fee.quote,
+    paymentEnvelope: eip3009Envelope({ to: payer }),
+  }), errorCode('P13_RECIPIENT_BINDING_MISMATCH'));
+  assert.deepEqual(requests, []);
 });
 
 test('records pair-8 product authorization as unused with no replacement', async () => {
