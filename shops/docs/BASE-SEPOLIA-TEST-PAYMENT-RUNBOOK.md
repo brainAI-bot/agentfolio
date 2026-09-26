@@ -1,64 +1,116 @@
-# Base Sepolia x402 test-payment runbook (inert qualification)
+# Base Sepolia x402 two-exchange test-payment runbook
 
-Status: qualification only. **This repository change executes no payment and authorizes no network command.**
+Status: bounded R1 test procedure. **Repository tests are inert; network execution is permitted only by a task that names the exact UTC window, amount cap, wallet boundary, and facilitator.**
 
-## Boundary
+## Fixed P13 contract
 
-- Allowed qualification network: Base Sepolia, CAIP-2 `eip155:84532`.
-- Forbidden network: Base mainnet, CAIP-2 `eip155:8453`.
-- Live USDC, production wallets, AgentFolio legacy wallets, SATP wallets, credentials, private keys, seed phrases, RPC tokens, and funded addresses must not be committed or reused.
-- The facilitator is an untrusted settlement adapter. Shops owns the immutable quote, amount, asset, network, recipient, product, artifact hash, receipt, and entitlement decision.
-- Existing AgentFolio/SATP routes and `liveEscrowWritesAllowed=false` remain unchanged. Shops stays under `shops/**`, `/shops/**`, and `/api/shops/**` with its own future store and runtime.
+| Field | Required value |
+| --- | --- |
+| Network | Base Sepolia, CAIP-2 `eip155:84532` |
+| Forbidden network | Base mainnet, CAIP-2 `eip155:8453` |
+| Asset | Circle Base Sepolia USDC `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
+| Decimals | 6 |
+| Facilitator | `https://x402.org/facilitator` for this isolated test only |
+| Quote TTL | 600 seconds |
+| Authorization maximum | 300 seconds |
+| Pair-admission margin | at least 60 seconds remaining on both authorizations |
+| Settlement-dispatch floor | at least 30 seconds remaining on the dispatched leg |
+| Order | verify both concurrently; settle fee first; dispatch product only after fee settlement success |
+| Per order | at most 20,000 minor units: 10,000 fee + 10,000 product (0.02 test USDC total) |
+| Aggregate | at most 200,000 minor units and 10 pairs |
 
-## Owner-gated prerequisites
+The facilitator is an untrusted settlement adapter. Shops owns the immutable quote, amount, asset, network, recipient, product, artifact hash, pair order, payment state, receipt, and entitlement decision. No production network, real USDC, production/legacy AgentFolio wallet, SATP wallet, HQ-box runtime, production mount, deploy, paid hosting, public launch, credential disclosure, admin/DNS/org mutation, or mainnet write is part of this runbook.
 
-Do not perform a test payment until Hani separately selects and records all of the following through an authorized carrier:
+## Fresh-wallet handling
 
-1. Shops hosting option and isolated runtime.
-2. Facilitator and the expected facilitator identity/configuration.
-3. Base Sepolia test asset contract and decimal interpretation.
-4. A securely provisioned Base Sepolia receiving wallet. Use `<OWNER_PROVISIONED_BASE_SEPOLIA_RECEIVER>` in documentation until then.
-5. A separately authorized network execution window and exact maximum test amount.
+Use one fresh EVM wallet created for this Base Sepolia test. Store its private material outside Git in a mode-`0600` file or an approved secret store. Record only the public address. Never paste a private key, mnemonic, seed phrase, wallet JSON, RPC token, or environment file into Git, HQ, logs, messages, screenshots, shell arguments, or evidence. Do not reuse the wallet on Base mainnet or for legacy AgentFolio/SATP.
 
-Hosting selection, wallet provisioning, credential delivery, funding, and any payment are outside this qualification slice.
+The public Circle faucet may fund the fresh address with test USDC. Confirm the balance with a read-only `eth_call` before signing. The x402 facilitator sponsors settlement gas for the EIP-3009 path; the buyer wallet does not require Base Sepolia ETH for this test.
 
-## Proposed future HTTP flow (not mounted by this change)
+Value-free balance readback, with the public address ABI-padded in `data`:
 
-1. `POST /api/shops/v1/quotes` returns an immutable quote bound to product version, artifact SHA-256/length/media type, `eip155:84532`, asset, integer minor-unit amount, recipient, and expiry.
-2. `POST /api/shops/v1/purchases` without valid payment proof returns the quote as an x402 `402 Payment Required` challenge.
-3. A paid retry uses the same quote and a required `Idempotency-Key`. The key is bound to the canonical request hash before facilitator activity.
-4. Shops derives the payment fingerprint from the submitted payment envelope; it never accepts a caller-supplied fingerprint. Shops independently checks the facilitator result against quote id/hash, network, asset, amount, recipient, expiry, that derived payment fingerprint, expected facilitator, settlement id, and transaction hash.
-5. A timeout, connection loss, malformed response, or facilitator 5xx becomes `SETTLEMENT_UNKNOWN` and returns an in-progress response. It must never trigger an automatic resubmission.
-6. Reconciliation may resolve the same payment fingerprint exactly once to `PAID` or `REJECTED`. `PAID` requires a settlement for the original derived fingerprint. `REJECTED` requires stored terminal evidence that the original authorization cannot settle and no successful matching transfer exists; timeout, missing receipt, or failed HTTP alone is insufficient. Reuse on another quote is rejected as `PAYMENT_REPLAY`.
-7. Only `PAID` may mint an immutable receipt. Only a receipt bound to the server-side paid purchase record plus matching artifact bytes may become `READY` for download.
+```bash
+curl -sS https://sepolia.base.org \
+  -H 'Content-Type: application/json' \
+  --data '{"jsonrpc":"2.0","method":"eth_call","params":[{"to":"0x036CbD53842c5426634e7929541eC2318f3dCF7e","data":"0x70a08231<PADDED_PUBLIC_ADDRESS>"},"latest"],"id":1}'
+```
 
-## Receipt and download verification
+A zero balance, unavailable faucet, faucet rejection, or absent secure wallet file is an exact capability blocker. Do not substitute a production wallet or request a private key in chat.
 
-A receipt binds the quote hash, payment fingerprint, settlement/transaction identity, network, asset, amount, recipient, paid time, and artifact metadata. The receipt hash is SHA-256 over canonical JSON excluding the receipt hash itself, which detects mutation but does not prove Shops issued the receipt. The server-side purchase/entitlement record is authoritative.
+## Two-exchange HTTP flow
 
-Before a future download response:
+1. Create one immutable order snapshot containing fee and product requirements. Both use the same issue time and 600-second quote expiry, but distinct quote IDs, resource URLs, payment identifiers, EIP-3009 nonces, and `(order_id, leg)` fingerprints.
+2. An unpaid purchase returns `402 Payment Required` with both requirements. The two entries are cumulative legs, not alternative prices.
+3. Sign both EIP-3009 authorizations with `maxTimeoutSeconds=300`.
+4. Call facilitator `/verify` for fee and product concurrently. Pair admission fails unless both verify and each has at least 60 seconds remaining.
+5. Before every settlement dispatch, require at least 30 seconds remaining on that leg.
+6. Call `/settle` for the fee leg first.
+7. Dispatch the product `/settle` only after the fee response is a settlement success with a transaction reference.
+8. Track each leg independently through verified, dispatched, settlement success, L2 receipt, safe/L1-posted, and finalized. Product dispatch follows fee settlement success, not fee finality. Entitlement waits for the later leg finality required by the selected test policy.
+9. Bind the receipt to both quote hashes, both payment fingerprints, both settlement/transaction identities, the network, asset, amounts, recipients, timestamps, and artifact metadata.
+10. Download only from the Shops-owned entitlement snapshot, recompute SHA-256 independently, and compare it with the immutable receipt.
 
-1. Look up the Shops-owned purchase/entitlement snapshot by the authenticated request's server-side identifier; never accept that snapshot from the request.
-2. Require the snapshot to be `PAID` or `READY`, and bind every receipt commerce, payment, settlement, and artifact field to that snapshot. A self-hashed receipt without this record is refused.
-3. Verify the receipt hash.
-4. Read the artifact from the Shops-owned isolated object prefix.
-5. Verify exact byte length and SHA-256 before sending any bytes.
-6. Return explicit `Content-Length`, `Content-Type`, immutable SHA-256 `ETag`, and `Content-Digest` headers.
-7. Do not expose object-store keys or accept artifact metadata/download locations from the facilitator.
-8. On snapshot/receipt mismatch, refuse entitlement; on byte mismatch, return `ARTIFACT_INTEGRITY_FAILED` without partial content.
+## Unknown settlement rule
 
-Operator verification for downloaded test artifacts must independently calculate SHA-256 and compare it with the immutable receipt. A receipt or generated packet proves repository behavior only; it does not prove a chain transaction or payment occurred.
+`settlement_pending`, timeout, connection loss, malformed response, or facilitator 5xx is non-terminal.
 
-## Future authorized test checklist
+- Freeze the affected leg and retain the original authorization, nonce, payment fingerprint, settlement ID, and transaction hash when present.
+- Set `automaticResubmitAllowed=false`.
+- Reconcile the original transaction/authorization. Never create a replacement payment.
+- Fee unknown means product is never dispatched until the original fee is reconciled as settled.
+- Product unknown after fee success is the defined split outcome; reconcile only the original product payment.
+- A terminal rejection requires structured evidence that the original authorization cannot settle and no matching successful transfer exists. Missing receipt or failed HTTP alone is insufficient.
 
-When a later task explicitly authorizes network execution:
+## Bounded execution cases
 
-- record the exact tested commit and isolated environment;
-- prove the configured chain is `eip155:84532`, never `eip155:8453`;
-- prove the receiver and asset came from the Owner-approved secure configuration without printing either credential material or private keys;
-- use the bounded approved test amount only;
-- capture unpaid `402`, paid retry, payment-state readback, facilitator result, receipt verification, and downloaded-file SHA-256;
-- if settlement is ambiguous, stop and reconcile; do not retry the transfer;
-- report repository-tested, transaction-submitted, transaction-confirmed, receipt-ready, and download-verified as separate states.
+Run only inside the task-authorized UTC window and stop when the first exact capability blocker prevents safe continuation.
 
-Until those gates are met, the executable scope is limited to the pure contract and local tests in `shops/src/payment-contract.mjs` and `shops/tests/payment-contract.test.mjs`.
+1. Capture the unpaid `402` and both immutable requirements.
+2. Sign two distinct authorizations.
+3. Verify both concurrently and record start/end UTC and facilitator results.
+4. Settle fee, then product after fee settlement success; record transaction hashes and per-leg receipt/finality timestamps.
+5. Read the Shops payment state and prove both legs remain separately visible.
+6. Build the bound receipt, download the artifact, compute SHA-256 independently, and compare it with the receipt.
+7. Run one cutoff case with 60 seconds remaining: exactly 60 seconds may admit; less than 60 seconds must fail before settlement.
+8. Run one `settlement_pending`/reconciliation case using the original transaction only. If the public facilitator cannot deterministically produce pending state without an unsafe replacement or unbounded transfer, run the isolated adapter harness and report the live capability gap separately.
+9. Run at most 10 pairs and 0.20 test USDC aggregate. Capture latency and any 429 response. Stop at either bound.
+
+## Repository harness
+
+The pure, dependency-injected pair contract is in `shops/src/two-exchange-slice.mjs`; its focused harness is `shops/tests/two-exchange-slice.test.mjs`.
+
+```bash
+npm --prefix shops test
+npm --prefix shops run check:boundary
+```
+
+The harness proves:
+
+- unpaid `402` with two distinct exchanges;
+- Base mainnet, wrong asset, wrong facilitator, and amount-cap rejection;
+- concurrent verification;
+- fee-first then product settlement order;
+- exact 60-second admission and 30-second dispatch boundaries;
+- fee/product unknown-state freeze and original-payment reconciliation without replacement;
+- payment-state readback;
+- a bounded 10-pair probe;
+- receipt binding and downloaded-file SHA-256.
+
+Passing repository tests prove the orchestration contract only. They do not prove a facilitator call, transaction submission, receipt, finality, balance change, or live download.
+
+## Evidence format
+
+Report these states separately:
+
+- `repository_tested`
+- `wallet_funded`
+- `authorization_signed`
+- `facilitator_verified`
+- `fee_transaction_submitted`
+- `fee_transaction_confirmed`
+- `product_transaction_submitted`
+- `product_transaction_confirmed`
+- `receipt_ready`
+- `download_verified`
+
+Evidence may include the public test wallet address, UTC, raw value-free commands, public transaction hashes, receipt/finality timestamps, PR/head/checks, and downloaded-file SHA-256. It must not contain private wallet material or secret-bearing environment/process output. If execution cannot proceed, return one exact blocker naming the endpoint or capability, observed result, and the owner/action needed to unblock it.

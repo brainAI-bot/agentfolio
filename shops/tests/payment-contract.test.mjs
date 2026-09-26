@@ -357,11 +357,13 @@ test('an attacker-rehashed malformed receipt is still rejected', () => {
   assert.throws(() => verifyReceipt(malformed), errorCode('RECEIPT_HASH_MISMATCH'));
 });
 
-test('runbook remains inert and names the chain gates', async () => {
+test('runbook names the bounded Base Sepolia execution gates without private material', async () => {
   const runbook = await import('node:fs/promises').then(({ readFile }) => readFile(new URL('../docs/BASE-SEPOLIA-TEST-PAYMENT-RUNBOOK.md', import.meta.url), 'utf8'));
   assert.match(runbook, /eip155:84532/);
   assert.match(runbook, /eip155:8453/);
-  assert.match(runbook, /executes no payment/);
-  assert.match(runbook, /OWNER_PROVISIONED_BASE_SEPOLIA_RECEIVER/);
-  assert.doesNotMatch(runbook, /BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|0x[a-fA-F0-9]{40}/);
+  assert.match(runbook, /Repository tests are inert/);
+  assert.match(runbook, /0x036CbD53842c5426634e7929541eC2318f3dCF7e/);
+  assert.match(runbook, /fresh EVM wallet/);
+  assert.match(runbook, /private material outside Git/);
+  assert.doesNotMatch(runbook, /BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|seed phrase:\s*\S|privateKey\s*[:=]/i);
 });
