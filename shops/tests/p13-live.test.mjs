@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
+import { createTwoExchangePair } from '../src/two-exchange-slice.mjs';
+
 import {
   PAIR_8_PRODUCT_AUTHORIZATION_DISPOSITION,
   assertEip3009EnvelopeBinding,
@@ -92,7 +94,7 @@ test('imports and invokes the reviewed two-exchange module', async () => {
   assert.match(source, /settleTwoExchangePair\(verified/);
 
   const trace = [];
-  const { results } = await runP13PairsSequentially({ jobs: [job(1, trace)] });
+  const { results } = await runP13PairsSequentially({ jobs: [job(1, trace)], payer });
   assert.equal(results[0].state, 'PAID');
   assert.deepEqual(trace, [
     'verify:1:fee',
@@ -133,7 +135,7 @@ test('awaits each pair settlement before dispatching the next pair', async () =>
     await new Promise((resolve) => setImmediate(resolve));
     activeSettlements -= 1;
   };
-  const { results } = await runP13PairsSequentially({ jobs: [job(1, trace, gate), job(2, trace, gate)] });
+  const { results } = await runP13PairsSequentially({ jobs: [job(1, trace, gate), job(2, trace, gate)], payer });
   assert.equal(results.every((result) => result.state === 'PAID'), true);
   assert.equal(maximumActiveSettlements, 1);
   assert.equal(trace.indexOf('settle:end:1:product') < trace.indexOf('settle:start:2:fee'), true);
@@ -142,7 +144,7 @@ test('awaits each pair settlement before dispatching the next pair', async () =>
 test('applies the authoritative bounded-probe gate before any adapter call', async () => {
   const trace = [];
   const jobs = Array.from({ length: 11 }, (_, index) => job(index + 1, trace));
-  await assert.rejects(() => runP13PairsSequentially({ jobs }), errorCode('PAIR_LIMIT_EXCEEDED'));
+  await assert.rejects(() => runP13PairsSequentially({ jobs, payer }), errorCode('PAIR_LIMIT_EXCEEDED'));
   assert.deepEqual(trace, []);
 });
 
@@ -155,7 +157,7 @@ test('stops before the next pair after the first unexpected settlement outcome',
       ? { status: 'settled', settlementId: 'settlement-1-fee', transactionHash: '0x1fee', receiptAt: '2026-09-26T15:10:03.000Z' }
       : { status: 'unknown', settlementId: 'pending-1-product', transactionHash: '0x1pending' };
   };
-  const output = await runP13PairsSequentially({ jobs: [first, job(2, trace)] });
+  const output = await runP13PairsSequentially({ jobs: [first, job(2, trace)], payer });
   assert.equal(output.completed, false);
   assert.deepEqual(output.stoppedAt, { index: 0, orderId: 'p13-1', state: 'PRODUCT_SETTLEMENT_UNKNOWN' });
   assert.equal(output.results.length, 1);
@@ -199,7 +201,7 @@ test('reviewed live adapter binds quote payTo through EIP-3009 and facilitator r
     adapter: liveAdapter,
     verifiedAt: '2026-09-26T15:10:01.000Z',
     now: () => '2026-09-26T15:10:02.000Z',
-  }] });
+  }], payer });
   assert.equal(output.completed, true);
   assert.deepEqual(requests.map(({ operation, leg }) => `${operation}:${leg}`), [
     'verify:fee', 'verify:product', 'settle:fee', 'settle:product',
@@ -217,11 +219,44 @@ test('reviewed live adapter binds quote payTo through EIP-3009 and facilitator r
 
 test('records pair-8 product authorization as unused with no replacement', async () => {
   const trace = [];
-  const output = await runP13PairsSequentially({ jobs: [job(9, trace)] });
+  const output = await runP13PairsSequentially({ jobs: [job(9, trace)], payer });
   assert.deepEqual(PAIR_8_PRODUCT_AUTHORIZATION_DISPOSITION, {
     pair: 8,
     productAuthorization: 'unused',
     replacementAuthorization: 'not_created',
   });
   assert.deepEqual(output.priorPair8, PAIR_8_PRODUCT_AUTHORIZATION_DISPOSITION);
+});
+
+test('rejects an externally constructed payer-to-self pair before adapter dispatch', async () => {
+  const quote = (leg, payTo) => ({
+    productId: `shops-p13-${leg}`,
+    productVersion: 'r1',
+    artifact,
+    payment: {
+      network: 'eip155:84532',
+      asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      amountMinor: '10000',
+      payTo,
+    },
+    facilitator: { id: 'https://x402.org/facilitator' },
+  });
+  const pair = createTwoExchangePair({
+    orderId: 'external-payer-to-self',
+    fee: quote('fee', payer),
+    product: quote('product', productRecipient),
+  }, issuedAt);
+  const trace = [];
+  await assert.rejects(() => runP13PairsSequentially({
+    jobs: [{
+      pair,
+      feeEnvelope: { signature: 'fee-external' },
+      productEnvelope: { signature: 'product-external' },
+      adapter: adapter(trace, 'external'),
+      verifiedAt: '2026-09-26T15:10:01.000Z',
+      now: () => '2026-09-26T15:10:02.000Z',
+    }],
+    payer,
+  }), errorCode('PAYER_RECIPIENT_FORBIDDEN'));
+  assert.deepEqual(trace, []);
 });

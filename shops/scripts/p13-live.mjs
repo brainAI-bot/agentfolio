@@ -163,9 +163,16 @@ export async function runP13Pair({
   return settleTwoExchangePair(verified, { adapter, now });
 }
 
-export async function runP13PairsSequentially({ jobs }) {
+export async function runP13PairsSequentially({ jobs, payer }) {
   if (!Array.isArray(jobs) || jobs.length === 0) fail('P13_JOBS_REQUIRED', 'at least one P13 job is required');
   assertBoundedProbe(jobs.map((job) => job?.pair));
+  for (const job of jobs) {
+    assertRecipientBindings({
+      payer,
+      feeRecipient: job?.pair?.legs?.fee?.quote?.payment?.payTo,
+      productRecipient: job?.pair?.legs?.product?.quote?.payment?.payTo,
+    });
+  }
   const results = [];
   for (const [index, job] of jobs.entries()) {
     // Await the complete fee-then-product settlement before the next pair can
