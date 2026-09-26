@@ -239,6 +239,15 @@ const trustScoreLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Share one budget across the two root-level paid trust routes so callers
+// cannot multiply facilitator verification attempts by alternating paths.
+const paidTrustScoreLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 const didDirectoryLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
@@ -2212,6 +2221,10 @@ app.get('/api/satp/score/:id', async (req, res) => {
 
 // x402 payment middleware — protects paid routes
 // NOTE: Express parameterized routes use [id] syntax in the x402 route matcher.
+// Keep the limiter mounted separately: mounting the gate or payment middleware
+// below either route would rewrite req.path to "/" and bypass their full-path
+// matchers.
+app.use(['/api/score', '/api/leaderboard/scores'], paidTrustScoreLimiter);
 app.use(
   paidTrustX402ModeGate,
   paymentMiddleware(

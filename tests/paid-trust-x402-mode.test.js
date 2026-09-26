@@ -164,6 +164,22 @@ test('canonical server wires the central gate before direct and global x402 midd
   assert.match(server, /paid:\s*paidTrustPricingEntries\(\[/);
 });
 
+test('canonical server rate-limits both root paid routes before the gate and x402 verification', () => {
+  const server = fs.readFileSync(path.join(__dirname, '../src/server.js'), 'utf8');
+  const limiterDefinition = server.indexOf('const paidTrustScoreLimiter = rateLimit({');
+  const limiterMount = server.indexOf("app.use(['/api/score', '/api/leaderboard/scores'], paidTrustScoreLimiter);");
+  const gateMount = server.indexOf('app.use(\n  paidTrustX402ModeGate,');
+
+  assert.ok(limiterDefinition >= 0, 'shared paid trust limiter must be defined');
+  assert.ok(limiterMount > limiterDefinition, 'both paid routes must mount the shared limiter');
+  assert.ok(gateMount > limiterMount, 'limiter must run before the gate and payment middleware');
+  assert.match(
+    server.slice(limiterDefinition, limiterMount),
+    /windowMs:\s*60 \* 1000,[\s\S]*max:\s*100,/,
+    'paid trust limiter must match the existing 100/min trust-score budget',
+  );
+});
+
 test('legacy x402 installer shares the canonical cut-over gate and all three route prices', () => {
   const legacy = fs.readFileSync(path.join(__dirname, '../src/x402-payments.js'), 'utf8');
   assert.match(legacy, /app\.use\(paidTrustX402ModeGate\);\s*app\.use\(middleware\);/);
