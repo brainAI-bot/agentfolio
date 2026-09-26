@@ -1,0 +1,7 @@
+# Principal-owned remote state is configured out of band.
+# This repository intentionally does not create, select, or mutate a state backend.
+bucket         = "REPLACE_WITH_PRINCIPAL_OWNED_STATE_BUCKET"
+key            = "makings/shops/option3/terraform.tfstate"
+region         = "eu-north-1"
+encrypt        = true
+dynamodb_table = "REPLACE_WITH_PRINCIPAL_OWNED_LOCK_TABLE"

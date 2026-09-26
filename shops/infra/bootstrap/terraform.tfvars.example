@@ -1,0 +1,2 @@
+aws_region         = "eu-north-1"
+github_environment = "makings-production"
