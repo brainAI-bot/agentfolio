@@ -1,0 +1,8 @@
+budget_notification_emails = ["principal@example.com"]
+acm_certificate_arn        = "arn:aws:acm:eu-north-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+permissions_boundary_arn   = "arn:aws:iam::123456789012:policy/makings-shops-workload-boundary"
+web_image                  = "123456789012.dkr.ecr.eu-north-1.amazonaws.com/makings-shops-web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+scanner_image              = "123456789012.dkr.ecr.eu-north-1.amazonaws.com/makings-shops-scanner@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+# Confirm account-specific AZ mapping before any principal-authorized apply.
+availability_zones = ["eu-north-1a", "eu-north-1b"]
