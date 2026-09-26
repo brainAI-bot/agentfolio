@@ -84,7 +84,7 @@ async function fullyPaid(input = pair()) {
   const verified = await fullyVerified(input);
   return settleTwoExchangePair(verified, {
     adapter: { settle: async ({ leg }) => settledResult(leg) },
-    at: '2026-09-26T10:00:02.000Z',
+    now: () => '2026-09-26T10:00:02.000Z',
   });
 }
 
@@ -92,7 +92,7 @@ function errorCode(code) {
   return (error) => error?.code === code;
 }
 
-test('pins the P13 bounds and returns an unpaid 402 with two exchanges', () => {
+test('pins the P13 bounds and returns one unpaid 402 per payment leg', () => {
   assert.deepEqual(TWO_EXCHANGE_LIMITS, {
     quoteTtlSeconds: 600,
     authorizationMaxSeconds: 300,
@@ -104,10 +104,16 @@ test('pins the P13 bounds and returns an unpaid 402 with two exchanges', () => {
   });
   const snapshot = pair();
   assert.equal(snapshot.expiresAt, '2026-09-26T10:10:00.000Z');
-  const challenge = unpaidChallenge(snapshot);
-  assert.equal(challenge.status, 402);
-  assert.equal(challenge.body.accepts.length, 2);
-  assert.notEqual(challenge.body.accepts[0].quoteHash, challenge.body.accepts[1].quoteHash);
+  const feeChallenge = unpaidChallenge(snapshot, 'fee');
+  const productChallenge = unpaidChallenge(snapshot, 'product');
+  assert.equal(feeChallenge.status, 402);
+  assert.equal(productChallenge.status, 402);
+  assert.equal(feeChallenge.body.leg, 'fee');
+  assert.equal(productChallenge.body.leg, 'product');
+  assert.equal(feeChallenge.body.accepts.length, 1);
+  assert.equal(productChallenge.body.accepts.length, 1);
+  assert.notEqual(feeChallenge.body.accepts[0].quoteHash, productChallenge.body.accepts[0].quoteHash);
+  assert.throws(() => unpaidChallenge(snapshot), errorCode('PAYMENT_LEG_REQUIRED'));
 });
 
 test('verifies both authorizations concurrently and settles fee before product', async () => {
@@ -134,7 +140,7 @@ test('verifies both authorizations concurrently and settles fee before product',
     adapter,
     at: '2026-09-26T10:00:01.000Z',
   });
-  const paid = await settleTwoExchangePair(verified, { adapter, at: '2026-09-26T10:00:02.000Z' });
+  const paid = await settleTwoExchangePair(verified, { adapter, now: () => '2026-09-26T10:00:02.000Z' });
   assert.equal(paid.state, 'PAID');
   assert.deepEqual(calls, ['verify:fee', 'verify:product', 'settle:fee', 'settle:product']);
 });
@@ -149,13 +155,52 @@ test('enforces the 60-second admission margin and 30-second dispatch floor', asy
   });
   await assert.rejects(() => settleTwoExchangePair(verified, {
     adapter: { settle: async ({ leg }) => settledResult(leg) },
-    at: '2026-09-26T10:00:31.001Z',
+    now: () => '2026-09-26T10:00:31.001Z',
   }), errorCode('SETTLEMENT_DISPATCH_CUTOFF'));
   const paid = await settleTwoExchangePair(verified, {
     adapter: { settle: async ({ leg }) => settledResult(leg) },
-    at: '2026-09-26T10:00:31.000Z',
+    now: () => '2026-09-26T10:00:31.000Z',
   });
   assert.equal(paid.state, 'PAID');
+});
+
+test('rechecks the product dispatch floor after a slow fee settlement', async () => {
+  const calls = [];
+  const times = ['2026-09-26T10:00:02.000Z', '2026-09-26T10:00:32.000Z'];
+  const verified = await fullyVerified(pair(), {
+    verify: async ({ leg }) => verifiedResult(leg, '2026-09-26T10:01:01.000Z'),
+  });
+  const blocked = await settleTwoExchangePair(verified, {
+    adapter: {
+      settle: async ({ leg }) => {
+        calls.push(leg);
+        return settledResult(leg);
+      },
+    },
+    now: () => times.shift(),
+  });
+  assert.equal(blocked.state, 'FEE_SETTLED_PRODUCT_CUTOFF');
+  assert.equal(blocked.blockedReason, 'SETTLEMENT_DISPATCH_CUTOFF');
+  assert.equal(blocked.legs.fee.state, 'SETTLED');
+  assert.equal(blocked.legs.product.state, 'VERIFIED');
+  assert.deepEqual(calls, ['fee']);
+});
+
+test('rejects duplicate authorization IDs and payment fingerprints across legs', async () => {
+  await assert.rejects(() => fullyVerified(pair(), {
+    verify: async () => ({
+      ...verifiedResult('shared'),
+      authorizationId: 'authorization-shared',
+      paymentFingerprint: 'fingerprint-shared',
+    }),
+  }), errorCode('VERIFICATION_BINDING_MISMATCH'));
+
+  await assert.rejects(() => fullyVerified(pair(), {
+    verify: async ({ leg }) => ({
+      ...verifiedResult(leg),
+      paymentFingerprint: 'fingerprint-shared',
+    }),
+  }), errorCode('VERIFICATION_BINDING_MISMATCH'));
 });
 
 test('fee settlement unknown freezes the original transfer and suppresses product dispatch', async () => {
@@ -168,12 +213,12 @@ test('fee settlement unknown freezes the original transfer and suppresses produc
         return { status: 'settlement_pending', settlementId: 'pending-fee', transactionHash: '0xpending-fee' };
       },
     },
-    at: '2026-09-26T10:00:02.000Z',
+    now: () => '2026-09-26T10:00:02.000Z',
   });
   assert.equal(frozen.state, 'FEE_SETTLEMENT_UNKNOWN');
   assert.equal(frozen.automaticResubmitAllowed, false);
   assert.deepEqual(calls, ['fee']);
-  await assert.rejects(() => settleTwoExchangePair(frozen, { adapter: {}, at: '2026-09-26T10:00:03.000Z' }), errorCode('PAIR_FROZEN'));
+  await assert.rejects(() => settleTwoExchangePair(frozen, { adapter: {}, now: () => '2026-09-26T10:00:03.000Z' }), errorCode('PAIR_FROZEN'));
 
   const reconciled = reconcileOriginalSettlement(frozen, {
     leg: 'fee',
@@ -200,7 +245,7 @@ test('product settlement unknown reconciles the original product without replace
         return leg === 'fee' ? settledResult(leg) : { status: 'unknown', settlementId: 'pending-product', transactionHash: '0xpending-product' };
       },
     },
-    at: '2026-09-26T10:00:02.000Z',
+    now: () => '2026-09-26T10:00:02.000Z',
   });
   assert.equal(frozen.state, 'PRODUCT_SETTLEMENT_UNKNOWN');
   assert.deepEqual(calls, ['fee', 'product']);
@@ -251,7 +296,7 @@ test('bounded 10-pair probe preserves per-pair fee-first ordering', async () => 
     const verified = await verifyTwoExchangePair(probePair, {
       feeEnvelope: { signature: `fee-${index}` }, productEnvelope: { signature: `product-${index}` }, adapter, at: '2026-09-26T10:00:01.000Z',
     });
-    return settleTwoExchangePair(verified, { adapter, at: '2026-09-26T10:00:02.000Z' });
+    return settleTwoExchangePair(verified, { adapter, now: () => '2026-09-26T10:00:02.000Z' });
   });
   const results = await Promise.all(jobs);
   assert.equal(results.length, 10);

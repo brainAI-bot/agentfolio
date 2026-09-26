@@ -40,7 +40,7 @@ A zero balance, unavailable faucet, faucet rejection, or absent secure wallet fi
 ## Two-exchange HTTP flow
 
 1. Create one immutable order snapshot containing fee and product requirements. Both use the same issue time and 600-second quote expiry, but distinct quote IDs, resource URLs, payment identifiers, EIP-3009 nonces, and `(order_id, leg)` fingerprints.
-2. An unpaid purchase returns `402 Payment Required` with both requirements. The two entries are cumulative legs, not alternative prices.
+2. Calling the unpaid fee resource returns a fee-specific `402 Payment Required` with exactly one `accepts[]` requirement. After fee staging, calling the unpaid product resource returns a product-specific `402` with exactly one requirement. In x402 v2, entries within one `accepts[]` array are alternatives, so cumulative legs must never share one challenge.
 3. Sign both EIP-3009 authorizations with `maxTimeoutSeconds=300`.
 4. Call facilitator `/verify` for fee and product concurrently. Pair admission fails unless both verify and each has at least 60 seconds remaining.
 5. Before every settlement dispatch, require at least 30 seconds remaining on that leg.
@@ -86,11 +86,12 @@ npm --prefix shops run check:boundary
 
 The harness proves:
 
-- unpaid `402` with two distinct exchanges;
+- separate fee and product `402` responses with one requirement each;
+- rejection of duplicate authorization IDs or payment fingerprints across legs;
 - Base mainnet, wrong asset, wrong facilitator, and amount-cap rejection;
 - concurrent verification;
 - fee-first then product settlement order;
-- exact 60-second admission and 30-second dispatch boundaries;
+- exact 60-second admission and 30-second dispatch boundaries, including a fresh clock read after slow fee settlement;
 - fee/product unknown-state freeze and original-payment reconciliation without replacement;
 - payment-state readback;
 - a bounded 10-pair probe;

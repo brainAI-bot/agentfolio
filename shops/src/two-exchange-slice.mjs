@@ -114,16 +114,18 @@ export function createTwoExchangePair({ orderId, fee, product }, issuedAt = new 
   };
 }
 
-export function unpaidChallenge(pair) {
+export function unpaidChallenge(pair, leg) {
   assertPairShape(pair);
+  if (leg !== 'fee' && leg !== 'product') fail('PAYMENT_LEG_REQUIRED', 'fee or product payment leg is required');
   return {
     status: 402,
     body: {
       code: 'PAYMENT_REQUIRED',
       orderId: pair.orderId,
       pairHash: pair.pairHash,
+      leg,
       expiresAt: pair.expiresAt,
-      accepts: [pair.legs.fee.quote, pair.legs.product.quote],
+      accepts: [pair.legs[leg].quote],
     },
   };
 }
@@ -175,6 +177,12 @@ export async function verifyTwoExchangePair(pair, { feeEnvelope, productEnvelope
   next.state = 'VERIFIED';
   next.legs.fee = assertAuthorization('fee', feeResult, pair, verifiedAt);
   next.legs.product = assertAuthorization('product', productResult, pair, verifiedAt);
+  if (next.legs.fee.authorizationId === next.legs.product.authorizationId) {
+    fail('VERIFICATION_BINDING_MISMATCH', 'fee and product authorization IDs must be distinct');
+  }
+  if (next.legs.fee.paymentFingerprint === next.legs.product.paymentFingerprint) {
+    fail('VERIFICATION_BINDING_MISMATCH', 'fee and product payment fingerprints must be distinct');
+  }
   next.history.push({ type: 'verified_both', at: verifiedAt, state: next.state });
   return next;
 }
@@ -217,23 +225,32 @@ function applySettlement(next, legName, result, at) {
   fail(result?.failureCode ?? 'SETTLEMENT_REJECTED', `${legName} settlement was rejected`);
 }
 
-export async function settleTwoExchangePair(pair, { adapter, at = new Date().toISOString() }) {
+export async function settleTwoExchangePair(pair, { adapter, now = () => new Date().toISOString() }) {
   assertPairShape(pair);
   if (pair.state !== 'VERIFIED') fail('PAIR_FROZEN', `cannot dispatch settlement from ${pair.state}`);
-  const dispatchedAt = iso(at);
   const next = clone(pair);
-  assertDispatchable(next.legs.fee, dispatchedAt);
+  const feeDispatchedAt = iso(now());
+  assertDispatchable(next.legs.fee, feeDispatchedAt);
   const feeResult = await adapter.settle({ leg: 'fee', quote: next.legs.fee.quote, authorization: next.legs.fee });
-  if (applySettlement(next, 'fee', feeResult, dispatchedAt) !== 'settled') return next;
+  if (applySettlement(next, 'fee', feeResult, feeDispatchedAt) !== 'settled') return next;
   next.state = 'FEE_SETTLED';
-  next.history.push({ type: 'fee_settled', at: dispatchedAt, state: next.state });
+  next.history.push({ type: 'fee_settled', at: feeDispatchedAt, state: next.state });
 
-  assertDispatchable(next.legs.product, dispatchedAt);
+  const productDispatchedAt = iso(now());
+  try {
+    assertDispatchable(next.legs.product, productDispatchedAt);
+  } catch (error) {
+    if (error?.code !== 'SETTLEMENT_DISPATCH_CUTOFF') throw error;
+    next.state = 'FEE_SETTLED_PRODUCT_CUTOFF';
+    next.blockedReason = error.code;
+    next.history.push({ type: 'product_dispatch_cutoff', at: productDispatchedAt, state: next.state });
+    return next;
+  }
   const productResult = await adapter.settle({ leg: 'product', quote: next.legs.product.quote, authorization: next.legs.product });
-  if (applySettlement(next, 'product', productResult, dispatchedAt) !== 'settled') return next;
+  if (applySettlement(next, 'product', productResult, productDispatchedAt) !== 'settled') return next;
   next.state = 'PAID';
-  next.paidAt = dispatchedAt;
-  next.history.push({ type: 'product_settled', at: dispatchedAt, state: next.state });
+  next.paidAt = productDispatchedAt;
+  next.history.push({ type: 'product_settled', at: productDispatchedAt, state: next.state });
   return next;
 }
 
