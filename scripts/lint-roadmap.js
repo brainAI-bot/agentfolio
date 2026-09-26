@@ -152,7 +152,7 @@ function lintRoadmap(file) {
 }
 
 const files = process.argv.slice(2);
-const defaultTargets = ['ROADMAP.md', 'docs/planning/ROADMAP.md'].filter((file) => fs.existsSync(file));
+const defaultTargets = ['ROADMAP.md', 'docs/planning/ROADMAP.md', 'shops/ROADMAP.md'].filter((file) => fs.existsSync(file));
 const targets = files.length ? files : defaultTargets;
 let failed = false;
 
