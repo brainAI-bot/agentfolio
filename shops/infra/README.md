@@ -62,7 +62,7 @@ aud = sts.amazonaws.com
 sub = repo:brainAI-bot/agentfolio:environment:makings-production
 ```
 
-GitHub environment subjects replace branch subjects. Therefore the principal must configure `makings-production` as a protected environment whose deployment branch policy allows only `main`, and should require principal approval. Adding a separate `repo:brainAI-bot/agentfolio:ref:refs/heads/main` subject would create an OR and bypass the environment requirement, so it is intentionally absent.
+GitHub environment subjects replace branch subjects. Therefore the principal must configure `makings-production` as a protected environment whose deployment branch policy allows only `main` **and must configure the principal as a required reviewer**. That approval is mandatory before every apply; merges to `main` do not bypass it. Adding a separate `repo:brainAI-bot/agentfolio:ref:refs/heads/main` subject would create an OR and bypass the environment requirement, so it is intentionally absent.
 
 The deployer policy excludes Route 53, ACM creation, customer-managed KMS keys, Organizations/account administration, and mutation of its own trust, boundary, or the OIDC provider. AWS APIs with incomplete resource-level authorization are constrained by exact action lists, `eu-north-1`, the `makings-*` namespace, required `Project=Makings` request/resource tags, and the `/makings/shops/` IAM path.
 
@@ -83,7 +83,7 @@ The contract test includes insecure mutations and proves they are rejected. Vali
 ## Principal-only apply prerequisites
 
 1. Reprice and explicitly approve the monthly ceiling and exclusions.
-2. Configure/protect the GitHub `makings-production` environment for `main` only.
+2. Configure/protect the GitHub `makings-production` environment for `main` only and require the principal as a reviewer for every deployment.
 3. Apply/import `bootstrap/` personally and configure principal-owned remote state.
 4. Confirm account-specific AZ mapping and existing ACM certificate.
 5. Build and push both ARM64 images, then replace examples with immutable digests.

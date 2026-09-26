@@ -24,6 +24,8 @@ function contractViolations({ option3Source = option3, variableSource = variable
   requirePattern(option3Source, /resource "aws_security_group" "scanner"[\s\S]*description\s*=\s*"Scanner tasks have no inbound rules"[\s\S]*egress\s*\{/, 'scanner security group must exist');
   const scannerBlock = /resource "aws_security_group" "scanner"\s*\{([\s\S]*?)\n\}/.exec(option3Source)?.[1] ?? '';
   if (/\bingress\s*\{/.test(scannerBlock)) violations.push('scanner security group must have no ingress block');
+  requirePattern(option3Source, /resource "aws_vpc_security_group_egress_rule" "web_database"[\s\S]*security_group_id\s*=\s*aws_security_group\.web\.id[\s\S]*referenced_security_group_id\s*=\s*aws_security_group\.database\.id[\s\S]*from_port\s*=\s*5432[\s\S]*to_port\s*=\s*5432/, 'web tasks require narrowly scoped PostgreSQL egress');
+  requirePattern(option3Source, /resource "aws_vpc_security_group_egress_rule" "scanner_database"[\s\S]*security_group_id\s*=\s*aws_security_group\.scanner\.id[\s\S]*referenced_security_group_id\s*=\s*aws_security_group\.database\.id[\s\S]*from_port\s*=\s*5432[\s\S]*to_port\s*=\s*5432/, 'scanner tasks require narrowly scoped PostgreSQL egress');
   requirePattern(option3Source, /resource "aws_ecs_service" "scanner"[\s\S]*desired_count\s*=\s*2/, 'scanner service must run two tasks');
   requirePattern(option3Source, /resource "aws_ecs_service" "web"[\s\S]*desired_count\s*=\s*2/, 'web service must run two tasks');
   requirePattern(option3Source, /resource "aws_ecs_task_definition" "web"[\s\S]*cpu\s*=\s*"256"[\s\S]*memory\s*=\s*"512"[\s\S]*cpu_architecture\s*=\s*"ARM64"/, 'web task size and ARM64 platform are fixed');
@@ -44,6 +46,14 @@ function contractViolations({ option3Source = option3, variableSource = variable
   requirePattern(bootstrapSource, /token\.actions\.githubusercontent\.com:aud"\s*=\s*"sts\.amazonaws\.com"/, 'OIDC audience must be exact');
   rejectPattern(bootstrapSource, /ref:refs\/heads\/main/, 'a branch subject would bypass the protected environment');
   requirePattern(bootstrapSource, /aws:RequestTag\/Project"\s*=\s*"Makings"/, 'deployer creates only Makings-tagged resources');
+  requirePattern(bootstrapSource, /Sid\s*=\s*"TagMakingsEc2ResourcesOnlyAtCreateTime"[\s\S]*Action\s*=\s*"ec2:CreateTags"[\s\S]*"ec2:CreateAction"/, 'EC2 tags must be limited to resource creation');
+  rejectPattern(bootstrapSource, /Sid\s*=\s*"CreateMakingsTaggedRegionalResources"[\s\S]*?Action\s*=\s*\[[^\]]*"ec2:CreateTags"/, 'general create policy must not tag existing EC2 resources');
+  requirePattern(bootstrapSource, /repository\/makings-shops-\*/, 'workload boundary must scope ECR to Makings repositories');
+  requirePattern(bootstrapSource, /s3:::makings-shops-\*/, 'workload boundary must scope S3 to Makings buckets');
+  requirePattern(bootstrapSource, /log-group:\/makings\/shops\/\*/, 'workload boundary must scope logs to Makings groups');
+  requirePattern(bootstrapSource, /rds-db:\$\{var\.aws_region\}:\$\{data\.aws_caller_identity\.current\.account_id\}:dbuser:\*\/shops_\*/, 'workload boundary must scope database users to this account and region');
+  requirePattern(bootstrapSource, /role\/makings\/shops\/workload\/makings-shops-\*/, 'deployer may create and pass only workload-path roles');
+  rejectPattern(bootstrapSource, /role\/makings\/shops\/makings-shops-\*/, 'deployer role must stay outside workload role patterns');
   requirePattern(bootstrapSource, /DenyBootstrapAndExcludedServices/, 'deployer must be denied bootstrap mutation');
 
   return violations;
@@ -53,6 +63,8 @@ test('checked-in infrastructure satisfies the fail-closed contract', () => {
   assert.deepEqual(contractViolations(), []);
   assert.match(readme, /\*\*Planning total\*\* \| \*\*\$127\.30\/month\*\*/);
   assert.match(readme, /does \*\*not\*\* authorize or perform an AWS plan against a live account, apply, resource creation/i);
+  assert.match(readme, /must configure the principal as a required reviewer/i);
+  assert.match(readme, /deployment branch policy allows only `main`/i);
 });
 
 test('failure case: scanner ingress is rejected', () => {
@@ -63,6 +75,14 @@ test('failure case: scanner ingress is rejected', () => {
   const targetedCheck = /resource "aws_security_group" "scanner"[\s\S]*?\n\}/.exec(insecure)?.[0] ?? '';
   assert.match(targetedCheck, /ingress/);
   assert.ok(contractViolations({ option3Source: insecure }).includes('scanner security group must have no ingress block'));
+});
+
+test('failure case: database egress cannot regress', () => {
+  const insecure = option3.replace(
+    'resource "aws_vpc_security_group_egress_rule" "scanner_database"',
+    'resource "aws_vpc_security_group_egress_rule" "scanner_database_removed"',
+  );
+  assert.ok(contractViolations({ option3Source: insecure }).includes('scanner tasks require narrowly scoped PostgreSQL egress'));
 });
 
 test('failure case: wildcard OIDC branch trust is rejected', () => {

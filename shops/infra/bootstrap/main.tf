@@ -30,10 +30,34 @@ resource "aws_iam_policy" "workload_boundary" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid      = "WorkloadDataPlaneOnly"
+        Sid      = "EcrAuthorizationToken"
         Effect   = "Allow"
-        Action   = ["ecr:GetAuthorizationToken", "ecr:BatchCheckLayerAvailability", "ecr:GetDownloadUrlForLayer", "ecr:BatchGetImage", "logs:CreateLogStream", "logs:PutLogEvents", "s3:ListBucket", "s3:GetObject", "s3:GetObjectVersion", "s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts", "rds-db:connect"]
+        Action   = "ecr:GetAuthorizationToken"
         Resource = "*"
+      },
+      {
+        Sid      = "MakingsEcrPullOnly"
+        Effect   = "Allow"
+        Action   = ["ecr:BatchCheckLayerAvailability", "ecr:GetDownloadUrlForLayer", "ecr:BatchGetImage"]
+        Resource = "arn:${data.aws_partition.current.partition}:ecr:${var.aws_region}:${data.aws_caller_identity.current.account_id}:repository/makings-shops-*"
+      },
+      {
+        Sid      = "MakingsLogsOnly"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/makings/shops/*:*"
+      },
+      {
+        Sid      = "MakingsBucketOnly"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket", "s3:GetObject", "s3:GetObjectVersion", "s3:PutObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"]
+        Resource = ["arn:${data.aws_partition.current.partition}:s3:::makings-shops-*", "arn:${data.aws_partition.current.partition}:s3:::makings-shops-*/*"]
+      },
+      {
+        Sid      = "MakingsDatabaseUsersOnly"
+        Effect   = "Allow"
+        Action   = "rds-db:connect"
+        Resource = "arn:${data.aws_partition.current.partition}:rds-db:${var.aws_region}:${data.aws_caller_identity.current.account_id}:dbuser:*/shops_*"
       },
       {
         Sid      = "DenyAdministrationAndDeletion"
@@ -88,13 +112,30 @@ resource "aws_iam_role_policy" "github_deployer" {
       {
         Sid      = "CreateMakingsTaggedRegionalResources"
         Effect   = "Allow"
-        Action   = ["ec2:CreateVpc", "ec2:CreateSubnet", "ec2:CreateInternetGateway", "ec2:CreateRouteTable", "ec2:CreateRoute", "ec2:CreateSecurityGroup", "ec2:CreateTags", "elasticloadbalancing:CreateLoadBalancer", "elasticloadbalancing:CreateTargetGroup", "elasticloadbalancing:CreateListener", "ecs:CreateCluster", "ecs:RegisterTaskDefinition", "ecs:CreateService", "ecr:CreateRepository", "logs:CreateLogGroup", "rds:CreateDBSubnetGroup", "rds:CreateDBParameterGroup", "rds:CreateDBInstance", "s3:CreateBucket", "budgets:ModifyBudget"]
+        Action   = ["ec2:CreateVpc", "ec2:CreateSubnet", "ec2:CreateInternetGateway", "ec2:CreateRouteTable", "ec2:CreateRoute", "ec2:CreateSecurityGroup", "elasticloadbalancing:CreateLoadBalancer", "elasticloadbalancing:CreateTargetGroup", "elasticloadbalancing:CreateListener", "ecs:CreateCluster", "ecs:RegisterTaskDefinition", "ecs:CreateService", "ecr:CreateRepository", "logs:CreateLogGroup", "rds:CreateDBSubnetGroup", "rds:CreateDBParameterGroup", "rds:CreateDBInstance", "s3:CreateBucket", "budgets:ModifyBudget"]
         Resource = "*"
         Condition = {
           StringEquals = {
             "aws:RequestedRegion"       = var.aws_region
             "aws:RequestTag/Project"    = "Makings"
             "aws:RequestTag/Repository" = "brainAI-bot/agentfolio"
+          }
+          "ForAllValues:StringEquals" = {
+            "aws:TagKeys" = ["Project", "Product", "Option", "Environment", "ManagedBy", "Repository", "Name", "Tier"]
+          }
+        }
+      },
+      {
+        Sid      = "TagMakingsEc2ResourcesOnlyAtCreateTime"
+        Effect   = "Allow"
+        Action   = "ec2:CreateTags"
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion"       = var.aws_region
+            "aws:RequestTag/Project"    = "Makings"
+            "aws:RequestTag/Repository" = "brainAI-bot/agentfolio"
+            "ec2:CreateAction"          = ["CreateVpc", "CreateSubnet", "CreateInternetGateway", "CreateRouteTable", "CreateSecurityGroup"]
           }
           "ForAllValues:StringEquals" = {
             "aws:TagKeys" = ["Project", "Product", "Option", "Environment", "ManagedBy", "Repository", "Name", "Tier"]
@@ -116,8 +157,8 @@ resource "aws_iam_role_policy" "github_deployer" {
       {
         Sid      = "CreateBoundedWorkloadRoles"
         Effect   = "Allow"
-        Action   = ["iam:CreateRole", "iam:TagRole", "iam:PutRolePolicy", "iam:DeleteRolePolicy"]
-        Resource = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/makings/shops/makings-shops-*"
+        Action   = "iam:CreateRole"
+        Resource = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/makings/shops/workload/makings-shops-*"
         Condition = {
           StringEquals = {
             "iam:PermissionsBoundary" = aws_iam_policy.workload_boundary.arn
@@ -126,10 +167,31 @@ resource "aws_iam_role_policy" "github_deployer" {
         }
       },
       {
+        Sid      = "TagBoundedWorkloadRoles"
+        Effect   = "Allow"
+        Action   = "iam:TagRole"
+        Resource = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/makings/shops/workload/makings-shops-*"
+        Condition = {
+          StringEquals = { "aws:RequestTag/Project" = "Makings" }
+          "ForAllValues:StringEquals" = {
+            "aws:TagKeys" = ["Project", "Product", "Option", "Environment", "ManagedBy", "Repository"]
+          }
+        }
+      },
+      {
+        Sid      = "ManageBoundedWorkloadInlinePolicies"
+        Effect   = "Allow"
+        Action   = ["iam:PutRolePolicy", "iam:DeleteRolePolicy"]
+        Resource = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/makings/shops/workload/makings-shops-*"
+        Condition = {
+          StringEquals = { "aws:ResourceTag/Project" = "Makings" }
+        }
+      },
+      {
         Sid      = "PassOnlyMakingsEcsRoles"
         Effect   = "Allow"
         Action   = "iam:PassRole"
-        Resource = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/makings/shops/makings-shops-*"
+        Resource = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/makings/shops/workload/makings-shops-*"
         Condition = {
           StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" }
         }

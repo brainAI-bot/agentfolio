@@ -199,6 +199,27 @@ resource "aws_security_group" "database" {
   tags = merge(local.required_tags, { Name = "${var.name_prefix}-database" })
 }
 
+# Keep broad internet egress limited to TLS while permitting the exact database
+# flow required by both task definitions. Standalone rules avoid a security-
+# group dependency cycle.
+resource "aws_vpc_security_group_egress_rule" "web_database" {
+  security_group_id            = aws_security_group.web.id
+  referenced_security_group_id = aws_security_group.database.id
+  description                  = "PostgreSQL from web tasks to the Shops database"
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "scanner_database" {
+  security_group_id            = aws_security_group.scanner.id
+  referenced_security_group_id = aws_security_group.database.id
+  description                  = "PostgreSQL from scanner tasks to the Shops database"
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+}
+
 resource "aws_s3_bucket" "shops" {
   bucket = local.bucket_name
 
@@ -446,7 +467,7 @@ locals {
 
 resource "aws_iam_role" "web_execution" {
   name                 = "${var.name_prefix}-web-execution"
-  path                 = "/makings/shops/"
+  path                 = "/makings/shops/workload/"
   assume_role_policy   = local.ecs_assume_role_policy
   permissions_boundary = var.permissions_boundary_arn
   tags                 = local.required_tags
@@ -456,7 +477,7 @@ resource "aws_iam_role" "web_execution" {
 
 resource "aws_iam_role" "scanner_execution" {
   name                 = "${var.name_prefix}-scanner-execution"
-  path                 = "/makings/shops/"
+  path                 = "/makings/shops/workload/"
   assume_role_policy   = local.ecs_assume_role_policy
   permissions_boundary = var.permissions_boundary_arn
   tags                 = local.required_tags
@@ -466,7 +487,7 @@ resource "aws_iam_role" "scanner_execution" {
 
 resource "aws_iam_role" "web_task" {
   name                 = "${var.name_prefix}-web-task"
-  path                 = "/makings/shops/"
+  path                 = "/makings/shops/workload/"
   assume_role_policy   = local.ecs_assume_role_policy
   permissions_boundary = var.permissions_boundary_arn
   tags                 = local.required_tags
@@ -476,7 +497,7 @@ resource "aws_iam_role" "web_task" {
 
 resource "aws_iam_role" "scanner_task" {
   name                 = "${var.name_prefix}-scanner-task"
-  path                 = "/makings/shops/"
+  path                 = "/makings/shops/workload/"
   assume_role_policy   = local.ecs_assume_role_policy
   permissions_boundary = var.permissions_boundary_arn
   tags                 = local.required_tags
