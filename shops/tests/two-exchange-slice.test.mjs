@@ -321,3 +321,17 @@ test('rejects mainnet, wrong assets, wrong facilitator, over-limit order, and re
   }, issuedAt), errorCode('ORDER_LIMIT_EXCEEDED'));
   assert.throws(() => createTwoExchangeReceipt(pair(), artifactBytes), errorCode('INVALID_PAIR_TRANSITION'));
 });
+
+test('settled results with null finality cannot become PAID or receiptReady', async () => {
+  const verified = await fullyVerified(pair('null-finality'));
+  const calls = [];
+  await assert.rejects(() => settleTwoExchangePair(verified, {
+    adapter: { settle: async ({ leg }) => {
+      calls.push(leg);
+      return { status: 'settled', settlementId: `settlement-${leg}`, transactionHash: `0xtx-${leg}`, receiptAt: '2026-09-26T10:00:03.000Z', safeAt: null, finalizedAt: null };
+    } },
+    now: () => '2026-09-26T10:00:02.000Z',
+  }), errorCode('SETTLEMENT_FINALITY_REQUIRED'));
+  assert.deepEqual(calls, ['fee']);
+  assert.equal(readTwoExchangeState(verified).receiptReady, false);
+});

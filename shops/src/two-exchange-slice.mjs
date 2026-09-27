@@ -1,4 +1,4 @@
-import { canonicalJson, createQuote, sha256Hex } from './payment-contract.mjs';
+import { canonicalJson, createQuote, sha256Hex, verifyQuote } from './payment-contract.mjs';
 
 export const BASE_SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
 export const X402_TEST_FACILITATOR = 'https://x402.org/facilitator';
@@ -43,6 +43,21 @@ function assertPairShape(pair) {
   if (!pair || pair.schemaVersion !== 1 || pair.network !== 'eip155:84532') {
     fail('PAIR_BINDING_MISMATCH', 'pair must be the Base Sepolia two-exchange schema');
   }
+  if (pair.asset?.toLowerCase() !== BASE_SEPOLIA_USDC.toLowerCase()) {
+    fail('ASSET_MISMATCH', 'pair must use Circle Base Sepolia USDC');
+  }
+  if (pair.facilitator !== X402_TEST_FACILITATOR) {
+    fail('FACILITATOR_MISMATCH', 'pair must use the bounded test facilitator');
+  }
+  const feeQuote = pair.legs?.fee?.quote;
+  const productQuote = pair.legs?.product?.quote;
+  try {
+    verifyQuote(feeQuote);
+    verifyQuote(productQuote);
+  } catch (error) {
+    fail('QUOTE_BINDING_MISMATCH', error?.message ?? 'quote hash mismatch');
+  }
+  assertLegQuotes(feeQuote, productQuote);
   const expected = sha256Hex(canonicalJson({
     schemaVersion: pair.schemaVersion,
     orderId: pair.orderId,
@@ -170,8 +185,8 @@ export async function verifyTwoExchangePair(pair, { feeEnvelope, productEnvelope
   const verifiedAt = iso(at);
   if (new Date(verifiedAt) > new Date(pair.expiresAt)) fail('QUOTE_EXPIRED');
   const [feeResult, productResult] = await Promise.all([
-    adapter.verify({ leg: 'fee', quote: pair.legs.fee.quote, paymentEnvelope: feeEnvelope }),
-    adapter.verify({ leg: 'product', quote: pair.legs.product.quote, paymentEnvelope: productEnvelope }),
+    adapter.verify({ pairHash: pair.pairHash, leg: 'fee', quote: pair.legs.fee.quote, paymentEnvelope: feeEnvelope }),
+    adapter.verify({ pairHash: pair.pairHash, leg: 'product', quote: pair.legs.product.quote, paymentEnvelope: productEnvelope }),
   ]);
   const next = clone(pair);
   next.state = 'VERIFIED';
@@ -198,14 +213,23 @@ function applySettlement(next, legName, result, at) {
   const leg = next.legs[legName];
   if (result?.status === 'settled') {
     if (!result.transactionHash || !result.settlementId) fail('SETTLEMENT_BINDING_MISMATCH', `${legName} settlement identifiers are required`);
+    if (!result.safeAt || !result.finalizedAt) {
+      fail('SETTLEMENT_FINALITY_REQUIRED', `${legName} settlement requires explicit safeAt and finalizedAt evidence`);
+    }
+    const receiptAt = iso(result.receiptAt ?? at);
+    const safeAt = iso(result.safeAt);
+    const finalizedAt = iso(result.finalizedAt);
+    if (new Date(safeAt) < new Date(receiptAt) || new Date(finalizedAt) < new Date(safeAt)) {
+      fail('SETTLEMENT_FINALITY_REQUIRED', `${legName} settlement finality evidence must be monotonic`);
+    }
     next.legs[legName] = {
       ...leg,
       state: 'SETTLED',
       transactionHash: result.transactionHash,
       settlementId: result.settlementId,
-      receiptAt: iso(result.receiptAt ?? at),
-      safeAt: result.safeAt ? iso(result.safeAt) : undefined,
-      finalizedAt: result.finalizedAt ? iso(result.finalizedAt) : undefined,
+      receiptAt,
+      safeAt,
+      finalizedAt,
     };
     return 'settled';
   }
@@ -231,7 +255,7 @@ export async function settleTwoExchangePair(pair, { adapter, now = () => new Dat
   const next = clone(pair);
   const feeDispatchedAt = iso(now());
   assertDispatchable(next.legs.fee, feeDispatchedAt);
-  const feeResult = await adapter.settle({ leg: 'fee', quote: next.legs.fee.quote, authorization: next.legs.fee });
+  const feeResult = await adapter.settle({ pairHash: next.pairHash, leg: 'fee', quote: next.legs.fee.quote, authorization: next.legs.fee });
   if (applySettlement(next, 'fee', feeResult, feeDispatchedAt) !== 'settled') return next;
   next.state = 'FEE_SETTLED';
   next.history.push({ type: 'fee_settled', at: feeDispatchedAt, state: next.state });
@@ -246,7 +270,7 @@ export async function settleTwoExchangePair(pair, { adapter, now = () => new Dat
     next.history.push({ type: 'product_dispatch_cutoff', at: productDispatchedAt, state: next.state });
     return next;
   }
-  const productResult = await adapter.settle({ leg: 'product', quote: next.legs.product.quote, authorization: next.legs.product });
+  const productResult = await adapter.settle({ pairHash: next.pairHash, leg: 'product', quote: next.legs.product.quote, authorization: next.legs.product });
   if (applySettlement(next, 'product', productResult, productDispatchedAt) !== 'settled') return next;
   next.state = 'PAID';
   next.paidAt = productDispatchedAt;
@@ -276,7 +300,7 @@ export async function dispatchProductAfterFeeReconciliation(pair, { adapter, at 
   const dispatchedAt = iso(at);
   const next = clone(pair);
   assertDispatchable(next.legs.product, dispatchedAt);
-  const result = await adapter.settle({ leg: 'product', quote: next.legs.product.quote, authorization: next.legs.product });
+  const result = await adapter.settle({ pairHash: next.pairHash, leg: 'product', quote: next.legs.product.quote, authorization: next.legs.product });
   if (applySettlement(next, 'product', result, dispatchedAt) !== 'settled') return next;
   next.state = 'PAID';
   next.paidAt = dispatchedAt;

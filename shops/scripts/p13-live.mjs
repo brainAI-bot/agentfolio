@@ -8,6 +8,7 @@ import {
   settleTwoExchangePair,
   verifyTwoExchangePair,
 } from '../src/two-exchange-slice.mjs';
+import { verifyQuote } from '../src/payment-contract.mjs';
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
@@ -89,40 +90,46 @@ function facilitatorRequestBody(quote, paymentEnvelope) {
   };
 }
 
+export function assertP13RequestPolicy({ pairHash, quote }) {
+  if (typeof pairHash !== 'string' || pairHash.length === 0) fail('PAIR_BINDING_MISMATCH', 'pairHash is required');
+  verifyQuote(quote);
+  if (quote.payment.network !== 'eip155:84532') fail('LIVE_NETWORK_FORBIDDEN', 'Base Sepolia only');
+  if (quote.payment.asset.toLowerCase() !== BASE_SEPOLIA_USDC.toLowerCase()) fail('ASSET_MISMATCH', 'Circle Base Sepolia test USDC required');
+  if (quote.facilitator.id !== X402_TEST_FACILITATOR) fail('FACILITATOR_MISMATCH', 'selected test facilitator required');
+}
+
 export function createP13LiveAdapter({ payer, feeRecipient, productRecipient, request }) {
   const recipients = assertRecipientBindings({ payer, feeRecipient, productRecipient });
   if (typeof request !== 'function') fail('FACILITATOR_REQUEST_REQUIRED', 'request callback is required');
-  const expectedRecipients = Object.freeze({
-    fee: recipients.feeRecipient,
-    product: recipients.productRecipient,
-  });
+  const expectedRecipients = Object.freeze({ fee: recipients.feeRecipient, product: recipients.productRecipient });
   const boundPayments = new Map();
+  const consumedSettlements = new Map();
   return {
-    verify: async ({ leg, quote, paymentEnvelope }) => {
+    verify: async ({ pairHash, leg, quote, paymentEnvelope }) => {
       if (!(leg in expectedRecipients)) fail('INVALID_P13_LEG', 'P13 leg must be fee or product');
+      assertP13RequestPolicy({ pairHash, quote });
       const quotedRecipient = normalizedAddress(quote?.payment?.payTo, 'quote.payment.payTo');
-      if (quotedRecipient !== expectedRecipients[leg]) {
-        fail('P13_RECIPIENT_BINDING_MISMATCH', `${leg} quote recipient differs from the configured public test recipient`);
-      }
+      if (quotedRecipient !== expectedRecipients[leg]) fail('P13_RECIPIENT_BINDING_MISMATCH', `${leg} quote recipient differs from the configured public test recipient`);
       assertEip3009EnvelopeBinding({ payer: recipients.payer, quote, paymentEnvelope });
       const body = facilitatorRequestBody(quote, paymentEnvelope);
-      if (normalizedAddress(body.paymentRequirements.payTo, 'paymentRequirements.payTo')
-        !== normalizedAddress(paymentEnvelope.authorization.to, 'paymentEnvelope.authorization.to')) {
-        fail('FACILITATOR_RECIPIENT_MISMATCH', `${leg} facilitator request recipient differs from the signed target`);
-      }
-      boundPayments.set(quote.quoteHash, { paymentEnvelope, body });
-      return request({ operation: 'verify', facilitator: quote.facilitator.id, leg, body });
+      const verification = await request({ operation: 'verify', facilitator: quote.facilitator.id, leg, body });
+      boundPayments.set(quote.quoteHash, { pairHash, paymentEnvelope, body, verification });
+      return verification;
     },
-    settle: async ({ leg, quote, authorization }) => {
+    settle: async ({ pairHash, leg, quote, authorization }) => {
+      assertP13RequestPolicy({ pairHash, quote });
       const bound = boundPayments.get(quote.quoteHash);
       if (!bound) fail('UNVERIFIED_SETTLEMENT_FORBIDDEN', `${leg} settlement has no verified bound payment`);
+      if (bound.pairHash !== pairHash) fail('PAIR_BINDING_MISMATCH', `${leg} settlement differs from the verified pair`);
+      if (authorization?.authorizationId !== bound.verification?.authorizationId || authorization?.paymentFingerprint !== bound.verification?.paymentFingerprint) {
+        fail('VERIFICATION_BINDING_MISMATCH', `${leg} settlement differs from the verified authorization`);
+      }
       assertEip3009EnvelopeBinding({ payer: recipients.payer, quote, paymentEnvelope: bound.paymentEnvelope });
-      return request({
-        operation: 'settle',
-        facilitator: quote.facilitator.id,
-        leg,
-        body: { ...bound.body, authorization },
-      });
+      const key = [pairHash, leg, quote.quoteHash, authorization.authorizationId, authorization.paymentFingerprint].join(':');
+      if (consumedSettlements.has(key)) return consumedSettlements.get(key);
+      const settlement = Promise.resolve(request({ operation: 'settle', facilitator: quote.facilitator.id, leg, body: { ...bound.body, authorization } }));
+      consumedSettlements.set(key, settlement);
+      return settlement;
     },
   };
 }
