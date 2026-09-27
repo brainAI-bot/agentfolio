@@ -3,19 +3,20 @@
 `migrations/0001_durable_commerce.up.sql` creates the repository-only durable commerce model for:
 
 - immutable pinned catalogue versions;
-- immutable quote snapshots;
-- one idempotent order per quote;
-- fee and product settlement dispatch attempts;
-- immutable finality receipts bound to recorded settlements; and
-- immutable delivery receipts bound to the pinned artifact and both finalized payment legs.
+- immutable commerce quote snapshots with a payment `pair_hash` and exactly one immutable fee and product leg quote;
+- one idempotent order per complete quote pair;
+- payment dispatches bound to the order-owned leg quote, with copied network, scheme, asset, amount, recipient, facilitator, and validity terms checked by PostgreSQL;
+- at most one non-failed dispatch per order leg, monotonic dispatch state, and settlement bindings that cannot be replaced once recorded;
+- immutable finality receipts requiring a complete, non-failed settlement; and
+- immutable delivery receipts bound to the pinned artifact and both `SETTLED` payment legs.
 
-The migration does not provision or connect to production infrastructure. The default connection values in the harness target only the loopback PostgreSQL service from `shops/compose.ci.yml`.
+The migration does not provision or connect to production infrastructure. The harness defaults to the loopback PostgreSQL service from `shops/compose.ci.yml`; destructive `test:migrations` mode refuses any `SHOPS_POSTGRES_HOST` that is not `localhost`, `::1`, or an address in `127.0.0.0/8` before invoking `psql`. Explicit `db:migrate` and `db:rollback` retain their reviewed connection behavior.
 
 ```bash
-docker-compose -f compose.ci.yml up -d postgres
+docker compose -f compose.ci.yml up -d postgres
 npm run check:services
 npm run test:migrations
-docker-compose -f compose.ci.yml down -v
+docker compose -f compose.ci.yml down -v
 ```
 
-`test:migrations` applies the migration, exercises success and failure constraints, applies the down migration, proves the schema is absent, reapplies the up migration, and performs a final down migration cleanup.
+`test:migrations` applies the migration, exercises success and must-fail constraints, applies the down migration, proves the schema is absent, reapplies the up migration, and performs a final down migration cleanup. The normal `npm test` suite includes a stubbed runner test proving that a non-loopback host is rejected without invoking `psql`.
