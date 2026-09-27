@@ -7,6 +7,7 @@ import {
   TWO_EXCHANGE_LIMITS,
   X402_TEST_FACILITATOR,
   assertBoundedProbe,
+  confirmTwoExchangeFinality,
   createTwoExchangePair,
   createTwoExchangeReceipt,
   dispatchProductAfterFeeReconciliation,
@@ -322,16 +323,40 @@ test('rejects mainnet, wrong assets, wrong facilitator, over-limit order, and re
   assert.throws(() => createTwoExchangeReceipt(pair(), artifactBytes), errorCode('INVALID_PAIR_TRANSITION'));
 });
 
-test('settled results with null finality cannot become PAID or receiptReady', async () => {
+test('records both settlement transactions before separate monotonic finality confirmation', async () => {
   const verified = await fullyVerified(pair('null-finality'));
   const calls = [];
-  await assert.rejects(() => settleTwoExchangePair(verified, {
+  const awaitingFinality = await settleTwoExchangePair(verified, {
     adapter: { settle: async ({ leg }) => {
       calls.push(leg);
       return { status: 'settled', settlementId: `settlement-${leg}`, transactionHash: `0xtx-${leg}`, receiptAt: '2026-09-26T10:00:03.000Z', safeAt: null, finalizedAt: null };
     } },
     now: () => '2026-09-26T10:00:02.000Z',
+  });
+  assert.deepEqual(calls, ['fee', 'product']);
+  assert.equal(awaitingFinality.state, 'AWAITING_FINALITY');
+  assert.equal(awaitingFinality.legs.fee.state, 'AWAITING_FINALITY');
+  assert.equal(awaitingFinality.legs.product.state, 'AWAITING_FINALITY');
+  assert.equal(awaitingFinality.legs.fee.transactionHash, '0xtx-fee');
+  assert.equal(awaitingFinality.legs.product.settlementId, 'settlement-product');
+  assert.equal(awaitingFinality.legs.product.receiptAt, '2026-09-26T10:00:03.000Z');
+  assert.equal(readTwoExchangeState(awaitingFinality).receiptReady, false);
+  assert.throws(() => createTwoExchangeReceipt(awaitingFinality, artifactBytes), errorCode('INVALID_PAIR_TRANSITION'));
+
+  const evidence = {
+    fee: { transactionHash: '0xtx-fee', settlementId: 'settlement-fee', safeAt: '2026-09-26T10:02:03.000Z', finalizedAt: '2026-09-26T10:20:03.000Z' },
+    product: { transactionHash: '0xtx-product', settlementId: 'settlement-product', safeAt: '2026-09-26T10:02:04.000Z', finalizedAt: '2026-09-26T10:20:04.000Z' },
+    at: '2026-09-26T10:20:05.000Z',
+  };
+  assert.throws(() => confirmTwoExchangeFinality(awaitingFinality, {
+    ...evidence,
+    product: { ...evidence.product, safeAt: '2026-09-26T10:20:05.000Z', finalizedAt: '2026-09-26T10:20:04.000Z' },
   }), errorCode('SETTLEMENT_FINALITY_REQUIRED'));
-  assert.deepEqual(calls, ['fee']);
-  assert.equal(readTwoExchangeState(verified).receiptReady, false);
+  assert.equal(awaitingFinality.legs.fee.safeAt, undefined);
+
+  const paid = confirmTwoExchangeFinality(awaitingFinality, evidence);
+  assert.equal(paid.state, 'PAID');
+  assert.equal(paid.legs.fee.state, 'SETTLED');
+  assert.equal(paid.legs.product.state, 'SETTLED');
+  assert.equal(readTwoExchangeState(paid).receiptReady, true);
 });

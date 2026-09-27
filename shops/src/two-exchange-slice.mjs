@@ -209,29 +209,36 @@ function assertDispatchable(leg, at) {
   }
 }
 
+function normalizeFinality(result, receiptAt, legName) {
+  const hasSafeAt = result?.safeAt != null;
+  const hasFinalizedAt = result?.finalizedAt != null;
+  if (hasSafeAt !== hasFinalizedAt) {
+    fail('SETTLEMENT_FINALITY_REQUIRED', `${legName} settlement finality evidence must include safeAt and finalizedAt together`);
+  }
+  if (!hasSafeAt) return null;
+  const safeAt = iso(result.safeAt);
+  const finalizedAt = iso(result.finalizedAt);
+  if (new Date(safeAt) < new Date(receiptAt) || new Date(finalizedAt) < new Date(safeAt)) {
+    fail('SETTLEMENT_FINALITY_REQUIRED', `${legName} settlement finality evidence must be monotonic`);
+  }
+  return { safeAt, finalizedAt };
+}
+
 function applySettlement(next, legName, result, at) {
   const leg = next.legs[legName];
   if (result?.status === 'settled') {
     if (!result.transactionHash || !result.settlementId) fail('SETTLEMENT_BINDING_MISMATCH', `${legName} settlement identifiers are required`);
-    if (!result.safeAt || !result.finalizedAt) {
-      fail('SETTLEMENT_FINALITY_REQUIRED', `${legName} settlement requires explicit safeAt and finalizedAt evidence`);
-    }
     const receiptAt = iso(result.receiptAt ?? at);
-    const safeAt = iso(result.safeAt);
-    const finalizedAt = iso(result.finalizedAt);
-    if (new Date(safeAt) < new Date(receiptAt) || new Date(finalizedAt) < new Date(safeAt)) {
-      fail('SETTLEMENT_FINALITY_REQUIRED', `${legName} settlement finality evidence must be monotonic`);
-    }
+    const finality = normalizeFinality(result, receiptAt, legName);
     next.legs[legName] = {
       ...leg,
-      state: 'SETTLED',
+      state: finality ? 'SETTLED' : 'AWAITING_FINALITY',
       transactionHash: result.transactionHash,
       settlementId: result.settlementId,
       receiptAt,
-      safeAt,
-      finalizedAt,
+      ...(finality ?? {}),
     };
-    return 'settled';
+    return finality ? 'settled' : 'awaiting_finality';
   }
   if (result?.status === 'settlement_pending' || result?.status === 'unknown') {
     next.legs[legName] = {
@@ -256,25 +263,32 @@ export async function settleTwoExchangePair(pair, { adapter, now = () => new Dat
   const feeDispatchedAt = iso(now());
   assertDispatchable(next.legs.fee, feeDispatchedAt);
   const feeResult = await adapter.settle({ pairHash: next.pairHash, leg: 'fee', quote: next.legs.fee.quote, authorization: next.legs.fee });
-  if (applySettlement(next, 'fee', feeResult, feeDispatchedAt) !== 'settled') return next;
-  next.state = 'FEE_SETTLED';
-  next.history.push({ type: 'fee_settled', at: feeDispatchedAt, state: next.state });
+  const feeOutcome = applySettlement(next, 'fee', feeResult, feeDispatchedAt);
+  if (feeOutcome === 'unknown') return next;
+  next.state = feeOutcome === 'settled' ? 'FEE_SETTLED' : 'FEE_AWAITING_FINALITY';
+  next.history.push({ type: feeOutcome === 'settled' ? 'fee_settled' : 'fee_awaiting_finality', at: feeDispatchedAt, state: next.state });
 
   const productDispatchedAt = iso(now());
   try {
     assertDispatchable(next.legs.product, productDispatchedAt);
   } catch (error) {
     if (error?.code !== 'SETTLEMENT_DISPATCH_CUTOFF') throw error;
-    next.state = 'FEE_SETTLED_PRODUCT_CUTOFF';
+    next.state = feeOutcome === 'settled' ? 'FEE_SETTLED_PRODUCT_CUTOFF' : 'FEE_AWAITING_FINALITY_PRODUCT_CUTOFF';
     next.blockedReason = error.code;
     next.history.push({ type: 'product_dispatch_cutoff', at: productDispatchedAt, state: next.state });
     return next;
   }
   const productResult = await adapter.settle({ pairHash: next.pairHash, leg: 'product', quote: next.legs.product.quote, authorization: next.legs.product });
-  if (applySettlement(next, 'product', productResult, productDispatchedAt) !== 'settled') return next;
-  next.state = 'PAID';
-  next.paidAt = productDispatchedAt;
-  next.history.push({ type: 'product_settled', at: productDispatchedAt, state: next.state });
+  const productOutcome = applySettlement(next, 'product', productResult, productDispatchedAt);
+  if (productOutcome === 'unknown') return next;
+  if (feeOutcome === 'settled' && productOutcome === 'settled') {
+    next.state = 'PAID';
+    next.paidAt = productDispatchedAt;
+    next.history.push({ type: 'product_settled', at: productDispatchedAt, state: next.state });
+  } else {
+    next.state = 'AWAITING_FINALITY';
+    next.history.push({ type: 'settlements_awaiting_finality', at: productDispatchedAt, state: next.state });
+  }
   return next;
 }
 
@@ -287,24 +301,61 @@ export function reconcileOriginalSettlement(pair, { leg, authorizationId, paymen
     fail('RECONCILIATION_TARGET_MISMATCH', 'reconciliation must target the original authorization');
   }
   const next = clone(pair);
-  if (applySettlement(next, leg, result, at) !== 'settled') return next;
-  next.state = leg === 'fee' ? 'FEE_SETTLED_RECONCILED' : 'PAID';
-  if (leg === 'product') next.paidAt = iso(at);
+  const outcome = applySettlement(next, leg, result, at);
+  if (outcome === 'unknown') return next;
+  next.state = leg === 'fee'
+    ? (outcome === 'settled' ? 'FEE_SETTLED_RECONCILED' : 'FEE_AWAITING_FINALITY_RECONCILED')
+    : (next.legs.fee.state === 'SETTLED' && outcome === 'settled' ? 'PAID' : 'AWAITING_FINALITY');
+  if (next.state === 'PAID') next.paidAt = iso(at);
   next.history.push({ type: `${leg}_reconciled`, at: iso(at), state: next.state });
   return next;
 }
 
 export async function dispatchProductAfterFeeReconciliation(pair, { adapter, at = new Date().toISOString() }) {
   assertPairShape(pair);
-  if (pair.state !== 'FEE_SETTLED_RECONCILED') fail('INVALID_PAIR_TRANSITION');
+  if (pair.state !== 'FEE_SETTLED_RECONCILED' && pair.state !== 'FEE_AWAITING_FINALITY_RECONCILED') fail('INVALID_PAIR_TRANSITION');
   const dispatchedAt = iso(at);
   const next = clone(pair);
   assertDispatchable(next.legs.product, dispatchedAt);
   const result = await adapter.settle({ pairHash: next.pairHash, leg: 'product', quote: next.legs.product.quote, authorization: next.legs.product });
-  if (applySettlement(next, 'product', result, dispatchedAt) !== 'settled') return next;
-  next.state = 'PAID';
-  next.paidAt = dispatchedAt;
+  const outcome = applySettlement(next, 'product', result, dispatchedAt);
+  if (outcome === 'unknown') return next;
+  if (next.legs.fee.state === 'SETTLED' && outcome === 'settled') {
+    next.state = 'PAID';
+    next.paidAt = dispatchedAt;
+  } else {
+    next.state = 'AWAITING_FINALITY';
+  }
   next.history.push({ type: 'product_settled_after_fee_reconciliation', at: dispatchedAt, state: next.state });
+  return next;
+}
+
+export function confirmTwoExchangeFinality(pair, { fee, product, at = new Date().toISOString() }) {
+  assertPairShape(pair);
+  if (pair.state !== 'AWAITING_FINALITY') fail('INVALID_PAIR_TRANSITION', `cannot confirm finality from ${pair.state}`);
+  const confirmed = {};
+  for (const [legName, evidence] of [['fee', fee], ['product', product]]) {
+    const leg = pair.legs[legName];
+    if (!leg.transactionHash || !leg.settlementId || !leg.receiptAt) {
+      fail('SETTLEMENT_BINDING_MISMATCH', `${legName} settlement receipt is incomplete`);
+    }
+    if (evidence?.transactionHash !== leg.transactionHash || evidence?.settlementId !== leg.settlementId) {
+      fail('SETTLEMENT_BINDING_MISMATCH', `${legName} finality evidence differs from the recorded settlement`);
+    }
+    const finality = normalizeFinality(evidence, leg.receiptAt, legName);
+    if (!finality) fail('SETTLEMENT_FINALITY_REQUIRED', `${legName} finality evidence is required`);
+    if ((leg.safeAt && leg.safeAt !== finality.safeAt) || (leg.finalizedAt && leg.finalizedAt !== finality.finalizedAt)) {
+      fail('SETTLEMENT_FINALITY_REQUIRED', `${legName} finality evidence cannot overwrite recorded finality`);
+    }
+    confirmed[legName] = finality;
+  }
+  const next = clone(pair);
+  for (const legName of ['fee', 'product']) {
+    next.legs[legName] = { ...next.legs[legName], ...confirmed[legName], state: 'SETTLED' };
+  }
+  next.state = 'PAID';
+  next.paidAt = iso(at);
+  next.history.push({ type: 'finality_confirmed_both', at: next.paidAt, state: next.state });
   return next;
 }
 

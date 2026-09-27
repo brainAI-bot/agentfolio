@@ -107,28 +107,35 @@ export function createP13LiveAdapter({ payer, feeRecipient, productRecipient, re
   return {
     verify: async ({ pairHash, leg, quote, paymentEnvelope }) => {
       if (!(leg in expectedRecipients)) fail('INVALID_P13_LEG', 'P13 leg must be fee or product');
+      const legKey = `${pairHash}:${leg}`;
       assertP13RequestPolicy({ pairHash, quote });
       const quotedRecipient = normalizedAddress(quote?.payment?.payTo, 'quote.payment.payTo');
       if (quotedRecipient !== expectedRecipients[leg]) fail('P13_RECIPIENT_BINDING_MISMATCH', `${leg} quote recipient differs from the configured public test recipient`);
       assertEip3009EnvelopeBinding({ payer: recipients.payer, quote, paymentEnvelope });
       const body = facilitatorRequestBody(quote, paymentEnvelope);
+      if (consumedSettlements.has(legKey)) {
+        const consumedBinding = boundPayments.get(legKey);
+        if (!consumedBinding || consumedBinding.quoteHash !== quote.quoteHash) fail('PAIR_BINDING_MISMATCH', `${leg} consumed settlement differs from the verified quote`);
+        return consumedBinding.verification;
+      }
       const verification = await request({ operation: 'verify', facilitator: quote.facilitator.id, leg, body });
-      boundPayments.set(quote.quoteHash, { pairHash, paymentEnvelope, body, verification });
+      boundPayments.set(legKey, { pairHash, leg, quoteHash: quote.quoteHash, paymentEnvelope, body, verification });
       return verification;
     },
     settle: async ({ pairHash, leg, quote, authorization }) => {
+      if (!(leg in expectedRecipients)) fail('INVALID_P13_LEG', 'P13 leg must be fee or product');
+      const legKey = `${pairHash}:${leg}`;
       assertP13RequestPolicy({ pairHash, quote });
-      const bound = boundPayments.get(quote.quoteHash);
+      const bound = boundPayments.get(legKey);
       if (!bound) fail('UNVERIFIED_SETTLEMENT_FORBIDDEN', `${leg} settlement has no verified bound payment`);
-      if (bound.pairHash !== pairHash) fail('PAIR_BINDING_MISMATCH', `${leg} settlement differs from the verified pair`);
+      if (bound.pairHash !== pairHash || bound.leg !== leg || bound.quoteHash !== quote.quoteHash) fail('PAIR_BINDING_MISMATCH', `${leg} settlement differs from the verified pair leg`);
       if (authorization?.authorizationId !== bound.verification?.authorizationId || authorization?.paymentFingerprint !== bound.verification?.paymentFingerprint) {
         fail('VERIFICATION_BINDING_MISMATCH', `${leg} settlement differs from the verified authorization`);
       }
       assertEip3009EnvelopeBinding({ payer: recipients.payer, quote, paymentEnvelope: bound.paymentEnvelope });
-      const key = [pairHash, leg, quote.quoteHash, authorization.authorizationId, authorization.paymentFingerprint].join(':');
-      if (consumedSettlements.has(key)) return consumedSettlements.get(key);
-      const settlement = Promise.resolve(request({ operation: 'settle', facilitator: quote.facilitator.id, leg, body: { ...bound.body, authorization } }));
-      consumedSettlements.set(key, settlement);
+      if (consumedSettlements.has(legKey)) return consumedSettlements.get(legKey);
+      const settlement = Promise.resolve().then(() => request({ operation: 'settle', facilitator: quote.facilitator.id, leg, body: { ...bound.body, authorization } }));
+      consumedSettlements.set(legKey, settlement);
       return settlement;
     },
   };

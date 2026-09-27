@@ -69,7 +69,7 @@ function job(index, trace, settlementGate) {
   };
 }
 
-function eip3009Envelope({ from = payer, to = feeRecipient, value = '10000', network = 'eip155:84532' } = {}) {
+function eip3009Envelope({ from = payer, to = feeRecipient, value = '10000', network = 'eip155:84532', nonce = '0xpublic-test-nonce' } = {}) {
   return {
     network,
     payer: from,
@@ -80,7 +80,7 @@ function eip3009Envelope({ from = payer, to = feeRecipient, value = '10000', net
       value,
       validAfter: '0',
       validBefore: '1790435700',
-      nonce: '0xpublic-test-nonce',
+      nonce,
     },
   };
 }
@@ -326,19 +326,26 @@ test('rejects deserialized quote tampering to Base mainnet USDC and attacker fac
   assert.deepEqual(trace, []);
 });
 
-test('identical pair double-run reuses consumed bindings instead of four dispatches', async () => {
+test('fresh-nonce rerun cannot overwrite a consumed pair leg or dispatch it again', async () => {
   const pair = createPair('idempotent-double-run');
   const requests = [];
   const liveAdapter = createP13LiveAdapter({
     payer, feeRecipient, productRecipient,
     request: async (entry) => {
       requests.push(`${entry.operation}:${entry.leg}`);
-      if (entry.operation === 'verify') return { status: 'verified', authorizationId: `authorization-${entry.leg}`, paymentFingerprint: `fingerprint-${entry.leg}`, validBefore: '2026-09-26T15:15:00.000Z' };
+      if (entry.operation === 'verify') {
+        const nonce = entry.body.paymentPayload.authorization.nonce;
+        return { status: 'verified', authorizationId: `authorization-${entry.leg}-${nonce}`, paymentFingerprint: `fingerprint-${entry.leg}-${nonce}`, validBefore: '2026-09-26T15:15:00.000Z' };
+      }
       return { status: 'settled', settlementId: `settlement-${entry.leg}`, transactionHash: `0x${entry.leg}`, receiptAt: '2026-09-26T15:10:03.000Z', safeAt: '2026-09-26T15:10:04.000Z', finalizedAt: '2026-09-26T15:10:05.000Z' };
     },
   });
-  const run = () => runP13PairsSequentially({ jobs: [{ pair, feeEnvelope: eip3009Envelope({ to: feeRecipient }), productEnvelope: eip3009Envelope({ to: productRecipient }), adapter: liveAdapter, verifiedAt: '2026-09-26T15:10:01.000Z', now: () => '2026-09-26T15:10:02.000Z' }], payer });
-  assert.equal((await run()).results[0].state, 'PAID');
-  assert.equal((await run()).results[0].state, 'PAID');
+  const run = (nonce) => runP13PairsSequentially({ jobs: [{ pair, feeEnvelope: eip3009Envelope({ to: feeRecipient, nonce: `${nonce}-fee` }), productEnvelope: eip3009Envelope({ to: productRecipient, nonce: `${nonce}-product` }), adapter: liveAdapter, verifiedAt: '2026-09-26T15:10:01.000Z', now: () => '2026-09-26T15:10:02.000Z' }], payer });
+  const first = (await run('first')).results[0];
+  const second = (await run('fresh')).results[0];
+  assert.equal(first.state, 'PAID');
+  assert.equal(second.state, 'PAID');
+  assert.equal(second.legs.fee.authorizationId, first.legs.fee.authorizationId);
+  assert.equal(second.legs.product.paymentFingerprint, first.legs.product.paymentFingerprint);
   assert.equal(requests.filter((entry) => entry.startsWith('settle:')).length, 2);
 });
