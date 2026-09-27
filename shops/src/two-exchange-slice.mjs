@@ -236,12 +236,20 @@ function normalizeSettlementFinality(result, receiptAt) {
   }
 }
 
+function normalizeSettlementMetadata(result, at) {
+  try {
+    const receiptAt = iso(result.receiptAt ?? at);
+    return { receiptAt, finality: normalizeSettlementFinality(result, receiptAt) };
+  } catch {
+    return { receiptAt: iso(at), finality: null };
+  }
+}
+
 function applySettlement(next, legName, result, at) {
   const leg = next.legs[legName];
   if (result?.status === 'settled') {
     if (!result.transactionHash || !result.settlementId) fail('SETTLEMENT_BINDING_MISMATCH', `${legName} settlement identifiers are required`);
-    const receiptAt = iso(result.receiptAt ?? at);
-    const finality = normalizeSettlementFinality(result, receiptAt);
+    const { receiptAt, finality } = normalizeSettlementMetadata(result, at);
     next.legs[legName] = {
       ...leg,
       state: finality ? 'SETTLED' : 'AWAITING_FINALITY',
