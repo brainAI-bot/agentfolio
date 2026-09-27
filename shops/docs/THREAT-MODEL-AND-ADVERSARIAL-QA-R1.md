@@ -112,9 +112,11 @@ pre-production:
 - `two-exchange-slice.mjs` binds a pair, caps the quote window and aggregate amount, verifies both
   authorizations before settlement, dispatches fee before product, records unknown outcomes, and
   requires both legs' finality before receipt readiness.
-- focused tests cover term tampering, mainnet substitution, wrong asset/facilitator, payer
-  self-payment, duplicate fingerprints, partial/unknown settlement, malformed timestamps,
+- focused tests cover term tampering, mainnet substitution, wrong asset/facilitator, duplicate
+  fingerprints, partial/unknown settlement, malformed timestamps,
   recovery of finality evidence, receipt mutation, and artifact mismatch.
+- The current contracts have no payer/recipient or fee/product recipient-distinctness check, so
+  R04 starts from zero.
 - ADRs keep Shops routes, data, runtime, and landing changes isolated. Option 3 defines separate
   web/scanner roles, PostgreSQL, S3, ALB, and bootstrap boundaries, but no apply is authorized.
 
