@@ -1,4 +1,6 @@
-import { BASE_SEPOLIA, createQuote, requestFingerprint, resolveIdempotency, sha256Hex } from './payment-contract.mjs';
+import { randomUUID } from 'node:crypto';
+
+import { BASE_SEPOLIA, createQuote, requestFingerprint, resolveIdempotency } from './payment-contract.mjs';
 
 const API_PREFIX = '/api/shops/v1';
 const JSON_HEADERS = Object.freeze({ 'Content-Type': 'application/json; charset=utf-8' });
@@ -160,6 +162,7 @@ function observerCatalogueItem(item) {
 export function createShopsApi({
   catalogue = INERT_CATALOGUE_FIXTURES,
   clock = () => new Date().toISOString(),
+  idSource = randomUUID,
   paymentTerms = {},
 } = {}) {
   const catalogueByVersion = new Map();
@@ -173,7 +176,6 @@ export function createShopsApi({
   const orders = new Map();
   const orderClaims = new Map();
   const quoteClaims = new Map();
-  let quoteSequence = 0;
 
   function getCatalogueVersion(productId, productVersion) {
     const item = catalogueByVersion.get(catalogueKey(productId, productVersion));
@@ -200,8 +202,7 @@ export function createShopsApi({
     }
     const issuedAt = asIso(clock());
     const expiresAt = new Date(new Date(issuedAt).valueOf() + QUOTE_TTL_MS).toISOString();
-    quoteSequence += 1;
-    const quoteId = `quote_${sha256Hex(`${item.productId}:${item.productVersion}:${issuedAt}:${quoteSequence}`).slice(0, 24)}`;
+    const quoteId = `quote_${idSource()}`;
     const quote = createQuote({
       quoteId,
       productId: item.productId,
@@ -260,7 +261,7 @@ export function createShopsApi({
       fail(409, 'QUOTE_ALREADY_ORDERED', 'quote is already bound to an order', { orderId: claimedOrderId });
     }
 
-    const orderId = `order_${sha256Hex(`${key}:${quoteRecord.quote.quoteHash}`).slice(0, 24)}`;
+    const orderId = `order_${idSource()}`;
     const order = {
       schemaVersion: 1,
       orderId,

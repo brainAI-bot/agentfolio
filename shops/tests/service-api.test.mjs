@@ -64,29 +64,47 @@ test('quote creation and read pin product, artifact, payment, and licence terms'
   assert.deepEqual(read.body, created.body);
 });
 
-test('same-millisecond quote creates retain unique identities and independent order claims', async () => {
-  const api = createShopsApi({ clock: () => issuedAt });
-  const [firstQuote, secondQuote] = await Promise.all([createQuote(api), createQuote(api)]);
+test('same-millisecond quote creates across instances retain unique identities and bindings', async () => {
+  const firstApi = createShopsApi({ clock: () => issuedAt });
+  const secondApi = createShopsApi({ clock: () => issuedAt });
+  const [firstQuote, secondQuote] = await Promise.all([createQuote(firstApi), createQuote(secondApi)]);
 
   assert.equal(firstQuote.status, 201);
   assert.equal(secondQuote.status, 201);
   assert.notEqual(firstQuote.body.quote.quoteId, secondQuote.body.quote.quoteId);
+  assert.notEqual(firstQuote.body.quote.quoteHash, secondQuote.body.quote.quoteHash);
   assert.notEqual(firstQuote.headers.Location, secondQuote.headers.Location);
 
   const [firstRead, secondRead] = await Promise.all([
-    api.handle({ method: 'GET', path: firstQuote.headers.Location }),
-    api.handle({ method: 'GET', path: secondQuote.headers.Location }),
+    firstApi.handle({ method: 'GET', path: firstQuote.headers.Location }),
+    secondApi.handle({ method: 'GET', path: secondQuote.headers.Location }),
   ]);
   assert.deepEqual(firstRead.body, firstQuote.body);
   assert.deepEqual(secondRead.body, secondQuote.body);
 
   const [firstOrder, secondOrder] = await Promise.all([
-    createOrder(api, firstQuote.body.quote.quoteId, 'same-millisecond-order-1'),
-    createOrder(api, secondQuote.body.quote.quoteId, 'same-millisecond-order-2'),
+    createOrder(firstApi, firstQuote.body.quote.quoteId, 'same-millisecond-order-1'),
+    createOrder(secondApi, secondQuote.body.quote.quoteId, 'same-millisecond-order-2'),
   ]);
   assert.equal(firstOrder.status, 201);
   assert.equal(secondOrder.status, 201);
   assert.notEqual(firstOrder.body.orderId, secondOrder.body.orderId);
+});
+
+test('injected id source controls deterministic quote and order identities', async () => {
+  const ids = ['quote-fixture-id', 'order-fixture-id'];
+  const api = createShopsApi({
+    clock: clock(issuedAt, '2026-09-27T12:01:00.000Z'),
+    idSource: () => ids.shift(),
+  });
+
+  const quoted = await createQuote(api);
+  assert.equal(quoted.status, 201);
+  assert.equal(quoted.body.quote.quoteId, 'quote_quote-fixture-id');
+
+  const ordered = await createOrder(api, quoted.body.quote.quoteId);
+  assert.equal(ordered.status, 201);
+  assert.equal(ordered.body.orderId, 'order_order-fixture-id');
 });
 
 test('order creation is idempotent and starts with payment, finality, and delivery closed', async () => {
