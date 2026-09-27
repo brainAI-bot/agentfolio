@@ -51,6 +51,8 @@ function adapter(trace, index, settlementGate = async () => {}) {
         settlementId: `settlement-${index}-${leg}`,
         transactionHash: `0x${String(index).padStart(2, '0')}${leg === 'fee' ? 'f' : 'e'}`,
         receiptAt: '2026-09-26T15:10:03.000Z',
+        safeAt: '2026-09-26T15:10:04.000Z',
+        finalizedAt: '2026-09-26T15:10:05.000Z',
       };
     },
   };
@@ -67,7 +69,7 @@ function job(index, trace, settlementGate) {
   };
 }
 
-function eip3009Envelope({ from = payer, to = feeRecipient, value = '10000', network = 'eip155:84532' } = {}) {
+function eip3009Envelope({ from = payer, to = feeRecipient, value = '10000', network = 'eip155:84532', nonce = '0xpublic-test-nonce' } = {}) {
   return {
     network,
     payer: from,
@@ -78,7 +80,7 @@ function eip3009Envelope({ from = payer, to = feeRecipient, value = '10000', net
       value,
       validAfter: '0',
       validBefore: '1790435700',
-      nonce: '0xpublic-test-nonce',
+      nonce,
     },
   };
 }
@@ -154,7 +156,7 @@ test('stops before the next pair after the first unexpected settlement outcome',
   first.adapter.settle = async ({ leg }) => {
     trace.push(`settle:1:${leg}`);
     return leg === 'fee'
-      ? { status: 'settled', settlementId: 'settlement-1-fee', transactionHash: '0x1fee', receiptAt: '2026-09-26T15:10:03.000Z' }
+      ? { status: 'settled', settlementId: 'settlement-1-fee', transactionHash: '0x1fee', receiptAt: '2026-09-26T15:10:03.000Z', safeAt: '2026-09-26T15:10:04.000Z', finalizedAt: '2026-09-26T15:10:05.000Z' }
       : { status: 'unknown', settlementId: 'pending-1-product', transactionHash: '0x1pending' };
   };
   const output = await runP13PairsSequentially({ jobs: [first, job(2, trace)], payer });
@@ -186,6 +188,8 @@ test('reviewed live adapter binds quote payTo through EIP-3009 and facilitator r
         settlementId: `settlement-${request.leg}`,
         transactionHash: `0x${request.leg}`,
         receiptAt: '2026-09-26T15:10:03.000Z',
+        safeAt: '2026-09-26T15:10:04.000Z',
+        finalizedAt: '2026-09-26T15:10:05.000Z',
       };
     },
   });
@@ -213,6 +217,7 @@ test('reviewed live adapter binds quote payTo through EIP-3009 and facilitator r
     assert.equal(request.body.paymentRequirements.payTo.toLowerCase(), request.body.paymentPayload.authorization.to.toLowerCase());
   }
   await assert.rejects(() => liveAdapter.verify({
+    pairHash: pair.pairHash,
     leg: 'fee',
     quote: pair.legs.fee.quote,
     paymentEnvelope: eip3009Envelope({ to: productRecipient }),
@@ -259,6 +264,7 @@ test('reviewed live adapter rejects direct payer-to-self quotes before facilitat
   }, issuedAt);
 
   await assert.rejects(() => liveAdapter.verify({
+    pairHash: selfPair.pairHash,
     leg: 'fee',
     quote: selfPair.legs.fee.quote,
     paymentEnvelope: eip3009Envelope({ to: payer }),
@@ -308,4 +314,38 @@ test('rejects an externally constructed payer-to-self pair before adapter dispat
     payer,
   }), errorCode('PAYER_RECIPIENT_FORBIDDEN'));
   assert.deepEqual(trace, []);
+});
+
+test('rejects deserialized quote tampering to Base mainnet USDC and attacker facilitator before dispatch', async () => {
+  const tampered = structuredClone(createPair('tampered-mainnet'));
+  tampered.legs.fee.quote.payment.network = 'eip155:8453';
+  tampered.legs.fee.quote.payment.asset = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+  tampered.legs.fee.quote.facilitator.id = 'https://attacker.invalid';
+  const trace = [];
+  await assert.rejects(() => runP13PairsSequentially({ jobs: [{ ...job(1, trace), pair: tampered }], payer }), errorCode('QUOTE_BINDING_MISMATCH'));
+  assert.deepEqual(trace, []);
+});
+
+test('fresh-nonce rerun cannot overwrite a consumed pair leg or dispatch it again', async () => {
+  const pair = createPair('idempotent-double-run');
+  const requests = [];
+  const liveAdapter = createP13LiveAdapter({
+    payer, feeRecipient, productRecipient,
+    request: async (entry) => {
+      requests.push(`${entry.operation}:${entry.leg}`);
+      if (entry.operation === 'verify') {
+        const nonce = entry.body.paymentPayload.authorization.nonce;
+        return { status: 'verified', authorizationId: `authorization-${entry.leg}-${nonce}`, paymentFingerprint: `fingerprint-${entry.leg}-${nonce}`, validBefore: '2026-09-26T15:15:00.000Z' };
+      }
+      return { status: 'settled', settlementId: `settlement-${entry.leg}`, transactionHash: `0x${entry.leg}`, receiptAt: '2026-09-26T15:10:03.000Z', safeAt: '2026-09-26T15:10:04.000Z', finalizedAt: '2026-09-26T15:10:05.000Z' };
+    },
+  });
+  const run = (nonce) => runP13PairsSequentially({ jobs: [{ pair, feeEnvelope: eip3009Envelope({ to: feeRecipient, nonce: `${nonce}-fee` }), productEnvelope: eip3009Envelope({ to: productRecipient, nonce: `${nonce}-product` }), adapter: liveAdapter, verifiedAt: '2026-09-26T15:10:01.000Z', now: () => '2026-09-26T15:10:02.000Z' }], payer });
+  const first = (await run('first')).results[0];
+  const second = (await run('fresh')).results[0];
+  assert.equal(first.state, 'PAID');
+  assert.equal(second.state, 'PAID');
+  assert.equal(second.legs.fee.authorizationId, first.legs.fee.authorizationId);
+  assert.equal(second.legs.product.paymentFingerprint, first.legs.product.paymentFingerprint);
+  assert.equal(requests.filter((entry) => entry.startsWith('settle:')).length, 2);
 });
