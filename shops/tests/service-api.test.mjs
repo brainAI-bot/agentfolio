@@ -64,6 +64,31 @@ test('quote creation and read pin product, artifact, payment, and licence terms'
   assert.deepEqual(read.body, created.body);
 });
 
+test('same-millisecond quote creates retain unique identities and independent order claims', async () => {
+  const api = createShopsApi({ clock: () => issuedAt });
+  const [firstQuote, secondQuote] = await Promise.all([createQuote(api), createQuote(api)]);
+
+  assert.equal(firstQuote.status, 201);
+  assert.equal(secondQuote.status, 201);
+  assert.notEqual(firstQuote.body.quote.quoteId, secondQuote.body.quote.quoteId);
+  assert.notEqual(firstQuote.headers.Location, secondQuote.headers.Location);
+
+  const [firstRead, secondRead] = await Promise.all([
+    api.handle({ method: 'GET', path: firstQuote.headers.Location }),
+    api.handle({ method: 'GET', path: secondQuote.headers.Location }),
+  ]);
+  assert.deepEqual(firstRead.body, firstQuote.body);
+  assert.deepEqual(secondRead.body, secondQuote.body);
+
+  const [firstOrder, secondOrder] = await Promise.all([
+    createOrder(api, firstQuote.body.quote.quoteId, 'same-millisecond-order-1'),
+    createOrder(api, secondQuote.body.quote.quoteId, 'same-millisecond-order-2'),
+  ]);
+  assert.equal(firstOrder.status, 201);
+  assert.equal(secondOrder.status, 201);
+  assert.notEqual(firstOrder.body.orderId, secondOrder.body.orderId);
+});
+
 test('order creation is idempotent and starts with payment, finality, and delivery closed', async () => {
   const api = createShopsApi({ clock: clock(issuedAt, '2026-09-27T12:01:00.000Z') });
   const quoted = await createQuote(api);

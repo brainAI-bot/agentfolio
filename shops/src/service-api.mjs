@@ -173,6 +173,7 @@ export function createShopsApi({
   const orders = new Map();
   const orderClaims = new Map();
   const quoteClaims = new Map();
+  let quoteSequence = 0;
 
   function getCatalogueVersion(productId, productVersion) {
     const item = catalogueByVersion.get(catalogueKey(productId, productVersion));
@@ -199,7 +200,8 @@ export function createShopsApi({
     }
     const issuedAt = asIso(clock());
     const expiresAt = new Date(new Date(issuedAt).valueOf() + QUOTE_TTL_MS).toISOString();
-    const quoteId = `quote_${sha256Hex(`${item.productId}:${item.productVersion}:${issuedAt}`).slice(0, 24)}`;
+    quoteSequence += 1;
+    const quoteId = `quote_${sha256Hex(`${item.productId}:${item.productVersion}:${issuedAt}:${quoteSequence}`).slice(0, 24)}`;
     const quote = createQuote({
       quoteId,
       productId: item.productId,
