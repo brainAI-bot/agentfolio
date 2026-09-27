@@ -323,13 +323,15 @@ test('rejects mainnet, wrong assets, wrong facilitator, over-limit order, and re
   assert.throws(() => createTwoExchangeReceipt(pair(), artifactBytes), errorCode('INVALID_PAIR_TRANSITION'));
 });
 
-test('records both settlement transactions before separate monotonic finality confirmation', async () => {
-  const verified = await fullyVerified(pair('null-finality'));
+test('records both settlement transactions when settle finality is partial or out of order', async () => {
+  const verified = await fullyVerified(pair('deferred-finality'));
   const calls = [];
   const awaitingFinality = await settleTwoExchangePair(verified, {
     adapter: { settle: async ({ leg }) => {
       calls.push(leg);
-      return { status: 'settled', settlementId: `settlement-${leg}`, transactionHash: `0xtx-${leg}`, receiptAt: '2026-09-26T10:00:03.000Z', safeAt: null, finalizedAt: null };
+      return leg === 'fee'
+        ? { status: 'settled', settlementId: 'settlement-fee', transactionHash: '0xtx-fee', receiptAt: '2026-09-26T10:00:03.000Z', safeAt: '2026-09-26T10:02:03.000Z' }
+        : { status: 'settled', settlementId: 'settlement-product', transactionHash: '0xtx-product', receiptAt: '2026-09-26T10:00:03.000Z', safeAt: '2026-09-26T09:58:03.000Z', finalizedAt: '2026-09-26T09:59:03.000Z' };
     } },
     now: () => '2026-09-26T10:00:02.000Z',
   });
@@ -353,6 +355,9 @@ test('records both settlement transactions before separate monotonic finality co
     product: { ...evidence.product, safeAt: '2026-09-26T10:20:05.000Z', finalizedAt: '2026-09-26T10:20:04.000Z' },
   }), errorCode('SETTLEMENT_FINALITY_REQUIRED'));
   assert.equal(awaitingFinality.legs.fee.safeAt, undefined);
+  assert.equal(awaitingFinality.legs.fee.finalizedAt, undefined);
+  assert.equal(awaitingFinality.legs.product.safeAt, undefined);
+  assert.equal(awaitingFinality.legs.product.finalizedAt, undefined);
 
   const paid = confirmTwoExchangeFinality(awaitingFinality, evidence);
   assert.equal(paid.state, 'PAID');

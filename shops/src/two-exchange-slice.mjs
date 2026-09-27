@@ -224,12 +224,24 @@ function normalizeFinality(result, receiptAt, legName) {
   return { safeAt, finalizedAt };
 }
 
+function normalizeSettlementFinality(result, receiptAt) {
+  if (result?.safeAt == null || result?.finalizedAt == null) return null;
+  try {
+    const safeAt = iso(result.safeAt);
+    const finalizedAt = iso(result.finalizedAt);
+    if (new Date(safeAt) < new Date(receiptAt) || new Date(finalizedAt) < new Date(safeAt)) return null;
+    return { safeAt, finalizedAt };
+  } catch {
+    return null;
+  }
+}
+
 function applySettlement(next, legName, result, at) {
   const leg = next.legs[legName];
   if (result?.status === 'settled') {
     if (!result.transactionHash || !result.settlementId) fail('SETTLEMENT_BINDING_MISMATCH', `${legName} settlement identifiers are required`);
     const receiptAt = iso(result.receiptAt ?? at);
-    const finality = normalizeFinality(result, receiptAt, legName);
+    const finality = normalizeSettlementFinality(result, receiptAt);
     next.legs[legName] = {
       ...leg,
       state: finality ? 'SETTLED' : 'AWAITING_FINALITY',
