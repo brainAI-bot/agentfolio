@@ -4,12 +4,26 @@ This directory is an **inert, independently locked boundary** for Shops work. It
 
 Scope is the Shops runtime. The static Makings landing is served separately and is not deployed from this boundary.
 
-Wave 0 provides only:
+Wave 0 provides:
 
 - an isolated Node package and lockfile;
 - a CI-only PostgreSQL 16 + MinIO harness;
 - executable boundary/retired-route assertions;
-- ADRs for route, data, runtime, hosting, and landing-switch decisions.
+- ADRs for route, data, runtime, hosting, and landing-switch decisions;
+- an inert in-memory `/api/shops/v1` contract handler for pinned catalogue list/detail reads, quote create/read, and idempotent order create/read.
+
+The contract handler in `src/service-api.mjs` does not open a listener or mount into AgentFolio. Its catalogue entry and recipient are synthetic fixtures, payment dispatch is absent, and new orders remain explicitly blocked at payment, finality, and delivery boundaries.
+
+## Inert API contract
+
+The unmounted handler accepts `{ method, path, headers, body }` and returns `{ status, headers, body }` for:
+
+- `GET /api/shops/v1/catalogue`
+- `GET /api/shops/v1/catalogue/:productId/versions/:productVersion`
+- `POST /api/shops/v1/quotes`
+- `GET /api/shops/v1/quotes/:quoteId`
+- `POST /api/shops/v1/orders` (requires `Idempotency-Key`)
+- `GET /api/shops/v1/orders/:orderId`
 
 ## Local checks
 
