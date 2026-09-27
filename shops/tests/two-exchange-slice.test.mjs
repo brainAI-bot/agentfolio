@@ -365,3 +365,49 @@ test('records both settlement transactions when settle finality is partial or ou
   assert.equal(paid.legs.product.state, 'SETTLED');
   assert.equal(readTwoExchangeState(paid).receiptReady, true);
 });
+
+test('retains settled transactions when receiptAt is malformed and confirms both legs later', async () => {
+  const verified = await fullyVerified(pair('malformed-receipt-at'));
+  const calls = [];
+  const awaitingFinality = await settleTwoExchangePair(verified, {
+    adapter: { settle: async ({ leg }) => {
+      calls.push(leg);
+      return leg === 'fee'
+        ? { ...settledResult(leg), receiptAt: 'not-a-timestamp' }
+        : { ...settledResult(leg), safeAt: '2026-09-26T10:02:03.000Z', finalizedAt: undefined };
+    } },
+    now: () => '2026-09-26T10:00:02.000Z',
+  });
+
+  assert.deepEqual(calls, ['fee', 'product']);
+  assert.equal(awaitingFinality.state, 'AWAITING_FINALITY');
+  assert.equal(awaitingFinality.legs.fee.state, 'AWAITING_FINALITY');
+  assert.equal(awaitingFinality.legs.fee.transactionHash, '0xtx-fee');
+  assert.equal(awaitingFinality.legs.fee.settlementId, 'settlement-fee');
+  assert.equal(awaitingFinality.legs.fee.receiptAt, '2026-09-26T10:00:02.000Z');
+  assert.equal(awaitingFinality.legs.product.state, 'AWAITING_FINALITY');
+  assert.equal(awaitingFinality.legs.product.transactionHash, '0xtx-product');
+  assert.equal(awaitingFinality.legs.product.safeAt, undefined);
+  assert.equal(readTwoExchangeState(awaitingFinality).receiptReady, false);
+  assert.deepEqual(readTwoExchangeState(awaitingFinality), readTwoExchangeState(awaitingFinality));
+  assert.deepEqual(calls, ['fee', 'product']);
+
+  const paid = confirmTwoExchangeFinality(awaitingFinality, {
+    fee: {
+      transactionHash: '0xtx-fee',
+      settlementId: 'settlement-fee',
+      safeAt: '2026-09-26T10:02:03.000Z',
+      finalizedAt: '2026-09-26T10:20:03.000Z',
+    },
+    product: {
+      transactionHash: '0xtx-product',
+      settlementId: 'settlement-product',
+      safeAt: '2026-09-26T10:02:04.000Z',
+      finalizedAt: '2026-09-26T10:20:04.000Z',
+    },
+    at: '2026-09-26T10:20:05.000Z',
+  });
+  assert.equal(paid.state, 'PAID');
+  assert.equal(readTwoExchangeState(paid).receiptReady, true);
+  assert.deepEqual(calls, ['fee', 'product']);
+});
