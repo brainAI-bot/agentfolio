@@ -108,6 +108,17 @@ export function valueReduceFacilitatorSettlementResponse(response) {
   return reducePublicEvidence(response);
 }
 
+function valueReduceSettlementError(error) {
+  return {
+    ...(typeof error?.code === 'string' || typeof error?.code === 'number'
+      ? { code: String(error.code) }
+      : {}),
+    message: typeof error?.message === 'string'
+      ? error.message
+      : 'facilitator settlement request failed',
+  };
+}
+
 function authorizationEvidence(quote, paymentEnvelope) {
   const authorizer = normalizedAddress(
     paymentEnvelope.authorization.from,
@@ -200,7 +211,19 @@ export function createP13LiveAdapter({ payer, feeRecipient, productRecipient, re
             facilitatorResponse: valueReduceFacilitatorSettlementResponse(facilitatorResponse),
             errorReason: typeof facilitatorResponse?.errorReason === 'string' ? facilitatorResponse.errorReason : null,
           },
-        }));
+        }))
+        .catch((error) => {
+          const reducedError = valueReduceSettlementError(error);
+          return {
+            status: 'unknown',
+            errorReason: reducedError.message,
+            settlementEvidence: {
+              ...bound.evidence,
+              facilitatorResponse: { error: reducedError },
+              errorReason: reducedError.message,
+            },
+          };
+        });
       consumedSettlements.set(legKey, settlement);
       return settlement;
     },

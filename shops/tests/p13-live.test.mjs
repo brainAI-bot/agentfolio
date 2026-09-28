@@ -90,6 +90,48 @@ function errorCode(code) {
   return (error) => error?.code === code;
 }
 
+async function runLiveProductOutcome(orderId, productSettlement) {
+  const pair = createPair(orderId);
+  const liveAdapter = createP13LiveAdapter({
+    payer,
+    feeRecipient,
+    productRecipient,
+    request: async ({ operation, leg }) => {
+      if (operation === 'verify') {
+        return {
+          status: 'verified',
+          authorizationId: `${orderId}-${leg}`,
+          validBefore: '2026-09-26T15:15:00.000Z',
+        };
+      }
+      if (leg === 'fee') {
+        return {
+          status: 'settled',
+          settlementId: `${orderId}-fee`,
+          transactionHash: `0x${orderId}-fee`,
+          receiptAt: '2026-09-26T15:10:03.000Z',
+          safeAt: '2026-09-26T15:10:04.000Z',
+          finalizedAt: '2026-09-26T15:10:05.000Z',
+        };
+      }
+      return typeof productSettlement === 'function'
+        ? productSettlement()
+        : productSettlement;
+    },
+  });
+  return runP13PairsSequentially({
+    jobs: [{
+      pair,
+      feeEnvelope: eip3009Envelope({ to: feeRecipient, nonce: `${orderId}-fee-nonce` }),
+      productEnvelope: eip3009Envelope({ to: productRecipient, nonce: `${orderId}-product-nonce` }),
+      adapter: liveAdapter,
+      verifiedAt: '2026-09-26T15:10:01.000Z',
+      now: () => '2026-09-26T15:10:02.000Z',
+    }],
+    payer,
+  });
+}
+
 test('imports and invokes the reviewed two-exchange module', async () => {
   const source = await readFile(new URL('../scripts/p13-live.mjs', import.meta.url), 'utf8');
   assert.match(source, /from '\.\.\/src\/two-exchange-slice\.mjs'/);
@@ -459,6 +501,64 @@ test('pair-10 unknown preserves joinable authorization and value-reduced settlem
   for (const forbidden of ['must-not-persist', 'paymentPayload', 'privateKey', 'signature']) {
     assert.equal(serialized.includes(forbidden), false);
   }
+});
+
+test('x402 rejected product settlement preserves the frozen pair and bound evidence', async () => {
+  const output = await runLiveProductOutcome('x402-rejected', {
+    success: false,
+    errorReason: 'invalid_exact_evm_payload_signature',
+    transaction: '',
+    network: 'eip155:84532',
+    payer,
+  });
+  assert.equal(output.completed, false);
+  assert.equal(output.results.length, 1);
+  const pair = output.results[0];
+  assert.equal(pair.state, 'PRODUCT_SETTLEMENT_REJECTED');
+  assert.equal(pair.legs.fee.state, 'SETTLED');
+  assert.equal(pair.legs.product.state, 'SETTLEMENT_REJECTED');
+  assert.equal(pair.legs.product.authorizationNonce, 'x402-rejected-product-nonce');
+  assert.equal(pair.legs.product.settlementEvidence.errorReason, 'invalid_exact_evm_payload_signature');
+  assert.equal(pair.legs.product.settlementEvidence.payer, payer);
+  assert.equal(pair.legs.product.automaticResubmitAllowed, false);
+});
+
+test('explicit failed product settlement preserves the frozen pair and error reason', async () => {
+  const output = await runLiveProductOutcome('status-failed', {
+    status: 'failed',
+    success: false,
+    errorReason: 'insufficient_funds',
+  });
+  const pair = output.results[0];
+  assert.equal(output.completed, false);
+  assert.equal(pair.state, 'PRODUCT_SETTLEMENT_REJECTED');
+  assert.equal(pair.legs.fee.state, 'SETTLED');
+  assert.equal(pair.legs.product.authorizationNonce, 'status-failed-product-nonce');
+  assert.equal(pair.legs.product.settlementEvidence.errorReason, 'insufficient_funds');
+  assert.equal(pair.legs.product.automaticResubmitAllowed, false);
+});
+
+test('thrown product settle request freezes as unknown with only reduced public error evidence', async () => {
+  const output = await runLiveProductOutcome('request-timeout', () => {
+    const error = new Error('facilitator request timed out');
+    error.code = 'ETIMEDOUT';
+    error.request = { paymentPayload: { signature: 'must-not-persist' } };
+    throw error;
+  });
+  const pair = output.results[0];
+  assert.equal(output.completed, false);
+  assert.equal(pair.state, 'PRODUCT_SETTLEMENT_UNKNOWN');
+  assert.equal(pair.legs.fee.state, 'SETTLED');
+  assert.equal(pair.legs.product.state, 'SETTLEMENT_UNKNOWN');
+  assert.equal(pair.legs.product.authorizationNonce, 'request-timeout-product-nonce');
+  assert.deepEqual(pair.legs.product.settlementEvidence.facilitatorResponse, {
+    error: { code: 'ETIMEDOUT', message: 'facilitator request timed out' },
+  });
+  assert.equal(pair.legs.product.automaticResubmitAllowed, false);
+  const serialized = JSON.stringify(pair.legs.product.settlementEvidence);
+  assert.equal(serialized.includes('must-not-persist'), false);
+  assert.equal(serialized.includes('paymentPayload'), false);
+  assert.equal(serialized.includes('signature'), false);
 });
 
 test('settlement evidence reducer excludes private request material', () => {

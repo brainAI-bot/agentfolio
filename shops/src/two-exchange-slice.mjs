@@ -304,7 +304,19 @@ function applySettlement(next, legName, result, at) {
     next.history.push({ type: `${legName}_settlement_unknown`, at: iso(at), state: next.state });
     return 'unknown';
   }
-  fail(result?.failureCode ?? 'SETTLEMENT_REJECTED', `${legName} settlement was rejected`);
+  const failureCode = result?.failureCode ?? 'SETTLEMENT_REJECTED';
+  next.legs[legName] = {
+    ...leg,
+    state: 'SETTLEMENT_REJECTED',
+    settlementEvidence: settlementEvidence ? clone(settlementEvidence) : undefined,
+    errorReason: settlementEvidence?.errorReason ?? result?.errorReason ?? null,
+    failureCode,
+    rejectedAt: iso(at),
+    automaticResubmitAllowed: false,
+  };
+  next.state = legName === 'fee' ? 'FEE_SETTLEMENT_REJECTED' : 'PRODUCT_SETTLEMENT_REJECTED';
+  next.history.push({ type: `${legName}_settlement_rejected`, at: iso(at), state: next.state });
+  return 'rejected';
 }
 
 export async function settleTwoExchangePair(pair, { adapter, now = () => new Date().toISOString() }) {
@@ -315,7 +327,7 @@ export async function settleTwoExchangePair(pair, { adapter, now = () => new Dat
   assertDispatchable(next.legs.fee, feeDispatchedAt);
   const feeResult = await adapter.settle({ pairHash: next.pairHash, leg: 'fee', quote: next.legs.fee.quote, authorization: next.legs.fee });
   const feeOutcome = applySettlement(next, 'fee', feeResult, feeDispatchedAt);
-  if (feeOutcome === 'unknown') return next;
+  if (feeOutcome === 'unknown' || feeOutcome === 'rejected') return next;
   next.state = feeOutcome === 'settled' ? 'FEE_SETTLED' : 'FEE_AWAITING_FINALITY';
   next.history.push({ type: feeOutcome === 'settled' ? 'fee_settled' : 'fee_awaiting_finality', at: feeDispatchedAt, state: next.state });
 
@@ -331,7 +343,7 @@ export async function settleTwoExchangePair(pair, { adapter, now = () => new Dat
   }
   const productResult = await adapter.settle({ pairHash: next.pairHash, leg: 'product', quote: next.legs.product.quote, authorization: next.legs.product });
   const productOutcome = applySettlement(next, 'product', productResult, productDispatchedAt);
-  if (productOutcome === 'unknown') return next;
+  if (productOutcome === 'unknown' || productOutcome === 'rejected') return next;
   if (feeOutcome === 'settled' && productOutcome === 'settled') {
     next.state = 'PAID';
     next.paidAt = productDispatchedAt;
