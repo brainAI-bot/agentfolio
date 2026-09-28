@@ -414,7 +414,6 @@ test('pair-10 unknown preserves joinable authorization and value-reduced settlem
         if (index === 10 && leg === 'product') {
           return {
             status: 'unknown',
-            success: false,
             transaction: null,
             errorReason: 'upstream settlement status unavailable',
             diagnostic: { code: 'TEMPORARY_UNKNOWN', signature: 'must-not-persist' },
@@ -469,7 +468,6 @@ test('pair-10 unknown preserves joinable authorization and value-reduced settlem
   assert.equal(product.settlementEvidence.errorReason, 'upstream settlement status unavailable');
   assert.deepEqual(product.settlementEvidence.facilitatorResponse, {
     status: 'unknown',
-    success: false,
     transaction: null,
     errorReason: 'upstream settlement status unavailable',
     diagnostic: { code: 'TEMPORARY_UNKNOWN' },
@@ -520,6 +518,34 @@ test('x402 rejected product settlement preserves the frozen pair and bound evide
   assert.equal(pair.legs.product.authorizationNonce, 'x402-rejected-product-nonce');
   assert.equal(pair.legs.product.settlementEvidence.errorReason, 'invalid_exact_evm_payload_signature');
   assert.equal(pair.legs.product.settlementEvidence.payer, payer);
+  assert.equal(pair.legs.product.automaticResubmitAllowed, false);
+});
+
+test('x402 success without canonical settlement identifiers freezes as unknown', async () => {
+  const output = await runLiveProductOutcome('x402-success-unknown', {
+    success: true,
+    transaction: '0xabc',
+    network: 'eip155:84532',
+    payer,
+  });
+  const pair = output.results[0];
+  assert.equal(output.completed, false);
+  assert.equal(pair.state, 'PRODUCT_SETTLEMENT_UNKNOWN');
+  assert.equal(pair.legs.fee.state, 'SETTLED');
+  assert.equal(pair.legs.product.state, 'SETTLEMENT_UNKNOWN');
+  assert.equal(pair.legs.product.authorizationNonce, 'x402-success-unknown-product-nonce');
+  assert.equal(pair.legs.product.settlementEvidence.facilitatorResponse.success, true);
+  assert.equal(pair.legs.product.settlementEvidence.facilitatorResponse.transaction, '0xabc');
+  assert.equal(pair.legs.product.automaticResubmitAllowed, false);
+});
+
+test('unrecognised product settlement response freezes as unknown', async () => {
+  const output = await runLiveProductOutcome('unrecognised-unknown', {});
+  const pair = output.results[0];
+  assert.equal(output.completed, false);
+  assert.equal(pair.state, 'PRODUCT_SETTLEMENT_UNKNOWN');
+  assert.equal(pair.legs.product.state, 'SETTLEMENT_UNKNOWN');
+  assert.deepEqual(pair.legs.product.settlementEvidence.facilitatorResponse, {});
   assert.equal(pair.legs.product.automaticResubmitAllowed, false);
 });
 

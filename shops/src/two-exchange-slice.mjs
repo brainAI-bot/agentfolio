@@ -262,6 +262,13 @@ function normalizeSettlementMetadata(result, at) {
   }
 }
 
+const EXPLICIT_SETTLEMENT_FAILURE_STATUSES = new Set([
+  'failed',
+  'rejected',
+  'settlement_failed',
+  'settlement_rejected',
+]);
+
 function applySettlement(next, legName, result, at) {
   const leg = next.legs[legName];
   const settlementEvidence = result?.settlementEvidence;
@@ -290,7 +297,9 @@ function applySettlement(next, legName, result, at) {
     };
     return finality ? 'settled' : 'awaiting_finality';
   }
-  if (result?.status === 'settlement_pending' || result?.status === 'unknown') {
+  const explicitlyRejected = result?.success === false
+    || EXPLICIT_SETTLEMENT_FAILURE_STATUSES.has(result?.status);
+  if (!explicitlyRejected) {
     next.legs[legName] = {
       ...leg,
       state: 'SETTLEMENT_UNKNOWN',
