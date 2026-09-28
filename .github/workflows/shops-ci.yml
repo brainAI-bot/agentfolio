@@ -63,7 +63,7 @@ jobs:
         run: npm ci
 
       - name: Start disposable CI services
-        run: docker compose -f compose.ci.yml up --detach postgres
+        run: docker compose -f compose.ci.yml up --detach --wait postgres
 
       - name: Wait for disposable PostgreSQL service
         env:
