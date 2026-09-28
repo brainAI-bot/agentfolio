@@ -1,6 +1,6 @@
 # AgentFolio (legacy) → Makings
 
-This repository keeps the legacy AgentFolio site and APIs at `agentfolio.bot` and contains the pre-launch Makings Shops boundary. Makings is a brainAI product. Shops is being built and takes no orders.
+This repository keeps the legacy AgentFolio site and APIs at `agentfolio.bot`. Makings is a brainAI product; its code (formerly `shops/`) moved to a private repository.
 
 ## Repo map
 - `src/` backend API and services
