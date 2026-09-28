@@ -11,7 +11,8 @@ Wave 0 provides:
 - executable boundary/retired-route assertions;
 - ADRs for route, data, runtime, hosting, and landing-switch decisions;
 - an inert in-memory `/api/shops/v1` contract handler for pinned catalogue list/detail reads, quote create/read, and idempotent order create/read.
-- reversible PostgreSQL migrations for pinned catalogue versions and durable quote, order, dispatch, finality, and delivery-receipt rows.
+- reversible PostgreSQL migrations for pinned catalogue versions and durable quote, order, payment-leg, dispatch, finality, and delivery-receipt rows;
+- a focused durable order/dispatch packet with monotonic state versions, fee-before-product dispatch gating, allowlisted settlement evidence persistence, pinned-product joins, and scoped rollback/readback proof.
 
 The contract handler in `src/service-api.mjs` does not open a listener or mount into AgentFolio. Its catalogue entry and recipient are synthetic fixtures, payment dispatch is absent, and new orders remain explicitly blocked at payment, finality, and delivery boundaries.
 
