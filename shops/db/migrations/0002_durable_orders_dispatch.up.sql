@@ -601,9 +601,20 @@ BEGIN
       SELECT * INTO predecessor
       FROM shops.payment_dispatches
       WHERE dispatch_id = leg_row.current_dispatch_id;
-      IF predecessor.state = 'FAILED'
-         AND NEW.attempt_no <> leg_row.current_attempt_no + 1 THEN
-        RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'dispatch successor requires the next attempt number after terminal failure';
+
+      IF predecessor.state = 'FAILED' THEN
+        IF EXISTS (
+          SELECT 1
+          FROM shops.payment_dispatch_results
+          WHERE dispatch_id = predecessor.dispatch_id
+            AND outcome IN ('UNKNOWN', 'COMMITTED')
+        ) THEN
+          RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'ambiguous or committed dispatch must be reconciled, not retried';
+        END IF;
+
+        IF NEW.attempt_no <> leg_row.current_attempt_no + 1 THEN
+          RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'dispatch successor requires the next attempt number after terminal failure';
+        END IF;
       END IF;
     END IF;
   END IF;

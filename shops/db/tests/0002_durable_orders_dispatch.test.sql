@@ -152,6 +152,51 @@ INSERT INTO shops.payment_dispatches (
   authorization_id, payment_fingerprint,
   payment_network, price_scheme, payment_asset, amount_minor,
   pay_to, facilitator_id, valid_before, dispatched_at,
+  observed_settlement_id, observed_transaction_hash,
+  settlement_evidence, error_reason, updated_at
+) VALUES (
+  'dispatch_gate_fee_unknown', 'order_gate', 'quote_gate', 'fee', 'leg_quote_gate_fee', 'SETTLEMENT_UNKNOWN',
+  'authorization-gate-fee-unknown', 'fingerprint-gate-fee-unknown',
+  'eip155:84532', 'exact', 'fixture-base-sepolia-asset', 100,
+  '0xfee-payee', 'fixture-facilitator', '2026-09-28T06:30:00Z', '2026-09-28T06:02:01Z',
+  'settlement-gate-fee-unknown', '0xtx-gate-fee-unknown',
+  '{"status":"unknown","error":{"code":"TIMEOUT","message":"synthetic ambiguous fixture"}}'::jsonb,
+  'synthetic ambiguous fixture', '2026-09-28T06:02:02Z'
+);
+
+UPDATE shops.payment_dispatches
+SET state = 'FAILED',
+    failure_code = 'AMBIGUOUS_TIMEOUT',
+    settlement_evidence = '{"status":"failed","failureCode":"AMBIGUOUS_TIMEOUT","errorReason":"synthetic ambiguous terminal marker"}'::jsonb,
+    error_reason = 'synthetic ambiguous terminal marker',
+    updated_at = '2026-09-28T06:02:03Z'
+WHERE dispatch_id = 'dispatch_gate_fee_unknown';
+
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO shops.payment_dispatches (
+      dispatch_id, order_id, quote_id, leg, leg_quote_id, attempt_no, state,
+      authorization_id, payment_fingerprint,
+      payment_network, price_scheme, payment_asset, amount_minor,
+      pay_to, facilitator_id, valid_before, dispatched_at
+    ) VALUES (
+      'dispatch_gate_fee_after_unknown', 'order_gate', 'quote_gate', 'fee', 'leg_quote_gate_fee', 2, 'DISPATCHED',
+      'authorization-gate-fee-after-unknown', 'fingerprint-gate-fee-after-unknown',
+      'eip155:84532', 'exact', 'fixture-base-sepolia-asset', 100,
+      '0xfee-payee', 'fixture-facilitator', '2026-09-28T06:30:00Z', '2026-09-28T06:02:04Z'
+    );
+    RAISE EXCEPTION 'expected retry after an unknown result to fail';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+END;
+$$;
+
+INSERT INTO shops.payment_dispatches (
+  dispatch_id, order_id, quote_id, leg, leg_quote_id, state,
+  authorization_id, payment_fingerprint,
+  payment_network, price_scheme, payment_asset, amount_minor,
+  pay_to, facilitator_id, valid_before, dispatched_at,
   settlement_id, transaction_hash, receipt_at, settlement_evidence, updated_at
 ) VALUES (
   'dispatch_flow_fee', 'order_flow', 'quote_flow', 'fee', 'leg_quote_flow_fee', 'AWAITING_FINALITY',
@@ -322,6 +367,22 @@ WHERE dispatch_id = 'dispatch_retry_fee_2';
 
 DO $$
 BEGIN
+  BEGIN
+    INSERT INTO shops.payment_dispatches (
+      dispatch_id, order_id, quote_id, leg, leg_quote_id, attempt_no, state,
+      authorization_id, payment_fingerprint,
+      payment_network, price_scheme, payment_asset, amount_minor,
+      pay_to, facilitator_id, valid_before, dispatched_at
+    ) VALUES (
+      'dispatch_retry_fee_3', 'order_retry', 'quote_retry', 'fee', 'leg_quote_retry_fee', 3, 'DISPATCHED',
+      'authorization-retry-fee-3', 'fingerprint-retry-fee-3',
+      'eip155:84532', 'exact', 'fixture-base-sepolia-asset', 100,
+      '0xfee-payee', 'fixture-facilitator', '2026-09-28T06:30:00Z', '2026-09-28T06:04:05Z'
+    );
+    RAISE EXCEPTION 'expected retry after a committed result to fail';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+
   BEGIN
     INSERT INTO shops.payment_dispatches (
       dispatch_id, order_id, quote_id, leg, leg_quote_id, state,
