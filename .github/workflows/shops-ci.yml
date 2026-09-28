@@ -63,9 +63,11 @@ jobs:
         run: npm ci
 
       - name: Start disposable CI services
-        run: docker compose -f compose.ci.yml up --detach postgres minio
+        run: docker compose -f compose.ci.yml up --detach postgres
 
-      - name: Wait for disposable CI services
+      - name: Wait for disposable PostgreSQL service
+        env:
+          SHOPS_REQUIRED_SERVICES: postgres
         run: npm run check:services
 
       - name: Test PostgreSQL migrations

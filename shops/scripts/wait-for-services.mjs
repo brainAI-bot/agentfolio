@@ -1,9 +1,22 @@
 import net from 'node:net';
 
-const services = [
-  ['PostgreSQL', process.env.SHOPS_POSTGRES_HOST || '127.0.0.1', Number(process.env.SHOPS_POSTGRES_PORT || 55432)],
-  ['MinIO', process.env.SHOPS_MINIO_HOST || '127.0.0.1', Number(process.env.SHOPS_MINIO_PORT || 59000)],
-];
+const availableServices = new Map([
+  ['postgres', ['PostgreSQL', process.env.SHOPS_POSTGRES_HOST || '127.0.0.1', Number(process.env.SHOPS_POSTGRES_PORT || 55432)]],
+  ['minio', ['MinIO', process.env.SHOPS_MINIO_HOST || '127.0.0.1', Number(process.env.SHOPS_MINIO_PORT || 59000)]],
+]);
+
+const requiredServiceNames = (process.env.SHOPS_REQUIRED_SERVICES || 'postgres,minio')
+  .split(',')
+  .map(name => name.trim().toLowerCase())
+  .filter(Boolean);
+
+if (requiredServiceNames.length === 0) throw new Error('SHOPS_REQUIRED_SERVICES must name at least one service');
+
+const services = requiredServiceNames.map(name => {
+  const service = availableServices.get(name);
+  if (!service) throw new Error(`unknown required service: ${name}`);
+  return service;
+});
 
 function connect(host, port) {
   return new Promise((resolve, reject) => {
