@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { createTwoExchangePair } from '../src/two-exchange-slice.mjs';
+import { createTwoExchangePair, readTwoExchangeState } from '../src/two-exchange-slice.mjs';
 
 import {
   PAIR_8_PRODUCT_AUTHORIZATION_DISPOSITION,
@@ -405,13 +405,25 @@ test('pair-10 unknown preserves joinable authorization and value-reduced settlem
   assert.equal(output.completed, false);
   assert.deepEqual(output.stoppedAt, { index: 9, orderId: 'pair-10', state: 'PRODUCT_SETTLEMENT_UNKNOWN' });
   const product = output.results[9].legs.product;
+  assert.equal(product.authorizationEvidence.authorizer, payer);
+  assert.equal(product.authorizationEvidence.payer, payer);
   assert.equal(product.authorizationNonce, '0xnonce-10-product');
   assert.equal(product.quoteHash, product.quote.quoteHash);
   assert.equal(product.authorizationEvidence.quoteHash, product.quote.quoteHash);
   assert.equal(product.authorizationEvidence.paymentFingerprint, product.paymentFingerprint);
+  assert.equal(product.authorizationEvidence.network, 'eip155:84532');
+  assert.equal(product.authorizationEvidence.asset, '0x036cbd53842c5426634e7929541ec2318f3dcf7e');
+  assert.equal(product.authorizationEvidence.payTo, productRecipient);
+  assert.equal(product.authorizationEvidence.amountMinor, '10000');
+  assert.equal(product.settlementEvidence.authorizer, payer);
+  assert.equal(product.settlementEvidence.payer, payer);
   assert.equal(product.settlementEvidence.authorizationNonce, '0xnonce-10-product');
   assert.equal(product.settlementEvidence.paymentFingerprint, product.paymentFingerprint);
   assert.equal(product.settlementEvidence.quoteHash, product.quote.quoteHash);
+  assert.equal(product.settlementEvidence.network, 'eip155:84532');
+  assert.equal(product.settlementEvidence.asset, '0x036cbd53842c5426634e7929541ec2318f3dcf7e');
+  assert.equal(product.settlementEvidence.payTo, productRecipient);
+  assert.equal(product.settlementEvidence.amountMinor, '10000');
   assert.equal(product.settlementEvidence.errorReason, 'upstream settlement status unavailable');
   assert.deepEqual(product.settlementEvidence.facilitatorResponse, {
     status: 'unknown',
@@ -419,6 +431,29 @@ test('pair-10 unknown preserves joinable authorization and value-reduced settlem
     transaction: null,
     errorReason: 'upstream settlement status unavailable',
     diagnostic: { code: 'TEMPORARY_UNKNOWN' },
+  });
+  const readback = readTwoExchangeState(output.results[9]);
+  assert.equal(readback.asset, '0x036CbD53842c5426634e7929541eC2318f3dCF7e');
+  assert.deepEqual({
+    authorizer: readback.product.authorizer,
+    payer: readback.product.payer,
+    nonce: readback.product.authorizationNonce,
+    network: readback.product.network,
+    asset: readback.product.asset,
+    payTo: readback.product.payTo,
+    amountMinor: readback.product.amountMinor,
+    quoteHash: readback.product.quoteHash,
+    paymentFingerprint: readback.product.paymentFingerprint,
+  }, {
+    authorizer: payer,
+    payer,
+    nonce: '0xnonce-10-product',
+    network: 'eip155:84532',
+    asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    payTo: productRecipient,
+    amountMinor: '10000',
+    quoteHash: product.quote.quoteHash,
+    paymentFingerprint: product.paymentFingerprint,
   });
   const serialized = JSON.stringify(output.results[9]);
   for (const forbidden of ['must-not-persist', 'paymentPayload', 'privateKey', 'signature']) {

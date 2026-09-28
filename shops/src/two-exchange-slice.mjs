@@ -171,10 +171,17 @@ function assertAuthorization(leg, result, pair, at) {
   if (new Date(validBefore) > new Date(pair.expiresAt)) fail('AUTHORIZATION_WINDOW_EXCEEDED', `${leg} authorization outlives the quote`);
   const evidence = result.authorizationEvidence;
   if (evidence && (
-    typeof evidence.authorizationNonce !== 'string'
+    typeof evidence.authorizer !== 'string'
+    || evidence.authorizer.length === 0
+    || evidence.payer !== evidence.authorizer
+    || typeof evidence.authorizationNonce !== 'string'
     || evidence.authorizationNonce.length === 0
     || evidence.paymentFingerprint !== result.paymentFingerprint
     || evidence.quoteHash !== pair.legs[leg].quote.quoteHash
+    || evidence.network !== pair.legs[leg].quote.payment.network
+    || evidence.asset?.toLowerCase() !== pair.legs[leg].quote.payment.asset.toLowerCase()
+    || evidence.payTo?.toLowerCase() !== pair.legs[leg].quote.payment.payTo.toLowerCase()
+    || evidence.amountMinor !== pair.legs[leg].quote.payment.amountMinor
   )) fail('VERIFICATION_BINDING_MISMATCH', `${leg} authorization evidence differs from the verified payment`);
   return {
     state: 'VERIFIED',
@@ -259,9 +266,15 @@ function applySettlement(next, legName, result, at) {
   const leg = next.legs[legName];
   const settlementEvidence = result?.settlementEvidence;
   if (settlementEvidence && (
-    settlementEvidence.authorizationNonce !== leg.authorizationNonce
+    settlementEvidence.authorizer !== leg.authorizationEvidence?.authorizer
+    || settlementEvidence.payer !== leg.authorizationEvidence?.payer
+    || settlementEvidence.authorizationNonce !== leg.authorizationNonce
     || settlementEvidence.paymentFingerprint !== leg.paymentFingerprint
     || settlementEvidence.quoteHash !== leg.quote.quoteHash
+    || settlementEvidence.network !== leg.quote.payment.network
+    || settlementEvidence.asset?.toLowerCase() !== leg.quote.payment.asset.toLowerCase()
+    || settlementEvidence.payTo?.toLowerCase() !== leg.quote.payment.payTo.toLowerCase()
+    || settlementEvidence.amountMinor !== leg.quote.payment.amountMinor
   )) fail('SETTLEMENT_BINDING_MISMATCH', `${legName} settlement evidence differs from the original authorization`);
   if (result?.status === 'settled') {
     if (!result.transactionHash || !result.settlementId) fail('SETTLEMENT_BINDING_MISMATCH', `${legName} settlement identifiers are required`);
@@ -402,6 +415,12 @@ export function readTwoExchangeState(pair) {
   const leg = (value) => ({
     state: value.state,
     quoteHash: value.quote.quoteHash,
+    authorizer: value.authorizationEvidence?.authorizer,
+    payer: value.authorizationEvidence?.payer,
+    network: value.quote.payment.network,
+    asset: value.quote.payment.asset,
+    payTo: value.quote.payment.payTo,
+    amountMinor: value.quote.payment.amountMinor,
     authorizationId: value.authorizationId,
     authorizationNonce: value.authorizationNonce,
     paymentFingerprint: value.paymentFingerprint,
@@ -418,6 +437,7 @@ export function readTwoExchangeState(pair) {
     pairHash: pair.pairHash,
     state: pair.state,
     network: pair.network,
+    asset: pair.asset,
     expiresAt: pair.expiresAt,
     fee: leg(pair.legs.fee),
     product: leg(pair.legs.product),

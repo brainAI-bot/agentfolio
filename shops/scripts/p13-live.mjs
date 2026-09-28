@@ -109,10 +109,20 @@ export function valueReduceFacilitatorSettlementResponse(response) {
 }
 
 function authorizationEvidence(quote, paymentEnvelope) {
+  const authorizer = normalizedAddress(
+    paymentEnvelope.authorization.from,
+    'paymentEnvelope.authorization.from',
+  );
   return {
+    authorizer,
+    payer: authorizer,
     authorizationNonce: paymentEnvelope.authorization.nonce,
     paymentFingerprint: paymentFingerprint(paymentEnvelope),
     quoteHash: quote.quoteHash,
+    network: quote.payment.network,
+    asset: normalizedAddress(quote.payment.asset, 'quote.payment.asset'),
+    payTo: normalizedAddress(quote.payment.payTo, 'quote.payment.payTo'),
+    amountMinor: quote.payment.amountMinor,
   };
 }
 
