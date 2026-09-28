@@ -169,11 +169,28 @@ function assertAuthorization(leg, result, pair, at) {
   if (remaining < TWO_EXCHANGE_LIMITS.admissionMarginSeconds) fail('PAIR_ADMISSION_CUTOFF', `${leg} has less than 60 seconds remaining`);
   if (remaining > TWO_EXCHANGE_LIMITS.authorizationMaxSeconds) fail('AUTHORIZATION_WINDOW_EXCEEDED', `${leg} authorization exceeds 300 seconds`);
   if (new Date(validBefore) > new Date(pair.expiresAt)) fail('AUTHORIZATION_WINDOW_EXCEEDED', `${leg} authorization outlives the quote`);
+  const evidence = result.authorizationEvidence;
+  if (evidence && (
+    typeof evidence.authorizer !== 'string'
+    || evidence.authorizer.length === 0
+    || evidence.payer !== evidence.authorizer
+    || typeof evidence.authorizationNonce !== 'string'
+    || evidence.authorizationNonce.length === 0
+    || evidence.paymentFingerprint !== result.paymentFingerprint
+    || evidence.quoteHash !== pair.legs[leg].quote.quoteHash
+    || evidence.network !== pair.legs[leg].quote.payment.network
+    || evidence.asset?.toLowerCase() !== pair.legs[leg].quote.payment.asset.toLowerCase()
+    || evidence.payTo?.toLowerCase() !== pair.legs[leg].quote.payment.payTo.toLowerCase()
+    || evidence.amountMinor !== pair.legs[leg].quote.payment.amountMinor
+  )) fail('VERIFICATION_BINDING_MISMATCH', `${leg} authorization evidence differs from the verified payment`);
   return {
     state: 'VERIFIED',
     quote: pair.legs[leg].quote,
+    quoteHash: pair.legs[leg].quote.quoteHash,
     authorizationId: result.authorizationId,
     paymentFingerprint: result.paymentFingerprint,
+    authorizationNonce: evidence?.authorizationNonce,
+    authorizationEvidence: evidence ? clone(evidence) : undefined,
     validBefore,
     verifiedAt: iso(at),
   };
@@ -245,8 +262,27 @@ function normalizeSettlementMetadata(result, at) {
   }
 }
 
+const EXPLICIT_SETTLEMENT_FAILURE_STATUSES = new Set([
+  'failed',
+  'rejected',
+  'settlement_failed',
+  'settlement_rejected',
+]);
+
 function applySettlement(next, legName, result, at) {
   const leg = next.legs[legName];
+  const settlementEvidence = result?.settlementEvidence;
+  if (settlementEvidence && (
+    settlementEvidence.authorizer !== leg.authorizationEvidence?.authorizer
+    || settlementEvidence.payer !== leg.authorizationEvidence?.payer
+    || settlementEvidence.authorizationNonce !== leg.authorizationNonce
+    || settlementEvidence.paymentFingerprint !== leg.paymentFingerprint
+    || settlementEvidence.quoteHash !== leg.quote.quoteHash
+    || settlementEvidence.network !== leg.quote.payment.network
+    || settlementEvidence.asset?.toLowerCase() !== leg.quote.payment.asset.toLowerCase()
+    || settlementEvidence.payTo?.toLowerCase() !== leg.quote.payment.payTo.toLowerCase()
+    || settlementEvidence.amountMinor !== leg.quote.payment.amountMinor
+  )) fail('SETTLEMENT_BINDING_MISMATCH', `${legName} settlement evidence differs from the original authorization`);
   if (result?.status === 'settled') {
     if (!result.transactionHash || !result.settlementId) fail('SETTLEMENT_BINDING_MISMATCH', `${legName} settlement identifiers are required`);
     const { receiptAt, finality } = normalizeSettlementMetadata(result, at);
@@ -255,17 +291,21 @@ function applySettlement(next, legName, result, at) {
       state: finality ? 'SETTLED' : 'AWAITING_FINALITY',
       transactionHash: result.transactionHash,
       settlementId: result.settlementId,
+      settlementEvidence: settlementEvidence ? clone(settlementEvidence) : undefined,
       receiptAt,
       ...(finality ?? {}),
     };
     return finality ? 'settled' : 'awaiting_finality';
   }
-  if (result?.status === 'settlement_pending' || result?.status === 'unknown') {
+  const explicitlyRejected = result?.success === false
+    || EXPLICIT_SETTLEMENT_FAILURE_STATUSES.has(result?.status);
+  if (!explicitlyRejected) {
     next.legs[legName] = {
       ...leg,
       state: 'SETTLEMENT_UNKNOWN',
       transactionHash: result.transactionHash,
       settlementId: result.settlementId,
+      settlementEvidence: settlementEvidence ? clone(settlementEvidence) : undefined,
       unknownAt: iso(at),
       automaticResubmitAllowed: false,
     };
@@ -273,7 +313,19 @@ function applySettlement(next, legName, result, at) {
     next.history.push({ type: `${legName}_settlement_unknown`, at: iso(at), state: next.state });
     return 'unknown';
   }
-  fail(result?.failureCode ?? 'SETTLEMENT_REJECTED', `${legName} settlement was rejected`);
+  const failureCode = result?.failureCode ?? 'SETTLEMENT_REJECTED';
+  next.legs[legName] = {
+    ...leg,
+    state: 'SETTLEMENT_REJECTED',
+    settlementEvidence: settlementEvidence ? clone(settlementEvidence) : undefined,
+    errorReason: settlementEvidence?.errorReason ?? result?.errorReason ?? null,
+    failureCode,
+    rejectedAt: iso(at),
+    automaticResubmitAllowed: false,
+  };
+  next.state = legName === 'fee' ? 'FEE_SETTLEMENT_REJECTED' : 'PRODUCT_SETTLEMENT_REJECTED';
+  next.history.push({ type: `${legName}_settlement_rejected`, at: iso(at), state: next.state });
+  return 'rejected';
 }
 
 export async function settleTwoExchangePair(pair, { adapter, now = () => new Date().toISOString() }) {
@@ -284,7 +336,7 @@ export async function settleTwoExchangePair(pair, { adapter, now = () => new Dat
   assertDispatchable(next.legs.fee, feeDispatchedAt);
   const feeResult = await adapter.settle({ pairHash: next.pairHash, leg: 'fee', quote: next.legs.fee.quote, authorization: next.legs.fee });
   const feeOutcome = applySettlement(next, 'fee', feeResult, feeDispatchedAt);
-  if (feeOutcome === 'unknown') return next;
+  if (feeOutcome === 'unknown' || feeOutcome === 'rejected') return next;
   next.state = feeOutcome === 'settled' ? 'FEE_SETTLED' : 'FEE_AWAITING_FINALITY';
   next.history.push({ type: feeOutcome === 'settled' ? 'fee_settled' : 'fee_awaiting_finality', at: feeDispatchedAt, state: next.state });
 
@@ -300,7 +352,7 @@ export async function settleTwoExchangePair(pair, { adapter, now = () => new Dat
   }
   const productResult = await adapter.settle({ pairHash: next.pairHash, leg: 'product', quote: next.legs.product.quote, authorization: next.legs.product });
   const productOutcome = applySettlement(next, 'product', productResult, productDispatchedAt);
-  if (productOutcome === 'unknown') return next;
+  if (productOutcome === 'unknown' || productOutcome === 'rejected') return next;
   if (feeOutcome === 'settled' && productOutcome === 'settled') {
     next.state = 'PAID';
     next.paidAt = productDispatchedAt;
@@ -384,8 +436,17 @@ export function readTwoExchangeState(pair) {
   const leg = (value) => ({
     state: value.state,
     quoteHash: value.quote.quoteHash,
+    authorizer: value.authorizationEvidence?.authorizer,
+    payer: value.authorizationEvidence?.payer,
+    network: value.quote.payment.network,
+    asset: value.quote.payment.asset,
+    payTo: value.quote.payment.payTo,
+    amountMinor: value.quote.payment.amountMinor,
     authorizationId: value.authorizationId,
+    authorizationNonce: value.authorizationNonce,
     paymentFingerprint: value.paymentFingerprint,
+    authorizationEvidence: value.authorizationEvidence,
+    settlementEvidence: value.settlementEvidence,
     settlementId: value.settlementId,
     transactionHash: value.transactionHash,
     receiptAt: value.receiptAt,
@@ -397,6 +458,7 @@ export function readTwoExchangeState(pair) {
     pairHash: pair.pairHash,
     state: pair.state,
     network: pair.network,
+    asset: pair.asset,
     expiresAt: pair.expiresAt,
     fee: leg(pair.legs.fee),
     product: leg(pair.legs.product),

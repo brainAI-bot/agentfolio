@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { createTwoExchangePair } from '../src/two-exchange-slice.mjs';
+import { createTwoExchangePair, readTwoExchangeState } from '../src/two-exchange-slice.mjs';
 
 import {
   PAIR_8_PRODUCT_AUTHORIZATION_DISPOSITION,
@@ -12,6 +12,7 @@ import {
   createP13LiveAdapter,
   createP13Pair,
   runP13PairsSequentially,
+  valueReduceFacilitatorSettlementResponse,
 } from '../scripts/p13-live.mjs';
 
 const payer = '0x1111111111111111111111111111111111111111';
@@ -73,7 +74,7 @@ function eip3009Envelope({ from = payer, to = feeRecipient, value = '10000', net
   return {
     network,
     payer: from,
-    signature: '0xpublic-test-signature',
+    signature: `0xpublic-test-signature-${nonce}`,
     authorization: {
       from,
       to,
@@ -87,6 +88,48 @@ function eip3009Envelope({ from = payer, to = feeRecipient, value = '10000', net
 
 function errorCode(code) {
   return (error) => error?.code === code;
+}
+
+async function runLiveProductOutcome(orderId, productSettlement) {
+  const pair = createPair(orderId);
+  const liveAdapter = createP13LiveAdapter({
+    payer,
+    feeRecipient,
+    productRecipient,
+    request: async ({ operation, leg }) => {
+      if (operation === 'verify') {
+        return {
+          status: 'verified',
+          authorizationId: `${orderId}-${leg}`,
+          validBefore: '2026-09-26T15:15:00.000Z',
+        };
+      }
+      if (leg === 'fee') {
+        return {
+          status: 'settled',
+          settlementId: `${orderId}-fee`,
+          transactionHash: `0x${orderId}-fee`,
+          receiptAt: '2026-09-26T15:10:03.000Z',
+          safeAt: '2026-09-26T15:10:04.000Z',
+          finalizedAt: '2026-09-26T15:10:05.000Z',
+        };
+      }
+      return typeof productSettlement === 'function'
+        ? productSettlement()
+        : productSettlement;
+    },
+  });
+  return runP13PairsSequentially({
+    jobs: [{
+      pair,
+      feeEnvelope: eip3009Envelope({ to: feeRecipient, nonce: `${orderId}-fee-nonce` }),
+      productEnvelope: eip3009Envelope({ to: productRecipient, nonce: `${orderId}-product-nonce` }),
+      adapter: liveAdapter,
+      verifiedAt: '2026-09-26T15:10:01.000Z',
+      now: () => '2026-09-26T15:10:02.000Z',
+    }],
+    payer,
+  });
 }
 
 test('imports and invokes the reviewed two-exchange module', async () => {
@@ -193,12 +236,13 @@ test('reviewed live adapter binds quote payTo through EIP-3009 and facilitator r
       };
     },
   });
-  const feeEnvelope = eip3009Envelope({ to: feeRecipient });
-  const productEnvelope = eip3009Envelope({ to: productRecipient });
+  const feeEnvelope = eip3009Envelope({ to: feeRecipient, nonce: '0xadapter-fee-nonce' });
+  const productEnvelope = eip3009Envelope({ to: productRecipient, nonce: '0xadapter-product-nonce' });
   assert.deepEqual(assertEip3009EnvelopeBinding({ payer, quote: pair.legs.fee.quote, paymentEnvelope: feeEnvelope }), {
     from: payer,
     to: feeRecipient,
     value: '10000',
+    nonce: '0xadapter-fee-nonce',
   });
   const output = await runP13PairsSequentially({ jobs: [{
     pair,
@@ -348,4 +392,211 @@ test('fresh-nonce rerun cannot overwrite a consumed pair leg or dispatch it agai
   assert.equal(second.legs.fee.authorizationId, first.legs.fee.authorizationId);
   assert.equal(second.legs.product.paymentFingerprint, first.legs.product.paymentFingerprint);
   assert.equal(requests.filter((entry) => entry.startsWith('settle:')).length, 2);
+});
+
+test('pair-10 unknown preserves joinable authorization and value-reduced settlement evidence', async () => {
+  const jobs = Array.from({ length: 10 }, (_, offset) => {
+    const index = offset + 1;
+    const pair = createPair(`pair-${index}`);
+    const liveAdapter = createP13LiveAdapter({
+      payer,
+      feeRecipient,
+      productRecipient,
+      request: async ({ operation, leg }) => {
+        if (operation === 'verify') {
+          return {
+            status: 'verified',
+            authorizationId: `authorization-${index}-${leg}`,
+            paymentFingerprint: 'facilitator-value-must-not-win',
+            validBefore: '2026-09-26T15:15:00.000Z',
+          };
+        }
+        if (index === 10 && leg === 'product') {
+          return {
+            status: 'unknown',
+            transaction: null,
+            errorReason: 'upstream settlement status unavailable',
+            diagnostic: { code: 'TEMPORARY_UNKNOWN', signature: 'must-not-persist' },
+            paymentPayload: { authorization: { nonce: 'must-not-persist' } },
+            privateKey: 'must-not-persist',
+          };
+        }
+        return {
+          status: 'settled',
+          success: true,
+          settlementId: `settlement-${index}-${leg}`,
+          transactionHash: `0x${index}${leg}`,
+          receiptAt: '2026-09-26T15:10:03.000Z',
+          safeAt: '2026-09-26T15:10:04.000Z',
+          finalizedAt: '2026-09-26T15:10:05.000Z',
+        };
+      },
+    });
+    return {
+      pair,
+      feeEnvelope: eip3009Envelope({ to: feeRecipient, nonce: `0xnonce-${index}-fee` }),
+      productEnvelope: eip3009Envelope({ to: productRecipient, nonce: `0xnonce-${index}-product` }),
+      adapter: liveAdapter,
+      verifiedAt: '2026-09-26T15:10:01.000Z',
+      now: () => '2026-09-26T15:10:02.000Z',
+    };
+  });
+
+  const output = await runP13PairsSequentially({ jobs, payer });
+  assert.equal(output.completed, false);
+  assert.deepEqual(output.stoppedAt, { index: 9, orderId: 'pair-10', state: 'PRODUCT_SETTLEMENT_UNKNOWN' });
+  const product = output.results[9].legs.product;
+  assert.equal(product.authorizationEvidence.authorizer, payer);
+  assert.equal(product.authorizationEvidence.payer, payer);
+  assert.equal(product.authorizationNonce, '0xnonce-10-product');
+  assert.equal(product.quoteHash, product.quote.quoteHash);
+  assert.equal(product.authorizationEvidence.quoteHash, product.quote.quoteHash);
+  assert.equal(product.authorizationEvidence.paymentFingerprint, product.paymentFingerprint);
+  assert.equal(product.authorizationEvidence.network, 'eip155:84532');
+  assert.equal(product.authorizationEvidence.asset, '0x036cbd53842c5426634e7929541ec2318f3dcf7e');
+  assert.equal(product.authorizationEvidence.payTo, productRecipient);
+  assert.equal(product.authorizationEvidence.amountMinor, '10000');
+  assert.equal(product.settlementEvidence.authorizer, payer);
+  assert.equal(product.settlementEvidence.payer, payer);
+  assert.equal(product.settlementEvidence.authorizationNonce, '0xnonce-10-product');
+  assert.equal(product.settlementEvidence.paymentFingerprint, product.paymentFingerprint);
+  assert.equal(product.settlementEvidence.quoteHash, product.quote.quoteHash);
+  assert.equal(product.settlementEvidence.network, 'eip155:84532');
+  assert.equal(product.settlementEvidence.asset, '0x036cbd53842c5426634e7929541ec2318f3dcf7e');
+  assert.equal(product.settlementEvidence.payTo, productRecipient);
+  assert.equal(product.settlementEvidence.amountMinor, '10000');
+  assert.equal(product.settlementEvidence.errorReason, 'upstream settlement status unavailable');
+  assert.deepEqual(product.settlementEvidence.facilitatorResponse, {
+    status: 'unknown',
+    transaction: null,
+    errorReason: 'upstream settlement status unavailable',
+    diagnostic: { code: 'TEMPORARY_UNKNOWN' },
+  });
+  const readback = readTwoExchangeState(output.results[9]);
+  assert.equal(readback.asset, '0x036CbD53842c5426634e7929541eC2318f3dCF7e');
+  assert.deepEqual({
+    authorizer: readback.product.authorizer,
+    payer: readback.product.payer,
+    nonce: readback.product.authorizationNonce,
+    network: readback.product.network,
+    asset: readback.product.asset,
+    payTo: readback.product.payTo,
+    amountMinor: readback.product.amountMinor,
+    quoteHash: readback.product.quoteHash,
+    paymentFingerprint: readback.product.paymentFingerprint,
+  }, {
+    authorizer: payer,
+    payer,
+    nonce: '0xnonce-10-product',
+    network: 'eip155:84532',
+    asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    payTo: productRecipient,
+    amountMinor: '10000',
+    quoteHash: product.quote.quoteHash,
+    paymentFingerprint: product.paymentFingerprint,
+  });
+  const serialized = JSON.stringify(output.results[9]);
+  for (const forbidden of ['must-not-persist', 'paymentPayload', 'privateKey', 'signature']) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+});
+
+test('x402 rejected product settlement preserves the frozen pair and bound evidence', async () => {
+  const output = await runLiveProductOutcome('x402-rejected', {
+    success: false,
+    errorReason: 'invalid_exact_evm_payload_signature',
+    transaction: '',
+    network: 'eip155:84532',
+    payer,
+  });
+  assert.equal(output.completed, false);
+  assert.equal(output.results.length, 1);
+  const pair = output.results[0];
+  assert.equal(pair.state, 'PRODUCT_SETTLEMENT_REJECTED');
+  assert.equal(pair.legs.fee.state, 'SETTLED');
+  assert.equal(pair.legs.product.state, 'SETTLEMENT_REJECTED');
+  assert.equal(pair.legs.product.authorizationNonce, 'x402-rejected-product-nonce');
+  assert.equal(pair.legs.product.settlementEvidence.errorReason, 'invalid_exact_evm_payload_signature');
+  assert.equal(pair.legs.product.settlementEvidence.payer, payer);
+  assert.equal(pair.legs.product.automaticResubmitAllowed, false);
+});
+
+test('x402 success without canonical settlement identifiers freezes as unknown', async () => {
+  const output = await runLiveProductOutcome('x402-success-unknown', {
+    success: true,
+    transaction: '0xabc',
+    network: 'eip155:84532',
+    payer,
+  });
+  const pair = output.results[0];
+  assert.equal(output.completed, false);
+  assert.equal(pair.state, 'PRODUCT_SETTLEMENT_UNKNOWN');
+  assert.equal(pair.legs.fee.state, 'SETTLED');
+  assert.equal(pair.legs.product.state, 'SETTLEMENT_UNKNOWN');
+  assert.equal(pair.legs.product.authorizationNonce, 'x402-success-unknown-product-nonce');
+  assert.equal(pair.legs.product.settlementEvidence.facilitatorResponse.success, true);
+  assert.equal(pair.legs.product.settlementEvidence.facilitatorResponse.transaction, '0xabc');
+  assert.equal(pair.legs.product.automaticResubmitAllowed, false);
+});
+
+test('unrecognised product settlement response freezes as unknown', async () => {
+  const output = await runLiveProductOutcome('unrecognised-unknown', {});
+  const pair = output.results[0];
+  assert.equal(output.completed, false);
+  assert.equal(pair.state, 'PRODUCT_SETTLEMENT_UNKNOWN');
+  assert.equal(pair.legs.product.state, 'SETTLEMENT_UNKNOWN');
+  assert.deepEqual(pair.legs.product.settlementEvidence.facilitatorResponse, {});
+  assert.equal(pair.legs.product.automaticResubmitAllowed, false);
+});
+
+test('explicit failed product settlement preserves the frozen pair and error reason', async () => {
+  const output = await runLiveProductOutcome('status-failed', {
+    status: 'failed',
+    success: false,
+    errorReason: 'insufficient_funds',
+  });
+  const pair = output.results[0];
+  assert.equal(output.completed, false);
+  assert.equal(pair.state, 'PRODUCT_SETTLEMENT_REJECTED');
+  assert.equal(pair.legs.fee.state, 'SETTLED');
+  assert.equal(pair.legs.product.authorizationNonce, 'status-failed-product-nonce');
+  assert.equal(pair.legs.product.settlementEvidence.errorReason, 'insufficient_funds');
+  assert.equal(pair.legs.product.automaticResubmitAllowed, false);
+});
+
+test('thrown product settle request freezes as unknown with only reduced public error evidence', async () => {
+  const output = await runLiveProductOutcome('request-timeout', () => {
+    const error = new Error('facilitator request timed out');
+    error.code = 'ETIMEDOUT';
+    error.request = { paymentPayload: { signature: 'must-not-persist' } };
+    throw error;
+  });
+  const pair = output.results[0];
+  assert.equal(output.completed, false);
+  assert.equal(pair.state, 'PRODUCT_SETTLEMENT_UNKNOWN');
+  assert.equal(pair.legs.fee.state, 'SETTLED');
+  assert.equal(pair.legs.product.state, 'SETTLEMENT_UNKNOWN');
+  assert.equal(pair.legs.product.authorizationNonce, 'request-timeout-product-nonce');
+  assert.deepEqual(pair.legs.product.settlementEvidence.facilitatorResponse, {
+    error: { code: 'ETIMEDOUT', message: 'facilitator request timed out' },
+  });
+  assert.equal(pair.legs.product.automaticResubmitAllowed, false);
+  const serialized = JSON.stringify(pair.legs.product.settlementEvidence);
+  assert.equal(serialized.includes('must-not-persist'), false);
+  assert.equal(serialized.includes('paymentPayload'), false);
+  assert.equal(serialized.includes('signature'), false);
+});
+
+test('settlement evidence reducer excludes private request material', () => {
+  assert.deepEqual(valueReduceFacilitatorSettlementResponse({
+    success: false,
+    errorReason: 'unknown',
+    headers: { authorization: 'secret' },
+    request: { token: 'secret' },
+    result: { code: 'UNKNOWN', signature: 'secret' },
+  }), {
+    success: false,
+    errorReason: 'unknown',
+    result: { code: 'UNKNOWN' },
+  });
 });
