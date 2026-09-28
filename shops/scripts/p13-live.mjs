@@ -78,34 +78,58 @@ export function assertEip3009EnvelopeBinding({ payer, quote, paymentEnvelope }) 
   return { from, to, value: String(authorization.value), nonce: authorization.nonce };
 }
 
-const PRIVATE_EVIDENCE_KEYS = new Set([
-  'authorization', 'cookie', 'headers', 'keypair', 'mnemonic', 'password',
-  'paymentenvelope', 'paymentpayload', 'privatekey', 'request', 'seed',
-  'secret', 'signature', 'token',
-]);
+const PUBLIC_SCALAR = true;
+const PUBLIC_SETTLEMENT_RESPONSE_SCHEMA = Object.freeze({
+  status: PUBLIC_SCALAR,
+  success: PUBLIC_SCALAR,
+  transaction: PUBLIC_SCALAR,
+  transactionHash: PUBLIC_SCALAR,
+  settlementId: PUBLIC_SCALAR,
+  network: PUBLIC_SCALAR,
+  payer: PUBLIC_SCALAR,
+  errorReason: PUBLIC_SCALAR,
+  failureCode: PUBLIC_SCALAR,
+  reason: PUBLIC_SCALAR,
+  message: PUBLIC_SCALAR,
+  receiptAt: PUBLIC_SCALAR,
+  safeAt: PUBLIC_SCALAR,
+  finalizedAt: PUBLIC_SCALAR,
+  diagnostic: Object.freeze({
+    code: PUBLIC_SCALAR,
+    message: PUBLIC_SCALAR,
+    reason: PUBLIC_SCALAR,
+    status: PUBLIC_SCALAR,
+  }),
+  result: Object.freeze({
+    code: PUBLIC_SCALAR,
+    message: PUBLIC_SCALAR,
+    reason: PUBLIC_SCALAR,
+    status: PUBLIC_SCALAR,
+  }),
+  error: Object.freeze({
+    code: PUBLIC_SCALAR,
+    message: PUBLIC_SCALAR,
+  }),
+});
 
-function isPrivateEvidenceKey(key) {
-  const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
-  return PRIVATE_EVIDENCE_KEYS.has(normalizedKey)
-    || /(credential|mnemonic|password|privatekey|refreshtoken|accesstoken|apikey|secret|seed|signature)$/.test(normalizedKey);
-}
-
-function reducePublicEvidence(value, depth = 0) {
-  if (value == null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
-  if (depth >= 6) return '[depth-limited]';
-  if (Array.isArray(value)) return value.slice(0, 50).map((entry) => reducePublicEvidence(entry, depth + 1));
-  if (typeof value !== 'object') return undefined;
+function reducePublicEvidence(value, schema, depth = 0) {
+  if (schema === PUBLIC_SCALAR) {
+    return value == null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+      ? value
+      : undefined;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value) || depth >= 3) return undefined;
   const reduced = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (isPrivateEvidenceKey(key)) continue;
-    const publicEntry = reducePublicEvidence(entry, depth + 1);
+  for (const [key, childSchema] of Object.entries(schema)) {
+    if (!Object.hasOwn(value, key)) continue;
+    const publicEntry = reducePublicEvidence(value[key], childSchema, depth + 1);
     if (publicEntry !== undefined) reduced[key] = publicEntry;
   }
   return reduced;
 }
 
 export function valueReduceFacilitatorSettlementResponse(response) {
-  return reducePublicEvidence(response);
+  return reducePublicEvidence(response, PUBLIC_SETTLEMENT_RESPONSE_SCHEMA) ?? {};
 }
 
 function valueReduceSettlementError(error) {

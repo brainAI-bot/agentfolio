@@ -419,6 +419,11 @@ test('pair-10 unknown preserves joinable authorization and value-reduced settlem
             diagnostic: { code: 'TEMPORARY_UNKNOWN', signature: 'must-not-persist' },
             paymentPayload: { authorization: { nonce: 'must-not-persist' } },
             privateKey: 'must-not-persist',
+            bearerToken: 'must-not-persist-bearer',
+            privateMaterial: 'must-not-persist-private-material',
+            signedAuthorization: 'must-not-persist-signed-authorization',
+            rawRequestBody: { body: 'must-not-persist-request-body' },
+            rawTransaction: 'must-not-persist-raw-transaction',
           };
         }
         return {
@@ -473,6 +478,12 @@ test('pair-10 unknown preserves joinable authorization and value-reduced settlem
     diagnostic: { code: 'TEMPORARY_UNKNOWN' },
   });
   const readback = readTwoExchangeState(output.results[9]);
+  assert.deepEqual(readback.product.settlementEvidence.facilitatorResponse, {
+    status: 'unknown',
+    transaction: null,
+    errorReason: 'upstream settlement status unavailable',
+    diagnostic: { code: 'TEMPORARY_UNKNOWN' },
+  });
   assert.equal(readback.asset, '0x036CbD53842c5426634e7929541eC2318f3dCF7e');
   assert.deepEqual({
     authorizer: readback.product.authorizer,
@@ -496,7 +507,10 @@ test('pair-10 unknown preserves joinable authorization and value-reduced settlem
     paymentFingerprint: product.paymentFingerprint,
   });
   const serialized = JSON.stringify(output.results[9]);
-  for (const forbidden of ['must-not-persist', 'paymentPayload', 'privateKey', 'signature']) {
+  for (const forbidden of [
+    'must-not-persist', 'paymentPayload', 'privateKey', 'signature',
+    'bearerToken', 'privateMaterial', 'signedAuthorization', 'rawRequestBody', 'rawTransaction',
+  ]) {
     assert.equal(serialized.includes(forbidden), false);
   }
 });
@@ -587,13 +601,19 @@ test('thrown product settle request freezes as unknown with only reduced public 
   assert.equal(serialized.includes('signature'), false);
 });
 
-test('settlement evidence reducer excludes private request material', () => {
+test('settlement evidence reducer uses an explicit public-field allowlist', () => {
   assert.deepEqual(valueReduceFacilitatorSettlementResponse({
     success: false,
     errorReason: 'unknown',
     headers: { authorization: 'secret' },
     request: { token: 'secret' },
     result: { code: 'UNKNOWN', signature: 'secret' },
+    bearerToken: 'secret',
+    privateMaterial: 'secret',
+    signedAuthorization: 'secret',
+    rawRequestBody: { paymentPayload: 'secret' },
+    rawTransaction: 'secret',
+    unexpectedPublicLookingField: 'must-not-persist',
   }), {
     success: false,
     errorReason: 'unknown',
