@@ -169,11 +169,21 @@ function assertAuthorization(leg, result, pair, at) {
   if (remaining < TWO_EXCHANGE_LIMITS.admissionMarginSeconds) fail('PAIR_ADMISSION_CUTOFF', `${leg} has less than 60 seconds remaining`);
   if (remaining > TWO_EXCHANGE_LIMITS.authorizationMaxSeconds) fail('AUTHORIZATION_WINDOW_EXCEEDED', `${leg} authorization exceeds 300 seconds`);
   if (new Date(validBefore) > new Date(pair.expiresAt)) fail('AUTHORIZATION_WINDOW_EXCEEDED', `${leg} authorization outlives the quote`);
+  const evidence = result.authorizationEvidence;
+  if (evidence && (
+    typeof evidence.authorizationNonce !== 'string'
+    || evidence.authorizationNonce.length === 0
+    || evidence.paymentFingerprint !== result.paymentFingerprint
+    || evidence.quoteHash !== pair.legs[leg].quote.quoteHash
+  )) fail('VERIFICATION_BINDING_MISMATCH', `${leg} authorization evidence differs from the verified payment`);
   return {
     state: 'VERIFIED',
     quote: pair.legs[leg].quote,
+    quoteHash: pair.legs[leg].quote.quoteHash,
     authorizationId: result.authorizationId,
     paymentFingerprint: result.paymentFingerprint,
+    authorizationNonce: evidence?.authorizationNonce,
+    authorizationEvidence: evidence ? clone(evidence) : undefined,
     validBefore,
     verifiedAt: iso(at),
   };
@@ -247,6 +257,12 @@ function normalizeSettlementMetadata(result, at) {
 
 function applySettlement(next, legName, result, at) {
   const leg = next.legs[legName];
+  const settlementEvidence = result?.settlementEvidence;
+  if (settlementEvidence && (
+    settlementEvidence.authorizationNonce !== leg.authorizationNonce
+    || settlementEvidence.paymentFingerprint !== leg.paymentFingerprint
+    || settlementEvidence.quoteHash !== leg.quote.quoteHash
+  )) fail('SETTLEMENT_BINDING_MISMATCH', `${legName} settlement evidence differs from the original authorization`);
   if (result?.status === 'settled') {
     if (!result.transactionHash || !result.settlementId) fail('SETTLEMENT_BINDING_MISMATCH', `${legName} settlement identifiers are required`);
     const { receiptAt, finality } = normalizeSettlementMetadata(result, at);
@@ -255,6 +271,7 @@ function applySettlement(next, legName, result, at) {
       state: finality ? 'SETTLED' : 'AWAITING_FINALITY',
       transactionHash: result.transactionHash,
       settlementId: result.settlementId,
+      settlementEvidence: settlementEvidence ? clone(settlementEvidence) : undefined,
       receiptAt,
       ...(finality ?? {}),
     };
@@ -266,6 +283,7 @@ function applySettlement(next, legName, result, at) {
       state: 'SETTLEMENT_UNKNOWN',
       transactionHash: result.transactionHash,
       settlementId: result.settlementId,
+      settlementEvidence: settlementEvidence ? clone(settlementEvidence) : undefined,
       unknownAt: iso(at),
       automaticResubmitAllowed: false,
     };
@@ -385,7 +403,10 @@ export function readTwoExchangeState(pair) {
     state: value.state,
     quoteHash: value.quote.quoteHash,
     authorizationId: value.authorizationId,
+    authorizationNonce: value.authorizationNonce,
     paymentFingerprint: value.paymentFingerprint,
+    authorizationEvidence: value.authorizationEvidence,
+    settlementEvidence: value.settlementEvidence,
     settlementId: value.settlementId,
     transactionHash: value.transactionHash,
     receiptAt: value.receiptAt,

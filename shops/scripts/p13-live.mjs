@@ -8,7 +8,7 @@ import {
   settleTwoExchangePair,
   verifyTwoExchangePair,
 } from '../src/two-exchange-slice.mjs';
-import { verifyQuote } from '../src/payment-contract.mjs';
+import { paymentFingerprint, verifyQuote } from '../src/payment-contract.mjs';
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
@@ -72,7 +72,48 @@ export function assertEip3009EnvelopeBinding({ payer, quote, paymentEnvelope }) 
   if (typeof paymentEnvelope?.signature !== 'string' || paymentEnvelope.signature.length === 0) {
     fail('EIP3009_SIGNATURE_REQUIRED', 'signed EIP-3009 envelope is required');
   }
-  return { from, to, value: String(authorization.value) };
+  if (typeof authorization.nonce !== 'string' || authorization.nonce.length === 0) {
+    fail('EIP3009_NONCE_REQUIRED', 'EIP-3009 authorization nonce is required');
+  }
+  return { from, to, value: String(authorization.value), nonce: authorization.nonce };
+}
+
+const PRIVATE_EVIDENCE_KEYS = new Set([
+  'authorization', 'cookie', 'headers', 'keypair', 'mnemonic', 'password',
+  'paymentenvelope', 'paymentpayload', 'privatekey', 'request', 'seed',
+  'secret', 'signature', 'token',
+]);
+
+function isPrivateEvidenceKey(key) {
+  const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return PRIVATE_EVIDENCE_KEYS.has(normalizedKey)
+    || /(credential|mnemonic|password|privatekey|refreshtoken|accesstoken|apikey|secret|seed|signature)$/.test(normalizedKey);
+}
+
+function reducePublicEvidence(value, depth = 0) {
+  if (value == null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (depth >= 6) return '[depth-limited]';
+  if (Array.isArray(value)) return value.slice(0, 50).map((entry) => reducePublicEvidence(entry, depth + 1));
+  if (typeof value !== 'object') return undefined;
+  const reduced = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (isPrivateEvidenceKey(key)) continue;
+    const publicEntry = reducePublicEvidence(entry, depth + 1);
+    if (publicEntry !== undefined) reduced[key] = publicEntry;
+  }
+  return reduced;
+}
+
+export function valueReduceFacilitatorSettlementResponse(response) {
+  return reducePublicEvidence(response);
+}
+
+function authorizationEvidence(quote, paymentEnvelope) {
+  return {
+    authorizationNonce: paymentEnvelope.authorization.nonce,
+    paymentFingerprint: paymentFingerprint(paymentEnvelope),
+    quoteHash: quote.quoteHash,
+  };
 }
 
 function facilitatorRequestBody(quote, paymentEnvelope) {
@@ -112,14 +153,20 @@ export function createP13LiveAdapter({ payer, feeRecipient, productRecipient, re
       const quotedRecipient = normalizedAddress(quote?.payment?.payTo, 'quote.payment.payTo');
       if (quotedRecipient !== expectedRecipients[leg]) fail('P13_RECIPIENT_BINDING_MISMATCH', `${leg} quote recipient differs from the configured public test recipient`);
       assertEip3009EnvelopeBinding({ payer: recipients.payer, quote, paymentEnvelope });
+      const evidence = authorizationEvidence(quote, paymentEnvelope);
       const body = facilitatorRequestBody(quote, paymentEnvelope);
       if (consumedSettlements.has(legKey)) {
         const consumedBinding = boundPayments.get(legKey);
         if (!consumedBinding || consumedBinding.quoteHash !== quote.quoteHash) fail('PAIR_BINDING_MISMATCH', `${leg} consumed settlement differs from the verified quote`);
         return consumedBinding.verification;
       }
-      const verification = await request({ operation: 'verify', facilitator: quote.facilitator.id, leg, body });
-      boundPayments.set(legKey, { pairHash, leg, quoteHash: quote.quoteHash, paymentEnvelope, body, verification });
+      const facilitatorVerification = await request({ operation: 'verify', facilitator: quote.facilitator.id, leg, body });
+      const verification = {
+        ...facilitatorVerification,
+        paymentFingerprint: evidence.paymentFingerprint,
+        authorizationEvidence: evidence,
+      };
+      boundPayments.set(legKey, { pairHash, leg, quoteHash: quote.quoteHash, paymentEnvelope, body, verification, evidence });
       return verification;
     },
     settle: async ({ pairHash, leg, quote, authorization }) => {
@@ -134,7 +181,16 @@ export function createP13LiveAdapter({ payer, feeRecipient, productRecipient, re
       }
       assertEip3009EnvelopeBinding({ payer: recipients.payer, quote, paymentEnvelope: bound.paymentEnvelope });
       if (consumedSettlements.has(legKey)) return consumedSettlements.get(legKey);
-      const settlement = Promise.resolve().then(() => request({ operation: 'settle', facilitator: quote.facilitator.id, leg, body: { ...bound.body, authorization } }));
+      const settlement = Promise.resolve()
+        .then(() => request({ operation: 'settle', facilitator: quote.facilitator.id, leg, body: { ...bound.body, authorization } }))
+        .then((facilitatorResponse) => ({
+          ...facilitatorResponse,
+          settlementEvidence: {
+            ...bound.evidence,
+            facilitatorResponse: valueReduceFacilitatorSettlementResponse(facilitatorResponse),
+            errorReason: typeof facilitatorResponse?.errorReason === 'string' ? facilitatorResponse.errorReason : null,
+          },
+        }));
       consumedSettlements.set(legKey, settlement);
       return settlement;
     },

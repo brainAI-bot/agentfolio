@@ -12,6 +12,7 @@ import {
   createP13LiveAdapter,
   createP13Pair,
   runP13PairsSequentially,
+  valueReduceFacilitatorSettlementResponse,
 } from '../scripts/p13-live.mjs';
 
 const payer = '0x1111111111111111111111111111111111111111';
@@ -73,7 +74,7 @@ function eip3009Envelope({ from = payer, to = feeRecipient, value = '10000', net
   return {
     network,
     payer: from,
-    signature: '0xpublic-test-signature',
+    signature: `0xpublic-test-signature-${nonce}`,
     authorization: {
       from,
       to,
@@ -193,12 +194,13 @@ test('reviewed live adapter binds quote payTo through EIP-3009 and facilitator r
       };
     },
   });
-  const feeEnvelope = eip3009Envelope({ to: feeRecipient });
-  const productEnvelope = eip3009Envelope({ to: productRecipient });
+  const feeEnvelope = eip3009Envelope({ to: feeRecipient, nonce: '0xadapter-fee-nonce' });
+  const productEnvelope = eip3009Envelope({ to: productRecipient, nonce: '0xadapter-product-nonce' });
   assert.deepEqual(assertEip3009EnvelopeBinding({ payer, quote: pair.legs.fee.quote, paymentEnvelope: feeEnvelope }), {
     from: payer,
     to: feeRecipient,
     value: '10000',
+    nonce: '0xadapter-fee-nonce',
   });
   const output = await runP13PairsSequentially({ jobs: [{
     pair,
@@ -348,4 +350,92 @@ test('fresh-nonce rerun cannot overwrite a consumed pair leg or dispatch it agai
   assert.equal(second.legs.fee.authorizationId, first.legs.fee.authorizationId);
   assert.equal(second.legs.product.paymentFingerprint, first.legs.product.paymentFingerprint);
   assert.equal(requests.filter((entry) => entry.startsWith('settle:')).length, 2);
+});
+
+test('pair-10 unknown preserves joinable authorization and value-reduced settlement evidence', async () => {
+  const jobs = Array.from({ length: 10 }, (_, offset) => {
+    const index = offset + 1;
+    const pair = createPair(`pair-${index}`);
+    const liveAdapter = createP13LiveAdapter({
+      payer,
+      feeRecipient,
+      productRecipient,
+      request: async ({ operation, leg }) => {
+        if (operation === 'verify') {
+          return {
+            status: 'verified',
+            authorizationId: `authorization-${index}-${leg}`,
+            paymentFingerprint: 'facilitator-value-must-not-win',
+            validBefore: '2026-09-26T15:15:00.000Z',
+          };
+        }
+        if (index === 10 && leg === 'product') {
+          return {
+            status: 'unknown',
+            success: false,
+            transaction: null,
+            errorReason: 'upstream settlement status unavailable',
+            diagnostic: { code: 'TEMPORARY_UNKNOWN', signature: 'must-not-persist' },
+            paymentPayload: { authorization: { nonce: 'must-not-persist' } },
+            privateKey: 'must-not-persist',
+          };
+        }
+        return {
+          status: 'settled',
+          success: true,
+          settlementId: `settlement-${index}-${leg}`,
+          transactionHash: `0x${index}${leg}`,
+          receiptAt: '2026-09-26T15:10:03.000Z',
+          safeAt: '2026-09-26T15:10:04.000Z',
+          finalizedAt: '2026-09-26T15:10:05.000Z',
+        };
+      },
+    });
+    return {
+      pair,
+      feeEnvelope: eip3009Envelope({ to: feeRecipient, nonce: `0xnonce-${index}-fee` }),
+      productEnvelope: eip3009Envelope({ to: productRecipient, nonce: `0xnonce-${index}-product` }),
+      adapter: liveAdapter,
+      verifiedAt: '2026-09-26T15:10:01.000Z',
+      now: () => '2026-09-26T15:10:02.000Z',
+    };
+  });
+
+  const output = await runP13PairsSequentially({ jobs, payer });
+  assert.equal(output.completed, false);
+  assert.deepEqual(output.stoppedAt, { index: 9, orderId: 'pair-10', state: 'PRODUCT_SETTLEMENT_UNKNOWN' });
+  const product = output.results[9].legs.product;
+  assert.equal(product.authorizationNonce, '0xnonce-10-product');
+  assert.equal(product.quoteHash, product.quote.quoteHash);
+  assert.equal(product.authorizationEvidence.quoteHash, product.quote.quoteHash);
+  assert.equal(product.authorizationEvidence.paymentFingerprint, product.paymentFingerprint);
+  assert.equal(product.settlementEvidence.authorizationNonce, '0xnonce-10-product');
+  assert.equal(product.settlementEvidence.paymentFingerprint, product.paymentFingerprint);
+  assert.equal(product.settlementEvidence.quoteHash, product.quote.quoteHash);
+  assert.equal(product.settlementEvidence.errorReason, 'upstream settlement status unavailable');
+  assert.deepEqual(product.settlementEvidence.facilitatorResponse, {
+    status: 'unknown',
+    success: false,
+    transaction: null,
+    errorReason: 'upstream settlement status unavailable',
+    diagnostic: { code: 'TEMPORARY_UNKNOWN' },
+  });
+  const serialized = JSON.stringify(output.results[9]);
+  for (const forbidden of ['must-not-persist', 'paymentPayload', 'privateKey', 'signature']) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+});
+
+test('settlement evidence reducer excludes private request material', () => {
+  assert.deepEqual(valueReduceFacilitatorSettlementResponse({
+    success: false,
+    errorReason: 'unknown',
+    headers: { authorization: 'secret' },
+    request: { token: 'secret' },
+    result: { code: 'UNKNOWN', signature: 'secret' },
+  }), {
+    success: false,
+    errorReason: 'unknown',
+    result: { code: 'UNKNOWN' },
+  });
 });
