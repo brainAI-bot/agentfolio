@@ -76,6 +76,10 @@ module.exports = {
       AGENTFOLIO_COMMIT_SHA: deployCommitSha,
       AGENTFOLIO_BUILD_TIME: deployBuildTime,
       ...secretEnv,
+      // Repository-controlled production runtime truth. A stale host selector
+      // must not restore the retired devnet/B1Se transaction runtime.
+      SATP_NETWORK: "mainnet",
+      SOLANA_NETWORK: "mainnet",
     },
     kill_timeout: 5000,
     listen_timeout: 8000,

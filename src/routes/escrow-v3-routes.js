@@ -77,7 +77,10 @@ const getV3EscrowPDA = satpClient.getV3EscrowPDA;
 const getGenesisPDA = satpClient.getGenesisPDA;
 
 function normalizeNetwork(value) {
-  return String(value || '').toLowerCase().includes('devnet') ? 'devnet' : 'mainnet';
+  const network = String(value || '').trim().toLowerCase();
+  if (network === 'mainnet' || network === 'mainnet-beta') return 'mainnet';
+  if (network === 'devnet') return 'devnet';
+  return 'unknown';
 }
 
 try {
@@ -135,7 +138,8 @@ function requireSDK(req, res, next) {
 }
 
 function requireLiveEscrowWrites(req, res, next) {
-  if (sendLiveEscrowGateResponse(res, `SATP V3 escrow ${req.method} ${req.path}`)) return;
+  const runtime = getLiveEscrowRuntime();
+  if (sendLiveEscrowGateResponse(res, `SATP V3 escrow ${req.method} ${req.path}`, runtime)) return;
   const authorityReadback = getEscrowV3AuthorityReadback({ satpClient });
   const provenance = getEscrowV3ProvenanceReadback({ authorityReadback, network: NETWORK });
   if (provenance.failClosed) {
@@ -467,6 +471,14 @@ function currentEscrowProgramId() {
   return getEscrowProgramId(NETWORK);
 }
 
+function getLiveEscrowRuntime() {
+  try {
+    return { network: NETWORK, programId: publicKeyToString(currentEscrowProgramId()) };
+  } catch (err) {
+    return { network: NETWORK, programId: null, error: err.message };
+  }
+}
+
 function getEscrowPdaReadback(client, descriptionOrHash, nonce) {
   const result = deriveEscrowPDA(client, descriptionOrHash, nonce);
   return {
@@ -577,7 +589,7 @@ function resolveEscrowAgentBinding(
 router.get('/health', (req, res) => {
   const agentId = getSingleQueryString(req.query.agentId);
   const escrowAuthority = getEscrowV3AuthorityReadback({ satpClient });
-  const liveEscrow = liveEscrowGateStatus();
+  const liveEscrow = liveEscrowGateStatus(process.env, getLiveEscrowRuntime());
   res.json({
     status: 'ok',
     network: NETWORK,

@@ -8,6 +8,8 @@ const ESCROW_KILL_SWITCH_ENV = 'AGENTFOLIO_ESCROW_KILL_SWITCH';
 // Advertised SATP /api/satp/programs surface. Leftover host runtime stays devnet/B1Se.
 const ADVERTISED_NETWORK = 'mainnet-beta';
 const ADVERTISED_ESCROW_PROGRAM_ID = 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C';
+const REQUIRED_LIVE_ESCROW_NETWORK = 'mainnet';
+const REQUIRED_LIVE_ESCROW_PROGRAM_ID = ADVERTISED_ESCROW_PROGRAM_ID;
 const LEFTOVER_RUNTIME_NETWORK = 'devnet';
 const LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID = 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg';
 const HOST_ENV_SPLIT_NOTE = 'HXCU-vs-B1Se is a host env split (advertised SATP /api/satp/programs mainnet-beta HXCU vs leftover host runtime devnet B1Se), not a missing IDL';
@@ -34,10 +36,34 @@ function hasLiveEscrowOwnerAuthorization(env = process.env) {
   return String(env[LIVE_ESCROW_OWNER_AUTHORIZATION_ENV] || '').trim() === LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE;
 }
 
-function isLiveEscrowEnabled(env = process.env) {
+function normalizeLiveEscrowNetwork(value) {
+  const network = String(value || '').trim().toLowerCase();
+  if (network === 'mainnet' || network === 'mainnet-beta') return 'mainnet';
+  if (network === 'devnet') return 'devnet';
+  return 'unknown';
+}
+
+function liveEscrowRuntimeStatus(runtime = {}) {
+  const network = normalizeLiveEscrowNetwork(runtime.network);
+  const programId = runtime.programId ? String(runtime.programId) : null;
+  const networkMatches = network === REQUIRED_LIVE_ESCROW_NETWORK;
+  const programIdMatches = programId === REQUIRED_LIVE_ESCROW_PROGRAM_ID;
+  return {
+    network,
+    programId,
+    requiredNetwork: REQUIRED_LIVE_ESCROW_NETWORK,
+    requiredProgramId: REQUIRED_LIVE_ESCROW_PROGRAM_ID,
+    networkMatches,
+    programIdMatches,
+    verified: networkMatches && programIdMatches,
+  };
+}
+
+function isLiveEscrowEnabled(env = process.env, runtime = {}) {
   return envValueAllowsWrites(env[ENABLE_LIVE_ESCROW_ENV])
     && hasLiveEscrowOwnerAuthorization(env)
-    && !isEscrowKillSwitchActive(env);
+    && !isEscrowKillSwitchActive(env)
+    && liveEscrowRuntimeStatus(runtime).verified;
 }
 
 function solanaIrysWriteGatePayload(operation = 'Solana/Irys write') {
@@ -50,11 +76,12 @@ function solanaIrysWriteGatePayload(operation = 'Solana/Irys write') {
   };
 }
 
-function liveEscrowGateStatus(env = process.env) {
+function liveEscrowGateStatus(env = process.env, runtime = {}) {
   const requested = envValueAllowsWrites(env[ENABLE_LIVE_ESCROW_ENV]);
   const ownerAuthorized = hasLiveEscrowOwnerAuthorization(env);
-  const enabled = isLiveEscrowEnabled(env);
   const killSwitchActive = isEscrowKillSwitchActive(env);
+  const verifiedRuntime = liveEscrowRuntimeStatus(runtime);
+  const enabled = isLiveEscrowEnabled(env, runtime);
   return {
     enabled,
     requested,
@@ -66,6 +93,10 @@ function liveEscrowGateStatus(env = process.env) {
         ? 'live_funds_blocked_by_kill_switch'
         : requested && !ownerAuthorized
           ? 'live_funds_gated_pending_owner_authorization'
+          : requested && !verifiedRuntime.networkMatches
+            ? 'live_funds_blocked_by_runtime_network'
+            : requested && !verifiedRuntime.programIdMatches
+              ? 'live_funds_blocked_by_runtime_program'
           : 'live_funds_gated_pending_security_review',
     liveFundsCleared: enabled,
     ownerAuthorization: {
@@ -74,12 +105,9 @@ function liveEscrowGateStatus(env = process.env) {
       expectedValue: LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE,
       status: ownerAuthorized ? 'owner_authorized' : 'missing_owner_authorization',
     },
-    verifiedRuntime: {
-      network: LEFTOVER_RUNTIME_NETWORK,
-      programId: LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID,
-      pdaDerive: 'verified',
-    },
-    runtimeNetwork: LEFTOVER_RUNTIME_NETWORK,
+    verifiedRuntime,
+    runtimeNetwork: verifiedRuntime.network,
+    runtimeProgramId: verifiedRuntime.programId,
     leftoverRuntimeNetwork: LEFTOVER_RUNTIME_NETWORK,
     leftoverRuntimeProgramId: LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID,
     advertisedNetwork: ADVERTISED_NETWORK,
@@ -99,7 +127,7 @@ function liveEscrowGateStatus(env = process.env) {
   };
 }
 
-function liveEscrowWriteGatePayload(operation = 'live escrow write') {
+function liveEscrowWriteGatePayload(operation = 'live escrow write', runtime = {}) {
   const killSwitchActive = isEscrowKillSwitchActive();
   return {
     ok: false,
@@ -108,7 +136,7 @@ function liveEscrowWriteGatePayload(operation = 'live escrow write') {
       ? 'Live escrow writes are disabled by the escrow kill switch.'
       : 'Live escrow writes are disabled until security re-review clears the live-funds path.',
     operation,
-    liveEscrow: liveEscrowGateStatus(),
+    liveEscrow: liveEscrowGateStatus(process.env, runtime),
     enableWith: ENABLE_LIVE_ESCROW_ENV,
     killSwitchEnv: ESCROW_KILL_SWITCH_ENV,
   };
@@ -154,8 +182,8 @@ class WriteSurfaceReadOnlyError extends Error {
 }
 
 class LiveEscrowReadOnlyError extends Error {
-  constructor(operation = 'live escrow write') {
-    const payload = liveEscrowWriteGatePayload(operation);
+  constructor(operation = 'live escrow write', runtime = {}) {
+    const payload = liveEscrowWriteGatePayload(operation, runtime);
     super(payload.error);
     this.name = 'LiveEscrowReadOnlyError';
     this.code = payload.code;
@@ -171,9 +199,9 @@ function assertSolanaIrysWriteEnabled(operation) {
   }
 }
 
-function assertLiveEscrowWriteEnabled(operation) {
-  if (!isLiveEscrowEnabled()) {
-    throw new LiveEscrowReadOnlyError(operation);
+function assertLiveEscrowWriteEnabled(operation, runtime = {}) {
+  if (!isLiveEscrowEnabled(process.env, runtime)) {
+    throw new LiveEscrowReadOnlyError(operation, runtime);
   }
 }
 
@@ -204,9 +232,9 @@ function sendBoaWriteGateResponse(res, operation) {
   return true;
 }
 
-function sendLiveEscrowGateResponse(res, operation) {
-  if (isLiveEscrowEnabled()) return false;
-  const payload = liveEscrowWriteGatePayload(operation);
+function sendLiveEscrowGateResponse(res, operation, runtime = {}) {
+  if (isLiveEscrowEnabled(process.env, runtime)) return false;
+  const payload = liveEscrowWriteGatePayload(operation, runtime);
   if (typeof res.status === 'function') {
     return res.status(423).json(payload);
   }
@@ -258,6 +286,8 @@ module.exports = {
   LEFTOVER_RUNTIME_NETWORK,
   LIVE_ESCROW_OWNER_AUTHORIZATION_ENV,
   LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE,
+  REQUIRED_LIVE_ESCROW_NETWORK,
+  REQUIRED_LIVE_ESCROW_PROGRAM_ID,
   LEGACY_ESCROW_ROUTE_DISABLED_CODE,
   LIVE_ESCROW_READ_ONLY_CODE,
   LiveEscrowReadOnlyError,
@@ -270,6 +300,8 @@ module.exports = {
   isEscrowKillSwitchActive,
   isLiveEscrowEnabled,
   isSolanaIrysWriteEnabled,
+  liveEscrowRuntimeStatus,
+  normalizeLiveEscrowNetwork,
   boaWriteGatePayload,
   custodialEscrowDisabledPayload,
   legacyEscrowRouteDisabledPayload,

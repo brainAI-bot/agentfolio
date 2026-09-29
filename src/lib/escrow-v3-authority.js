@@ -10,6 +10,7 @@ const {
   LEFTOVER_RUNTIME_ESCROW_PROGRAM_ID,
   LEFTOVER_RUNTIME_NETWORK,
   liveEscrowGateStatus,
+  normalizeLiveEscrowNetwork,
 } = require('./write-surface-gate');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
@@ -398,7 +399,16 @@ function getEscrowV3AuthorityReadback({
     && packagedIdlHashMatches
     && releaseFeeRouting.supported
     && satpMainnetMatches;
-  const liveEscrow = liveEscrowGateStatus(env);
+  const configuredNetwork = normalizeLiveEscrowNetwork(env.SATP_NETWORK || env.SOLANA_NETWORK || 'mainnet');
+  const configuredProgramId = configuredNetwork === 'mainnet'
+    ? normalizeRuntimeProgramId(satpRuntime.mainnetEscrowProgramId)
+    : configuredNetwork === 'devnet'
+      ? normalizeRuntimeProgramId(satpRuntime.devnetEscrowProgramId)
+      : null;
+  const liveEscrow = liveEscrowGateStatus(env, {
+    network: configuredNetwork,
+    programId: configuredProgramId,
+  });
   const liveEscrowWritesAllowed = verified && liveEscrow.enabled;
 
   return {
@@ -503,6 +513,12 @@ function getEscrowV3ProvenanceReadback({
   const escrowProgramId = readback.expectedProgramId || null;
 
   const mismatches = [];
+  if (normalizedNetwork !== 'mainnet') {
+    mismatches.push('runtime_network_not_mainnet');
+  }
+  if (runtimeProgramId !== AUTHORITY_PROGRAM_ID) {
+    mismatches.push('runtime_program_id_mismatch');
+  }
   if (!provenanceReceipt) {
     mismatches.push('missing_provenance_receipt');
   } else if (!receiptValid) {

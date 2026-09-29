@@ -53,89 +53,69 @@ test('Solana/Irys write gate allows explicit opt-in env values', () => {
   assert.equal(isSolanaIrysWriteEnabled({ [ENABLE_WRITES_ENV]: 'true' }), true);
 });
 
-test('live escrow write gate requires explicit opt-in and honors kill switch', () => {
-  assert.equal(isLiveEscrowEnabled({}), false);
-  assert.equal(isLiveEscrowEnabled({ [ENABLE_LIVE_ESCROW_ENV]: '1' }), false);
-  assert.equal(hasLiveEscrowOwnerAuthorization({
-    [LIVE_ESCROW_OWNER_AUTHORIZATION_ENV]: LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE,
-  }), true);
-  assert.equal(isLiveEscrowEnabled({
+test('live escrow write gate requires mainnet HXCU plus explicit Owner controls', () => {
+  const runtime = {
+    network: 'mainnet',
+    programId: 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C',
+  };
+  const enabledEnv = {
     [ENABLE_LIVE_ESCROW_ENV]: '1',
     [LIVE_ESCROW_OWNER_AUTHORIZATION_ENV]: LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE,
-  }), true);
-  assert.equal(liveEscrowGateStatus({
-    [ENABLE_LIVE_ESCROW_ENV]: '1',
-  }).status, 'live_funds_gated_pending_owner_authorization');
+  };
+
+  assert.equal(isLiveEscrowEnabled({}, runtime), false);
+  assert.equal(isLiveEscrowEnabled(enabledEnv, runtime), true);
+  assert.equal(isLiveEscrowEnabled(enabledEnv, {
+    network: 'devnet',
+    programId: 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg',
+  }), false);
+  assert.equal(isLiveEscrowEnabled(enabledEnv, {
+    network: 'mainnet',
+    programId: '11111111111111111111111111111111',
+  }), false);
+  assert.equal(liveEscrowGateStatus(enabledEnv, {
+    network: 'devnet',
+    programId: 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg',
+  }).status, 'live_funds_blocked_by_runtime_network');
+  assert.equal(liveEscrowGateStatus(enabledEnv, {
+    network: 'mainnet',
+    programId: '11111111111111111111111111111111',
+  }).status, 'live_funds_blocked_by_runtime_program');
+  assert.equal(liveEscrowGateStatus({ [ENABLE_LIVE_ESCROW_ENV]: '1' }, runtime).status,
+    'live_funds_gated_pending_owner_authorization');
   assert.equal(isEscrowKillSwitchActive({ [ESCROW_KILL_SWITCH_ENV]: 'on' }), true);
   assert.equal(isLiveEscrowEnabled({
-    [ENABLE_LIVE_ESCROW_ENV]: '1',
-    [LIVE_ESCROW_OWNER_AUTHORIZATION_ENV]: LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE,
+    ...enabledEnv,
     [ESCROW_KILL_SWITCH_ENV]: '1',
-  }), false);
+  }, runtime), false);
 
-  assert.deepEqual(liveEscrowGateStatus({
-    [ENABLE_LIVE_ESCROW_ENV]: '1',
-    [ESCROW_KILL_SWITCH_ENV]: '1',
-  }), {
-    enabled: false,
-    requested: true,
-    ownerAuthorized: false,
-    killSwitchActive: true,
-    status: 'live_funds_blocked_by_kill_switch',
-    liveFundsCleared: false,
-    ownerAuthorization: {
-      required: true,
-      env: LIVE_ESCROW_OWNER_AUTHORIZATION_ENV,
-      expectedValue: LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE,
-      status: 'missing_owner_authorization',
-    },
-    verifiedRuntime: {
-      network: 'devnet',
-      programId: 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg',
-      pdaDerive: 'verified',
-    },
-    runtimeNetwork: 'devnet',
-    leftoverRuntimeNetwork: 'devnet',
-    leftoverRuntimeProgramId: 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg',
-    advertisedNetwork: 'mainnet-beta',
-    advertisedEscrowProgramId: 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C',
-    hostEnvSplit: 'HXCU-vs-B1Se is a host env split (advertised SATP /api/satp/programs mainnet-beta HXCU vs leftover host runtime devnet B1Se), not a missing IDL',
-    mainnetLiveFundsCleared: false,
-    readOnlyPosture: 'GET health and PDA derivation routes remain read-only HTTP 200 when program IDs resolve; live-funds POST routes fail closed.',
-    publicCopy: 'Live escrow writes are disabled by the escrow kill switch.',
-    enableWith: ENABLE_LIVE_ESCROW_ENV,
-    killSwitchEnv: ESCROW_KILL_SWITCH_ENV,
-  });
+  const readOnly = liveEscrowGateStatus({}, runtime);
+  assert.equal(readOnly.enabled, false);
+  assert.equal(readOnly.verifiedRuntime.verified, true);
+  assert.equal(readOnly.runtimeNetwork, 'mainnet');
+  assert.equal(readOnly.runtimeProgramId, runtime.programId);
+  assert.equal(readOnly.mainnetLiveFundsCleared, false);
 
   const previousEnable = process.env[ENABLE_LIVE_ESCROW_ENV];
+  const previousOwner = process.env[LIVE_ESCROW_OWNER_AUTHORIZATION_ENV];
   const previousKill = process.env[ESCROW_KILL_SWITCH_ENV];
   delete process.env[ENABLE_LIVE_ESCROW_ENV];
+  delete process.env[LIVE_ESCROW_OWNER_AUTHORIZATION_ENV];
   delete process.env[ESCROW_KILL_SWITCH_ENV];
   try {
-    const gatedPayload = liveEscrowWriteGatePayload('escrow release');
+    const gatedPayload = liveEscrowWriteGatePayload('escrow release', runtime);
     assert.equal(gatedPayload.code, LIVE_ESCROW_READ_ONLY_CODE);
-    assert.equal(gatedPayload.liveEscrow.runtimeNetwork, 'devnet');
-    assert.equal(gatedPayload.liveEscrow.leftoverRuntimeProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
-    assert.equal(gatedPayload.liveEscrow.advertisedNetwork, 'mainnet-beta');
-    assert.equal(gatedPayload.liveEscrow.advertisedEscrowProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
-    assert.match(gatedPayload.liveEscrow.hostEnvSplit, /host env split/);
-    assert.match(gatedPayload.liveEscrow.hostEnvSplit, /not a missing IDL/);
-    assert.equal(gatedPayload.liveEscrow.mainnetLiveFundsCleared, false);
+    assert.equal(gatedPayload.liveEscrow.runtimeNetwork, 'mainnet');
+    assert.equal(gatedPayload.liveEscrow.runtimeProgramId, runtime.programId);
     assert.throws(
-      () => assertLiveEscrowWriteEnabled('escrow release'),
+      () => assertLiveEscrowWriteEnabled('escrow release', runtime),
       (err) => err instanceof LiveEscrowReadOnlyError && err.code === LIVE_ESCROW_READ_ONLY_CODE && err.statusCode === 423,
     );
   } finally {
     if (previousEnable === undefined) delete process.env[ENABLE_LIVE_ESCROW_ENV];
     else process.env[ENABLE_LIVE_ESCROW_ENV] = previousEnable;
-    if (previousKill === undefined) delete process.env[ESCROW_KILL_SWITCH_ENV];
-    else process.env[ESCROW_KILL_SWITCH_ENV] = previousKill;
-  }
-
-  process.env[ESCROW_KILL_SWITCH_ENV] = '1';
-  try {
-    assert.equal(liveEscrowWriteGatePayload('escrow release').code, ESCROW_KILL_SWITCH_CODE);
-  } finally {
+    if (previousOwner === undefined) delete process.env[LIVE_ESCROW_OWNER_AUTHORIZATION_ENV];
+    else process.env[LIVE_ESCROW_OWNER_AUTHORIZATION_ENV] = previousOwner;
     if (previousKill === undefined) delete process.env[ESCROW_KILL_SWITCH_ENV];
     else process.env[ESCROW_KILL_SWITCH_ENV] = previousKill;
   }

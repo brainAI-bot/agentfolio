@@ -92,8 +92,9 @@ test('POST /api/v3/escrow/create is gated before live-funds release', async () =
     assert.equal(body.liveEscrow.status, 'live_funds_gated_pending_security_review');
     assert.equal(body.liveEscrow.ownerAuthorization.required, true);
     assert.equal(body.liveEscrow.ownerAuthorization.status, 'missing_owner_authorization');
-    assert.equal(body.liveEscrow.verifiedRuntime.network, 'devnet');
-    assert.equal(body.liveEscrow.verifiedRuntime.programId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
+    assert.equal(body.liveEscrow.verifiedRuntime.network, 'mainnet');
+    assert.equal(body.liveEscrow.verifiedRuntime.programId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
+    assert.equal(body.liveEscrow.verifiedRuntime.verified, true);
     assert.equal(body.liveEscrow.mainnetLiveFundsCleared, false);
     assert.equal(body.enableWith, 'AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES');
     assert.equal(body.killSwitchEnv, 'AGENTFOLIO_ESCROW_KILL_SWITCH');
@@ -163,7 +164,8 @@ test('GET /api/v3/escrow/health exposes live escrow gate status', async () => {
     assert.equal(body.liveEscrow.ownerAuthorization.env, 'AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION');
     assert.equal(body.liveEscrow.ownerAuthorization.status, 'missing_owner_authorization');
     assert.match(body.liveEscrow.readOnlyPosture, /GET health and PDA derivation routes remain read-only HTTP 200/);
-    assert.equal(body.liveEscrow.verifiedRuntime.network, 'devnet');
+    assert.equal(body.liveEscrow.verifiedRuntime.network, 'mainnet');
+    assert.equal(body.liveEscrow.verifiedRuntime.programId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
     assert.equal(body.liveEscrow.mainnetLiveFundsCleared, false);
     assert.equal(body.liveEscrow.enableWith, 'AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES');
     assert.equal(body.liveEscrow.killSwitchEnv, 'AGENTFOLIO_ESCROW_KILL_SWITCH');
@@ -202,7 +204,7 @@ test('GET /api/v3/escrow/health exposes live escrow gate status', async () => {
   }
 });
 
-test('GET /api/v3/escrow/health exposes packaged HXCU IDL next to observed B1Se runtime drift', async () => {
+test('GET /api/v3/escrow/health reports mainnet HXCU while writes remain read-only', async () => {
   const previousEnable = process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
   const previousOwnerAuthorization = process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
   const previousKill = process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
@@ -220,13 +222,16 @@ test('GET /api/v3/escrow/health exposes packaged HXCU IDL next to observed B1Se 
     const body = await res.json();
 
     assert.equal(res.status, 200);
+    assert.equal(body.network, 'mainnet');
     assert.equal(body.advertisedNetwork, 'mainnet-beta');
     assert.equal(body.advertisedEscrowProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
     assert.equal(body.leftoverRuntimeNetwork, 'devnet');
     assert.equal(body.leftoverRuntimeProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
     assert.match(body.hostEnvSplit, /host env split/);
     assert.match(body.hostEnvSplit, /not a missing IDL/);
-    assert.equal(body.liveEscrow.runtimeNetwork, 'devnet');
+    assert.equal(body.liveEscrow.runtimeNetwork, 'mainnet');
+    assert.equal(body.liveEscrow.runtimeProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
+    assert.equal(body.liveEscrow.verifiedRuntime.verified, true);
     assert.match(body.liveEscrow.hostEnvSplit, /not a missing IDL/);
     assert.equal(body.liveEscrow.advertisedNetwork, 'mainnet-beta');
     assert.equal(body.liveEscrow.advertisedEscrowProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
@@ -255,6 +260,7 @@ test('GET /api/v3/escrow/health exposes packaged HXCU IDL next to observed B1Se 
     assert.equal(body.escrowProvenance.advertisedNetwork, 'mainnet-beta');
     assert.equal(body.escrowProvenance.advertisedEscrowProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
     assert.equal(body.escrowProvenance.escrowProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
+    assert.equal(body.escrowProvenance.runtimeProgramId, 'HXCUWKR2NvRcZ7rNAJHwPcH6QAAWaLR4bRFbfyuDND6C');
     assert.equal(body.escrowProvenance.leftoverRuntimeProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
     assert.equal(body.escrowProvenance.mismatchStatus, 'matched');
     assert.deepEqual(body.escrowProvenance.mismatches, []);

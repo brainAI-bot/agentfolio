@@ -1038,8 +1038,10 @@ test('escrow health authority advertises mainnet HXCU next to observed leftover 
   assert.equal(leftoverProvenance.advertisedNetwork, 'mainnet-beta');
   assert.equal(leftoverProvenance.advertisedEscrowProgramId, AUTHORITY_PROGRAM_ID);
   assert.equal(leftoverProvenance.leftoverRuntimeProgramId, 'B1Se8SPx7GLUisa4LYeXY1tDZy5TviJrsV2yMLgqUXmg');
-  assert.equal(leftoverProvenance.mismatchStatus, 'matched');
-  assert.deepEqual(leftoverProvenance.mismatches, []);
+  assert.equal(leftoverProvenance.mismatchStatus, 'mismatch');
+  assert.ok(leftoverProvenance.mismatches.includes('runtime_network_not_mainnet'));
+  assert.ok(leftoverProvenance.mismatches.includes('runtime_program_id_mismatch'));
+  assert.equal(leftoverProvenance.failClosed, true);
   assert.ok(!leftoverProvenance.mismatches.includes('missing_packaged_idl'));
   assert.equal(advertisedProvenance.advertisedEscrowProgramId, AUTHORITY_PROGRAM_ID);
   assert.equal(advertisedProvenance.runtimeProgramIds.mainnet, AUTHORITY_PROGRAM_ID);
