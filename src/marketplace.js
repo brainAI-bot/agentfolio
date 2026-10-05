@@ -15,6 +15,7 @@ const bs58Module = require('bs58');
 const { buildReputationSurface } = require('./lib/reputation-surface');
 const {
   sendCustodialEscrowDisabledResponse,
+  sendOldSiteEscrowRouteDisabledResponse,
   sendLiveEscrowGateResponse,
 } = require('./lib/write-surface-gate');
 const {
@@ -821,6 +822,7 @@ function registerRoutes(app, dependencies = {}) {
 
   // 4. POST /api/marketplace/jobs/:id/escrow — Fund escrow for a job
   app.post('/api/marketplace/jobs/:id/escrow', (req, res) => {
+    if (sendOldSiteEscrowRouteDisabledResponse(req, res, 'legacy marketplace custodial escrow fund')) return;
     if (sendCustodialEscrowDisabledResponse(res, 'legacy marketplace custodial escrow fund')) return;
     const jobPath = path.join(DATA_DIR, 'jobs', `${req.params.id}.json`);
     const job = readJSON(jobPath);
@@ -903,6 +905,7 @@ function registerRoutes(app, dependencies = {}) {
 
   // 6. POST /api/marketplace/escrow/:id/release — Release payment
   app.post('/api/marketplace/escrow/:id/release', marketplaceMutationLimiter, (req, res) => {
+    if (sendOldSiteEscrowRouteDisabledResponse(req, res, 'legacy marketplace custodial escrow release')) return;
     const { releasedBy } = req.body || {};
     if (releasedBy) {
       const authResult = verifyMarketplaceMutationSignature({
@@ -959,6 +962,7 @@ function registerRoutes(app, dependencies = {}) {
 
   // POST /api/marketplace/escrow/:id/refund — Refund escrow
   app.post('/api/marketplace/escrow/:id/refund', marketplaceMutationLimiter, (req, res) => {
+    if (sendOldSiteEscrowRouteDisabledResponse(req, res, 'legacy marketplace custodial escrow refund')) return;
     const { refundedBy, reason } = req.body || {};
     if (!refundedBy) return res.status(400).json({ error: 'refundedBy required' });
     const authResult = verifyMarketplaceMutationSignature({
@@ -1172,6 +1176,7 @@ function registerRoutes(app, dependencies = {}) {
 
   // POST /api/marketplace/jobs/:id/v3-escrow-funded — Record V3 on-chain escrow creation
   app.post("/api/marketplace/jobs/:id/v3-escrow-funded", marketplaceMutationLimiter, async (req, res) => {
+    if (sendOldSiteEscrowRouteDisabledResponse(req, res, 'marketplace v3-escrow-funded')) return;
     const jobPath = path.join(DATA_DIR, "jobs", `${req.params.id}.json`);
     const job = readJSON(jobPath);
     if (!job) return res.status(404).json({ error: "Job not found" });
