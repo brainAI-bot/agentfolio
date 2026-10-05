@@ -22,6 +22,7 @@ const OLD_SITE_ESCROW_HOSTS = new Set([
   'agentfolio.bot',
   'staging.agentfolio.bot',
   'satp.bot',
+  'www.satp.bot',
   'explorer.satp.bot',
   'brainai.bot',
 ]);

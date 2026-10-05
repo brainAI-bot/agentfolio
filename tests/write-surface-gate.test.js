@@ -150,13 +150,14 @@ test('live escrow write gate requires explicit opt-in and honors kill switch', (
   }
 });
 
-test('old-site escrow gate covers the five canonical hosts without exposing authorization configuration', () => {
+test('old-site escrow gate covers the five canonical surfaces and routed www.satp.bot alias without exposing authorization configuration', () => {
   assert.deepEqual([...OLD_SITE_ESCROW_HOSTS].sort(), [
     'agentfolio.bot',
     'brainai.bot',
     'explorer.satp.bot',
     'satp.bot',
     'staging.agentfolio.bot',
+    'www.satp.bot',
   ]);
   const payload = oldSiteEscrowRouteDisabledPayload('test old-site mutation');
   assert.equal(payload.code, OLD_SITE_ESCROW_ROUTE_DISABLED_CODE);

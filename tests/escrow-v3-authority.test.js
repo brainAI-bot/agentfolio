@@ -206,7 +206,7 @@ test('escrow_v3 authority readback names the HQ-selected program id from SATP ma
   assert.equal(readback.releaseGate.liveEscrowWritesAllowed, false);
   assert.equal(readback.releaseGate.ownerAuthorizationRequired, true);
   assert.equal(readback.releaseGate.ownerAuthorizationStatus, 'missing_owner_authorization');
-  assert.equal(readback.releaseGate.ownerAuthorizationEnv, 'AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION');
+  assert.equal(Object.hasOwn(readback.releaseGate, 'ownerAuthorizationEnv'), false);
   assert.match(readback.releaseGate.readOnlyPosture, /PDA derivation routes remain read-only HTTP 200/);
   assert.equal(readback.satpArtifact.runtime.available, true);
   assert.equal(readback.satpArtifact.runtime.mainnetEscrowProgramId, AUTHORITY_PROGRAM_ID);

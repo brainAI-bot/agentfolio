@@ -123,7 +123,7 @@ test('canonical old-site hosts refuse V3 escrow mutations even when live-write e
 
   try {
     const { port } = server.address();
-    for (const host of ['agentfolio.bot', 'staging.agentfolio.bot', 'satp.bot', 'explorer.satp.bot', 'brainai.bot']) {
+    for (const host of ['agentfolio.bot', 'staging.agentfolio.bot', 'satp.bot', 'www.satp.bot', 'explorer.satp.bot', 'brainai.bot']) {
       const res = await fetch(`http://127.0.0.1:${port}/api/v3/escrow/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Forwarded-Host': host },
