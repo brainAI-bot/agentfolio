@@ -468,7 +468,6 @@ function getEscrowV3AuthorityReadback({
       liveEscrowWritesAllowed,
       ownerAuthorizationRequired: true,
       ownerAuthorizationStatus: liveEscrow.ownerAuthorization.status,
-      ownerAuthorizationEnv: liveEscrow.ownerAuthorization.env,
       readOnlyPosture: liveEscrow.readOnlyPosture,
       reason: liveEscrowWritesAllowed
         ? 'authoritative SATP mainnet runtime and 14-instruction IDL, live escrow flag, and explicit Owner authorization all agree'

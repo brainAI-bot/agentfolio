@@ -17,6 +17,15 @@ const LIVE_ESCROW_READ_ONLY_CODE = 'LIVE_ESCROW_WRITES_READ_ONLY';
 const ESCROW_KILL_SWITCH_CODE = 'ESCROW_KILL_SWITCH_ACTIVE';
 const CUSTODIAL_ESCROW_DISABLED_CODE = 'CUSTODIAL_ESCROW_DISABLED';
 const LEGACY_ESCROW_ROUTE_DISABLED_CODE = 'LEGACY_ESCROW_ROUTE_DISABLED';
+const OLD_SITE_ESCROW_ROUTE_DISABLED_CODE = 'OLD_SITE_ESCROW_ROUTE_DISABLED';
+const OLD_SITE_ESCROW_HOSTS = new Set([
+  'agentfolio.bot',
+  'staging.agentfolio.bot',
+  'satp.bot',
+  'www.satp.bot',
+  'explorer.satp.bot',
+  'brainai.bot',
+]);
 
 function envValueAllowsWrites(value) {
   return /^(1|true|yes|on)$/i.test(String(value || '').trim());
@@ -70,8 +79,6 @@ function liveEscrowGateStatus(env = process.env) {
     liveFundsCleared: enabled,
     ownerAuthorization: {
       required: true,
-      env: LIVE_ESCROW_OWNER_AUTHORIZATION_ENV,
-      expectedValue: LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE,
       status: ownerAuthorized ? 'owner_authorized' : 'missing_owner_authorization',
     },
     verifiedRuntime: {
@@ -129,6 +136,27 @@ function legacyEscrowRouteDisabledPayload(operation = 'legacy escrow write') {
     ok: false,
     code: LEGACY_ESCROW_ROUTE_DISABLED_CODE,
     error: 'Legacy escrow transaction builders are disabled because they bypass SATP V3 identity-gated escrow checks.',
+    operation,
+    liveEscrow: liveEscrowGateStatus(),
+  };
+}
+
+function normalizeHostname(value) {
+  return String(value || '').trim().toLowerCase().replace(/:\d+$/, '');
+}
+
+function isOldSiteEscrowHost(req) {
+  const forwarded = String(req?.headers?.['x-forwarded-host'] || '').split(',')[0].trim();
+  return [forwarded, req?.headers?.host, req?.hostname]
+    .map(normalizeHostname)
+    .some((hostname) => OLD_SITE_ESCROW_HOSTS.has(hostname));
+}
+
+function oldSiteEscrowRouteDisabledPayload(operation = 'old-site escrow write') {
+  return {
+    ok: false,
+    code: OLD_SITE_ESCROW_ROUTE_DISABLED_CODE,
+    error: 'Escrow mutations are disabled on retired AgentFolio web surfaces.',
     operation,
     liveEscrow: liveEscrowGateStatus(),
   };
@@ -244,6 +272,20 @@ function sendLegacyEscrowRouteDisabledResponse(res, operation) {
   return true;
 }
 
+function sendOldSiteEscrowRouteDisabledResponse(req, res, operation) {
+  if (!isOldSiteEscrowHost(req)) return false;
+  const payload = oldSiteEscrowRouteDisabledPayload(operation);
+  if (typeof res.status === 'function') {
+    return res.status(423).json(payload);
+  }
+  res.writeHead(423, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+  });
+  res.end(JSON.stringify(payload));
+  return true;
+}
+
 module.exports = {
   ADVERTISED_ESCROW_PROGRAM_ID,
   ADVERTISED_NETWORK,
@@ -259,6 +301,8 @@ module.exports = {
   LIVE_ESCROW_OWNER_AUTHORIZATION_ENV,
   LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE,
   LEGACY_ESCROW_ROUTE_DISABLED_CODE,
+  OLD_SITE_ESCROW_HOSTS,
+  OLD_SITE_ESCROW_ROUTE_DISABLED_CODE,
   LIVE_ESCROW_READ_ONLY_CODE,
   LiveEscrowReadOnlyError,
   READ_ONLY_CODE,
@@ -269,15 +313,18 @@ module.exports = {
   hasLiveEscrowOwnerAuthorization,
   isEscrowKillSwitchActive,
   isLiveEscrowEnabled,
+  isOldSiteEscrowHost,
   isSolanaIrysWriteEnabled,
   boaWriteGatePayload,
   custodialEscrowDisabledPayload,
   legacyEscrowRouteDisabledPayload,
+  oldSiteEscrowRouteDisabledPayload,
   liveEscrowGateStatus,
   liveEscrowWriteGatePayload,
   sendBoaWriteGateResponse,
   sendCustodialEscrowDisabledResponse,
   sendLegacyEscrowRouteDisabledResponse,
+  sendOldSiteEscrowRouteDisabledResponse,
   sendLiveEscrowGateResponse,
   sendSolanaIrysWriteGateResponse,
   solanaIrysWriteGatePayload,

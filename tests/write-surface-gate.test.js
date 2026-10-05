@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const test = require('node:test');
+const express = require('express');
 
 const {
   ENABLE_WRITES_ENV,
@@ -11,6 +12,8 @@ const {
   ESCROW_KILL_SWITCH_CODE,
   ESCROW_KILL_SWITCH_ENV,
   LIVE_ESCROW_READ_ONLY_CODE,
+  OLD_SITE_ESCROW_HOSTS,
+  OLD_SITE_ESCROW_ROUTE_DISABLED_CODE,
   LiveEscrowReadOnlyError,
   READ_ONLY_CODE,
   WriteSurfaceReadOnlyError,
@@ -23,10 +26,18 @@ const {
   assertSolanaIrysWriteEnabled,
   liveEscrowGateStatus,
   liveEscrowWriteGatePayload,
+  oldSiteEscrowRouteDisabledPayload,
+  sendOldSiteEscrowRouteDisabledResponse,
   solanaIrysWriteGatePayload,
 } = require('../src/lib/write-surface-gate');
 
 const ROOT = path.join(__dirname, '..');
+
+function listen(app) {
+  return new Promise((resolve) => {
+    const server = app.listen(0, () => resolve(server));
+  });
+}
 
 test('Solana/Irys write gate defaults to read-only', () => {
   assert.equal(isSolanaIrysWriteEnabled({}), false);
@@ -85,8 +96,6 @@ test('live escrow write gate requires explicit opt-in and honors kill switch', (
     liveFundsCleared: false,
     ownerAuthorization: {
       required: true,
-      env: LIVE_ESCROW_OWNER_AUTHORIZATION_ENV,
-      expectedValue: LIVE_ESCROW_OWNER_AUTHORIZATION_VALUE,
       status: 'missing_owner_authorization',
     },
     verifiedRuntime: {
@@ -138,6 +147,55 @@ test('live escrow write gate requires explicit opt-in and honors kill switch', (
   } finally {
     if (previousKill === undefined) delete process.env[ESCROW_KILL_SWITCH_ENV];
     else process.env[ESCROW_KILL_SWITCH_ENV] = previousKill;
+  }
+});
+
+test('old-site escrow gate covers the five canonical surfaces and routed www.satp.bot alias without exposing authorization configuration', () => {
+  assert.deepEqual([...OLD_SITE_ESCROW_HOSTS].sort(), [
+    'agentfolio.bot',
+    'brainai.bot',
+    'explorer.satp.bot',
+    'satp.bot',
+    'staging.agentfolio.bot',
+    'www.satp.bot',
+  ]);
+  const payload = oldSiteEscrowRouteDisabledPayload('test old-site mutation');
+  assert.equal(payload.code, OLD_SITE_ESCROW_ROUTE_DISABLED_CODE);
+  assert.equal(payload.liveEscrow.ownerAuthorization.required, true);
+  assert.equal(Object.hasOwn(payload.liveEscrow.ownerAuthorization, 'env'), false);
+  assert.equal(Object.hasOwn(payload.liveEscrow.ownerAuthorization, 'expectedValue'), false);
+});
+
+test('old-site escrow HTTP gate rejects canonical hosts and preserves non-mutation reads', async () => {
+  const app = express();
+  app.use(express.json());
+  app.post('/escrow-write', (req, res) => {
+    if (sendOldSiteEscrowRouteDisabledResponse(req, res, 'test escrow write')) return;
+    res.json({ ok: true });
+  });
+  app.get('/escrow-read', (req, res) => res.json({ ok: true, mode: 'read-only' }));
+  const server = await listen(app);
+
+  try {
+    const { port } = server.address();
+    for (const host of OLD_SITE_ESCROW_HOSTS) {
+      const response = await fetch(`http://127.0.0.1:${port}/escrow-write`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Forwarded-Host': host },
+        body: '{}',
+      });
+      const body = await response.json();
+      assert.equal(response.status, 423, host);
+      assert.equal(body.code, OLD_SITE_ESCROW_ROUTE_DISABLED_CODE, host);
+    }
+
+    const readResponse = await fetch(`http://127.0.0.1:${port}/escrow-read`, {
+      headers: { Host: 'agentfolio.bot' },
+    });
+    assert.equal(readResponse.status, 200);
+    assert.deepEqual(await readResponse.json(), { ok: true, mode: 'read-only' });
+  } finally {
+    await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
   }
 });
 
@@ -202,6 +260,29 @@ test('Burn-to-Become collection creation fails closed before reading or writing 
   assert.ok(gateIndex >= 0, 'collection creation route must invoke the BOA write gate');
   assert.ok(gateIndex < bodyIndex, 'write gate must run before request body data is read');
   assert.ok(gateIndex < writeIndex, 'write gate must run before collections data is written');
+});
+
+test('canonical marketplace escrow mutation routes gate old-site hosts before body reads or writes', () => {
+  const source = fs.readFileSync(path.join(ROOT, 'src/marketplace.js'), 'utf8');
+  const routes = [
+    ["app.post('/api/marketplace/jobs/:id/escrow'", "app.get('/api/marketplace/escrow/:id'"],
+    ["app.post('/api/marketplace/escrow/:id/release'", "app.post('/api/marketplace/escrow/:id/refund'"],
+    ["app.post('/api/marketplace/escrow/:id/refund'", "app.post('/api/marketplace/jobs/:id/complete'"],
+    ['app.post("/api/marketplace/jobs/:id/v3-escrow-funded"', 'module.exports'],
+  ];
+
+  for (const [startMarker, endMarker] of routes) {
+    const start = source.indexOf(startMarker);
+    const end = source.indexOf(endMarker, start + startMarker.length);
+    const route = source.slice(start, end);
+    const gateIndex = route.indexOf('sendOldSiteEscrowRouteDisabledResponse');
+    const bodyIndex = route.indexOf('req.body');
+    const writeIndex = route.indexOf('writeJSON');
+    assert.notEqual(start, -1, `missing route ${startMarker}`);
+    assert.ok(gateIndex >= 0, `${startMarker} must invoke the old-site escrow gate`);
+    assert.ok(bodyIndex === -1 || gateIndex < bodyIndex, `${startMarker} must gate before reading the body`);
+    assert.ok(writeIndex === -1 || gateIndex < writeIndex, `${startMarker} must gate before writing state`);
+  }
 });
 
 test('executable Solana/Irys write surfaces are covered by the read-only gate', () => {

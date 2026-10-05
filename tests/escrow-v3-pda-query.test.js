@@ -108,6 +108,51 @@ test('POST /api/v3/escrow/create is gated before live-funds release', async () =
   }
 });
 
+test('canonical old-site hosts refuse V3 escrow mutations even when live-write env gates are enabled', async () => {
+  const previousEnable = process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
+  const previousOwnerAuthorization = process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
+  const previousKill = process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
+  process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = '1';
+  process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION = 'owner-approved-live-escrow-writes';
+  delete process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
+
+  const app = express();
+  app.use(express.json());
+  app.use('/api/v3/escrow', escrowV3Router);
+  const server = await listen(app);
+
+  try {
+    const { port } = server.address();
+    for (const host of ['agentfolio.bot', 'staging.agentfolio.bot', 'satp.bot', 'www.satp.bot', 'explorer.satp.bot', 'brainai.bot']) {
+      const res = await fetch(`http://127.0.0.1:${port}/api/v3/escrow/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Forwarded-Host': host },
+        body: JSON.stringify({}),
+      });
+      const body = await res.json();
+      assert.equal(res.status, 423, host);
+      assert.equal(body.code, 'OLD_SITE_ESCROW_ROUTE_DISABLED', host);
+      assert.equal(body.transaction, undefined, host);
+    }
+
+    const healthRes = await fetch(`http://127.0.0.1:${port}/api/v3/escrow/health`, {
+      headers: { Host: 'agentfolio.bot' },
+    });
+    const health = await healthRes.json();
+    assert.equal(healthRes.status, 200);
+    assert.equal(Object.hasOwn(health.liveEscrow.ownerAuthorization, 'env'), false);
+    assert.equal(Object.hasOwn(health.liveEscrow.ownerAuthorization, 'expectedValue'), false);
+  } finally {
+    if (previousEnable === undefined) delete process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES;
+    else process.env.AGENTFOLIO_ENABLE_LIVE_ESCROW_WRITES = previousEnable;
+    if (previousOwnerAuthorization === undefined) delete process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION;
+    else process.env.AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION = previousOwnerAuthorization;
+    if (previousKill === undefined) delete process.env.AGENTFOLIO_ESCROW_KILL_SWITCH;
+    else process.env.AGENTFOLIO_ESCROW_KILL_SWITCH = previousKill;
+    await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  }
+});
+
 test('GET /api/v3/health stays cheap and leaves escrow provenance on escrow health', async () => {
   const app = express();
   app.use('/api/v3', v3ApiRouter);
@@ -160,7 +205,8 @@ test('GET /api/v3/escrow/health exposes live escrow gate status', async () => {
     assert.equal(body.liveEscrow.ownerAuthorized, false);
     assert.equal(body.liveEscrow.killSwitchActive, true);
     assert.equal(body.liveEscrow.status, 'live_funds_blocked_by_kill_switch');
-    assert.equal(body.liveEscrow.ownerAuthorization.env, 'AGENTFOLIO_LIVE_ESCROW_OWNER_AUTHORIZATION');
+    assert.equal(Object.hasOwn(body.liveEscrow.ownerAuthorization, 'env'), false);
+    assert.equal(Object.hasOwn(body.liveEscrow.ownerAuthorization, 'expectedValue'), false);
     assert.equal(body.liveEscrow.ownerAuthorization.status, 'missing_owner_authorization');
     assert.match(body.liveEscrow.readOnlyPosture, /GET health and PDA derivation routes remain read-only HTTP 200/);
     assert.equal(body.liveEscrow.verifiedRuntime.network, 'devnet');

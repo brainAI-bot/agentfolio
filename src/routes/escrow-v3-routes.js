@@ -43,6 +43,7 @@ const crypto = require('crypto');
 const satpClient = require('@brainai/satp-client');
 const {
   liveEscrowGateStatus,
+  sendOldSiteEscrowRouteDisabledResponse,
   sendLiveEscrowGateResponse,
 } = require('../lib/write-surface-gate');
 const {
@@ -597,6 +598,7 @@ router.get('/health', (req, res) => {
 
 router.use((req, res, next) => {
   if (req.method !== 'POST') return next();
+  if (sendOldSiteEscrowRouteDisabledResponse(req, res, `SATP V3 escrow ${req.method} ${req.path}`)) return;
   return requireLiveFeeRoutingSupport(req, res, () => requireLiveEscrowWrites(req, res, next));
 });
 
